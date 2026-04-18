@@ -1,0 +1,29 @@
+version: 2
+updates:
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      k8s-deps:
+        patterns:
+          - "*k8s.io*"
+    labels:
+      - "area/dependency"
+      - "ok-to-test"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "area/dependency"
+      - "ok-to-test"
+
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "area/dependency"
+      - "ok-to-test"

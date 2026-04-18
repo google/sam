@@ -1,0 +1,40 @@
+name: bats
+
+on:
+  push:
+    branches:
+      - "main"
+    tags:
+      - "v*"
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  GO_VERSION: "1.25"
+
+jobs:
+  bats_tests:
+    runs-on: ubuntu-22.04
+    name: Bats e2e tests
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Setup Bats and bats libs
+        id: setup-bats
+        uses: bats-core/bats-action@77d6fb60505b4d0d1d73e48bd035b55074bbfb43 # 4.0.0
+
+      - name: Bats tests
+        shell: bash
+        env:
+          BATS_LIB_PATH: ${{ steps.setup-bats.outputs.lib-path }}
+          TERM: xterm
+        run: bats -o _artifacts --print-output-on-failure tests/
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-logs-${{ env.JOB_NAME }}-${{ github.run_id }}
+          path: ./_artifacts

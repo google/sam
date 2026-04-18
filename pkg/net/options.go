@@ -1,0 +1,132 @@
+package samnet
+
+import (
+	cryptorand "crypto/rand"
+	"fmt"
+	"log/slog"
+
+	"github.com/libp2p/go-libp2p/core/crypto"
+	"github.com/multiformats/go-multiaddr"
+)
+
+// DHTMode controls how the node participates in the Kademlia DHT.
+type DHTMode int
+
+const (
+	// DHTModeAuto automatically switches between client and server based on
+	// the node's reachability (NAT status).
+	DHTModeAuto DHTMode = iota
+	// DHTModeServer always participates as a full DHT server.
+	DHTModeServer
+	// DHTModeClient always participates as a DHT client only.
+	DHTModeClient
+)
+
+// Options configures a SAM mesh node.
+type Options struct {
+	// PrivateKey is the Ed25519 identity key. Generated if nil.
+	PrivateKey crypto.PrivKey
+	// ListenAddrs are the multiaddresses to listen on.
+	ListenAddrs []multiaddr.Multiaddr
+	// BootstrapPeers are the initial peers to connect to on startup.
+	// Each address must include the /p2p/<peerID> component.
+	BootstrapPeers []multiaddr.Multiaddr
+	// DHTMode controls DHT participation level.
+	DHTMode DHTMode
+	// EnableRelayService runs a circuit relay v2 service, allowing other
+	// peers to relay through this node.
+	EnableRelayService bool
+	// UserAgent is the libp2p user-agent string.
+	UserAgent string
+	// Logger is the structured logger. Defaults to slog.Default().
+	Logger *slog.Logger
+	// FederationID scopes DHT participation to an isolated namespace.
+	// Nodes with different FederationIDs are invisible to one another.
+	// The empty string uses the global "/sam" namespace (public mesh).
+	FederationID string
+}
+
+// Option is a functional option for node configuration.
+type Option func(*Options)
+
+// DefaultOptions returns production defaults: QUIC on all interfaces,
+// auto DHT mode, and standard user-agent.
+func DefaultOptions() Options {
+	quicV1, _ := multiaddr.NewMultiaddr("/ip4/0.0.0.0/udp/0/quic-v1")
+	quicV1v6, _ := multiaddr.NewMultiaddr("/ip6/::/udp/0/quic-v1")
+	return Options{
+		ListenAddrs: []multiaddr.Multiaddr{quicV1, quicV1v6},
+		DHTMode:     DHTModeAuto,
+		UserAgent:   "sam/0.1.0",
+		Logger:      slog.Default(),
+	}
+}
+
+func (o *Options) validate() error {
+	if o.PrivateKey == nil {
+		key, err := GenerateKey()
+		if err != nil {
+			return fmt.Errorf("generating default key: %w", err)
+		}
+		o.PrivateKey = key
+	}
+	if len(o.ListenAddrs) == 0 {
+		return fmt.Errorf("at least one listen address required")
+	}
+	if o.Logger == nil {
+		o.Logger = slog.Default()
+	}
+	return nil
+}
+
+// GenerateKey creates a new Ed25519 private key suitable for use as a peer identity.
+func GenerateKey() (crypto.PrivKey, error) {
+	priv, _, err := crypto.GenerateEd25519Key(cryptorand.Reader)
+	if err != nil {
+		return nil, fmt.Errorf("generating ed25519 key: %w", err)
+	}
+	return priv, nil
+}
+
+// WithPrivateKey sets the node's Ed25519 identity key.
+func WithPrivateKey(key crypto.PrivKey) Option {
+	return func(o *Options) { o.PrivateKey = key }
+}
+
+// WithListenAddrs sets the multiaddresses to listen on.
+func WithListenAddrs(addrs ...multiaddr.Multiaddr) Option {
+	return func(o *Options) { o.ListenAddrs = addrs }
+}
+
+// WithBootstrapPeers sets initial peers to connect during Start.
+func WithBootstrapPeers(addrs ...multiaddr.Multiaddr) Option {
+	return func(o *Options) { o.BootstrapPeers = addrs }
+}
+
+// WithDHTMode sets the DHT participation mode.
+func WithDHTMode(mode DHTMode) Option {
+	return func(o *Options) { o.DHTMode = mode }
+}
+
+// WithRelayService enables the circuit relay v2 service.
+func WithRelayService() Option {
+	return func(o *Options) { o.EnableRelayService = true }
+}
+
+// WithFederation scopes DHT discovery to an isolated federation namespace.
+// Nodes sharing the same FederationID form a private mesh invisible to
+// nodes in other federations or the global mesh.
+func WithFederation(federationID string) Option {
+	return func(o *Options) { o.FederationID = federationID }
+}
+
+// WithLogger sets a structured logger for the node.
+
+func WithLogger(l *slog.Logger) Option {
+	return func(o *Options) { o.Logger = l }
+}
+
+// WithUserAgent sets the libp2p user-agent string.
+func WithUserAgent(ua string) Option {
+	return func(o *Options) { o.UserAgent = ua }
+}

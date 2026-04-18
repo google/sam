@@ -1,0 +1,39 @@
+# Copyright The Kubernetes Authors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+name: Test
+
+on:
+  push:
+    branches:
+      - 'main'
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        go-version: [1.25.x]
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+      with:
+        go-version: ${{ matrix.go-version }}
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+    - run: sudo make test
+    - run: make lint
+

@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>SAM - Sovereign Agent Mesh</title>
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Zero-Trust Networking for Autonomous Agents" />
+  
+  <!-- Docsify Stylesheet -->
+  <link rel="stylesheet" href="//cdn.jsdelivr.net/npm/docsify@4/themes/dark.css" />
+  
+  <!-- Custom Styles -->
+  <style>
+    :root {
+      --primary-color: #6366f1;
+      --heading-color: #e0e7ff;
+      --text-color: #e5e7eb;
+      --border-color: #4f46e5;
+      --code-color: #1f2937;
+    }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    }
+    
+    .sidebar {
+      background-color: #0f172a;
+      border-right: 1px solid var(--border-color);
+    }
+    
+    .markdown-section h1 {
+      border-bottom: 2px solid var(--primary-color);
+    }
+    
+    .markdown-section code {
+      background-color: var(--code-color);
+      padding: 2px 6px;
+      border-radius: 3px;
+    }
+    
+    .markdown-section pre code {
+      background-color: #1e293b;
+      color: #e2e8f0;
+    }
+  </style>
+</head>
+<body>
+  <div id="app">Loading SAM documentation...</div>
+  
+  <script>
+    window.$docsify = {
+      name: '<img src="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text x=%2210%22 y=%2275%22 font-size=%2280%22 fill=%22%236366f1%22>⚡</text></svg>" style="height: 2rem; margin-right: 8px;"/> SAM',
+      repo: 'https://github.com/your-org/sam',
+      
+      // Documentation settings
+      basePath: '/',
+      loadSidebar: true,
+      loadNavbar: false,
+      coverpage: true,
+      auto2top: true,
+      
+      // Search plugin
+      search: {
+        paths: 'auto',
+        placeholder: 'Search documentation...',
+        noData: 'No matching results',
+        depth: 3,
+      },
+      
+      // Sidebar configuration
+      maxLevel: 3,
+      subMaxLevel: 2,
+      sidebarDisplayLevel: 1,
+      
+      // Markdown rendering
+      markdown: {
+        pedantic: false,
+        gfm: true,
+        breaks: false,
+        sanitize: false,
+        smartLists: true,
+        smartypants: true,
+        highlight(code, lang) {
+          if (lang === 'bash' || lang === 'shell') {
+            return '<pre class="hljs"><code>' + Docsify.escapeHtml(code) + '</code></pre>';
+          }
+          return '<pre class="hljs"><code class="language-' + lang + '">' + Docsify.escapeHtml(code) + '</code></pre>';
+        },
+      },
+      
+      // Plugins
+      plugins: [
+        function(hook) {
+          // Copy-to-clipboard for code blocks
+          hook.doneEach(() => {
+            const blocks = document.querySelectorAll('pre');
+            blocks.forEach(block => {
+              const code = block.querySelector('code');
+              if (code && !block.querySelector('.copy-btn')) {
+                const btn = document.createElement('button');
+                btn.className = 'copy-btn';
+                btn.innerText = 'Copy';
+                btn.style.cssText = `
+                  position: absolute;
+                  top: 5px;
+                  right: 5px;
+                  padding: 4px 8px;
+                  background-color: #4f46e5;
+                  color: white;
+                  border: none;
+                  border-radius: 4px;
+                  cursor: pointer;
+                  font-size: 12px;
+                `;
+                btn.addEventListener('click', () => {
+                  const text = code.innerText;
+                  navigator.clipboard.writeText(text).then(() => {
+                    btn.innerText = 'Copied!';
+                    setTimeout(() => { btn.innerText = 'Copy'; }, 2000);
+                  });
+                });
+                block.style.position = 'relative';
+                block.appendChild(btn);
+              }
+            });
+          });
+        },
+      ],
+      
+      // Footer
+      footer: {
+        copy: '<span>&copy; 2026 SAM Contributors. <a href="https://github.com/your-org/sam/blob/main/LICENSE">License</a></span>',
+        auth: '',
+        pre: '<hr/>',
+        style: 'text-align: center;',
+      },
+    };
+  </script>
+  
+  <!-- Docsify Core -->
+  <script src="//cdn.jsdelivr.net/npm/docsify@4"></script>
+  
+  <!-- Plugins -->
+  <script src="//cdn.jsdelivr.net/npm/docsify-search@1"></script>
+  <script src="//cdn.jsdelivr.net/npm/docsify-footer-enh@1"></script>
+  
+  <!-- Syntax Highlighting -->
+  <script src="//cdn.jsdelivr.net/npm/prismjs@1.29.0/prism.min.js"></script>
+  <script src="//cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-bash.min.js"></script>
+  <script src="//cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-go.min.js"></script>
+  <script src="//cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-json.min.js"></script>
+</body>
+</html>
