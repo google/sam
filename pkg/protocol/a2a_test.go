@@ -95,13 +95,13 @@ func TestExecuteSuccessRecordsObserver(t *testing.T) {
 	if err != nil {
 		t.Fatalf("libp2p.New(server) error = %v", err)
 	}
-	defer serverHost.Close()
+	defer func() { _ = serverHost.Close() }()
 
 	clientHost, err := libp2p.New()
 	if err != nil {
 		t.Fatalf("libp2p.New(client) error = %v", err)
 	}
-	defer clientHost.Close()
+	defer func() { _ = clientHost.Close() }()
 
 	serverObserver := &testObserver{}
 	svc, err := NewA2AService(serverHost, staticResponseConnector{}, serverObserver)
@@ -151,7 +151,7 @@ func TestExecuteReturnsLivenessErrorWhenPeerDown(t *testing.T) {
 	if err != nil {
 		t.Fatalf("libp2p.New(client) error = %v", err)
 	}
-	defer clientHost.Close()
+	defer func() { _ = clientHost.Close() }()
 
 	target := peer.AddrInfo{ID: serverHost.ID(), Addrs: serverHost.Addrs()}
 	if err := serverHost.Close(); err != nil {

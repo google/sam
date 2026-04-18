@@ -133,7 +133,7 @@ func runProviderRole() error {
 	if err != nil {
 		return err
 	}
-	defer node.Stop(context.Background())
+	defer func() { _ = node.Stop(context.Background()) }()
 
 	if err := node.Start(ctx); err != nil {
 		return fmt.Errorf("provider node start: %w", err)
@@ -238,7 +238,7 @@ func runConsumerRole() error {
 	if err != nil {
 		return err
 	}
-	defer node.Stop(context.Background())
+	defer func() { _ = node.Stop(context.Background()) }()
 
 	if err := node.Start(ctx); err != nil {
 		return fmt.Errorf("consumer node start: %w", err)
@@ -362,7 +362,7 @@ func expectDeniedBridge(ctx context.Context, bridge *protocol.MCPBridge, provide
 	if err != nil {
 		return fmt.Errorf("opening denied bridge stream: %w", err)
 	}
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 
 	buf := make([]byte, 1024)
 	n, readErr := stream.Read(buf)
@@ -386,7 +386,7 @@ func expectAllowedBridge(ctx context.Context, bridge *protocol.MCPBridge, provid
 	if err != nil {
 		return fmt.Errorf("opening allowed bridge stream: %w", err)
 	}
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 
 	payload := []byte("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"handshake\"}\n")
 	if _, err := stream.Write(payload); err != nil {
@@ -425,7 +425,7 @@ func writeProviderInfo(path string, info providerInfo) error {
 	if err != nil {
 		return fmt.Errorf("creating provider info file: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	if err := json.NewEncoder(f).Encode(info); err != nil {
 		return fmt.Errorf("encoding provider info: %w", err)
 	}
@@ -574,13 +574,13 @@ func configureLinkInNetNS(t *testing.T, pid int, linkName, cidr string) {
 	if err != nil {
 		t.Fatalf("getting current netns: %v", err)
 	}
-	defer originalNS.Close()
+	defer func() { _ = originalNS.Close() }()
 
 	targetNS, err := netns.GetFromPid(pid)
 	if err != nil {
 		t.Fatalf("getting target netns for pid %d: %v", pid, err)
 	}
-	defer targetNS.Close()
+	defer func() { _ = targetNS.Close() }()
 
 	if err := netns.Set(targetNS); err != nil {
 		t.Fatalf("entering netns for pid %d: %v", pid, err)
@@ -637,7 +637,7 @@ type echoConnector struct{}
 func (echoConnector) Open(context.Context) (mcp.Transport, error) {
 	a, b := net.Pipe()
 	go func() {
-		defer b.Close()
+		defer func() { _ = b.Close() }()
 		buf := make([]byte, 32*1024)
 		for {
 			n, err := b.Read(buf)

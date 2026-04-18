@@ -199,7 +199,7 @@ func Execute(ctx context.Context, h host.Host, req ExecuteRequest, observer Obse
 		observer.OnFailure(peerID, FailureTypeLiveness)
 		return nil, &LivenessError{PeerID: peerID, Err: err}
 	}
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 
 	// Propagate the caller's deadline to the stream so that all subsequent
 	// reads and writes respect the context timeout even after the stream is
@@ -265,7 +265,7 @@ func Execute(ctx context.Context, h host.Host, req ExecuteRequest, observer Obse
 }
 
 func (s *A2AService) handleStream(stream network.Stream) {
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 
 	peerID := stream.Conn().RemotePeer().String()
 	started := time.Now()
@@ -336,7 +336,7 @@ func (s *A2AService) handleStream(stream network.Stream) {
 		fail(FailureTypeInternal, fmt.Errorf("connecting local MCP transport: %w", err))
 		return
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	if err := conn.Write(context.Background(), msg); err != nil {
 		fail(FailureTypeInternal, fmt.Errorf("writing local MCP request: %w", err))

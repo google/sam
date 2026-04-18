@@ -208,7 +208,7 @@ func FetchVouch(ctx context.Context, vouchEndpoint, accessToken, peerID string, 
 	if err != nil {
 		return nil, fmt.Errorf("vouch request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
 	if err != nil {
@@ -252,7 +252,7 @@ func postForm(ctx context.Context, endpoint string, form url.Values, client *htt
 	if err != nil {
 		return nil, fmt.Errorf("POST %s: %w", endpoint, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	return io.ReadAll(io.LimitReader(resp.Body, 1<<16))
 }
 
@@ -280,7 +280,7 @@ func doHTTPRequest(req *http.Request) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%s %s: %w", req.Method, req.URL, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
 	if err != nil {
 		return nil, fmt.Errorf("reading response body: %w", err)

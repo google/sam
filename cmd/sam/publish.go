@@ -84,7 +84,7 @@ func runPublish(parent context.Context, cfg *runConfig) error {
 	if err := node.Start(parent); err != nil {
 		return fmt.Errorf("starting node: %w", err)
 	}
-	defer node.Stop(context.Background())
+	defer func() { _ = node.Stop(context.Background()) }()
 
 	priv := node.Host().Peerstore().PrivKey(node.PeerID())
 	if priv == nil {

@@ -51,7 +51,7 @@ func runIdentityLogin(parent context.Context, cfg *runConfig, clientID string) e
 	fmt.Fprintf(os.Stderr, "Fetching Hub discovery document from %s …\n", hubURL)
 	disc, err := identity.FetchHubDiscovery(parent, hubURL)
 	if err != nil {
-		return fmt.Errorf("hub discovery: %w\n\nMake sure the Hub is reachable and implements OIDC discovery.", err)
+		return fmt.Errorf("hub discovery: %w (make sure the Hub is reachable and implements OIDC discovery)", err)
 	}
 
 	flowCfg := identity.DeviceFlowConfig{ClientID: clientID}
@@ -88,7 +88,7 @@ func runIdentityLogin(parent context.Context, cfg *runConfig, clientID string) e
 	if err := node.Start(parent); err != nil {
 		return fmt.Errorf("starting node: %w", err)
 	}
-	defer node.Stop(context.Background())
+	defer func() { _ = node.Stop(context.Background()) }()
 	peerID := node.PeerID().String()
 
 	// If the Hub exposes a vouch endpoint, fetch a signed Vouch.
@@ -105,7 +105,7 @@ func runIdentityLogin(parent context.Context, cfg *runConfig, clientID string) e
 	if err != nil {
 		return fmt.Errorf("opening credential store: %w", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	creds := &identity.StoredCredentials{
 		PeerID:       peerID,

@@ -122,15 +122,15 @@ func runInspectCard(cfg *runConfig, input string) error {
 		fmt.Println(string(data))
 	} else {
 		fmt.Printf("Peer ID:     %s\n", card.PeerID)
-		fmt.Printf("Name:        %s\n", card.AgentCard.Name)
-		fmt.Printf("Description: %s\n", card.AgentCard.Description)
+		fmt.Printf("Name:        %s\n", card.Name)
+		fmt.Printf("Description: %s\n", card.Description)
 		fmt.Printf("Version:     %s\n", card.Version)
 		fmt.Printf("Algorithm:   %s\n", card.Algorithm)
 		fmt.Printf("Issued At:   %s\n", card.IssuedAt.Format("2006-01-02T15:04:05Z07:00"))
 
-		if len(card.AgentCard.Skills) > 0 {
+		if len(card.Skills) > 0 {
 			fmt.Println("\nSkills:")
-			for _, skill := range card.AgentCard.Skills {
+			for _, skill := range card.Skills {
 				fmt.Printf("  - %s: %s\n", skill.ID, skill.Description)
 			}
 		}

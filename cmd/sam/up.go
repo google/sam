@@ -39,7 +39,7 @@ func runUp(parent context.Context, cfg *runConfig) error {
 	if err := node.Start(parent); err != nil {
 		return fmt.Errorf("starting node: %w", err)
 	}
-	defer node.Stop(context.Background())
+	defer func() { _ = node.Stop(context.Background()) }()
 
 	_, signingKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {

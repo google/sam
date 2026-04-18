@@ -66,7 +66,7 @@ func runCall(parent context.Context, cfg *runConfig, targetArg string) error {
 	if err := node.Start(parent); err != nil {
 		return fmt.Errorf("starting node: %w", err)
 	}
-	defer node.Stop(context.Background())
+	defer func() { _ = node.Stop(context.Background()) }()
 
 	ctx, cancel := context.WithTimeout(parent, cfg.callTimeout)
 	defer cancel()
@@ -85,7 +85,7 @@ func runCall(parent context.Context, cfg *runConfig, targetArg string) error {
 	if err != nil {
 		return fmt.Errorf("creating reputation observer: %w", err)
 	}
-	defer observer.Close()
+	defer func() { _ = observer.Close() }()
 
 	nonce := strings.TrimSpace(cfg.callNonce)
 	if nonce == "" {
@@ -155,7 +155,7 @@ func loadLocalVouch() (*identity.Vouch, error) {
 	if err != nil {
 		return nil, fmt.Errorf("opening credential store: %w", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	creds, err := store.Load()
 	if err != nil {
 		return nil, fmt.Errorf("loading credentials: %w", err)

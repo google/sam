@@ -254,7 +254,7 @@ func (s *DiscoveryService) fetchCardFromStream(ctx context.Context, pi peer.Addr
 	if err != nil {
 		return nil, fmt.Errorf("opening card stream to %s: %w", pi.ID, err)
 	}
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 
 	var card AgentCard
 	if err := json.NewDecoder(stream).Decode(&card); err != nil {
@@ -270,7 +270,7 @@ func (s *DiscoveryService) fetchCardFromStream(ctx context.Context, pi peer.Addr
 }
 
 func (s *DiscoveryService) handleAgentCardStream(stream network.Stream) {
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 
 	s.mu.RLock()
 	card := s.localCard

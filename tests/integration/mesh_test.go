@@ -168,7 +168,7 @@ func runMeshPublisher() error {
 	if err := node.Start(ctx); err != nil {
 		return fmt.Errorf("publisher node start: %w", err)
 	}
-	defer node.Stop(context.Background())
+	defer func() { _ = node.Stop(context.Background()) }()
 
 	// Write the peer info before publishing so the subscriber can start
 	// connecting as soon as the DHT bootstrap is ready.
@@ -256,7 +256,7 @@ func runMeshSubscriber() error {
 	if err := node.Start(ctx); err != nil {
 		return fmt.Errorf("subscriber node start: %w", err)
 	}
-	defer node.Stop(context.Background())
+	defer func() { _ = node.Stop(context.Background()) }()
 
 	if err := meshConnectWithRetry(ctx, node, *publisherAddrInfo); err != nil {
 		return fmt.Errorf("connecting to publisher bootstrap: %w", err)
@@ -327,7 +327,7 @@ func meshEchoRoundTrip(ctx context.Context, bridge *protocol.MCPBridge, target p
 	if err != nil {
 		return fmt.Errorf("opening bridge stream: %w", err)
 	}
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 
 	payload := []byte("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}\n")
 	if _, err := stream.Write(payload); err != nil {
@@ -560,13 +560,13 @@ func configureMeshLinkInNetNS(t *testing.T, pid int, linkName, cidr string) {
 	if err != nil {
 		t.Fatalf("getting current netns: %v", err)
 	}
-	defer originalNS.Close()
+	defer func() { _ = originalNS.Close() }()
 
 	targetNS, err := netns.GetFromPid(pid)
 	if err != nil {
 		t.Fatalf("getting netns for pid %d: %v", pid, err)
 	}
-	defer targetNS.Close()
+	defer func() { _ = targetNS.Close() }()
 
 	if err := netns.Set(targetNS); err != nil {
 		t.Fatalf("entering netns for pid %d: %v", pid, err)
@@ -610,7 +610,7 @@ func writeMeshPeerInfo(path string, info meshPeerInfo) error {
 	if err != nil {
 		return fmt.Errorf("creating mesh info file: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	return json.NewEncoder(f).Encode(info)
 }
 
@@ -679,7 +679,7 @@ type meshEchoConnector struct{}
 func (meshEchoConnector) Open(context.Context) (mcp.Transport, error) {
 	a, b := net.Pipe()
 	go func() {
-		defer b.Close()
+		defer func() { _ = b.Close() }()
 		buf := make([]byte, 32*1024)
 		for {
 			n, err := b.Read(buf)

@@ -82,7 +82,7 @@ func runCUJ2HolePunchRelayAssisted(t *testing.T) {
 
 	const protoID coreprotocol.ID = "/sam/cuj/holepunch/1.0"
 	target.Host().SetStreamHandler(protoID, func(s network.Stream) {
-		defer s.Close()
+		defer func() { _ = s.Close() }()
 		r := bufio.NewReader(s)
 		line, _ := r.ReadString('\n')
 		_, _ = io.WriteString(s, line)
@@ -157,7 +157,9 @@ func cujStartNode(t *testing.T, cfg cujNodeConfig) samnet.Node {
 	if err := n.Start(context.Background()); err != nil {
 		t.Fatalf("starting node: %v", err)
 	}
-	t.Cleanup(func() { go n.Stop(context.Background()) })
+	t.Cleanup(func() {
+		go func() { _ = n.Stop(context.Background()) }()
+	})
 	return n
 }
 

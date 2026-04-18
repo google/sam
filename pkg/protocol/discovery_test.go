@@ -65,13 +65,13 @@ func TestDiscoverReturnsVerifiedCards(t *testing.T) {
 	if err != nil {
 		t.Fatalf("libp2p.New provider error = %v", err)
 	}
-	defer providerHost.Close()
+	defer func() { _ = providerHost.Close() }()
 
 	consumerHost, err := libp2p.New()
 	if err != nil {
 		t.Fatalf("libp2p.New consumer error = %v", err)
 	}
-	defer consumerHost.Close()
+	defer func() { _ = consumerHost.Close() }()
 
 	providerPriv := providerHost.Peerstore().PrivKey(providerHost.ID())
 	card, err := protocol.NewAgentCard(providerHost.ID(), []string{"inference"}, nil, providerPriv)
@@ -80,7 +80,7 @@ func TestDiscoverReturnsVerifiedCards(t *testing.T) {
 	}
 
 	providerHost.SetStreamHandler(protocol.AgentCardProtocolID, func(s network.Stream) {
-		defer s.Close()
+		defer func() { _ = s.Close() }()
 		_ = json.NewEncoder(s).Encode(card)
 	})
 
@@ -113,19 +113,19 @@ func TestDiscoverPeerIDsReturnsUniqueRemotePeers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("libp2p.New consumer error = %v", err)
 	}
-	defer consumerHost.Close()
+	defer func() { _ = consumerHost.Close() }()
 
 	providerA, err := libp2p.New()
 	if err != nil {
 		t.Fatalf("libp2p.New providerA error = %v", err)
 	}
-	defer providerA.Close()
+	defer func() { _ = providerA.Close() }()
 
 	providerB, err := libp2p.New()
 	if err != nil {
 		t.Fatalf("libp2p.New providerB error = %v", err)
 	}
-	defer providerB.Close()
+	defer func() { _ = providerB.Close() }()
 
 	ch := make(chan peer.AddrInfo, 5)
 	ch <- peer.AddrInfo{ID: providerA.ID(), Addrs: providerA.Addrs()}
@@ -166,13 +166,13 @@ func TestDiscoverAndConnectReturnsPartialSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("libp2p.New consumer error = %v", err)
 	}
-	defer consumerHost.Close()
+	defer func() { _ = consumerHost.Close() }()
 
 	provider, err := libp2p.New()
 	if err != nil {
 		t.Fatalf("libp2p.New provider error = %v", err)
 	}
-	defer provider.Close()
+	defer func() { _ = provider.Close() }()
 
 	priv, _, err := crypto.GenerateEd25519Key(cryptorand.Reader)
 	if err != nil {
@@ -213,7 +213,7 @@ func TestDiscoverPrefersDHTCard(t *testing.T) {
 	if err != nil {
 		t.Fatalf("libp2p.New consumer error = %v", err)
 	}
-	defer consumerHost.Close()
+	defer func() { _ = consumerHost.Close() }()
 
 	priv, _, err := crypto.GenerateEd25519Key(cryptorand.Reader)
 	if err != nil {
@@ -270,13 +270,13 @@ func TestDiscoverFallsBackToStreamWhenDHTCardInvalid(t *testing.T) {
 	if err != nil {
 		t.Fatalf("libp2p.New provider error = %v", err)
 	}
-	defer providerHost.Close()
+	defer func() { _ = providerHost.Close() }()
 
 	consumerHost, err := libp2p.New()
 	if err != nil {
 		t.Fatalf("libp2p.New consumer error = %v", err)
 	}
-	defer consumerHost.Close()
+	defer func() { _ = consumerHost.Close() }()
 
 	providerPriv := providerHost.Peerstore().PrivKey(providerHost.ID())
 	card, err := protocol.NewAgentCard(providerHost.ID(), []string{"inference"}, nil, providerPriv)
@@ -285,7 +285,7 @@ func TestDiscoverFallsBackToStreamWhenDHTCardInvalid(t *testing.T) {
 	}
 
 	providerHost.SetStreamHandler(protocol.AgentCardProtocolID, func(s network.Stream) {
-		defer s.Close()
+		defer func() { _ = s.Close() }()
 		_ = json.NewEncoder(s).Encode(card)
 	})
 
@@ -326,7 +326,7 @@ func TestDiscoverAllowsStaleDHTCardWhenMaxAgeDisabled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("libp2p.New consumer error = %v", err)
 	}
-	defer consumerHost.Close()
+	defer func() { _ = consumerHost.Close() }()
 
 	priv, _, err := crypto.GenerateEd25519Key(cryptorand.Reader)
 	if err != nil {

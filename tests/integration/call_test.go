@@ -108,7 +108,7 @@ func runCallIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("opening reputation DB: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	type reputationRecord struct {
 		PeerID    string `json:"peer_id"`
@@ -174,7 +174,9 @@ func runCallProviderRole() error {
 	}
 	// In a subprocess role, fire Stop asynchronously so the process can exit
 	// promptly; the OS will clean up resources when the process terminates.
-	defer func() { go node.Stop(context.Background()) }()
+	defer func() {
+		go func() { _ = node.Stop(context.Background()) }()
+	}()
 
 	// Register the A2A handler BEFORE writing the info file so the consumer
 	// cannot connect and attempt Execute before the protocol is ready.
@@ -273,7 +275,9 @@ func runCallConsumerRole() error {
 	}
 	// In a subprocess role, fire Stop asynchronously so the process can exit
 	// promptly; the OS will clean up resources when the process terminates.
-	defer func() { go node.Stop(context.Background()) }()
+	defer func() {
+		go func() { _ = node.Stop(context.Background()) }()
+	}()
 
 	if err := connectCallWithRetry(ctx, node, *providerAddrInfo); err != nil {
 		return fmt.Errorf("connecting to provider bootstrap: %w", err)
@@ -287,7 +291,7 @@ func runCallConsumerRole() error {
 	if err != nil {
 		return fmt.Errorf("creating bolt observer: %w", err)
 	}
-	defer observer.Close()
+	defer func() { _ = observer.Close() }()
 
 	vouch := identity.NewVouch(node.PeerID().String(), "self", "test-subject", map[string]string{"name": "consumer"}, time.Hour)
 	req := protocol.ExecuteRequest{
@@ -371,25 +375,6 @@ func connectCallWithRetry(ctx context.Context, node samnet.Node, pi peer.AddrInf
 		select {
 		case <-ctx.Done():
 			return last
-		case <-ticker.C:
-		}
-	}
-}
-
-func discoverCallPeersWithRetry(ctx context.Context, svc *protocol.DiscoveryService, capability string) ([]peer.AddrInfo, error) {
-	ticker := time.NewTicker(300 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		peers, err := svc.DiscoverPeers(ctx, capability)
-		if err == nil && len(peers) > 0 {
-			return peers, nil
-		}
-		select {
-		case <-ctx.Done():
-			if err != nil {
-				return nil, fmt.Errorf("discovering peers for capability %q: %w", capability, err)
-			}
-			return nil, fmt.Errorf("no peers discovered for capability %q", capability)
 		case <-ticker.C:
 		}
 	}
@@ -482,7 +467,7 @@ type delayedResponseConnector struct {
 }
 
 func (c delayedResponseConnector) Open(context.Context) (mcp.Transport, error) {
-	return delayedResponseTransport{delay: c.delay}, nil
+	return delayedResponseTransport(c), nil
 }
 
 type delayedResponseTransport struct {

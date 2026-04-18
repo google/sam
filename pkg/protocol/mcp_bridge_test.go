@@ -48,7 +48,7 @@ type echoConnector struct{}
 func (echoConnector) Open(context.Context) (mcp.Transport, error) {
 	a, b := net.Pipe()
 	go func() {
-		defer b.Close()
+		defer func() { _ = b.Close() }()
 		buf := make([]byte, 32*1024)
 		for {
 			n, err := b.Read(buf)
@@ -73,13 +73,13 @@ func TestMCPBridgeAllowsAuthorizedStream(t *testing.T) {
 	if err != nil {
 		t.Fatalf("libp2p.New(server) error = %v", err)
 	}
-	defer serverHost.Close()
+	defer func() { _ = serverHost.Close() }()
 
 	clientHost, err := libp2p.New()
 	if err != nil {
 		t.Fatalf("libp2p.New(client) error = %v", err)
 	}
-	defer clientHost.Close()
+	defer func() { _ = clientHost.Close() }()
 
 	verifier := &fakeVerifier{}
 	_, err = NewMCPBridge(serverHost, verifier, echoConnector{})
@@ -106,7 +106,7 @@ func TestMCPBridgeAllowsAuthorizedStream(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 
 	payload := []byte("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}\n")
 	if _, err := stream.Write(payload); err != nil {
@@ -134,13 +134,13 @@ func TestMCPBridgeDeniesUnauthorizedStream(t *testing.T) {
 	if err != nil {
 		t.Fatalf("libp2p.New(server) error = %v", err)
 	}
-	defer serverHost.Close()
+	defer func() { _ = serverHost.Close() }()
 
 	clientHost, err := libp2p.New()
 	if err != nil {
 		t.Fatalf("libp2p.New(client) error = %v", err)
 	}
-	defer clientHost.Close()
+	defer func() { _ = clientHost.Close() }()
 
 	denyVerifier := &fakeVerifier{err: errors.New("insufficient funds")}
 	_, err = NewMCPBridge(serverHost, denyVerifier, echoConnector{})
@@ -167,7 +167,7 @@ func TestMCPBridgeDeniesUnauthorizedStream(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 
 	buf := make([]byte, 2048)
 	n, err := stream.Read(buf)

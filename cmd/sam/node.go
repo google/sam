@@ -121,7 +121,7 @@ func parseDHTMode(mode string) samnet.DHTMode {
 func waitForShutdown(parent context.Context, runFor time.Duration) error {
 	if runFor > 0 {
 		t := time.NewTimer(runFor)
-		defer t.Stop()
+		defer func() { _ = t.Stop() }()
 		select {
 		case <-parent.Done():
 			return parent.Err()

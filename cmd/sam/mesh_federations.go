@@ -48,7 +48,7 @@ func runMeshFederationsList(format string) error {
 	if err != nil {
 		return fmt.Errorf("creating federation manager: %w", err)
 	}
-	defer mgr.Close()
+	defer func() { _ = mgr.Close() }()
 
 	names, err := mgr.ListFederations()
 	if err != nil {
@@ -56,8 +56,8 @@ func runMeshFederationsList(format string) error {
 	}
 
 	if len(names) == 0 {
-		fmt.Fprintln(os.Stdout, "No federation databases found.")
-		fmt.Fprintf(os.Stdout, "Use --federation <name> with any command to create one.\n")
+		_, _ = fmt.Fprintln(os.Stdout, "No federation databases found.")
+		_, _ = fmt.Fprintf(os.Stdout, "Use --federation <name> with any command to create one.\n")
 		return nil
 	}
 
@@ -77,9 +77,9 @@ func runMeshFederationsList(format string) error {
 		return enc.Encode(out)
 	default:
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "NAME\tPATH")
+		_, _ = fmt.Fprintln(w, "NAME\tPATH")
 		for _, n := range names {
-			fmt.Fprintf(w, "%s\t%s/%s.db\n", n, mgr.BaseDir(), n)
+			_, _ = fmt.Fprintf(w, "%s\t%s/%s.db\n", n, mgr.BaseDir(), n)
 		}
 		return w.Flush()
 	}
@@ -109,11 +109,11 @@ func runMeshFederationsDrop(name string, confirmed bool) error {
 	if err != nil {
 		return fmt.Errorf("creating federation manager: %w", err)
 	}
-	defer mgr.Close()
+	defer func() { _ = mgr.Close() }()
 
 	if err := mgr.DropFederation(name); err != nil {
 		return fmt.Errorf("dropping federation %q: %w", name, err)
 	}
-	fmt.Fprintf(os.Stdout, "Federation %q dropped.\n", name)
+	_, _ = fmt.Fprintf(os.Stdout, "Federation %q dropped.\n", name)
 	return nil
 }

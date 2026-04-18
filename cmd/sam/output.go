@@ -91,9 +91,9 @@ func printAgents(w io.Writer, cards []*protocol.AgentCard, format outputFormat, 
 
 func printAgentsTable(w io.Writer, rows []agentRow) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 3, ' ', 0)
-	fmt.Fprintln(tw, "PEER ID\tIDENTITY\tCAPABILITY\tLATENCY\tISSUED AT")
+	_, _ = fmt.Fprintln(tw, "PEER ID\tIDENTITY\tCAPABILITY\tLATENCY\tISSUED AT")
 	for _, r := range rows {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n",
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n",
 			truncate(r.PeerID, 20),
 			r.Identity,
 			r.Capability,

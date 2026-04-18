@@ -173,7 +173,7 @@ func TestDHTRouting(t *testing.T) {
 			if err := provider.Start(ctx); err != nil {
 				t.Fatalf("starting provider: %v", err)
 			}
-			defer provider.Stop(ctx)
+			defer func() { _ = provider.Stop(ctx) }()
 
 			// Create and start the consumer node.
 			consumer, err := samnet.New(
@@ -186,7 +186,7 @@ func TestDHTRouting(t *testing.T) {
 			if err := consumer.Start(ctx); err != nil {
 				t.Fatalf("starting consumer: %v", err)
 			}
-			defer consumer.Stop(ctx)
+			defer func() { _ = consumer.Stop(ctx) }()
 
 			// Connect the two nodes so the DHT can route between them.
 			providerInfo := peer.AddrInfo{

@@ -47,7 +47,7 @@ func runPublishMCP(parent context.Context, cfg *runConfig) error {
 	if err := node.Start(parent); err != nil {
 		return fmt.Errorf("starting node: %w", err)
 	}
-	defer node.Stop(context.Background())
+	defer func() { _ = node.Stop(context.Background()) }()
 
 	priv := node.Host().Peerstore().PrivKey(node.PeerID())
 	if priv == nil {
@@ -110,12 +110,12 @@ func (c *httpMCPConnector) Open(ctx context.Context) (mcp.Transport, error) {
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		pw.Close()
+		_ = pw.Close()
 		return nil, fmt.Errorf("connecting to local MCP server at %s: %w", c.addr, err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		resp.Body.Close()
-		pw.Close()
+		_ = resp.Body.Close()
+		_ = pw.Close()
 		return nil, fmt.Errorf("local MCP server returned %s", resp.Status)
 	}
 	return &mcp.IOTransport{Reader: resp.Body, Writer: pw}, nil

@@ -74,7 +74,7 @@ func (b *MCPBridge) Open(ctx context.Context, peerID peer.ID, req BridgeOpenRequ
 }
 
 func (b *MCPBridge) handleInbound(stream network.Stream) {
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 
 	reader := bufio.NewReader(stream)
 
@@ -160,13 +160,13 @@ func proxyMCPMessages(ctx context.Context, remote mcp.Transport, local mcp.Trans
 	if err != nil {
 		return fmt.Errorf("connecting remote MCP transport: %w", err)
 	}
-	defer remoteConn.Close()
+	defer func() { _ = remoteConn.Close() }()
 
 	localConn, err := local.Connect(ctx)
 	if err != nil {
 		return fmt.Errorf("connecting local MCP transport: %w", err)
 	}
-	defer localConn.Close()
+	defer func() { _ = localConn.Close() }()
 
 	errCh := make(chan error, 2)
 	go forwardMCP(ctx, remoteConn, localConn, errCh)
