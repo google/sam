@@ -272,6 +272,6 @@
 
 ## See Also
 
-- **[Concepts](/concepts/federation.md)**: Technical deep dives
-- **[FAQ](/faq.md)**: Common questions answered
-- **[CLI Reference](/cli/reference.md)**: Command documentation
+- **[Concepts](#/concepts/federation.md)**: Technical deep dives
+- **[FAQ](#/faq.md)**: Common questions answered
+- **[CLI Reference](#/cli/reference.md)**: Command documentation

@@ -522,5 +522,5 @@ Use these to:
 
 ## Next Steps
 
-- **[User Journey Guide](/guides/dark-mesh.md)**: Full scenario walkthrough
-- **[Concepts](/concepts/federation.md)**: Technical deep dive
+- **[User Journey Guide](#/guides/dark-mesh.md)**: Full scenario walkthrough
+- **[Concepts](#/concepts/federation.md)**: Technical deep dive

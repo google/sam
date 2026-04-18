@@ -428,6 +428,6 @@ sam inspect biscuit "bob;allow_skill=risk-audit"
 
 ## Next Steps
 
-- **[Biscuit Authorization](/concepts/biscuit.md)**: How skill-based access control works
-- **[Federation & Storage](/concepts/federation.md)**: How federation isolation works
-- **[A2A Protocol](/concepts/a2a-protocol.md)**: How agents authenticate to each other
+- **[Biscuit Authorization](#/concepts/biscuit.md)**: How skill-based access control works
+- **[Federation & Storage](#/concepts/federation.md)**: How federation isolation works
+- **[A2A Protocol](#/concepts/a2a-protocol.md)**: How agents authenticate to each other

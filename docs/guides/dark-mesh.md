@@ -444,7 +444,7 @@ Operations Federation (isolated namespace: /sam/fed/operations)
 
 ## Next Steps
 
-1. **Setup Your Federations**: [Federation Setup Guide](/guides/federation-setup.md)
-2. **Publish Your First Agent**: [Publishing Guide](/guides/publish-agent.md)
-3. **CLI Reference**: Full command documentation at [CLI Reference](/cli/reference.md)
-4. **Technical Deep Dive**: Understand federation storage at [Federation & Storage](/concepts/federation.md)
+1. **Setup Your Federations**: [CLI Reference](#/cli/reference.md)
+2. **Publish Your First Agent**: [Quick Start](#/quickstart.md)
+3. **CLI Reference**: Full command documentation at [CLI Reference](#/cli/reference.md)
+4. **Technical Deep Dive**: Understand federation storage at [Federation & Storage](#/concepts/federation.md)

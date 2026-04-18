@@ -22,7 +22,7 @@ We welcome contributions! This guide covers:
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-org/sam.git
+git clone https://github.com/aojea/sam.git
 cd sam
 
 # Build the binary

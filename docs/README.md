@@ -164,10 +164,10 @@ SAM enables this sovereignty by moving trust from **authorities** to **cryptogra
 
 ## Next Steps
 
-- **[Getting Started](/guides/dark-mesh.md)**: Set up an enterprise dark mesh
-- **[CLI Reference](/cli/reference.md)**: Full kubectl-style command hierarchy
-- **[Technical Deep Dive](/concepts/federation.md)**: How federation isolation works
-- **[Testing Guide](/testing.md)**: Run the test suite locally
+- **[Getting Started](#/guides/dark-mesh.md)**: Set up an enterprise dark mesh
+- **[CLI Reference](#/cli/reference.md)**: Full kubectl-style command hierarchy
+- **[Technical Deep Dive](#/concepts/federation.md)**: How federation isolation works
+- **[Testing Guide](#/testing.md)**: Run the test suite locally
 
 ## Philosophy
 

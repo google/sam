@@ -9,9 +9,9 @@
 - **Federation-Ready**: Isolated namespaces for enterprise dark meshes
 - **Audit-First**: Built-in transparency for security compliance
 
-[Documentation](/README.md)
-[GitHub](https://github.com/your-org/sam)
-[Getting Started](#features)
+[Documentation](#/README.md)
+[GitHub](https://github.com/aojea/sam)
+[Getting Started](#/quickstart.md)
 
 ---
 

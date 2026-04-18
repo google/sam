@@ -388,6 +388,6 @@ Federated Database Architecture:
 
 ## Next Steps
 
-- **[Identity & Vouch System](/concepts/identity.md)**: Deep dive into how identity works
-- **[Biscuit Authorization](/concepts/biscuit.md)**: How skill-based access control works
-- **[A2A Protocol](/concepts/a2a-protocol.md)**: How agents authenticate and call each other
+- **[Identity & Vouch System](#/concepts/identity.md)**: Deep dive into how identity works
+- **[Biscuit Authorization](#/concepts/biscuit.md)**: How skill-based access control works
+- **[A2A Protocol](#/concepts/a2a-protocol.md)**: How agents authenticate and call each other

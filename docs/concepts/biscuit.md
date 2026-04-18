@@ -486,6 +486,6 @@ return executeSkill(ctx, capability, payload)
 
 ## Next Steps
 
-- **[Identity & Vouch System](/concepts/identity.md)**: How authentication works
-- **[A2A Protocol](/concepts/a2a-protocol.md)**: How authorization is enforced
-- **[CLI Reference](/cli/reference.md)**: `sam inspect biscuit` usage
+- **[Identity & Vouch System](#/concepts/identity.md)**: How authentication works
+- **[A2A Protocol](#/concepts/a2a-protocol.md)**: How authorization is enforced
+- **[CLI Reference](#/cli/reference.md)**: `sam inspect biscuit` usage

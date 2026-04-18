@@ -3,7 +3,7 @@
 ## Installation
 
 ```bash
-git clone https://github.com/your-org/sam.git
+git clone https://github.com/aojea/sam.git
 cd sam
 make build
 ./bin/sam --help
@@ -152,13 +152,13 @@ sam inspect card '{"peer_id":"...","agent_card":{...}}'
 
 ## Documentation
 
-- **[Overview](/README.md)**: What SAM is and why it matters
-- **[User Journey](/guides/dark-mesh.md)**: Step-by-step walkthrough
-- **[CLI Reference](/cli/reference.md)**: Full command documentation
-- **[Concepts](/concepts/federation.md)**: Technical deep dives
-- **[Testing](/testing.md)**: How to run and write tests
-- **[FAQ](/faq.md)**: Common questions
-- **[Glossary](/glossary.md)**: Terminology reference
+- **[Overview](#/README.md)**: What SAM is and why it matters
+- **[User Journey](#/guides/dark-mesh.md)**: Step-by-step walkthrough
+- **[CLI Reference](#/cli/reference.md)**: Full command documentation
+- **[Concepts](#/concepts/federation.md)**: Technical deep dives
+- **[Testing](#/testing.md)**: How to run and write tests
+- **[FAQ](#/faq.md)**: Common questions
+- **[Glossary](#/glossary.md)**: Terminology reference
 
 ---
 
@@ -172,7 +172,7 @@ sam <command> --help
 SAM_DEBUG=1 sam <command>
 
 # Report bugs
-https://github.com/your-org/sam/issues
+https://github.com/aojea/sam/issues
 ```
 
 ---

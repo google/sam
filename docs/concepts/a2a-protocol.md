@@ -404,15 +404,15 @@ If direct connection fails, libp2p automatically:
 
 ## Related Concepts
 
-- **[Vouch](/concepts/identity.md)**: Authentication mechanism
-- **[Biscuit](/concepts/biscuit.md)**: Authorization mechanism
-- **[Federation](/concepts/federation.md)**: Network isolation
-- **[CLI](/cli/reference.md)**: How to invoke A2A calls
+- **[Vouch](#/concepts/identity.md)**: Authentication mechanism
+- **[Biscuit](#/concepts/biscuit.md)**: Authorization mechanism
+- **[Federation](#/concepts/federation.md)**: Network isolation
+- **[CLI](#/cli/reference.md)**: How to invoke A2A calls
 
 ---
 
 ## Next Steps
 
-- **[Try it Out](/guides/dark-mesh.md)**: Make your first A2A call
-- **[Integration Tests](/tests/integration/)**: See A2A in action
-- **[Contributing](/contributing.md)**: Help improve the protocol
+- **[Try it Out](#/guides/dark-mesh.md)**: Make your first A2A call
+- **[Integration Tests](https://github.com/aojea/sam/tree/main/tests/integration)**: See A2A in action
+- **[Contributing](#/contributing.md)**: Help improve the protocol

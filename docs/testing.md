@@ -421,6 +421,6 @@ func TestExample(t *testing.T) {
 
 ## Next Steps
 
-- **[Quick Start](/guides/dark-mesh.md)**: Set up SAM locally
-- **[CLI Reference](/cli/reference.md)**: Test with real commands
-- **[Contributing](/contributing.md)**: Submit a test PR
+- **[Quick Start](#/guides/dark-mesh.md)**: Set up SAM locally
+- **[CLI Reference](#/cli/reference.md)**: Test with real commands
+- **[Contributing](#/contributing.md)**: Submit a test PR

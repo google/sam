@@ -13,7 +13,7 @@ In short: **Pure P2P networks for agents, with cryptographic identity**.
 ### How do I install SAM?
 
 ```bash
-git clone https://github.com/your-org/sam.git
+git clone https://github.com/aojea/sam.git
 cd sam
 make build
 ./bin/sam --help
@@ -44,7 +44,7 @@ Requirements: Go 1.21+, Make, BATS (for E2E tests)
 sam call mycapability --federation mynet --message "Do something"
 ```
 
-See [User Journey Guide](/guides/dark-mesh.md) for a full walkthrough.
+See [User Journey Guide](#/guides/dark-mesh.md) for a full walkthrough.
 
 ---
 
@@ -67,7 +67,7 @@ A **vouch** is a cryptographic credential proving your identity to a federation.
 - Includes your subject (username), PeerID, and expiry
 - Signed by the hub (so we trust the issuer, not a server)
 
-See [Identity & Vouch System](/concepts/identity.md).
+See [Identity & Vouch System](#/concepts/identity.md).
 
 ### What's a Biscuit?
 
@@ -79,7 +79,7 @@ Format: `alice;allow_skill=weather-bot,risk-audit`
 - No central revocation (revoke by deleting locally)
 - Plain-text for transparency
 
-See [Biscuit Authorization](/concepts/biscuit.md).
+See [Biscuit Authorization](#/concepts/biscuit.md).
 
 ### What's an Agent Card?
 
@@ -169,7 +169,7 @@ If direct connection fails:
 2. Fall back to relay
 3. Communication works either way
 
-See [CUJ-2 Test](/tests/integration/cuj_test.go) for example.
+See [CUJ-2 Test](https://github.com/aojea/sam/blob/main/tests/integration/cuj_test.go) for example.
 
 ### Can I run a SAM node in the cloud?
 
@@ -408,10 +408,10 @@ func main() {
 Yes. Import SAM as a Go library:
 
 ```bash
-go get github.com/your-org/sam
+go get github.com/aojea/sam
 ```
 
-See [pkg/net](/pkg/net), [pkg/protocol](/pkg/protocol), [pkg/economy](/pkg/economy).
+See [pkg/net](https://github.com/aojea/sam/tree/main/pkg/net), [pkg/protocol](https://github.com/aojea/sam/tree/main/pkg/protocol), [pkg/economy](https://github.com/aojea/sam/tree/main/pkg/economy).
 
 ### Can I use SAM with Docker/Kubernetes?
 
@@ -433,7 +433,7 @@ For Kubernetes: Mount `~/.config/sam` as a persistent volume.
 
 ### How do I contribute?
 
-See [Contributing Guide](/contributing.md).
+See [Contributing Guide](#/contributing.md).
 
 In short:
 1. Fork the repo
@@ -500,7 +500,7 @@ Open an issue describing your use case. We prioritize based on:
 
 ### What license is SAM under?
 
-[Check LICENSE file](https://github.com/your-org/sam/blob/main/LICENSE)
+[Check LICENSE file](https://github.com/aojea/sam/blob/main/LICENSE)
 
 Typically: MIT or Apache 2.0
 
@@ -510,7 +510,7 @@ Yes, as long as you comply with the license (usually MIT/Apache means you can).
 
 ### Do I need to contribute back to SAM?
 
-Not required, but appreciated. See [Contributing Guide](/contributing.md).
+Not required, but appreciated. See [Contributing Guide](#/contributing.md).
 
 ---
 
