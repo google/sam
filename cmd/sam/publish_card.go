@@ -55,6 +55,9 @@ func runPublishCard(parent context.Context, cfg *runConfig) error {
 	if err != nil {
 		return fmt.Errorf("building agent card: %w", err)
 	}
+	if err := attachNodeVouch(card, node.PeerID().String(), priv); err != nil {
+		return err
+	}
 
 	pub, err := protocol.NewPublisher(node)
 	if err != nil {

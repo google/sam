@@ -124,3 +124,57 @@ teardown() {
   run cat "$TEST_TMPDIR/proxy_body.txt"
   [[ "$output" == *"unauthorized"* ]]
 }
+
+@test "sam proxy /.sam/search discovers writer skill with vouch" {
+  node_a_log="$TEST_TMPDIR/node-a.log"
+  node_b_log="$TEST_TMPDIR/node-b.log"
+  proxy_port=18081
+  node_a_listen="/ip4/127.0.0.1/udp/4313/quic-v1"
+  node_b_listen="/ip4/127.0.0.1/udp/4314/quic-v1"
+
+  "$SAM_BINARY" proxy --port "$proxy_port" --listen "$node_b_listen" --dht-mode server --run-for 20s >"$node_b_log" 2>&1 &
+  node_b_pid=$!
+
+  node_b_peer=""
+  for _ in {1..100}; do
+    node_b_peer="$(grep -o 'peer_id=[^ ]*' "$node_b_log" | head -n1 | cut -d= -f2)"
+    if [[ -n "$node_b_peer" ]]; then
+      break
+    fi
+    sleep 0.1
+  done
+  [[ -n "$node_b_peer" ]]
+
+  node_a_peer=""
+  "$SAM_BINARY" publish --skill writer --mcp-port 19099 --listen "$node_a_listen" --bootstrap "/ip4/127.0.0.1/udp/4314/quic-v1/p2p/${node_b_peer}" --dht-mode server --run-for 20s >"$node_a_log" 2>&1 &
+  node_a_pid=$!
+
+  for _ in {1..120}; do
+    node_a_peer="$(grep -o 'peer_id=[^ ]*' "$node_a_log" | head -n1 | cut -d= -f2)"
+    if [[ -n "$node_a_peer" ]]; then
+      break
+    fi
+    sleep 0.1
+  done
+  [[ -n "$node_a_peer" ]]
+
+  search_status="000"
+  for _ in {1..120}; do
+    search_status="$(curl -s -o "$TEST_TMPDIR/search_body.json" -w "%{http_code}" "http://127.0.0.1:${proxy_port}/.sam/search?skill=writer" || true)"
+    if [[ "$search_status" == "200" ]] && grep -q "$node_a_peer" "$TEST_TMPDIR/search_body.json"; then
+      break
+    fi
+    sleep 0.2
+  done
+
+  kill "$node_b_pid" >/dev/null 2>&1 || true
+  wait "$node_b_pid" >/dev/null 2>&1 || true
+  kill "$node_a_pid" >/dev/null 2>&1 || true
+  wait "$node_a_pid" >/dev/null 2>&1 || true
+
+  [[ "$search_status" == "200" ]]
+  run cat "$TEST_TMPDIR/search_body.json"
+  [[ "$output" == *"$node_a_peer"* ]]
+  [[ "$output" == *'"vouch"'* ]]
+  [[ "$output" == *'"signature"'* ]]
+}

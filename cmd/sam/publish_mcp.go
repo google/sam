@@ -63,6 +63,9 @@ func runPublishMCP(parent context.Context, cfg *runConfig) error {
 	if err != nil {
 		return fmt.Errorf("building agent card: %w", err)
 	}
+	if err := attachNodeVouch(card, node.PeerID().String(), priv); err != nil {
+		return err
+	}
 
 	connector := &httpMCPConnector{
 		client: &http.Client{Timeout: 30 * time.Second},

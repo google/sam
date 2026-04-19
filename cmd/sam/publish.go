@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"sam/pkg/economy"
+	"sam/pkg/identity"
 	samnet "sam/pkg/net"
 	"sam/pkg/protocol"
 )
@@ -106,6 +108,9 @@ func runPublish(parent context.Context, cfg *runConfig) error {
 	if err != nil {
 		return fmt.Errorf("building agent card: %w", err)
 	}
+	if err := attachNodeVouch(card, node.PeerID().String(), priv); err != nil {
+		return err
+	}
 
 	// For dry-run=server mode, skip DHT but still build network
 	if cfg.dryRun == "server" {
@@ -132,6 +137,45 @@ func runPublish(parent context.Context, cfg *runConfig) error {
 		return fmt.Errorf("encoding published card: %w", err)
 	}
 	return waitForShutdown(parent, cfg.runFor)
+}
+
+func attachNodeVouch(card *protocol.AgentCard, peerID string, priv any) error {
+	if card == nil {
+		return fmt.Errorf("agent card is nil")
+	}
+	if vouch, err := loadLocalVouch(); err == nil && vouch != nil {
+		card.AttachVouch(vouch)
+		return nil
+	}
+
+	rawKey, err := nodeEd25519PrivateKey(priv)
+	if err != nil {
+		return fmt.Errorf("extracting ed25519 key for self-vouch: %w", err)
+	}
+	vouch, err := identity.SelfSignVouch(peerID, rawKey)
+	if err != nil {
+		return fmt.Errorf("building self-signed vouch: %w", err)
+	}
+	card.AttachVouch(vouch)
+	return nil
+}
+
+func nodeEd25519PrivateKey(priv any) (ed25519.PrivateKey, error) {
+	type rawKeyProvider interface {
+		Raw() ([]byte, error)
+	}
+	rawProvider, ok := priv.(rawKeyProvider)
+	if !ok {
+		return nil, fmt.Errorf("unsupported private key type")
+	}
+	raw, err := rawProvider.Raw()
+	if err != nil {
+		return nil, err
+	}
+	if len(raw) != ed25519.PrivateKeySize {
+		return nil, fmt.Errorf("unexpected private key size %d", len(raw))
+	}
+	return ed25519.PrivateKey(raw), nil
 }
 
 func publishLoop(parent context.Context, pub *protocol.Publisher, card *protocol.AgentCard, every time.Duration) error {
