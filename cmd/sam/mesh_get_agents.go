@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -121,7 +122,11 @@ func runMeshGetAgentsWatch(parent context.Context, cfg *runConfig, format output
 	if err != nil {
 		return fmt.Errorf("creating inventory watch manager: %w", err)
 	}
-	defer watchManager.Close()
+	defer func() {
+		if closeErr := watchManager.Close(); closeErr != nil {
+			slog.Warn("closing inventory watch manager", "err", closeErr)
+		}
+	}()
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/.sam/watch/inventory" {

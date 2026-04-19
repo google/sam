@@ -94,7 +94,11 @@ func runProxy(parent context.Context, cfg *runConfig) error {
 	if err != nil {
 		return fmt.Errorf("creating inventory watch manager: %w", err)
 	}
-	defer watchManager.Close()
+	defer func() {
+		if closeErr := watchManager.Close(); closeErr != nil {
+			slog.Warn("closing inventory watch manager", "err", closeErr)
+		}
+	}()
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/.sam/") {
