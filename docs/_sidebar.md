@@ -4,6 +4,7 @@
   - [Overview](#/README.md)
   - [Quick Start](#/quickstart.md)
   - [Enterprise Dark Mesh](#/guides/dark-mesh.md)
+  - [Hybrid Intelligence Audit](#/guides/hybrid-intelligence.md)
 
 - **CLI Reference**
   - [Command Hierarchy](#/cli/reference.md)

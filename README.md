@@ -51,6 +51,28 @@ sam inspect biscuit "vendor-bot;allow_skill=risk-audit"
 - CLI reference: https://aojea.github.io/sam/#/cli/reference.md
 - Testing guide: https://aojea.github.io/sam/#/testing.md
 
+## Architecture
+
+SAM keeps control at the edge: discovery is federated, trust is verified locally, and execution stays peer-to-peer.
+
+```mermaid
+flowchart LR
+	A[Agent A / Caller] -->|Discover capability| DHT[(Federated DHT\n/sam/fed/<id>)]
+	DHT -->|Peer candidates| A
+	A -->|A2A stream + Vouch + Biscuit| B[Agent B / Callee]
+	B -->|Federation Gate\nverify vouch + peer identity| G[AuthZ Layer]
+	G -->|BiscuitSkillGate\nallow_skill(c)| E[MCP Resource / Skill]
+	E -->|Result| B
+	B -->|A2A response| A
+```
+
+Trust flow summary:
+
+- Discovery: agents find peers by capability in an isolated federation namespace.
+- Authentication: callee verifies caller identity with a locally trusted vouch.
+- Authorization: Biscuit caveats constrain which capability can be executed.
+- Execution: skill runs locally (for example via MCP) and response returns over A2A.
+
 ## Development
 
 Key make targets:
