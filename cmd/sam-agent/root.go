@@ -26,15 +26,14 @@ import (
 // runConfig holds all flag values shared across subcommands.
 type runConfig struct {
 	// Node flags (persistent — available to every subcommand).
-	listenAddrs    []string
-	bootstrapAddrs []string
-	dhtMode        string
-	withRelay      bool
-	userAgent      string
-	runFor         time.Duration
-	hub            string
-	identityPath   string
-	debug          bool
+	listenAddrs  []string
+	dhtMode      string
+	withRelay    bool
+	userAgent    string
+	runFor       time.Duration
+	hub          string
+	identityPath string
+	debug        bool
 
 	// sam up
 	tunnelHTTPEndpoint string
@@ -91,7 +90,6 @@ func newRootCmd(cfg *runConfig) *cobra.Command {
 	// Persistent flags visible to every subcommand.
 	pf := cmd.PersistentFlags()
 	pf.StringSliceVar(&cfg.listenAddrs, "listen", []string{"/ip4/0.0.0.0/udp/0/quic-v1"}, "libp2p listen multiaddrs")
-	pf.StringSliceVar(&cfg.bootstrapAddrs, "bootstrap", nil, "bootstrap peer multiaddrs")
 	pf.StringVar(&cfg.dhtMode, "dht-mode", "client", "DHT mode: client|server|auto")
 	pf.BoolVar(&cfg.withRelay, "relay-service", false, "enable relay service")
 	pf.StringVar(&cfg.userAgent, "user-agent", "sam/0.1.0", "libp2p user-agent")

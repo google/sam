@@ -48,12 +48,6 @@ func buildNode(cfg *runConfig) (samnet.Node, error) {
 		return nil, fmt.Errorf("parsing --listen: %w", err)
 	}
 
-	// Explicit --bootstrap peers (additive with hub-resolved peers).
-	extraBootstrap, err := parseMultiaddrs(cfg.bootstrapAddrs)
-	if err != nil {
-		return nil, fmt.Errorf("parsing --bootstrap: %w", err)
-	}
-
 	key, err := loadOrGenerateKey(cfg.identityPath)
 	if err != nil {
 		return nil, fmt.Errorf("loading identity key: %w", err)
@@ -69,11 +63,10 @@ func buildNode(cfg *runConfig) (samnet.Node, error) {
 	if err != nil {
 		slog.Default().Warn("could not fetch hub P2P addresses; hub may not be running in P2P mode", "hub", hubURL, "err", err)
 	}
-	allBootstrap := append(hubBootstrap, extraBootstrap...)
 
 	opts := []samnet.Option{
 		samnet.WithListenAddrs(listen...),
-		samnet.WithBootstrapPeers(allBootstrap...),
+		samnet.WithBootstrapPeers(hubBootstrap...),
 		samnet.WithDHTMode(parseDHTMode(cfg.dhtMode)),
 		samnet.WithFederation(defaultFederationID),
 		samnet.WithUserAgent(cfg.userAgent),
