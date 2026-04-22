@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sam-mesh-client"
+version = "0.1.0"
+description = "Python client artifacts for SAM (Sovereign Agent Mesh)"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "SAM Contributors" }]
+dependencies = [
+  "pynacl>=1.5.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["sam_mesh*"]

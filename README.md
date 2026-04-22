@@ -49,6 +49,7 @@ sam-agent inspect biscuit "vendor-bot;allow_skill=risk-audit"
 - Docs site: https://aojea.github.io/sam
 - Manifesto: https://aojea.github.io/sam/#/README.md
 - User journey (dark mesh): https://aojea.github.io/sam/#/guides/dark-mesh.md
+- Hub as rendezvous point: https://aojea.github.io/sam/#/guides/hub-rendezvous.md
 - CLI reference: https://aojea.github.io/sam/#/cli/reference.md
 - Testing guide: https://aojea.github.io/sam/#/testing.md
 

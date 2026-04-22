@@ -33,6 +33,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/routing"
 	drouting "github.com/libp2p/go-libp2p/p2p/discovery/routing"
 	relayv2 "github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/relay"
+	libp2ptls "github.com/libp2p/go-libp2p/p2p/security/tls"
 	"github.com/multiformats/go-multiaddr"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -97,6 +98,9 @@ func (n *node) Start(ctx context.Context) error {
 		libp2p.Identity(n.opts.PrivateKey),
 		libp2p.ListenAddrs(n.opts.ListenAddrs...),
 		libp2p.UserAgent(n.opts.UserAgent),
+		// Force TLS security transport only. QUIC uses TLS 1.3 natively,
+		// and TCP falls back to libp2p TLS.
+		libp2p.Security(libp2ptls.ID, libp2ptls.New),
 		// QUIC is included in default transports; all QUIC traffic is
 		// TLS-encrypted natively, providing zero-knowledge relay semantics.
 		libp2p.NATPortMap(),
@@ -255,11 +259,12 @@ func (n *node) Announce(ctx context.Context, capability string) error {
 	if disc == nil {
 		return fmt.Errorf("node not started")
 	}
-	if _, err := disc.Advertise(ctx, capability); err != nil {
+	ns := n.discoveryNamespace(capability)
+	if _, err := disc.Advertise(ctx, ns); err != nil {
 		return fmt.Errorf("advertising capability %q: %w", capability, err)
 	}
 
-	n.logger.Info("capability announced", "capability", capability)
+	n.logger.Info("capability announced", "capability", capability, "namespace", ns)
 	return nil
 }
 
@@ -278,11 +283,24 @@ func (n *node) Discover(ctx context.Context, capability string) (<-chan peer.Add
 	if disc == nil {
 		return nil, fmt.Errorf("node not started")
 	}
-	ch, err := disc.FindPeers(ctx, capability)
+	ns := n.discoveryNamespace(capability)
+	ch, err := disc.FindPeers(ctx, ns)
 	if err != nil {
 		return nil, fmt.Errorf("discovering capability %q: %w", capability, err)
 	}
 	return ch, nil
+}
+
+func (n *node) discoveryNamespace(capability string) string {
+	capability = strings.TrimSpace(capability)
+	ns := strings.TrimSpace(n.opts.RendezvousNamespace)
+	if ns == "" {
+		ns = DefaultRendezvousNamespace
+	}
+	if capability == "" {
+		return ns
+	}
+	return ns + "/" + capability
 }
 
 // Connect establishes a direct connection to the given peer. libp2p will

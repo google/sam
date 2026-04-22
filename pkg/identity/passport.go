@@ -7,7 +7,9 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"sam/pkg/economy"
@@ -34,18 +36,57 @@ type PassportClaims struct {
 
 const DefaultHubIssuer = "app.sam-mesh.dev"
 
+var (
+	hubKeyMu    sync.RWMutex
+	hubKeyCache ed25519.PrivateKey
+)
+
 type signedPassportPayload struct {
 	Issuer       string            `json:"issuer"`
 	PeerID       string            `json:"peer_id"`
 	FederationID string            `json:"federation_id"`
+	MeshID       string            `json:"mesh_id"`
 	Subject      string            `json:"subject"`
 	Claims       map[string]string `json:"claims,omitempty"`
 	IssuedAt     time.Time         `json:"issued_at"`
 }
 
+// SetHubSigningKey overrides the hub's signing key (for testing or secure key injection).
+func SetHubSigningKey(priv ed25519.PrivateKey) {
+	hubKeyMu.Lock()
+	defer hubKeyMu.Unlock()
+	hubKeyCache = priv
+}
+
+// hubSigningKey returns the hub's Ed25519 signing key.
+// Priority: environment variable SAM_HUB_KEY (base64-encoded private key),
+// then cached value, then deterministic seed (development default).
 func hubSigningKey() ed25519.PrivateKey {
+	hubKeyMu.RLock()
+	if hubKeyCache != nil {
+		defer hubKeyMu.RUnlock()
+		return hubKeyCache
+	}
+	hubKeyMu.RUnlock()
+
+	// Check environment variable for externally configured key
+	if keyB64 := strings.TrimSpace(os.Getenv("SAM_HUB_KEY")); keyB64 != "" {
+		if keyBytes, err := base64.RawURLEncoding.DecodeString(keyB64); err == nil && len(keyBytes) == ed25519.PrivateKeySize {
+			priv := ed25519.PrivateKey(keyBytes)
+			hubKeyMu.Lock()
+			hubKeyCache = priv
+			hubKeyMu.Unlock()
+			return priv
+		}
+	}
+
+	// Development default: deterministic seed
 	seed := sha256.Sum256([]byte("sam-hub-root-key-v1"))
-	return ed25519.NewKeyFromSeed(seed[:])
+	priv := ed25519.NewKeyFromSeed(seed[:])
+	hubKeyMu.Lock()
+	hubKeyCache = priv
+	hubKeyMu.Unlock()
+	return priv
 }
 
 func HubPublicKeyBytes() []byte {
@@ -76,6 +117,7 @@ func IssuePassportBiscuit(_ context.Context, req PassportIssueRequest) (string, 
 		Issuer:       DefaultHubIssuer,
 		PeerID:       req.PeerID,
 		FederationID: req.FederationID,
+		MeshID:       req.FederationID,
 		Subject:      req.Subject,
 		Claims:       req.Claims,
 		IssuedAt:     time.Now().UTC(),
@@ -96,6 +138,7 @@ func FetchPassportBiscuit(ctx context.Context, issueEndpoint string, accessToken
 	body, err := json.Marshal(map[string]string{
 		"peer_id":    strings.TrimSpace(req.PeerID),
 		"federation": strings.TrimSpace(req.FederationID),
+		"mesh_id":    strings.TrimSpace(req.FederationID),
 		"subject":    strings.TrimSpace(req.Subject),
 		"email":      strings.TrimSpace(req.Claims["email"]),
 	})
@@ -173,6 +216,9 @@ func ValidatePassportBiscuit(ctx context.Context, token string, expectedPeerID s
 		Claims:       payload.Claims,
 		IssuedAt:     payload.IssuedAt,
 		Issuer:       payload.Issuer,
+	}
+	if strings.TrimSpace(claims.FederationID) == "" {
+		claims.FederationID = strings.TrimSpace(payload.MeshID)
 	}
 	if claims.Claims == nil {
 		claims.Claims = map[string]string{}

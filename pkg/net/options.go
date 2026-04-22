@@ -74,8 +74,10 @@ type Option func(*Options)
 func DefaultOptions() Options {
 	quicV1, _ := multiaddr.NewMultiaddr("/ip4/0.0.0.0/udp/0/quic-v1")
 	quicV1v6, _ := multiaddr.NewMultiaddr("/ip6/::/udp/0/quic-v1")
+	tcpV4, _ := multiaddr.NewMultiaddr("/ip4/0.0.0.0/tcp/0")
+	tcpV6, _ := multiaddr.NewMultiaddr("/ip6/::/tcp/0")
 	return Options{
-		ListenAddrs:         []multiaddr.Multiaddr{quicV1, quicV1v6},
+		ListenAddrs:         []multiaddr.Multiaddr{quicV1, quicV1v6, tcpV4, tcpV6},
 		DHTMode:             DHTModeAuto,
 		UserAgent:           "sam/0.1.0",
 		Logger:              slog.Default(),

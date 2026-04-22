@@ -16,9 +16,12 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"log/slog"
+	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -32,12 +35,21 @@ import (
 )
 
 // buildNode constructs a SAM mesh node from the shared runConfig flags.
+// --hub is mandatory: the hub provides OIDC-backed passport issuance and
+// acts as the mandatory P2P rendezvous/bootstrap point for the mesh.
 func buildNode(cfg *runConfig) (samnet.Node, error) {
+	hubURL := strings.TrimSpace(resolveHubURL(cfg))
+	if hubURL == "" {
+		return nil, fmt.Errorf("--hub (or SAM_HUB env) is required: the hub is the rendezvous point and passport issuer for the mesh")
+	}
+
 	listen, err := parseMultiaddrs(cfg.listenAddrs)
 	if err != nil {
 		return nil, fmt.Errorf("parsing --listen: %w", err)
 	}
-	bootstrap, err := parseMultiaddrs(cfg.bootstrapAddrs)
+
+	// Explicit --bootstrap peers (additive with hub-resolved peers).
+	extraBootstrap, err := parseMultiaddrs(cfg.bootstrapAddrs)
 	if err != nil {
 		return nil, fmt.Errorf("parsing --bootstrap: %w", err)
 	}
@@ -47,20 +59,71 @@ func buildNode(cfg *runConfig) (samnet.Node, error) {
 		return nil, fmt.Errorf("loading identity key: %w", err)
 	}
 
+	// Resolve hub hostname for rendezvous namespace and relay hint.
+	hubHost := hubHostFromURL(hubURL)
+
+	// Fetch hub P2P bootstrap addresses from the hub's well-known endpoint.
+	// This is the primary rendezvous mechanism: all agents bootstrap through
+	// the hub, which acts as DHT server and relay.
+	hubBootstrap, err := fetchHubP2PAddrs(hubURL)
+	if err != nil {
+		slog.Default().Warn("could not fetch hub P2P addresses; hub may not be running in P2P mode", "hub", hubURL, "err", err)
+	}
+	allBootstrap := append(hubBootstrap, extraBootstrap...)
+
 	opts := []samnet.Option{
 		samnet.WithListenAddrs(listen...),
-		samnet.WithBootstrapPeers(bootstrap...),
+		samnet.WithBootstrapPeers(allBootstrap...),
 		samnet.WithDHTMode(parseDHTMode(cfg.dhtMode)),
 		samnet.WithFederation(defaultFederationID),
 		samnet.WithUserAgent(cfg.userAgent),
 		samnet.WithLogger(slog.Default()),
 		samnet.WithPrivateKey(key),
+		samnet.WithRendezvousNamespace(hubHost),
+		samnet.WithRelayFallbackHost(hubHost),
 	}
 	if cfg.withRelay {
 		opts = append(opts, samnet.WithRelayService())
 	}
 
 	return samnet.New(opts...)
+}
+
+// fetchHubP2PAddrs contacts the hub's /.well-known/sam-hub-p2p endpoint and
+// returns the hub's libp2p multiaddrs for use as bootstrap/rendezvous peers.
+func fetchHubP2PAddrs(hubURL string) ([]multiaddr.Multiaddr, error) {
+	endpoint := strings.TrimRight(hubURL, "/") + "/.well-known/sam-hub-p2p"
+	resp, err := http.Get(endpoint) //nolint:gosec // hubURL is user-supplied and validated
+	if err != nil {
+		return nil, fmt.Errorf("fetching hub P2P info: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("hub P2P info returned %d", resp.StatusCode)
+	}
+	var info struct {
+		Addrs []string `json:"addrs"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
+		return nil, fmt.Errorf("decoding hub P2P info: %w", err)
+	}
+	var out []multiaddr.Multiaddr
+	for _, s := range info.Addrs {
+		ma, err := multiaddr.NewMultiaddr(s)
+		if err != nil {
+			continue // skip malformed entries
+		}
+		out = append(out, ma)
+	}
+	return out, nil
+}
+
+func hubHostFromURL(hubURL string) string {
+	u, err := url.Parse(strings.TrimSpace(hubURL))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(u.Hostname())
 }
 
 // loadOrGenerateKey loads a PEM-encoded libp2p Ed25519 private key from path.
