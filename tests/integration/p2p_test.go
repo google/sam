@@ -41,6 +41,7 @@ import (
 
 	"sam/internal/testutils"
 	"sam/pkg/economy"
+	"sam/pkg/identity"
 	samnet "sam/pkg/net"
 	"sam/pkg/protocol"
 )
@@ -152,6 +153,9 @@ func runProviderRole() error {
 	if err := node.Start(ctx); err != nil {
 		return fmt.Errorf("provider node start: %w", err)
 	}
+	if err := configureNodePassport(ctx, node, "provider"); err != nil {
+		return fmt.Errorf("provider passport setup: %w", err)
+	}
 
 	providerAddr := fmt.Sprintf("/ip4/%s/udp/%d/quic-v1/p2p/%s", os.Getenv(helperIPEnv), port, node.PeerID())
 	info := providerInfo{PeerID: node.PeerID().String(), Bootstrap: providerAddr}
@@ -256,6 +260,9 @@ func runConsumerRole() error {
 
 	if err := node.Start(ctx); err != nil {
 		return fmt.Errorf("consumer node start: %w", err)
+	}
+	if err := configureNodePassport(ctx, node, "consumer"); err != nil {
+		return fmt.Errorf("consumer passport setup: %w", err)
 	}
 	if err := connectWithRetry(ctx, node, *providerAddrInfo); err != nil {
 		return fmt.Errorf("connecting to bootstrap provider: %w", err)
@@ -432,6 +439,18 @@ func newNode(port int, mode samnet.DHTMode, bootstrap []multiaddr.Multiaddr) (sa
 		samnet.WithBootstrapPeers(bootstrap...),
 		samnet.WithDHTMode(mode),
 	)
+}
+
+func configureNodePassport(ctx context.Context, node samnet.Node, subject string) error {
+	passport, err := identity.IssuePassportBiscuit(ctx, identity.PassportIssueRequest{
+		PeerID:       node.PeerID().String(),
+		FederationID: "default",
+		Subject:      subject,
+	})
+	if err != nil {
+		return err
+	}
+	return identity.SetLocalPassport(node.Host(), "default", passport)
 }
 
 func writeProviderInfo(path string, info providerInfo) error {

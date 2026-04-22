@@ -23,7 +23,6 @@ func newMeshCmd(cfg *runConfig) *cobra.Command {
 		Short: "Inspect and interact with the SAM agent mesh",
 	}
 	cmd.AddCommand(newMeshGetCmd(cfg))
-	cmd.AddCommand(newMeshFederationsCmd(cfg))
 	return cmd
 }
 

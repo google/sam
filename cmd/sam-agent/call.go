@@ -94,11 +94,11 @@ func runCall(parent context.Context, cfg *runConfig, targetArg string) error {
 	if err != nil {
 		return err
 	}
-	if err := identity.SetLocalPassport(node.Host(), cfg.federation, passport); err != nil {
+	if err := identity.SetLocalPassport(node.Host(), defaultFederationID, passport); err != nil {
 		return fmt.Errorf("configuring local passport auth: %w", err)
 	}
 
-	observer, err := protocol.NewBoltObserverWithFallback(cfg.federation)
+	observer, err := protocol.NewBoltObserverWithFallback(defaultFederationID)
 	if err != nil {
 		return fmt.Errorf("creating reputation observer: %w", err)
 	}

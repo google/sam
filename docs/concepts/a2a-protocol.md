@@ -193,8 +193,8 @@ Server returns response to client
 
 | Error | Cause | Solution |
 |-------|-------|----------|
-| `ErrNotInFederation` | Vouch not in federation | Authenticate: `sam identity login --federation <name>` |
-| `ErrVouchExpired` | Vouch timestamp > expiry | Re-authenticate: `sam identity login ...` |
+| `ErrNotInFederation` | Vouch not in federation | Authenticate: `sam-agent identity login --hub <url>` |
+| `ErrVouchExpired` | Vouch timestamp > expiry | Re-authenticate: `sam-agent identity login --hub <url>` |
 | `ErrSkillNotAllowed` | Skill not in Biscuit caveats | Get new Biscuit with skill, or ask for permission |
 | `ErrMCPFailed` | MCP server error | Check MCP server logs |
 
@@ -220,7 +220,7 @@ Server returns response to client
 Default: 20 seconds (configurable with `--timeout`)
 
 ```bash
-sam call mycapability --federation finance --timeout 30s
+sam-agent call mycapability --timeout 30s
 ```
 
 ---

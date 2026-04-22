@@ -29,11 +29,6 @@ teardown() {
   [[ "$output" == *"--skill"* ]]
 }
 
-@test "sam mesh federations list shows federation management" {
-  run "$SAM_BINARY" mesh federations list
-  [[ "$status" -eq 0 ]]
-}
-
 @test "sam identity --help lists subcommands" {
   run "$SAM_BINARY" identity --help
   [[ "$status" -eq 0 ]]
@@ -49,12 +44,6 @@ teardown() {
 @test "sam mesh get agents --help returns success" {
   run "$SAM_BINARY" mesh get agents --help
   [[ "$status" -eq 0 ]]
-}
-
-@test "sam mesh federations drop --help mentions confirm flag" {
-  run "$SAM_BINARY" mesh federations drop --help
-  [[ "$status" -eq 0 ]]
-  [[ "$output" == *"confirm"* ]] || [[ "$output" == *"drop"* ]]
 }
 
 @test "sam inspect biscuit parses and explains a token" {

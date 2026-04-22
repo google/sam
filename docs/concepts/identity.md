@@ -23,7 +23,7 @@ SAM solves this with **vouch-based identity** that works offline.
 ### Phase 1: Authentication (Online, One-Time)
 
 ```bash
-sam identity login --hub https://identity.acme.corp --federation finance
+sam-agent identity login --hub https://identity.acme.corp
 ```
 
 **What happens:**
@@ -54,10 +54,10 @@ After login, Alice can operate completely offline:
 
 ```bash
 # Alice publishes an agent (no network)
-sam publish --federation finance --skill risk-audit --mcp-port 8080
+sam-agent publish --skill risk-audit --mcp-port 8080
 
 # Alice calls another agent (peer-to-peer only)
-sam call weather-bot --federation finance --message "forecast"
+sam-agent call weather-bot --message "forecast"
 ```
 
 **Behind the scenes:**
@@ -128,7 +128,7 @@ Vouches have a limited lifetime (typically 1 year):
 When the vouch expires:
 
 ```bash
-sam call risk-audit --federation finance --message "hello"
+sam call risk-audit  --message "hello"
 ```
 
 Error:
@@ -138,7 +138,7 @@ Error: stored identity vouch is expired; run login again
 
 Re-authenticate:
 ```bash
-sam identity login --hub https://identity.acme.corp --federation finance
+sam identity login --hub https://identity.acme.corp 
 ```
 
 SAM:
@@ -215,10 +215,10 @@ An agent can have vouches from multiple federations:
 
 ```bash
 # Alice logs into finance federation
-sam identity login --hub https://identity-finance.acme.corp --federation finance
+sam identity login --hub https://identity-finance.acme.corp 
 
 # Alice logs into operations federation  
-sam identity login --hub https://identity-ops.acme.corp --federation operations
+sam identity login --hub https://identity-ops.acme.corp 
 ```
 
 Storage:
@@ -334,13 +334,12 @@ Option C: Peer recommendation (other agents vouch for you)
 
 - **Option A** (Hub):
   ```bash
-  sam identity login --hub https://identity.acme.corp --federation finance
+  sam-agent identity login --hub https://identity.acme.corp
   ```
 
 - **Option B** (Certificate pinning):
   ```bash
-  sam identity login --hub https://identity.acme.corp \
-    --federation finance \
+  sam-agent identity login --hub https://identity.acme.corp \
     --pin-certificate /path/to/cert.pem
   ```
 
@@ -397,13 +396,13 @@ After authentication, agents can work completely offline:
 
 ```bash
 # Online: Alice logs in
-sam identity login --hub https://identity.acme.corp --federation finance
+sam identity login --hub https://identity.acme.corp 
 
 # Offline: Publish agent
-sam publish --federation finance --skill risk-audit --mcp-port 8080
+sam publish  --skill risk-audit --mcp-port 8080
 
 # Offline: Call another agent (if both are in same LAN)
-sam call bob.jones --federation finance --message "hello"
+sam call bob.jones  --message "hello"
 
 # Offline: Inspect credential
 sam inspect biscuit "bob;allow_skill=risk-audit"

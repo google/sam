@@ -107,7 +107,7 @@ func TestSAMReservedSearchReturnsPublishedWriterCard(t *testing.T) {
 		t.Fatalf("publishing writer card: %v", err)
 	}
 
-	cfg := &runConfig{proxyTimeout: 3 * time.Second, federation: "default"}
+	cfg := &runConfig{proxyTimeout: 3 * time.Second}
 
 	deadline := time.Now().Add(12 * time.Second)
 	for {

@@ -88,8 +88,7 @@ TOKEN="partner-bot@vendor.com;allow_skill=risk-audit"
 Partner-bot calls alice's agent:
 
 ```bash
-sam call risk-audit \
-  --federation finance \
+sam-agent call risk-audit \
   --biscuit "partner-bot@vendor.com;allow_skill=risk-audit" \
   --message "Audit my data"
 ```
@@ -109,8 +108,7 @@ Alice's agent:
 Partner-bot tries to use a different skill:
 
 ```bash
-sam call compliance-check \
-  --federation finance \
+sam-agent call compliance-check \
   --biscuit "partner-bot@vendor.com;allow_skill=risk-audit" \
   --message "Check compliance"
 ```

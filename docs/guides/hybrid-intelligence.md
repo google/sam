@@ -37,12 +37,11 @@ Publish that local MCP capability into SAM.
 Important: in SAM, the access scope for files is enforced by your local MCP tool configuration, not by `sam publish` flags.
 
 ```bash
-# Start a node in a dedicated federation for this workflow
-sam up --federation hybrid-audit &
+# Start a node for this workflow
+sam up &
 
 # Publish a private-docs capability backed by local MCP on :8080
 sam publish mcp \
-  --federation hybrid-audit \
   --capability private-docs \
   --resource-name private-docs \
   --resource-kind tool \
@@ -128,7 +127,7 @@ Result: high-quality analysis, with raw private source files never sent to cloud
 
 ## Security Controls Checklist
 
-- Use a dedicated federation (`--federation hybrid-audit`).
+- Use a dedicated environment/profile for this workflow.
 - Prefer least-privilege capabilities (`private-docs`, not broad wildcard tools).
 - Use Biscuit caveats for tool restrictions (for example, allow only `private-docs`).
 - Audit tokens and cards before execution:
@@ -143,13 +142,12 @@ sam call private-docs --message "summarize" --dry-run=client
 
 ```bash
 @test "E2E: Hybrid audit keeps secret local" {
-  sam up --federation testing-hybrid &
+  sam up &
 
   echo "Secret: Don't tell the cloud" > /tmp/secret.txt
 
   # Assume local MCP tool on :8080 is configured to read /tmp only
   sam publish mcp \
-    --federation testing-hybrid \
     --capability private-docs \
     --resource-name private-docs \
     --port 8080 &

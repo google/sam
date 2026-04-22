@@ -123,7 +123,7 @@ concepts/
 ### 3. **Manifesto** (README.md)
 - ✅ Core philosophy: "Sovereign" agents, "Engineering Truth"
 - ✅ The Trust Desert problem (gateways, IdP, audit)
-- ✅ How SAM solves it (Pure P2P, Zero-Trust, Federation, Audit)
+- ✅ How SAM solves it (Pure P2P, Zero-Trust, Passport auth, Audit)
 - ✅ Architecture overview with data flow diagrams
 - ✅ Why "Sovereign"
 - ✅ What SAM does NOT do (blockchain, sidecar, etc.)
@@ -131,15 +131,15 @@ concepts/
 ### 4. **User Journey** (dark-mesh.md)
 - ✅ Real-world scenario (Acme Corp with 3 business units)
 - ✅ 9 step-by-step sections with CLI snippets
-- ✅ Shows federation isolation (DHT namespace scoping)
-- ✅ Explains identity gating (vouch verification)
+- ✅ Shows mesh namespace scoping
+- ✅ Explains identity gating (passport verification)
 - ✅ Demonstrates Biscuit tokens (skill restrictions)
 - ✅ Audit transparency (sam inspect commands)
 - ✅ Trust flow diagram
 
 ### 5. **CLI Reference** (cli/reference.md)
 - ✅ kubectl-style command hierarchy
-- ✅ Global flags (--federation, --debug, --timeout, --output)
+- ✅ Global node/runtime flags and command-specific options
 - ✅ All commands documented (identity, publish, call, inspect, mesh, up)
 - ✅ Flags and examples for each command
 - ✅ Dry-run philosophy explained
@@ -147,8 +147,8 @@ concepts/
 - ✅ Output formats (JSON + text)
 
 ### 6. **Technical Concepts** (concepts/)
-- ✅ Federation storage: bbolt architecture, multi-tenant design
-- ✅ Identity: vouch system, decentralization, offline capability
+- ✅ Mesh storage: bbolt architecture and default namespace behavior
+- ✅ Identity: passport biscuit system
 - ✅ Biscuit: authorization model, skill gating, enforcement
 - ✅ A2A Protocol: message structure, authentication flow, code examples
 
@@ -173,7 +173,7 @@ concepts/
 ### 9. **FAQ** (faq.md)
 - ✅ 30+ questions organized by category
 - ✅ Getting started (install, publish, call)
-- ✅ Core concepts (federation, vouch, Biscuit, A2A)
+- ✅ Core concepts (mesh namespace, passport, Biscuit, A2A)
 - ✅ Architecture & design (why P2P, why not OAuth)
 - ✅ Network & connectivity (NAT, firewall, cloud)
 - ✅ Security & trust (production readiness, key management)

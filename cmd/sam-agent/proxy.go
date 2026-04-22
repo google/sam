@@ -81,17 +81,17 @@ func runProxy(parent context.Context, cfg *runConfig) error {
 	}
 	defer func() { _ = node.Stop(context.Background()) }()
 
-	discoverer, err := newAgentDiscoverer(node, cfg.federation, 15*time.Minute)
+	discoverer, err := newAgentDiscoverer(node, defaultFederationID, 15*time.Minute)
 	if err != nil {
 		return fmt.Errorf("creating informer discoverer: %w", err)
 	}
-	informer, err := samnet.NewLocalInformer(node, cfg.federation, samnet.WithInformerDiscoverer(discoverer))
+	informer, err := samnet.NewLocalInformer(node, defaultFederationID, samnet.WithInformerDiscoverer(discoverer))
 	if err != nil {
 		return fmt.Errorf("creating local informer: %w", err)
 	}
 	informer.Start(parent)
 
-	watchManager, err := newInventoryWatchManager(node, cfg.federation)
+	watchManager, err := newInventoryWatchManager(node, defaultFederationID)
 	if err != nil {
 		return fmt.Errorf("creating inventory watch manager: %w", err)
 	}
@@ -113,7 +113,7 @@ func runProxy(parent context.Context, cfg *runConfig) error {
 		}
 
 		start := time.Now()
-		observer, err := protocol.NewBoltObserverWithFallback(cfg.federation)
+		observer, err := protocol.NewBoltObserverWithFallback(defaultFederationID)
 		if err != nil {
 			http.Error(w, "reputation observer unavailable", http.StatusInternalServerError)
 			return
@@ -125,7 +125,7 @@ func runProxy(parent context.Context, cfg *runConfig) error {
 			http.Error(w, "unauthorized: local identity login required", http.StatusUnauthorized)
 			return
 		}
-		if err := identity.SetLocalPassport(node.Host(), cfg.federation, passport); err != nil {
+		if err := identity.SetLocalPassport(node.Host(), defaultFederationID, passport); err != nil {
 			http.Error(w, fmt.Sprintf("passport auth unavailable: %v", err), http.StatusInternalServerError)
 			return
 		}
@@ -262,7 +262,7 @@ func handleSAMReservedWithWatcher(w http.ResponseWriter, r *http.Request, node s
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		cards, err := aggregateInventory(ctx, node, cfg.federation)
+		cards, err := aggregateInventory(ctx, node, defaultFederationID)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("inventory lookup failed: %v", err), http.StatusBadGateway)
 			return
@@ -273,7 +273,7 @@ func handleSAMReservedWithWatcher(w http.ResponseWriter, r *http.Request, node s
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		cards, err := aggregateInventory(ctx, node, cfg.federation)
+		cards, err := aggregateInventory(ctx, node, defaultFederationID)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("inventory lookup failed: %v", err), http.StatusBadGateway)
 			return
@@ -289,7 +289,7 @@ func handleSAMReservedWithWatcher(w http.ResponseWriter, r *http.Request, node s
 			http.Error(w, "missing skill query parameter", http.StatusBadRequest)
 			return
 		}
-		cards, err := searchInventoryBySkill(ctx, node, cfg.federation, skill)
+		cards, err := searchInventoryBySkill(ctx, node, defaultFederationID, skill)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("search failed: %v", err), http.StatusBadGateway)
 			return

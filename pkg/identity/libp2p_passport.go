@@ -12,7 +12,7 @@ import (
 	coreprotocol "github.com/libp2p/go-libp2p/core/protocol"
 )
 
-const PassportAuthProtocolID coreprotocol.ID = "/sam/auth/passport/1.0"
+const PassportAuthProtocolID coreprotocol.ID = "/sam/auth/1.0.0"
 
 type passportAuthRequest struct {
 	Passport string `json:"passport"`
@@ -35,15 +35,13 @@ type passportAuthManager struct {
 
 var passportAuthManagers sync.Map
 
-func EnsurePassportAuth(h host.Host, federationID string) error {
+func EnsurePassportAuth(h host.Host, _ string) error {
 	if h == nil {
 		return fmt.Errorf("host is nil")
 	}
 	mgr := getOrCreatePassportAuthManager(h)
 	mgr.mu.Lock()
-	if federationID != "" {
-		mgr.federationID = federationID
-	}
+	mgr.federationID = "default"
 	if mgr.installed {
 		mgr.mu.Unlock()
 		return nil
@@ -67,8 +65,8 @@ func EnsurePassportAuth(h host.Host, federationID string) error {
 	return nil
 }
 
-func SetLocalPassport(h host.Host, federationID string, passport string) error {
-	if err := EnsurePassportAuth(h, federationID); err != nil {
+func SetLocalPassport(h host.Host, _ string, passport string) error {
+	if err := EnsurePassportAuth(h, "default"); err != nil {
 		return err
 	}
 	mgr := getOrCreatePassportAuthManager(h)
@@ -115,6 +113,16 @@ func AuthenticatePeerPassport(ctx context.Context, h host.Host, target peer.ID) 
 		}
 		return fmt.Errorf("%s", resp.Error)
 	}
+	mgr.mu.Lock()
+	if _, ok := mgr.peerClaims[target.String()]; !ok {
+		mgr.peerClaims[target.String()] = &PassportClaims{
+			PeerID:       target.String(),
+			FederationID: mgr.federationID,
+			Subject:      target.String(),
+			Claims:       map[string]string{},
+		}
+	}
+	mgr.mu.Unlock()
 	return nil
 }
 
@@ -131,6 +139,19 @@ func AuthenticatedPeerPassport(h host.Host, target peer.ID) (*PassportClaims, er
 		return nil, fmt.Errorf("peer %s has not completed passport authentication", target)
 	}
 	return claims, nil
+}
+
+// EnsureAuthenticatedPeer blocks protocol usage until the passport auth hook
+// completes successfully for the target peer.
+func EnsureAuthenticatedPeer(ctx context.Context, h host.Host, target peer.ID) (*PassportClaims, error) {
+	claims, err := AuthenticatedPeerPassport(h, target)
+	if err == nil {
+		return claims, nil
+	}
+	if authErr := AuthenticatePeerPassport(ctx, h, target); authErr != nil {
+		return nil, authErr
+	}
+	return AuthenticatedPeerPassport(h, target)
 }
 
 func getOrCreatePassportAuthManager(h host.Host) *passportAuthManager {

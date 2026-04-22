@@ -44,22 +44,13 @@ type PassportGate struct {
 
 // NewPassportGate creates a gate scoped to the default federation.
 func NewPassportGate() *PassportGate {
-	return NewPassportGateWithFederation("default")
+	return &PassportGate{federationID: "default"}
 }
 
-// NewPassportGateWithFederation creates a gate with an explicit local federation audience.
-func NewPassportGateWithFederation(federationID string) *PassportGate {
-	federationID = strings.TrimSpace(federationID)
-	if federationID == "" {
-		federationID = "default"
-	}
-	return &PassportGate{federationID: federationID}
-}
-
-// NewPassportGateForFederation returns a passport gate and a no-op close function
-// for compatibility with existing setup code.
-func NewPassportGateForFederation(federationID string) (*PassportGate, func() error, error) {
-	return NewPassportGateWithFederation(federationID), func() error { return nil }, nil
+// NewPassportGateWithCleanup returns a passport gate and a no-op close function
+// for compatibility with setup call-sites expecting a cleanup callback.
+func NewPassportGateWithCleanup() (*PassportGate, func() error, error) {
+	return NewPassportGate(), func() error { return nil }, nil
 }
 
 // Allow returns nil when the requester has authenticated passport claims.

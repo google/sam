@@ -2,13 +2,13 @@
 
 SAM is a zero-trust, pure P2P networking layer for autonomous agents.
 
-It is built for environments where centralized gateways and centralized trust are a liability. Agents discover each other over libp2p DHT, authenticate with vouches, authorize capabilities with Biscuit caveats, and communicate directly over A2A streams.
+It is built for environments where centralized gateways and centralized trust are a liability. Agents discover each other over libp2p DHT, authenticate with passport biscuits, authorize capabilities with Biscuit caveats, and communicate directly over A2A streams.
 
 ## Why SAM
 
 - Pure P2P: no API gateway in the data path
 - Zero-trust by default: every call is authenticated and authorized
-- Federation isolation: separate namespaces and storage per federation
+- Isolated mesh namespace: separate SAM protocol space and storage scope
 - Auditability: inspect tokens/cards and dry-run key flows
 
 ## Quick Start
@@ -32,13 +32,13 @@ make test-e2e
 
 ```bash
 # Authenticate
-sam-agent identity login --hub https://identity.example.com --federation finance
+sam-agent identity login --hub https://identity.example.com
 
 # Publish an agent capability
-sam-agent publish --federation finance --skill risk-audit --mcp-port 8080
+sam-agent publish --skill risk-audit --mcp-port 8080
 
 # Call by capability
-sam-agent call risk-audit --federation finance --message "audit this report"
+sam-agent call risk-audit --message "audit this report"
 
 # Inspect credential artifacts
 sam-agent inspect biscuit "vendor-bot;allow_skill=risk-audit"

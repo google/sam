@@ -53,6 +53,7 @@ import (
 
 	"sam/internal/testutils"
 	"sam/pkg/economy"
+	"sam/pkg/identity"
 	samnet "sam/pkg/net"
 	"sam/pkg/protocol"
 )
@@ -182,6 +183,9 @@ func runMeshPublisher() error {
 	if err := node.Start(ctx); err != nil {
 		return fmt.Errorf("publisher node start: %w", err)
 	}
+	if err := meshConfigureNodePassport(ctx, node, "publisher"); err != nil {
+		return fmt.Errorf("publisher passport setup: %w", err)
+	}
 	defer func() { _ = node.Stop(context.Background()) }()
 
 	// Write the peer info before publishing so the subscriber can start
@@ -270,6 +274,9 @@ func runMeshSubscriber() error {
 	if err := node.Start(ctx); err != nil {
 		return fmt.Errorf("subscriber node start: %w", err)
 	}
+	if err := meshConfigureNodePassport(ctx, node, "subscriber"); err != nil {
+		return fmt.Errorf("subscriber passport setup: %w", err)
+	}
 	defer func() { _ = node.Stop(context.Background()) }()
 
 	if err := meshConnectWithRetry(ctx, node, *publisherAddrInfo); err != nil {
@@ -356,6 +363,18 @@ func meshEchoRoundTrip(ctx context.Context, bridge *protocol.MCPBridge, target p
 		return fmt.Errorf("echo mismatch: want %q, got %q", string(payload), string(received))
 	}
 	return nil
+}
+
+func meshConfigureNodePassport(ctx context.Context, node samnet.Node, subject string) error {
+	passport, err := identity.IssuePassportBiscuit(ctx, identity.PassportIssueRequest{
+		PeerID:       node.PeerID().String(),
+		FederationID: "default",
+		Subject:      subject,
+	})
+	if err != nil {
+		return err
+	}
+	return identity.SetLocalPassport(node.Host(), "default", passport)
 }
 
 // ---------------------------------------------------------------------------

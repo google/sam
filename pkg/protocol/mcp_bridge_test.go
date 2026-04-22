@@ -29,6 +29,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"sam/pkg/economy"
+	"sam/pkg/identity"
 )
 
 type fakeVerifier struct {
@@ -104,6 +105,20 @@ func TestMCPBridgeAllowsAuthorizedStream(t *testing.T) {
 	if err := clientHost.Connect(ctx, peer.AddrInfo{ID: serverHost.ID(), Addrs: serverHost.Addrs()}); err != nil {
 		t.Fatalf("client connect error = %v", err)
 	}
+	serverPassport, err := identity.IssuePassportBiscuit(ctx, identity.PassportIssueRequest{PeerID: serverHost.ID().String(), FederationID: "default", Subject: "server"})
+	if err != nil {
+		t.Fatalf("IssuePassportBiscuit(server) error = %v", err)
+	}
+	clientPassport, err := identity.IssuePassportBiscuit(ctx, identity.PassportIssueRequest{PeerID: clientHost.ID().String(), FederationID: "default", Subject: "client"})
+	if err != nil {
+		t.Fatalf("IssuePassportBiscuit(client) error = %v", err)
+	}
+	if err := identity.SetLocalPassport(serverHost, "default", serverPassport); err != nil {
+		t.Fatalf("SetLocalPassport(server) error = %v", err)
+	}
+	if err := identity.SetLocalPassport(clientHost, "default", clientPassport); err != nil {
+		t.Fatalf("SetLocalPassport(client) error = %v", err)
+	}
 
 	clientBridge, err := NewMCPBridge(clientHost, verifier, echoConnector{})
 	if err != nil {
@@ -164,6 +179,20 @@ func TestMCPBridgeDeniesUnauthorizedStream(t *testing.T) {
 
 	if err := clientHost.Connect(ctx, peer.AddrInfo{ID: serverHost.ID(), Addrs: serverHost.Addrs()}); err != nil {
 		t.Fatalf("client connect error = %v", err)
+	}
+	serverPassport, err := identity.IssuePassportBiscuit(ctx, identity.PassportIssueRequest{PeerID: serverHost.ID().String(), FederationID: "default", Subject: "server"})
+	if err != nil {
+		t.Fatalf("IssuePassportBiscuit(server) error = %v", err)
+	}
+	clientPassport, err := identity.IssuePassportBiscuit(ctx, identity.PassportIssueRequest{PeerID: clientHost.ID().String(), FederationID: "default", Subject: "client"})
+	if err != nil {
+		t.Fatalf("IssuePassportBiscuit(client) error = %v", err)
+	}
+	if err := identity.SetLocalPassport(serverHost, "default", serverPassport); err != nil {
+		t.Fatalf("SetLocalPassport(server) error = %v", err)
+	}
+	if err := identity.SetLocalPassport(clientHost, "default", clientPassport); err != nil {
+		t.Fatalf("SetLocalPassport(client) error = %v", err)
 	}
 
 	clientBridge, err := NewMCPBridge(clientHost, &fakeVerifier{}, echoConnector{})

@@ -118,7 +118,7 @@ func runMeshGetAgents(parent context.Context, cfg *runConfig) error {
 }
 
 func runMeshGetAgentsWatch(parent context.Context, cfg *runConfig, format outputFormat, node samnet.Node) error {
-	watchManager, err := newInventoryWatchManager(node, cfg.federation)
+	watchManager, err := newInventoryWatchManager(node, defaultFederationID)
 	if err != nil {
 		return fmt.Errorf("creating inventory watch manager: %w", err)
 	}
@@ -151,11 +151,11 @@ func runMeshGetAgentsWatch(parent context.Context, cfg *runConfig, format output
 		return fmt.Errorf("watch stream failed: %s: %s", resp.Status, strings.TrimSpace(string(body)))
 	}
 
-	discoverer, err := newAgentDiscoverer(node, cfg.federation, cfg.dhtCardMaxAge)
+	discoverer, err := newAgentDiscoverer(node, defaultFederationID, cfg.dhtCardMaxAge)
 	if err != nil {
 		return fmt.Errorf("creating informer discoverer: %w", err)
 	}
-	informer, err := samnet.NewLocalInformer(node, cfg.federation, samnet.WithInformerDiscoverer(discoverer))
+	informer, err := samnet.NewLocalInformer(node, defaultFederationID, samnet.WithInformerDiscoverer(discoverer))
 	if err != nil {
 		return fmt.Errorf("creating local informer: %w", err)
 	}

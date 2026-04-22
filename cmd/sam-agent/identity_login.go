@@ -106,7 +106,7 @@ func runIdentityLogin(parent context.Context, cfg *runConfig, clientID string) e
 
 	issueReq := identity.PassportIssueRequest{
 		PeerID:       peerID,
-		FederationID: cfg.federation,
+		FederationID: defaultFederationID,
 		Subject:      peerID,
 		Claims:       map[string]string{"hub": hubURL},
 	}
@@ -135,7 +135,7 @@ func runIdentityLogin(parent context.Context, cfg *runConfig, clientID string) e
 	}
 
 	fmt.Fprintf(os.Stderr, "\nLogged in as peer %s\n", peerID)
-	if claims, pErr := identity.ValidatePassportBiscuit(parent, passportBiscuit, peerID, cfg.federation); pErr == nil {
+	if claims, pErr := identity.ValidatePassportBiscuit(parent, passportBiscuit, peerID, defaultFederationID); pErr == nil {
 		fmt.Fprintf(os.Stderr, "Subject: %s\n", claims.Subject)
 		fmt.Fprintf(os.Stderr, "Federation: %s\n", claims.FederationID)
 	}

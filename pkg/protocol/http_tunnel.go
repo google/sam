@@ -32,6 +32,7 @@ import (
 
 	"sam/pkg/economy"
 	"sam/pkg/identity"
+	"sam/pkg/reputation"
 )
 
 const HTTPTunnelProtocolID coreprotocol.ID = "/sam/tunnel/http/1.0"
@@ -148,6 +149,11 @@ func TunnelHTTP(ctx context.Context, h host.Host, target peer.ID, req HTTPTunnel
 	if err := json.NewDecoder(stream).Decode(&resp); err != nil {
 		return nil, fmt.Errorf("reading tunnel response: %w", err)
 	}
+	if resp.Error == "" && resp.StatusCode > 0 && resp.StatusCode < 500 {
+		if att := reputation.DefaultAttestor(); att != nil {
+			_ = att.PublishWithProtocol(context.Background(), target.String(), 1, string(HTTPTunnelProtocolID))
+		}
+	}
 	return &resp, nil
 }
 
@@ -170,7 +176,7 @@ func (s *HTTPTunnelService) handleStream(stream network.Stream) {
 }
 
 func (s *HTTPTunnelService) verifyMetadata(ctx context.Context, remotePeer peer.ID, req *HTTPTunnelOpenRequest) error {
-	if _, err := identity.AuthenticatedPeerPassport(s.host, remotePeer); err != nil {
+	if _, err := identity.EnsureAuthenticatedPeer(ctx, s.host, remotePeer); err != nil {
 		return fmt.Errorf("passport authentication required: %w", err)
 	}
 	if strings.TrimSpace(req.Biscuit) == "" {

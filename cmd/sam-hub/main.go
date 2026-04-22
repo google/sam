@@ -31,9 +31,28 @@ func main() {
 				w.WriteHeader(http.StatusOK)
 				_, _ = w.Write([]byte("ok"))
 			})
+			mux.HandleFunc("/.well-known/sam-hub-keys", func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet {
+					http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+					return
+				}
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"issuer": identity.DefaultHubIssuer,
+					"keys": []map[string]string{{
+						"kid": "sam-hub-root-v1",
+						"alg": "Ed25519",
+						"k":   identity.HubPublicKeyBase64(),
+					}},
+				})
+			})
 			mux.HandleFunc("/issue-passport", func(w http.ResponseWriter, r *http.Request) {
 				if r.Method != http.MethodPost {
 					http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+					return
+				}
+				auth := strings.TrimSpace(r.Header.Get("Authorization"))
+				if !strings.HasPrefix(strings.ToLower(auth), "bearer ") || strings.TrimSpace(strings.TrimPrefix(auth, "Bearer ")) == "" {
+					http.Error(w, "missing bearer token", http.StatusUnauthorized)
 					return
 				}
 				var req passportRequest
@@ -51,7 +70,10 @@ func main() {
 					http.Error(w, fmt.Sprintf("issue failed: %v", err), http.StatusBadRequest)
 					return
 				}
-				_ = json.NewEncoder(w).Encode(map[string]string{"passport_biscuit": tok})
+				_ = json.NewEncoder(w).Encode(map[string]string{
+					"issuer":           identity.DefaultHubIssuer,
+					"passport_biscuit": tok,
+				})
 			})
 			mux.HandleFunc("/trust-map", func(w http.ResponseWriter, _ *http.Request) {
 				_ = json.NewEncoder(w).Encode(map[string]any{"source": "gossipsub", "note": "passive observer endpoint"})

@@ -100,7 +100,7 @@ finance.db
 When you create a federation:
 
 ```bash
-sam mesh federations create finance
+sam-agent up
 ```
 
 SAM:
@@ -123,7 +123,7 @@ The federation ID is deterministic, so re-creating a federation with the same na
 When an agent authenticates with a federation hub:
 
 ```bash
-sam identity login --hub https://identity.acme.corp --federation finance
+sam-agent identity login --hub https://identity.acme.corp
 ```
 
 ### Step 1: Hub Issues Vouch
@@ -197,7 +197,7 @@ Storage is isolated, and **DHT discovery is also isolated**:
 
 ### Finance Federation
 ```bash
-sam publish --federation finance --skill risk-audit --mcp-port 8080
+sam-agent publish --skill risk-audit --mcp-port 8080
 ```
 
 DHT announcement:
@@ -209,7 +209,7 @@ Skill: risk-audit
 
 ### Operations Federation
 ```bash
-sam publish --federation operations --skill incident-response --mcp-port 8090
+sam-agent publish --skill incident-response --mcp-port 8090
 ```
 
 DHT announcement:
@@ -223,14 +223,14 @@ Skill: incident-response
 
 Finance agent queries:
 ```bash
-sam call risk-audit --federation finance
+sam-agent call risk-audit
 ```
 
 Result: Finds only agents in `/sam/fed/finance` (risk-audit skill)
 
 Operations agent queries:
 ```bash
-sam call risk-audit --federation operations
+sam-agent call risk-audit
 ```
 
 Result: Finds nothing (risk-audit not published in operations namespace)
@@ -280,14 +280,14 @@ An agent can participate in multiple federations:
 
 ```bash
 # Alice is in finance federation
-sam identity login --hub https://identity.acme.corp --federation finance
+sam-agent identity login --hub https://identity.acme.corp
 
 # Alice is also invited to operations (different hub)
-sam identity login --hub https://ops-identity.acme.corp --federation operations
+sam-agent identity login --hub https://ops-identity.acme.corp
 
 # Alice publishes to both
-sam publish --federation finance --skill risk-audit --mcp-port 8080
-sam publish --federation operations --skill audit-log --mcp-port 8090
+sam-agent publish --skill risk-audit --mcp-port 8080
+sam-agent publish --skill audit-log --mcp-port 8090
 
 # Each federation has its own storage
 ~/.config/sam/federations/finance.db
@@ -320,12 +320,12 @@ cp ~/.config/sam/identity/ ~/backups/identity.backup
 cp ~/backups/finance.db.backup ~/.config/sam/federations/finance.db
 
 # Agent will continue with cached vouch
-sam call risk-audit --federation finance
+sam-agent call risk-audit
 ```
 
 If the vouch is stale, re-authenticate:
 ```bash
-sam identity login --hub https://identity.acme.corp --federation finance
+sam-agent identity login --hub https://identity.acme.corp
 ```
 
 ---

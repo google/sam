@@ -36,7 +36,7 @@ import (
 	"sam/pkg/reputation"
 )
 
-const A2AProtocolID coreprotocol.ID = "/sam/a2a/1.0"
+const A2AProtocolID coreprotocol.ID = "/sam/a2a/1.0.0"
 
 const (
 	FailureTypeLiveness = "Liveness"
@@ -338,7 +338,7 @@ func (s *A2AService) handleStream(stream network.Stream) {
 		fail(FailureTypeProtocol, fmt.Errorf("missing biscuit token"))
 		return
 	}
-	claims, err := identity.AuthenticatedPeerPassport(s.host, stream.Conn().RemotePeer())
+	claims, err := identity.EnsureAuthenticatedPeer(context.Background(), s.host, stream.Conn().RemotePeer())
 	if err != nil {
 		fail(FailureTypeProtocol, fmt.Errorf("passport authentication required: %w", err))
 		return
@@ -413,7 +413,7 @@ func (s *A2AService) handleStream(stream network.Stream) {
 
 	s.observer.OnSuccess(peerID, time.Since(started))
 	if att := reputation.DefaultAttestor(); att != nil {
-		_ = att.Publish(context.Background(), peerID, 1)
+		_ = att.PublishWithProtocol(context.Background(), peerID, 1, string(A2AProtocolID))
 	}
 }
 

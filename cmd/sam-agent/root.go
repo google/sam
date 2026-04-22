@@ -72,12 +72,11 @@ type runConfig struct {
 	proxyBiscuit   string
 	proxyTimeout   time.Duration
 
-	// federation storage context
-	federation string
-
 	// dry-run modes: "", "client", "server"
 	dryRun string
 }
+
+const defaultFederationID = "default"
 
 // newRootCmd builds the top-level "sam-agent" command and attaches subcommands.
 func newRootCmd(cfg *runConfig) *cobra.Command {
@@ -100,7 +99,6 @@ func newRootCmd(cfg *runConfig) *cobra.Command {
 	pf.StringVar(&cfg.hub, "hub", "", "OIDC hub URL for passport issuance and identity login")
 	pf.StringVar(&cfg.identityPath, "identity", "", "path to PEM-encoded Ed25519 private key (generated and saved if absent)")
 	pf.BoolVar(&cfg.debug, "debug", false, "enable debug logging (slog + libp2p subsystems)")
-	pf.StringVar(&cfg.federation, "federation", "default", "federation context for isolated reputation and cache storage")
 
 	cmd.AddCommand(newUpCmd(cfg))
 	cmd.AddCommand(newPublishCmd(cfg))

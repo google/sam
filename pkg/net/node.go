@@ -167,6 +167,8 @@ func (n *node) Start(ctx context.Context) error {
 	n.logger.Info("node started",
 		"peer_id", h.ID(),
 		"addrs", h.Addrs(),
+		"relay_fallback", n.opts.RelayFallbackHost,
+		"rendezvous_namespace", n.opts.RendezvousNamespace,
 	)
 	return nil
 }
@@ -191,6 +193,11 @@ func (n *node) Stop(ctx context.Context) error {
 	}
 	if err := n.kdht.Close(); err != nil {
 		errs = append(errs, fmt.Errorf("closing DHT: %w", err))
+	}
+	if n.trust != nil {
+		if err := n.trust.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("closing trust cache: %w", err))
+		}
 	}
 	if err := n.host.Close(); err != nil {
 		errs = append(errs, fmt.Errorf("closing host: %w", err))
@@ -248,7 +255,6 @@ func (n *node) Announce(ctx context.Context, capability string) error {
 	if disc == nil {
 		return fmt.Errorf("node not started")
 	}
-
 	if _, err := disc.Advertise(ctx, capability); err != nil {
 		return fmt.Errorf("advertising capability %q: %w", capability, err)
 	}
@@ -272,7 +278,6 @@ func (n *node) Discover(ctx context.Context, capability string) (<-chan peer.Add
 	if disc == nil {
 		return nil, fmt.Errorf("node not started")
 	}
-
 	ch, err := disc.FindPeers(ctx, capability)
 	if err != nil {
 		return nil, fmt.Errorf("discovering capability %q: %w", capability, err)
@@ -305,13 +310,9 @@ func (n *node) Connect(ctx context.Context, pi peer.AddrInfo) error {
 }
 
 // newDHT initializes the Kademlia DHT with the configured mode.
-// When a FederationID is set, the DHT protocol prefix is scoped to
-// "/sam/fed/<id>" so nodes in different federations are mutually invisible.
+// SAM uses a single fixed federation namespace for DHT protocol traffic.
 func (n *node) newDHT(ctx context.Context, h host.Host) (*dht.IpfsDHT, error) {
-	prefix := "/sam"
-	if n.opts.FederationID != "" {
-		prefix = "/sam/fed/" + n.opts.FederationID
-	}
+	prefix := "/sam/fed/default"
 	var opts []dht.Option
 	opts = append(opts, dht.ProtocolPrefix(coreprotocol.ID(prefix)))
 	opts = append(opts, dht.NamespacedValidator("sam", samRecordValidator{}))

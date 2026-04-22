@@ -1,526 +1,169 @@
 # SAM CLI Reference
 
-SAM uses a **kubectl-style command hierarchy** with shared flags, subcommands, and consistent output formats.
-
----
+SAM uses a kubectl-style command hierarchy with shared node/runtime flags.
 
 ## Global Flags
 
-All commands accept these flags:
+Most commands accept these shared flags:
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--federation` | string | "" | Federation name (scopes operations to isolated namespace) |
-| `--debug` | bool | false | Enable debug logging (verbose output) |
-| `--timeout` | duration | 30s | Operation timeout |
-| `--output` / `-o` | string | "json" | Output format: "json" or "text" |
+| `--listen` | stringSlice | `/ip4/0.0.0.0/udp/0/quic-v1` | libp2p listen multiaddrs |
+| `--bootstrap` | stringSlice | empty | bootstrap peer multiaddrs |
+| `--dht-mode` | string | `client` | DHT mode: `client`, `server`, `auto` |
+| `--relay-service` | bool | `false` | enable relay service |
+| `--user-agent` | string | `sam/0.1.0` | libp2p user-agent |
+| `--run-for` | duration | `0` | optional duration before graceful shutdown |
+| `--hub` | string | empty | OIDC hub URL for identity login/passport issuance |
+| `--identity` | string | empty | PEM-encoded Ed25519 private key path |
+| `--debug` | bool | `false` | enable debug logging |
 
----
-
-## sam identity
+## sam-agent identity
 
 Authentication and credential management.
 
-### sam identity login
+### sam-agent identity login
 
-Authenticate with a federation hub and store vouch locally.
+Authenticate with the hub using device flow and store credentials plus passport biscuit locally.
 
 ```bash
-sam identity login \
-  --hub https://identity.acme.corp \
-  --federation finance
+sam-agent identity login --hub https://identity.acme.corp
 ```
 
-**Flags:**
-- `--hub` (required): URL of identity server
-- `--federation` (optional): Federation name (defaults to "default")
-
-**Output:**
-```
-✓ Identity verified
-✓ Vouch stored
-✓ Federation: finance
-✓ Subject: alice.smith@acme.corp
-```
-
-**What it does:**
-1. Prompts for username/password
-2. Contacts the hub to verify credentials
-3. Receives a signed Vouch (JSON)
-4. Stores vouch in `~/.config/sam/identity/vouch.json`
-5. Stores credentials in secure OS keyring (optional)
-
-**Behind the scenes:**
-- The vouch is a signed credential proving your identity to the federation
-- The hub is not contacted again (vouch is cached locally)
-- If the vouch expires, run login again
-
----
-
-### sam identity whoami
+### sam-agent identity whoami
 
 Show current authenticated identity.
 
 ```bash
-sam identity whoami --federation finance
+sam-agent identity whoami
 ```
 
-**Output:**
-```
-Subject: alice.smith@acme.corp
-Vouch: Valid until 2027-04-18
-Federation: finance
-PeerID: 12D3KooXA7cBj4VKrpv7HzKLmvnWKLVqZZHJm9NyN6Td3Y4hMWjK
-```
+## sam-agent publish
 
----
-
-## sam publish
-
-Publish an agent to a federation DHT.
+Publish an agent card to DHT namespaces.
 
 ### Quick Mode
 
-For simple single-skill agents:
-
 ```bash
-sam publish \
-  --federation finance \
-  --skill risk-audit \
-  --mcp-port 8080
+sam-agent publish --skill risk-audit --mcp-port 8080
 ```
 
-**Flags:**
-- `--skill`: Single skill name (convenience alias for --capability)
-- `--capability`: Repeatable flag for multiple skills
-- `--mcp-port` (required): Local MCP server port
-- `--republish-every`: Refresh interval (default 2m)
-- `--dry-run`: "client" (build locally) or "server" (skip DHT publish)
-- `--resource-name`: MCP resource name
-- `--resource-kind`: MCP resource kind (default "tool")
-- `--resource-endpoint`: Override resource endpoint
-- `--resource-description`: Human-readable description
+Useful flags:
+- `--skill` or repeatable `--capability`
+- `--mcp-port`
+- `--republish-every`
+- `--dry-run=client|server`
+- `--resource-name`, `--resource-kind`, `--resource-endpoint`, `--resource-description`
 
-**Dry-Run Modes:**
-
-Preview the Agent Card without network:
-```bash
-sam publish \
-  --federation finance \
-  --skill risk-audit \
-  --mcp-port 8080 \
-  --dry-run=client
-```
-
-Output: Agent Card JSON (no network activity)
-
-Skip DHT publish but build network:
-```bash
-sam publish \
-  --federation finance \
-  --skill risk-audit \
-  --mcp-port 8080 \
-  --dry-run=server
-```
-
-Output: Agent Card JSON (node started but DHT publish skipped)
-
----
-
-### sam publish card
-
-Explicit card publishing (advanced).
+### sam-agent publish card
 
 ```bash
-sam publish card \
-  --federation finance \
-  --file agent-card.json \
-  --republish-every 5m
+sam-agent publish card --file agent-card.json --republish-every 5m
 ```
 
-**Flags:**
-- `--file`: Path to pre-built Agent Card JSON
-- `--republish-every`: Refresh interval
-
----
-
-### sam publish mcp
-
-Publish an MCP server.
+### sam-agent publish mcp
 
 ```bash
-sam publish mcp \
-  --federation finance \
-  --port 8080 \
-  --name "Risk Audit Tool"
+sam-agent publish mcp --port 8080 --name "Risk Audit Tool"
 ```
 
-**Flags:**
-- `--port`: MCP server port
-- `--name`: Resource name
-
----
-
-## sam call
+## sam-agent call
 
 Execute an A2A task against a remote agent.
 
-### Basic Call
+```bash
+sam-agent call risk-audit --message "Audit the Q1 risk report"
+```
+
+Useful flags:
+- `--message`
+- `--biscuit`
+- `--timeout`
+- `--amount`, `--asset`, `--nonce`
+- `--dry-run=client|server`
+
+## sam-agent proxy
+
+Start a local HTTP proxy that tunnels over SAM.
 
 ```bash
-sam call risk-audit \
-  --federation finance \
-  --message "Audit the Q1 risk report"
+sam-agent proxy --port 8081
 ```
 
-**Flags:**
-- `--message` (required): Natural-language prompt
-- `--biscuit`: Credential token (default "dev-biscuit")
-- `--timeout`: Call timeout (default 20s)
-- `--amount`: Micropayment amount (default 1)
-- `--asset`: Micropayment asset (default "sam-credit")
-- `--nonce`: Micropayment nonce (auto-generated if empty)
-- `--dry-run`: "client" (validate locally) or "server" (skip A2A execute)
+Useful flags:
+- `--port`
+- `--target-header`
+- `--biscuit`
+- `--timeout`
 
-**Dry-Run Modes:**
+## sam-agent inspect
 
-Validate request without network:
-```bash
-sam call risk-audit \
-  --federation finance \
-  --message "Audit Q1" \
-  --dry-run=client
-```
+Decode local artifacts for auditing.
 
-Output: Request JSON (no network activity)
-
-**Output:**
-```json
-{
-  "jsonrpc": "2.0",
-  "id": "sam-call",
-  "method": "message",
-  "params": {
-    "message": "Audit the Q1 risk report"
-  }
-}
-```
-
----
-
-## sam inspect
-
-Decode and explain cryptographic artifacts for auditing.
-
-### sam inspect biscuit
-
-Parse and explain a Biscuit token.
+### sam-agent inspect biscuit
 
 ```bash
-sam inspect biscuit "alice;allow_skill=risk-audit,weather-bot"
+sam-agent inspect biscuit "alice;allow_skill=risk-audit,weather-bot"
 ```
 
-**Output (Text):**
-```
-Biscuit Token Analysis
-======================
-
-Subject: alice
-Allowed Skills: 
-  - risk-audit
-  - weather-bot
-
-Human-Readable Summary:
-This token issued to 'alice' allows execution of 2 skills:
-risk-audit, weather-bot.
-```
-
-**Output (JSON):**
-```bash
-sam inspect biscuit "alice;allow_skill=risk-audit" --output json
-```
-
-```json
-{
-  "subject": "alice",
-  "allowed_skills": ["risk-audit"]
-}
-```
-
-**Use case:** Before sharing a Biscuit token, verify it grants only intended skills.
-
----
-
-### sam inspect card
-
-Decode an Agent Card JSON.
+### sam-agent inspect card
 
 ```bash
-sam inspect card '{
-  "peer_id": "12D3KooXA7cBj4VKrpv7HzKLmvnWKLVqZZHJm9NyN6Td3Y4hMWjK",
-  "alg": "libp2p-ed25519",
-  "signature": "...",
-  "agent_card": {
-    "name": "Risk Audit Agent",
-    "skills": ["risk-audit", "compliance-check"],
-    "resources": [...]
-  },
-  "issued_at": "2026-04-18T10:15:00Z"
-}'
+sam-agent inspect card '{"peer_id":"...","agent_card":{...}}'
 ```
 
-**Output:**
-```
-Agent Card Analysis
-===================
+## sam-agent mesh
 
-Peer ID: 12D3KooXA7cBj4VKrpv7HzKLmvnWKLVqZZHJm9NyN6Td3Y4hMWjK
-Algorithm: libp2p-ed25519
-Signature: Verified ✓
+Mesh visibility commands.
 
-Skills Available:
-  - risk-audit
-  - compliance-check
-
-Resources:
-  - Name: risk-audit
-    Kind: tool
-    Endpoint: http://127.0.0.1:8080
-
-Issued: 2026-04-18T10:15:00Z
-```
-
-**Use case:** Verify an agent's published skills before calling it.
-
----
-
-## sam mesh
-
-Federation and network management.
-
-### sam mesh federations
-
-Manage isolated federation namespaces.
-
-#### sam mesh federations create
-
-Create a new federation.
+### sam-agent mesh get agents
 
 ```bash
-sam mesh federations create finance
+sam-agent mesh get agents
+sam-agent mesh get agents --capability risk-audit
+sam-agent mesh get agents --watch -o json
 ```
 
-**Output:**
-```json
-{
-  "name": "finance",
-  "id": "fed-abc123...",
-  "created_at": "2026-04-18T10:00:00Z"
-}
-```
-
-**What it does:**
-1. Generates a deterministic federation ID from the name
-2. Creates a bbolt database at `~/.config/sam/federations/<name>.db`
-3. Initializes buckets: identities, vouches, reputation, cache
-
----
-
-#### sam mesh federations list
-
-List all federations.
-
-```bash
-sam mesh federations list
-```
-
-**Output:**
-```json
-{
-  "federations": [
-    {
-      "name": "finance",
-      "id": "fed-abc123...",
-      "agents": 3,
-      "created_at": "2026-04-18T10:00:00Z"
-    },
-    {
-      "name": "operations",
-      "id": "fed-def456...",
-      "agents": 2,
-      "created_at": "2026-04-18T10:05:00Z"
-    }
-  ]
-}
-```
-
----
-
-#### sam mesh federations drop
-
-Delete a federation.
-
-```bash
-sam mesh federations drop finance --confirm
-```
-
-**Flags:**
-- `--confirm`: Require explicit confirmation to prevent accidental deletion
-
-**Output:**
-```
-✓ Federation 'finance' dropped
-✓ Database deleted: ~/.config/sam/federations/finance.db
-```
-
----
-
-### sam mesh get agents
-
-List agents in a federation.
-
-```bash
-sam mesh get agents --federation finance
-```
-
-**Output:**
-```json
-{
-  "agents": [
-    {
-      "peer_id": "12D3KooXA7cBj4VKrpv7HzKLmvnWKLVqZZHJm9NyN6Td3Y4hMWjK",
-      "name": "Risk Audit Agent",
-      "skills": ["risk-audit", "compliance-check"],
-      "published_at": "2026-04-18T10:15:00Z"
-    }
-  ]
-}
-```
-
----
-
-## sam up
+## sam-agent up
 
 Start a SAM node and wait for shutdown.
 
 ```bash
-sam up \
-  --federation finance \
-  --listen /ip4/0.0.0.0/tcp/4001 \
-  --bootstrap /ip4/192.168.1.100/tcp/4001/p2p/12D3KooXA7cBj4VKrpv7HzKLmvnWKLVqZZHJm9NyN6Td3Y4hMWjK
+sam-agent up \
+  --listen /ip4/0.0.0.0/udp/4001/quic-v1 \
+  --bootstrap /ip4/192.168.1.100/udp/4001/quic-v1/p2p/12D3KooXA7cBj4VKrpv7HzKLmvnWKLVqZZHJm9NyN6Td3Y4hMWjK
 ```
 
-**Flags:**
-- `--listen`: Multiaddr to listen on (repeatable)
-- `--bootstrap`: Bootstrap peer address (repeatable)
-- `--run-for`: Duration to run (e.g., "10m", default infinite)
-- `--federation`: Federation to join
+## Patterns
 
-**Use case:** Run a persistent SAM node for long-lived agents or relays.
-
----
-
-## Patterns and Best Practices
-
-### Workflow: Publish a New Agent
+### Publish workflow
 
 ```bash
-# 1. Preview the card locally
-sam publish \
-  --federation finance \
-  --skill new-capability \
-  --mcp-port 9000 \
-  --dry-run=client
+# Preview card locally
+sam-agent publish --skill new-capability --mcp-port 9000 --dry-run=client
 
-# 2. If satisfied, publish to DHT
-sam publish \
-  --federation finance \
-  --skill new-capability \
-  --mcp-port 9000
+# Publish to mesh
+sam-agent publish --skill new-capability --mcp-port 9000
 ```
 
-### Workflow: Call with Biscuit Authorization
+### Call workflow with Biscuit
 
 ```bash
-# 1. Create a Biscuit token for a partner
 TOKEN="partner-bot;allow_skill=risk-audit"
-
-# 2. Inspect the token before sharing
-sam inspect biscuit "$TOKEN"
-
-# 3. Partner uses token to call
-sam call risk-audit \
-  --federation finance \
-  --biscuit "$TOKEN" \
-  --message "Check compliance"
+sam-agent inspect biscuit "$TOKEN"
+sam-agent call risk-audit --biscuit "$TOKEN" --message "Check compliance"
 ```
-
-### Workflow: Audit a Call Request
-
-```bash
-# 1. Validate the call structure without network
-sam call weather-bot \
-  --federation finance \
-  --message "Get forecast" \
-  --dry-run=client
-
-# 2. Review the JSON
-# 3. If satisfied, remove --dry-run
-sam call weather-bot \
-  --federation finance \
-  --message "Get forecast"
-```
-
----
-
-## Output Formats
-
-All commands support `--output` flag (default "json", values "json" or "text").
-
-**JSON output:**
-```bash
-sam mesh federations list --output json
-```
-
-**Text output:**
-```bash
-sam mesh federations list --output text
-```
-
----
-
-## Federation Scoping
-
-Many commands require `--federation` to specify which federation to operate in.
-
-If not provided, defaults to "default" federation.
-
-```bash
-# Explicit federation
-sam publish --federation finance --skill risk-audit --mcp-port 8080
-
-# Uses "default" federation
-sam publish --skill risk-audit --mcp-port 8080
-```
-
----
 
 ## Dry-Run Philosophy
 
-**Dry-run modes exist to support audit transparency:**
+Dry-run modes support audit transparency and safe rollout:
 
-- `--dry-run=client`: Build and sign locally, show output, no network
-- `--dry-run=server`: Start network, build artifacts, skip final commit (DHT publish, A2A execute)
+- `--dry-run=client`: build and validate payloads locally, no network activity
+- `--dry-run=server`: initialize runtime, skip final network commit
 
-Use these to:
-1. Preview what will be published/called
-2. Extract JSON for security scanning
-3. Verify signatures before committing
-4. Integrate with CI/CD approval workflows
-
----
+Use these to preview behavior, capture JSON artifacts for security review, and gate CI checks.
 
 ## Next Steps
 
-- **[User Journey Guide](#/guides/dark-mesh.md)**: Full scenario walkthrough
-- **[Concepts](#/concepts/federation.md)**: Technical deep dive
+- **[User Journey Guide](#/guides/dark-mesh.md)**: scenario walkthrough
+- **[FAQ](#/faq.md)**: troubleshooting and operational tips

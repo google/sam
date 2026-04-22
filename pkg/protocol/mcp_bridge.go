@@ -28,10 +28,11 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"sam/pkg/economy"
+	"sam/pkg/identity"
 	"sam/pkg/reputation"
 )
 
-const MCPProtocolID = "/sam/mcp/1.0"
+const MCPProtocolID = "/sam/mcp/1.0.0"
 
 // MCPConnector opens a local MCP JSON-RPC transport endpoint.
 type MCPConnector interface {
@@ -71,6 +72,9 @@ func NewMCPBridge(h host.Host, verifier economy.Verifier, connector MCPConnector
 	}
 
 	b := &MCPBridge{host: h, verifier: verifier, connector: connector}
+	if err := identity.EnsurePassportAuth(h, ""); err != nil {
+		return nil, fmt.Errorf("installing passport auth: %w", err)
+	}
 	h.SetStreamHandler(MCPProtocolID, b.handleInbound)
 	return b, nil
 }
@@ -79,6 +83,9 @@ func NewMCPBridge(h host.Host, verifier economy.Verifier, connector MCPConnector
 func (b *MCPBridge) Open(ctx context.Context, peerID peer.ID, req BridgeOpenRequest) (network.Stream, error) {
 	if eval := reputation.DefaultEvaluator(); eval != nil && eval.IsNegative(peerID.String()) {
 		return nil, fmt.Errorf("refusing MCP stream to negatively-rated peer %s", peerID)
+	}
+	if _, err := identity.EnsureAuthenticatedPeer(ctx, b.host, peerID); err != nil {
+		return nil, fmt.Errorf("passport authentication failed for %s: %w", peerID, err)
 	}
 	stream, err := b.host.NewStream(ctx, peerID, MCPProtocolID)
 	if err != nil {
@@ -93,6 +100,10 @@ func (b *MCPBridge) Open(ctx context.Context, peerID peer.ID, req BridgeOpenRequ
 
 func (b *MCPBridge) handleInbound(stream network.Stream) {
 	defer func() { _ = stream.Close() }()
+	if _, err := identity.EnsureAuthenticatedPeer(context.Background(), b.host, stream.Conn().RemotePeer()); err != nil {
+		_ = writeBridgeError(stream, fmt.Errorf("passport authentication required: %w", err))
+		return
+	}
 
 	reader := bufio.NewReader(stream)
 
@@ -145,7 +156,7 @@ func (b *MCPBridge) handleInbound(stream network.Stream) {
 		return
 	}
 	if att := reputation.DefaultAttestor(); att != nil {
-		_ = att.Publish(context.Background(), stream.Conn().RemotePeer().String(), 1)
+		_ = att.PublishWithProtocol(context.Background(), stream.Conn().RemotePeer().String(), 1, MCPProtocolID)
 	}
 
 	local, err := b.connector.Open(ctx)

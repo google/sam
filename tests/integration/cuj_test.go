@@ -32,42 +32,39 @@ import (
 	samnet "sam/pkg/net"
 )
 
-// CUJ-1 Stealth Audit: peers in different federation namespaces must not
-// discover each other through DHT capability discovery.
-func TestCUJ1StealthAuditFederationIsolation(t *testing.T) {
+// CUJ-1 Stealth Audit: peers in the same mesh namespace discover each other
+// through DHT capability discovery.
+func TestCUJ1StealthAuditMeshDiscovery(t *testing.T) {
 	if !testutils.IsSupported() {
 		t.Skip("user namespaces not available")
 	}
-	testutils.Run(t, runCUJ1StealthAuditFederationIsolation)
+	testutils.Run(t, runCUJ1StealthAuditMeshDiscovery)
 }
 
-func runCUJ1StealthAuditFederationIsolation(t *testing.T) {
+func runCUJ1StealthAuditMeshDiscovery(t *testing.T) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 
-	// DHT protocol prefixes are federation-scoped, so each federation needs a
-	// bootstrap peer in the same namespace.
-	alphaSeed := cujStartNode(t, cujNodeConfig{federation: "fed-alpha", mode: samnet.DHTModeServer})
-	betaSeed := cujStartNode(t, cujNodeConfig{federation: "fed-beta", mode: samnet.DHTModeServer})
+	seed := cujStartNode(t, cujNodeConfig{mode: samnet.DHTModeServer})
 
-	alphaA := cujStartNode(t, cujNodeConfig{federation: "fed-alpha", bootstrap: cujBootstrapAddrs(t, alphaSeed), mode: samnet.DHTModeServer})
-	alphaB := cujStartNode(t, cujNodeConfig{federation: "fed-alpha", bootstrap: cujBootstrapAddrs(t, alphaSeed), mode: samnet.DHTModeServer})
-	betaA := cujStartNode(t, cujNodeConfig{federation: "fed-beta", bootstrap: cujBootstrapAddrs(t, betaSeed), mode: samnet.DHTModeServer})
+	publisher := cujStartNode(t, cujNodeConfig{bootstrap: cujBootstrapAddrs(t, seed), mode: samnet.DHTModeServer})
+	discovererA := cujStartNode(t, cujNodeConfig{bootstrap: cujBootstrapAddrs(t, seed), mode: samnet.DHTModeServer})
+	discovererB := cujStartNode(t, cujNodeConfig{bootstrap: cujBootstrapAddrs(t, seed), mode: samnet.DHTModeServer})
 
 	const capability = "risk-audit"
-	if err := alphaA.Announce(ctx, capability); err != nil {
-		t.Fatalf("alphaA announce: %v", err)
+	if err := publisher.Announce(ctx, capability); err != nil {
+		t.Fatalf("publisher announce: %v", err)
 	}
 
-	sameFedFound := cujWaitDiscover(ctx, alphaB, capability, alphaA.PeerID().String())
-	if !sameFedFound {
-		t.Fatalf("same-federation discovery failed: alphaB could not discover alphaA capability")
+	foundA := cujWaitDiscover(ctx, discovererA, capability, publisher.PeerID().String())
+	if !foundA {
+		t.Fatalf("mesh discovery failed: discovererA could not discover publisher capability")
 	}
 
-	crossFedFound := cujWaitDiscover(ctx, betaA, capability, alphaA.PeerID().String())
-	if crossFedFound {
-		t.Fatalf("cross-federation isolation failed: betaA discovered alphaA capability")
+	foundB := cujWaitDiscover(ctx, discovererB, capability, publisher.PeerID().String())
+	if !foundB {
+		t.Fatalf("mesh discovery failed: discovererB could not discover publisher capability")
 	}
 }
 
@@ -134,7 +131,6 @@ func runCUJ2HolePunchRelayAssisted(t *testing.T) {
 }
 
 type cujNodeConfig struct {
-	federation   string
 	bootstrap    []multiaddr.Multiaddr
 	relayService bool
 	mode         samnet.DHTMode
@@ -157,9 +153,6 @@ func cujStartNode(t *testing.T, cfg cujNodeConfig) samnet.Node {
 	}
 	if len(cfg.bootstrap) > 0 {
 		opts = append(opts, samnet.WithBootstrapPeers(cfg.bootstrap...))
-	}
-	if cfg.federation != "" {
-		opts = append(opts, samnet.WithFederation(cfg.federation))
 	}
 	if cfg.relayService {
 		opts = append(opts, samnet.WithRelayService())

@@ -85,7 +85,7 @@ func runPublish(parent context.Context, cfg *runConfig) error {
 	if len(cfg.capabilities) == 0 {
 		return fmt.Errorf("at least one non-empty skill/capability is required")
 	}
-	if err := ensureSecurePublishPreflight(cfg.federation); err != nil {
+	if err := ensureSecurePublishPreflight(); err != nil {
 		return err
 	}
 
@@ -154,8 +154,8 @@ func runPublish(parent context.Context, cfg *runConfig) error {
 	return waitForShutdown(parent, cfg.runFor)
 }
 
-func ensureSecurePublishPreflight(federationID string) error {
-	gate, closeFn, err := protocol.NewPassportGateForFederation(federationID)
+func ensureSecurePublishPreflight() error {
+	gate, closeFn, err := protocol.NewPassportGateWithCleanup()
 	if err != nil {
 		return fmt.Errorf("publish security preflight failed: %w", err)
 	}

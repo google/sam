@@ -54,7 +54,7 @@ func runUp(parent context.Context, cfg *runConfig) error {
 		return fmt.Errorf("starting node: %w", err)
 	}
 	defer func() { _ = node.Stop(context.Background()) }()
-	if err := identity.EnsurePassportAuth(node.Host(), cfg.federation); err != nil {
+	if err := identity.EnsurePassportAuth(node.Host(), defaultFederationID); err != nil {
 		return fmt.Errorf("installing passport auth: %w", err)
 	}
 

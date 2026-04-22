@@ -34,6 +34,9 @@ const (
 	DHTModeServer
 	// DHTModeClient always participates as a DHT client only.
 	DHTModeClient
+
+	DefaultRelayFallbackHost   = "app.sam-mesh.dev"
+	DefaultRendezvousNamespace = "app.sam-mesh.dev"
 )
 
 // Options configures a SAM mesh node.
@@ -54,10 +57,13 @@ type Options struct {
 	UserAgent string
 	// Logger is the structured logger. Defaults to slog.Default().
 	Logger *slog.Logger
-	// FederationID scopes DHT participation to an isolated namespace.
-	// Nodes with different FederationIDs are invisible to one another.
-	// The empty string uses the global "/sam" namespace (public mesh).
+	// FederationID scopes DHT participation to the single SAM namespace.
+	// Runtime enforces the default value for all nodes.
 	FederationID string
+	// RelayFallbackHost is the default host hint for relay bootstrap.
+	RelayFallbackHost string
+	// RendezvousNamespace scopes capability discovery advertisements.
+	RendezvousNamespace string
 }
 
 // Option is a functional option for node configuration.
@@ -69,10 +75,13 @@ func DefaultOptions() Options {
 	quicV1, _ := multiaddr.NewMultiaddr("/ip4/0.0.0.0/udp/0/quic-v1")
 	quicV1v6, _ := multiaddr.NewMultiaddr("/ip6/::/udp/0/quic-v1")
 	return Options{
-		ListenAddrs: []multiaddr.Multiaddr{quicV1, quicV1v6},
-		DHTMode:     DHTModeAuto,
-		UserAgent:   "sam/0.1.0",
-		Logger:      slog.Default(),
+		ListenAddrs:         []multiaddr.Multiaddr{quicV1, quicV1v6},
+		DHTMode:             DHTModeAuto,
+		UserAgent:           "sam/0.1.0",
+		Logger:              slog.Default(),
+		FederationID:        "default",
+		RelayFallbackHost:   DefaultRelayFallbackHost,
+		RendezvousNamespace: DefaultRendezvousNamespace,
 	}
 }
 
@@ -89,6 +98,15 @@ func (o *Options) validate() error {
 	}
 	if o.Logger == nil {
 		o.Logger = slog.Default()
+	}
+	if o.FederationID == "" {
+		o.FederationID = "default"
+	}
+	if o.RelayFallbackHost == "" {
+		o.RelayFallbackHost = DefaultRelayFallbackHost
+	}
+	if o.RendezvousNamespace == "" {
+		o.RendezvousNamespace = DefaultRendezvousNamespace
 	}
 	return nil
 }
@@ -127,11 +145,9 @@ func WithRelayService() Option {
 	return func(o *Options) { o.EnableRelayService = true }
 }
 
-// WithFederation scopes DHT discovery to an isolated federation namespace.
-// Nodes sharing the same FederationID form a private mesh invisible to
-// nodes in other federations or the global mesh.
-func WithFederation(federationID string) Option {
-	return func(o *Options) { o.FederationID = federationID }
+// WithFederation keeps API compatibility but federation is fixed at runtime.
+func WithFederation(_ string) Option {
+	return func(o *Options) { o.FederationID = "default" }
 }
 
 // WithLogger sets a structured logger for the node.
@@ -143,4 +159,14 @@ func WithLogger(l *slog.Logger) Option {
 // WithUserAgent sets the libp2p user-agent string.
 func WithUserAgent(ua string) Option {
 	return func(o *Options) { o.UserAgent = ua }
+}
+
+// WithRendezvousNamespace sets the discovery rendezvous namespace.
+func WithRendezvousNamespace(ns string) Option {
+	return func(o *Options) { o.RendezvousNamespace = ns }
+}
+
+// WithRelayFallbackHost sets the relay host hint used in logs and defaults.
+func WithRelayFallbackHost(host string) Option {
+	return func(o *Options) { o.RelayFallbackHost = host }
 }

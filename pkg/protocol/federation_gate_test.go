@@ -35,7 +35,7 @@ func TestPassportGateRejectsAudienceMismatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("validating passport: %v", err)
 	}
-	gate := NewPassportGateWithFederation("Federation-B")
+	gate := NewPassportGate()
 	err = gate.Allow(withAuthenticatedPassportClaims(context.Background(), claims), "12D3KooWTestPeer", "writer")
 	if err == nil {
 		t.Fatalf("expected audience mismatch error, got nil")

@@ -51,7 +51,7 @@ func buildNode(cfg *runConfig) (samnet.Node, error) {
 		samnet.WithListenAddrs(listen...),
 		samnet.WithBootstrapPeers(bootstrap...),
 		samnet.WithDHTMode(parseDHTMode(cfg.dhtMode)),
-		samnet.WithFederation(cfg.federation),
+		samnet.WithFederation(defaultFederationID),
 		samnet.WithUserAgent(cfg.userAgent),
 		samnet.WithLogger(slog.Default()),
 		samnet.WithPrivateKey(key),
