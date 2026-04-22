@@ -90,12 +90,15 @@ func runCall(parent context.Context, cfg *runConfig, targetArg string) error {
 		return err
 	}
 
-	vouch, err := loadLocalVouch()
+	passport, err := loadLocalIdentityAuth()
 	if err != nil {
 		return err
 	}
+	if err := identity.SetLocalPassport(node.Host(), cfg.federation, passport); err != nil {
+		return fmt.Errorf("configuring local passport auth: %w", err)
+	}
 
-	observer, err := protocol.NewBoltObserverForFederation(cfg.federation)
+	observer, err := protocol.NewBoltObserverWithFallback(cfg.federation)
 	if err != nil {
 		return fmt.Errorf("creating reputation observer: %w", err)
 	}
@@ -116,7 +119,6 @@ func runCall(parent context.Context, cfg *runConfig, targetArg string) error {
 	resp, err := protocol.Execute(ctx, node.Host(), protocol.ExecuteRequest{
 		Target:     target,
 		Capability: capability,
-		Vouch:      vouch,
 		Biscuit:    cfg.callBiscuit,
 		Payment: economy.Micropayment{
 			Amount:     cfg.callAmount,
@@ -164,23 +166,25 @@ func resolveCallTarget(ctx context.Context, node samnet.Node, targetArg string) 
 	return peers[0], targetArg, nil
 }
 
-func loadLocalVouch() (*identity.Vouch, error) {
+func loadLocalIdentityAuth() (string, error) {
+	const loginHint = "identity passport not found; run 'sam-agent identity login --hub <url>' first"
 	store, err := identity.DefaultCredentialStore()
 	if err != nil {
-		return nil, fmt.Errorf("opening credential store: %w", err)
+		return "", fmt.Errorf("opening credential store: %w", err)
 	}
 	defer func() { _ = store.Close() }()
 	creds, err := store.Load()
 	if err != nil {
-		return nil, fmt.Errorf("loading credentials: %w", err)
+		return "", fmt.Errorf("loading credentials: %w", err)
 	}
-	if creds == nil || creds.Vouch == nil {
-		return nil, fmt.Errorf("identity vouch not found; run 'sam identity login --hub <url>' first")
+	if creds == nil {
+		return "", fmt.Errorf(loginHint)
 	}
-	if creds.Vouch.IsExpired() {
-		return nil, fmt.Errorf("stored identity vouch is expired; run login again")
+	pass := strings.TrimSpace(creds.PassportBiscuit)
+	if pass != "" {
+		return pass, nil
 	}
-	return creds.Vouch, nil
+	return "", fmt.Errorf(loginHint)
 }
 
 func buildCallRequest(message string) (json.RawMessage, error) {

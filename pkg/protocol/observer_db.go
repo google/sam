@@ -17,6 +17,7 @@ package protocol
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -61,6 +62,10 @@ func NewBoltObserver(path string) (*BoltObserver, error) {
 // federation name. The database is stored at
 // ~/.config/sam/federations/<name>.db.
 func NewBoltObserverForFederation(fedID string) (*BoltObserver, error) {
+	fedID = strings.TrimSpace(fedID)
+	if fedID == "" {
+		fedID = "default"
+	}
 	mgr, err := internaldb.NewManager()
 	if err != nil {
 		return nil, fmt.Errorf("creating federation manager: %w", err)
@@ -71,6 +76,20 @@ func NewBoltObserverForFederation(fedID string) (*BoltObserver, error) {
 		return nil, fmt.Errorf("opening federation %q store: %w", fedID, err)
 	}
 	return &BoltObserver{store: store, codec: internaldb.JSONCodec{}}, nil
+}
+
+// NewBoltObserverWithFallback prefers federation-scoped storage and falls back
+// to default state storage when federation manager setup is unavailable.
+func NewBoltObserverWithFallback(fedID string) (*BoltObserver, error) {
+	observer, err := NewBoltObserverForFederation(fedID)
+	if err == nil {
+		return observer, nil
+	}
+	fallback, fallbackErr := DefaultBoltObserver()
+	if fallbackErr != nil {
+		return nil, fmt.Errorf("creating federation observer: %v; fallback failed: %w", err, fallbackErr)
+	}
+	return fallback, nil
 }
 
 func (o *BoltObserver) OnSuccess(peerID string, latency time.Duration) {

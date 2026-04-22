@@ -26,6 +26,7 @@ import (
 
 	"github.com/libp2p/go-libp2p"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
+	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
 	coreprotocol "github.com/libp2p/go-libp2p/core/protocol"
@@ -36,6 +37,8 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+
+	"sam/pkg/reputation"
 )
 
 var tracer = otel.Tracer("sam/net")
@@ -52,6 +55,8 @@ type node struct {
 	kdht    *dht.IpfsDHT
 	relay   *relayv2.Relay
 	disc    *drouting.RoutingDiscovery
+	gsub    *pubsub.PubSub
+	trust   *reputation.TrustStore
 	started bool
 	logger  *slog.Logger
 }
@@ -139,6 +144,24 @@ func (n *node) Start(ctx context.Context) error {
 
 	// Initialize routing-based discovery backed by the DHT.
 	n.disc = drouting.NewRoutingDiscovery(n.kdht)
+	gs, err := pubsub.NewGossipSub(ctx, h)
+	if err != nil {
+		_ = h.Close()
+		return fmt.Errorf("initializing gossipsub: %w", err)
+	}
+	n.gsub = gs
+	trust, err := reputation.NewTrustStore(h, gs)
+	if err != nil {
+		_ = h.Close()
+		return fmt.Errorf("initializing reputation trust store: %w", err)
+	}
+	if err := trust.Start(ctx); err != nil {
+		_ = h.Close()
+		return fmt.Errorf("starting reputation trust store: %w", err)
+	}
+	n.trust = trust
+	reputation.SetDefaultEvaluator(trust)
+	reputation.SetDefaultAttestor(trust)
 	n.started = true
 
 	n.logger.Info("node started",
@@ -174,6 +197,8 @@ func (n *node) Stop(ctx context.Context) error {
 	}
 
 	n.started = false
+	reputation.SetDefaultEvaluator(nil)
+	reputation.SetDefaultAttestor(nil)
 	n.logger.Info("node stopped")
 	return errors.Join(errs...)
 }

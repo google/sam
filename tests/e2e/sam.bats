@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 
 setup() {
-  export SAM_BINARY="${SAM_BINARY:-./bin/sam}"
+  export SAM_BINARY="${SAM_BINARY:-./bin/sam-agent}"
   if [[ ! -x "$SAM_BINARY" ]]; then
     skip "sam binary not found at $SAM_BINARY"
   fi
@@ -125,7 +125,7 @@ teardown() {
   [[ "$output" == *"unauthorized"* ]]
 }
 
-@test "sam proxy /.sam/search discovers writer skill with vouch" {
+@test "sam proxy /.sam/search discovers writer skill" {
   node_a_log="$TEST_TMPDIR/node-a.log"
   node_b_log="$TEST_TMPDIR/node-b.log"
   proxy_port=18081
@@ -175,6 +175,5 @@ teardown() {
   [[ "$search_status" == "200" ]]
   run cat "$TEST_TMPDIR/search_body.json"
   [[ "$output" == *"$node_a_peer"* ]]
-  [[ "$output" == *'"vouch"'* ]]
   [[ "$output" == *'"signature"'* ]]
 }

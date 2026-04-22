@@ -18,7 +18,7 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"time"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -27,7 +27,6 @@ import (
 
 const (
 	defaultClientID = "sam-cli"
-	defaultVouchTTL = 8 * time.Hour
 )
 
 func newIdentityLoginCmd(cfg *runConfig) *cobra.Command {
@@ -45,8 +44,8 @@ then saves credentials to ~/.config/sam/state.db.
 The Hub URL defaults to --hub (global flag) or the SAM_HUB environment
 variable. Any Hub that implements OIDC Device Flow is supported:
 
-  sam identity login --hub https://hub.internal.bank
-  sam identity login --hub https://hub.example.com --client-id my-app`,
+	sam-agent identity login --hub https://hub.internal.bank
+	sam-agent identity login --hub https://hub.example.com --client-id my-app`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runIdentityLogin(cmd.Context(), cfg, clientID)
 		},
@@ -92,7 +91,7 @@ func runIdentityLogin(parent context.Context, cfg *runConfig, clientID string) e
 		return fmt.Errorf("device flow: %w", err)
 	}
 
-	fmt.Fprintf(os.Stderr, "Authorization successful. Fetching identity voucher …\n")
+	fmt.Fprintf(os.Stderr, "Authorization successful. Issuing identity passport …\n")
 
 	// Build the node to obtain our stable PeerID.
 	node, err := buildNode(cfg)
@@ -105,14 +104,16 @@ func runIdentityLogin(parent context.Context, cfg *runConfig, clientID string) e
 	defer func() { _ = node.Stop(context.Background()) }()
 	peerID := node.PeerID().String()
 
-	// If the Hub exposes a vouch endpoint, fetch a signed Vouch.
-	var vouch *identity.Vouch
-	if disc.VouchEndpoint != "" {
-		vouch, err = identity.FetchVouch(parent, disc.VouchEndpoint, result.AccessToken, peerID, nil)
-		if err != nil {
-			// Non-fatal: warn and continue without a vouch.
-			fmt.Fprintf(os.Stderr, "Warning: could not fetch vouch from Hub: %v\n", err)
-		}
+	issueReq := identity.PassportIssueRequest{
+		PeerID:       peerID,
+		FederationID: cfg.federation,
+		Subject:      peerID,
+		Claims:       map[string]string{"hub": hubURL},
+	}
+	passportEndpoint := strings.TrimRight(hubURL, "/") + "/issue-passport"
+	passportBiscuit, err := identity.FetchPassportBiscuit(parent, passportEndpoint, result.AccessToken, issueReq)
+	if err != nil {
+		return fmt.Errorf("fetching hub-issued passport biscuit: %w", err)
 	}
 
 	store, err := identity.DefaultCredentialStore()
@@ -122,27 +123,21 @@ func runIdentityLogin(parent context.Context, cfg *runConfig, clientID string) e
 	defer func() { _ = store.Close() }()
 
 	creds := &identity.StoredCredentials{
-		PeerID:       peerID,
-		HubURL:       hubURL,
-		AccessToken:  result.AccessToken,
-		RefreshToken: result.RefreshToken,
-		TokenExpiry:  result.TokenExpiry,
-		Vouch:        vouch,
+		PeerID:          peerID,
+		HubURL:          hubURL,
+		AccessToken:     result.AccessToken,
+		RefreshToken:    result.RefreshToken,
+		TokenExpiry:     result.TokenExpiry,
+		PassportBiscuit: passportBiscuit,
 	}
 	if err := store.Save(creds); err != nil {
 		return fmt.Errorf("saving credentials: %w", err)
 	}
 
 	fmt.Fprintf(os.Stderr, "\nLogged in as peer %s\n", peerID)
-	if vouch != nil {
-		if email := vouch.Email(); email != "" {
-			fmt.Fprintf(os.Stderr, "Email  : %s\n", email)
-		}
-		if name := vouch.Name(); name != "" {
-			fmt.Fprintf(os.Stderr, "Name   : %s\n", name)
-		}
-		fmt.Fprintf(os.Stderr, "Issuer : %s\n", vouch.Issuer)
-		fmt.Fprintf(os.Stderr, "Expires: %s\n", vouch.Expiry.Format(time.RFC3339))
+	if claims, pErr := identity.ValidatePassportBiscuit(parent, passportBiscuit, peerID, cfg.federation); pErr == nil {
+		fmt.Fprintf(os.Stderr, "Subject: %s\n", claims.Subject)
+		fmt.Fprintf(os.Stderr, "Federation: %s\n", claims.FederationID)
 	}
 	fmt.Fprintf(os.Stderr, "Credentials saved to %s\n", store.Path())
 	return nil

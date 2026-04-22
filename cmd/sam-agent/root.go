@@ -37,7 +37,6 @@ type runConfig struct {
 	debug          bool
 
 	// sam up
-	issuerName         string
 	tunnelHTTPEndpoint string
 
 	// sam publish (shared by card and mcp subcommands)
@@ -80,11 +79,11 @@ type runConfig struct {
 	dryRun string
 }
 
-// newRootCmd builds the top-level "sam" command and attaches all subcommands.
+// newRootCmd builds the top-level "sam-agent" command and attaches subcommands.
 func newRootCmd(cfg *runConfig) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "sam",
-		Short: "SAM sovereign agent mesh CLI",
+		Use:   "sam-agent",
+		Short: "SAM agent runtime and mesh CLI",
 		PersistentPreRunE: func(_ *cobra.Command, _ []string) error {
 			return applyLogging(cfg.debug)
 		},
@@ -98,7 +97,7 @@ func newRootCmd(cfg *runConfig) *cobra.Command {
 	pf.BoolVar(&cfg.withRelay, "relay-service", false, "enable relay service")
 	pf.StringVar(&cfg.userAgent, "user-agent", "sam/0.1.0", "libp2p user-agent")
 	pf.DurationVar(&cfg.runFor, "run-for", 0, "optional duration before graceful shutdown (0 = wait for signal)")
-	pf.StringVar(&cfg.hub, "hub", "", "OIDC/Seed hub URL for identity bootstrap")
+	pf.StringVar(&cfg.hub, "hub", "", "OIDC hub URL for passport issuance and identity login")
 	pf.StringVar(&cfg.identityPath, "identity", "", "path to PEM-encoded Ed25519 private key (generated and saved if absent)")
 	pf.BoolVar(&cfg.debug, "debug", false, "enable debug logging (slog + libp2p subsystems)")
 	pf.StringVar(&cfg.federation, "federation", "default", "federation context for isolated reputation and cache storage")

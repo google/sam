@@ -26,8 +26,6 @@ import (
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
-
-	"sam/pkg/identity"
 )
 
 const (
@@ -46,9 +44,7 @@ type MCPResource struct {
 
 // AgentCard is the signed capability document advertised in the SAM mesh.
 //
-// The signature covers all fields except Signature and Vouch.
-// Vouch is attached after signing and allows peers to verify the operator's
-// identity as asserted by a trusted Hub.
+// The signature covers all fields except Signature.
 type AgentCard struct {
 	a2a.AgentCard
 	PeerID    string        `json:"peer_id"`
@@ -56,10 +52,6 @@ type AgentCard struct {
 	IssuedAt  time.Time     `json:"issued_at"`
 	Algorithm string        `json:"alg"`
 	Signature string        `json:"signature"`
-	// Vouch is the optional Hub-signed identity credential bound to this PeerID.
-	// It is not covered by the AgentCard signature; its own Hub signature provides
-	// the authenticity guarantee.
-	Vouch *identity.Vouch `json:"vouch,omitempty"`
 }
 
 type agentCardPayload struct {
@@ -191,13 +183,6 @@ func (c *AgentCard) Sign(privateKey crypto.PrivKey) error {
 // Verify checks card integrity and signature against the embedded PeerID.
 func (c *AgentCard) Verify() error {
 	return VerifyAgentCard(c)
-}
-
-// AttachVouch sets the Vouch on an AgentCard. The Vouch is not covered by the
-// AgentCard signature; its own Hub signature guarantees authenticity.
-// Passing nil clears any previously attached Vouch.
-func (c *AgentCard) AttachVouch(v *identity.Vouch) {
-	c.Vouch = v
 }
 
 func (c *AgentCard) validateBase() error {

@@ -31,6 +31,32 @@ import (
 	"sam/pkg/protocol"
 )
 
+func TestExtractBearerToken(t *testing.T) {
+	tests := []struct {
+		name    string
+		header  string
+		wantErr bool
+	}{
+		{name: "valid bearer", header: "Bearer abc.def.ghi", wantErr: false},
+		{name: "valid bearer lowercase", header: "bearer token", wantErr: false},
+		{name: "missing header", header: "", wantErr: true},
+		{name: "wrong scheme", header: "Basic xyz", wantErr: true},
+		{name: "empty token", header: "Bearer   ", wantErr: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := extractBearerToken(tc.header)
+			if tc.wantErr && err == nil {
+				t.Fatalf("expected error, got nil")
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
 func TestSAMReservedSearchReturnsPublishedWriterCard(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -73,9 +99,6 @@ func TestSAMReservedSearchReturnsPublishedWriterCard(t *testing.T) {
 	if err != nil {
 		t.Fatalf("creating writer card: %v", err)
 	}
-	if err := attachNodeVouch(card, nodeA.PeerID().String(), priv); err != nil {
-		t.Fatalf("attaching card vouch: %v", err)
-	}
 	pub, err := protocol.NewPublisher(nodeA)
 	if err != nil {
 		t.Fatalf("creating publisher: %v", err)
@@ -99,9 +122,6 @@ func TestSAMReservedSearchReturnsPublishedWriterCard(t *testing.T) {
 			}
 			for _, got := range cards {
 				if got != nil && got.PeerID == nodeA.PeerID().String() {
-					if got.Vouch == nil || got.Vouch.Signature == "" {
-						t.Fatalf("expected signed vouch in search response for %s", got.PeerID)
-					}
 					return
 				}
 			}

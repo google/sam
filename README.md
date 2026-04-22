@@ -17,7 +17,8 @@ It is built for environments where centralized gateways and centralized trust ar
 
 ```bash
 make build
-./bin/sam --help
+./bin/sam-agent --help
+./bin/sam-hub --help
 ```
 
 ### Run tests
@@ -31,16 +32,16 @@ make test-e2e
 
 ```bash
 # Authenticate
-sam identity login --hub https://identity.example.com --federation finance
+sam-agent identity login --hub https://identity.example.com --federation finance
 
 # Publish an agent capability
-sam publish --federation finance --skill risk-audit --mcp-port 8080
+sam-agent publish --federation finance --skill risk-audit --mcp-port 8080
 
 # Call by capability
-sam call risk-audit --federation finance --message "audit this report"
+sam-agent call risk-audit --federation finance --message "audit this report"
 
 # Inspect credential artifacts
-sam inspect biscuit "vendor-bot;allow_skill=risk-audit"
+sam-agent inspect biscuit "vendor-bot;allow_skill=risk-audit"
 ```
 
 ## Documentation

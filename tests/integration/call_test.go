@@ -307,11 +307,20 @@ func runCallConsumerRole() error {
 	}
 	defer func() { _ = observer.Close() }()
 
-	vouch := identity.NewVouch(node.PeerID().String(), "self", "test-subject", map[string]string{"name": "consumer"}, time.Hour)
+	passport, err := identity.IssuePassportBiscuit(ctx, identity.PassportIssueRequest{
+		PeerID:       node.PeerID().String(),
+		FederationID: "default",
+		Subject:      "test-subject",
+	})
+	if err != nil {
+		return fmt.Errorf("issuing passport biscuit: %w", err)
+	}
+	if err := identity.SetLocalPassport(node.Host(), "default", passport); err != nil {
+		return fmt.Errorf("setting local passport auth: %w", err)
+	}
 	req := protocol.ExecuteRequest{
 		Target:     target,
 		Capability: callCapability,
-		Vouch:      vouch,
 		Biscuit:    "integration-biscuit",
 		Payment: economy.Micropayment{
 			Amount:     1,

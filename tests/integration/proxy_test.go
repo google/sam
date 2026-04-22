@@ -117,8 +117,19 @@ func runProxyTunnelLegacyFlowIntegration(t *testing.T) {
 		t.Fatalf("connecting consumer->provider: %v", err)
 	}
 
-	vouch := identity.NewVouch(consumerNode.PeerID().String(), "test-issuer", "test-subject", map[string]string{"email": "test@example.com"}, 5*time.Minute)
-	proxySrv := httptest.NewServer(proxyTunnelHandler(consumerNode, observer, "X-SAM-Target", "alice;allow_skill=risk-audit", vouch))
+	passport, err := identity.IssuePassportBiscuit(ctx, identity.PassportIssueRequest{
+		PeerID:       consumerNode.PeerID().String(),
+		FederationID: "default",
+		Subject:      "test-subject",
+		Claims:       map[string]string{"email": "test@example.com"},
+	})
+	if err != nil {
+		t.Fatalf("issuing passport biscuit: %v", err)
+	}
+	if err := identity.SetLocalPassport(consumerNode.Host(), "default", passport); err != nil {
+		t.Fatalf("setting local passport auth: %v", err)
+	}
+	proxySrv := httptest.NewServer(proxyTunnelHandler(consumerNode, observer, "X-SAM-Target", "alice;allow_skill=risk-audit", passport))
 	defer proxySrv.Close()
 
 	payload := []byte(`{"request":"through-proxy"}`)
@@ -236,7 +247,7 @@ func runProxyTunnelUnauthorizedBeforeDial(t *testing.T) {
 	}
 	defer func() { _ = consumerNode.Stop(context.Background()) }()
 
-	proxySrv := httptest.NewServer(proxyTunnelHandler(consumerNode, protocol.NopObserver{}, "X-SAM-Target", "", nil))
+	proxySrv := httptest.NewServer(proxyTunnelHandler(consumerNode, protocol.NopObserver{}, "X-SAM-Target", "", ""))
 	defer proxySrv.Close()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, proxySrv.URL+"/blocked", nil)
@@ -260,9 +271,9 @@ func runProxyTunnelUnauthorizedBeforeDial(t *testing.T) {
 	}
 }
 
-func proxyTunnelHandler(node samnet.Node, observer protocol.Observer, targetHeader, biscuit string, vouch *identity.Vouch) http.Handler {
+func proxyTunnelHandler(node samnet.Node, observer protocol.Observer, targetHeader, biscuit string, passport string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if vouch == nil {
+		if strings.TrimSpace(passport) == "" {
 			http.Error(w, "unauthorized: local identity login required", http.StatusUnauthorized)
 			return
 		}
@@ -289,7 +300,6 @@ func proxyTunnelHandler(node samnet.Node, observer protocol.Observer, targetHead
 
 		start := time.Now()
 		resp, err := protocol.TunnelHTTP(r.Context(), node.Host(), targetID, protocol.HTTPTunnelOpenRequest{
-			Vouch:      vouch,
 			Biscuit:    biscuit,
 			Capability: "risk-audit",
 			Request: protocol.HTTPTunnelRequest{

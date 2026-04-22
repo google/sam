@@ -32,6 +32,7 @@ import (
 	"github.com/multiformats/go-multihash"
 	"github.com/spf13/cobra"
 
+	"sam/pkg/identity"
 	samnet "sam/pkg/net"
 	"sam/pkg/protocol"
 )
@@ -106,17 +107,26 @@ func runProxy(parent context.Context, cfg *runConfig) error {
 			return
 		}
 
+		if _, authErr := extractBearerToken(r.Header.Get("Authorization")); authErr != nil {
+			http.Error(w, fmt.Sprintf("unauthorized: %v", authErr), http.StatusUnauthorized)
+			return
+		}
+
 		start := time.Now()
-		observer, err := protocol.NewBoltObserverForFederation(cfg.federation)
+		observer, err := protocol.NewBoltObserverWithFallback(cfg.federation)
 		if err != nil {
 			http.Error(w, "reputation observer unavailable", http.StatusInternalServerError)
 			return
 		}
 		defer func() { _ = observer.Close() }()
 
-		vouch, vErr := loadLocalVouch()
+		passport, vErr := loadLocalIdentityAuth()
 		if vErr != nil {
 			http.Error(w, "unauthorized: local identity login required", http.StatusUnauthorized)
+			return
+		}
+		if err := identity.SetLocalPassport(node.Host(), cfg.federation, passport); err != nil {
+			http.Error(w, fmt.Sprintf("passport auth unavailable: %v", err), http.StatusInternalServerError)
 			return
 		}
 
@@ -161,7 +171,6 @@ func runProxy(parent context.Context, cfg *runConfig) error {
 		}
 
 		resp, err := protocol.TunnelHTTP(ctx, node.Host(), target.ID, protocol.HTTPTunnelOpenRequest{
-			Vouch:      vouch,
 			Biscuit:    strings.TrimSpace(cfg.proxyBiscuit),
 			Capability: capability,
 			Request:    tunnelReq,
@@ -210,6 +219,22 @@ func runProxy(parent context.Context, cfg *runConfig) error {
 		return fmt.Errorf("starting local proxy HTTP server: %w", err)
 	}
 	return nil
+}
+
+func extractBearerToken(header string) (string, error) {
+	header = strings.TrimSpace(header)
+	if header == "" {
+		return "", fmt.Errorf("missing Authorization header")
+	}
+	parts := strings.SplitN(header, " ", 2)
+	if len(parts) != 2 || !strings.EqualFold(strings.TrimSpace(parts[0]), "Bearer") {
+		return "", fmt.Errorf("Authorization must use Bearer scheme")
+	}
+	token := strings.TrimSpace(parts[1])
+	if token == "" {
+		return "", fmt.Errorf("bearer token is empty")
+	}
+	return token, nil
 }
 
 func handleSAMReserved(w http.ResponseWriter, r *http.Request, node samnet.Node, cfg *runConfig) {

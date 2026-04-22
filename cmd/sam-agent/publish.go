@@ -16,7 +16,6 @@ package main
 
 import (
 	"context"
-	"crypto/ed25519"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -28,7 +27,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"sam/pkg/economy"
-	"sam/pkg/identity"
 	samnet "sam/pkg/net"
 	"sam/pkg/protocol"
 )
@@ -87,6 +85,9 @@ func runPublish(parent context.Context, cfg *runConfig) error {
 	if len(cfg.capabilities) == 0 {
 		return fmt.Errorf("at least one non-empty skill/capability is required")
 	}
+	if err := ensureSecurePublishPreflight(cfg.federation); err != nil {
+		return err
+	}
 
 	// For dry-run=client mode, skip network and just build the card
 	if cfg.dryRun == "client" {
@@ -122,9 +123,6 @@ func runPublish(parent context.Context, cfg *runConfig) error {
 	if err != nil {
 		return fmt.Errorf("building agent card: %w", err)
 	}
-	if err := attachNodeVouch(card, node.PeerID().String(), priv); err != nil {
-		return err
-	}
 	if err := registerLocalAgentCard(node, card); err != nil {
 		return err
 	}
@@ -156,43 +154,16 @@ func runPublish(parent context.Context, cfg *runConfig) error {
 	return waitForShutdown(parent, cfg.runFor)
 }
 
-func attachNodeVouch(card *protocol.AgentCard, peerID string, priv any) error {
-	if card == nil {
-		return fmt.Errorf("agent card is nil")
-	}
-	if vouch, err := loadLocalVouch(); err == nil && vouch != nil {
-		card.AttachVouch(vouch)
-		return nil
-	}
-
-	rawKey, err := nodeEd25519PrivateKey(priv)
+func ensureSecurePublishPreflight(federationID string) error {
+	gate, closeFn, err := protocol.NewPassportGateForFederation(federationID)
 	if err != nil {
-		return fmt.Errorf("extracting ed25519 key for self-vouch: %w", err)
+		return fmt.Errorf("publish security preflight failed: %w", err)
 	}
-	vouch, err := identity.SelfSignVouch(peerID, rawKey)
-	if err != nil {
-		return fmt.Errorf("building self-signed vouch: %w", err)
+	defer func() { _ = closeFn() }()
+	if protocol.IsAllowAllGate(gate) {
+		return fmt.Errorf("refusing publish: A2A authentication middleware is permissive (AllowAllGate)")
 	}
-	card.AttachVouch(vouch)
 	return nil
-}
-
-func nodeEd25519PrivateKey(priv any) (ed25519.PrivateKey, error) {
-	type rawKeyProvider interface {
-		Raw() ([]byte, error)
-	}
-	rawProvider, ok := priv.(rawKeyProvider)
-	if !ok {
-		return nil, fmt.Errorf("unsupported private key type")
-	}
-	raw, err := rawProvider.Raw()
-	if err != nil {
-		return nil, err
-	}
-	if len(raw) != ed25519.PrivateKeySize {
-		return nil, fmt.Errorf("unexpected private key size %d", len(raw))
-	}
-	return ed25519.PrivateKey(raw), nil
 }
 
 func registerLocalAgentCard(node samnet.Node, card *protocol.AgentCard) error {
@@ -210,8 +181,18 @@ func publishLoop(parent context.Context, pub *protocol.Publisher, card *protocol
 	if every <= 0 {
 		every = 2 * time.Minute
 	}
-	if err := pub.Publish(parent, card); err != nil {
-		return fmt.Errorf("initial publish failed: %w", err)
+	retryTicker := time.NewTicker(250 * time.Millisecond)
+	defer retryTicker.Stop()
+	for {
+		if err := pub.Publish(parent, card); err == nil {
+			break
+		} else {
+			select {
+			case <-parent.Done():
+				return fmt.Errorf("initial publish failed: %w", err)
+			case <-retryTicker.C:
+			}
+		}
 	}
 	go func() {
 		ticker := time.NewTicker(every)

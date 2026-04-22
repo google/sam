@@ -32,7 +32,7 @@ func newMeshFederationsCmd(_ *runConfig) *cobra.Command {
 		Short: "Manage federation storage contexts",
 		Long: `Manage isolated storage contexts (federations).
 
-Each federation stores its own peer vouches, reputation scores, and discovery
+Each federation stores its own peer metadata, reputation scores, and discovery
 cache in a separate database at ~/.config/sam/federations/<name>.db.
 
 The master identity key stays at ~/.config/sam/state.db and is never affected

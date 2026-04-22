@@ -156,18 +156,6 @@ func runInspectCard(cfg *runConfig, input string) error {
 			}
 		}
 
-		if card.Vouch != nil {
-			fmt.Println("\nIdentity Vouch:")
-			fmt.Printf("  Issuer:    %s\n", card.Vouch.Issuer)
-			fmt.Printf("  Subject:   %s\n", card.Vouch.Subject)
-			if email, ok := card.Vouch.Claims["email"]; ok {
-				fmt.Printf("  Email:     %s\n", email)
-			}
-			if name, ok := card.Vouch.Claims["name"]; ok {
-				fmt.Printf("  Name:      %s\n", name)
-			}
-		}
-
 		fmt.Printf("\nSignature:   %s\n", truncateString(card.Signature, 20))
 	}
 	return nil

@@ -33,6 +33,7 @@ import (
 
 	"sam/pkg/economy"
 	"sam/pkg/identity"
+	"sam/pkg/reputation"
 )
 
 const A2AProtocolID coreprotocol.ID = "/sam/a2a/1.0"
@@ -83,14 +84,12 @@ func (e *LivenessError) Unwrap() error {
 type ExecuteRequest struct {
 	Target     peer.AddrInfo
 	Capability string
-	Vouch      *identity.Vouch
 	Biscuit    string
 	Payment    economy.Micropayment
 	MCPRequest json.RawMessage
 }
 
 type a2aHeader struct {
-	Vouch      *identity.Vouch      `json:"vouch,omitempty"`
 	Biscuit    string               `json:"biscuit"`
 	Capability string               `json:"capability,omitempty"`
 	Payment    economy.Micropayment `json:"payment"`
@@ -106,7 +105,19 @@ type FederationGate interface {
 // AllowAllGate is a FederationGate that accepts every peer (default, open mesh).
 type AllowAllGate struct{}
 
-func (AllowAllGate) Allow(_ context.Context, _ string, _ string) error { return nil }
+func (AllowAllGate) Allow(_ context.Context, _ string, _ string) error {
+	return nil
+}
+
+// IsAllowAllGate reports whether g is the permissive default gate implementation.
+func IsAllowAllGate(g FederationGate) bool {
+	switch g.(type) {
+	case AllowAllGate, *AllowAllGate:
+		return true
+	default:
+		return false
+	}
+}
 
 // A2AService serves /sam/a2a/1.0 and forwards JSON-RPC over a local MCP connector.
 type A2AService struct {
@@ -142,6 +153,9 @@ func NewA2AService(h host.Host, connector MCPConnector, observer Observer, opts 
 	}
 	if observer == nil {
 		observer = NopObserver{}
+	}
+	if err := identity.EnsurePassportAuth(h, ""); err != nil {
+		return nil, fmt.Errorf("installing passport auth: %w", err)
 	}
 	s := &A2AService{host: h, observer: observer, mcp: connector, gate: AllowAllGate{}}
 	for _, o := range opts {
@@ -202,10 +216,22 @@ func Execute(ctx context.Context, h host.Host, req ExecuteRequest, observer Obse
 	}
 	peerID := req.Target.ID.String()
 	started := time.Now()
+	if err := h.Connect(ctx, req.Target); err != nil {
+		observer.OnFailure(peerID, FailureTypeLiveness)
+		return nil, &LivenessError{PeerID: peerID, Err: err}
+	}
+	if err := identity.AuthenticatePeerPassport(ctx, h, req.Target.ID); err != nil {
+		observer.OnFailure(peerID, FailureTypeProtocol)
+		return nil, fmt.Errorf("passport authentication failed for %s: %w", peerID, err)
+	}
 
 	if err := Preflight(ctx, h, req.Target); err != nil {
 		observer.OnFailure(peerID, FailureTypeLiveness)
 		return nil, err
+	}
+	if eval := reputation.DefaultEvaluator(); eval != nil && eval.IsNegative(peerID) {
+		observer.OnFailure(peerID, FailureTypeProtocol)
+		return nil, fmt.Errorf("refusing A2A call to negatively-rated peer %s", peerID)
 	}
 
 	stream, err := h.NewStream(ctx, req.Target.ID, A2AProtocolID)
@@ -231,7 +257,6 @@ func Execute(ctx context.Context, h host.Host, req ExecuteRequest, observer Obse
 	}()
 
 	header := a2aHeader{
-		Vouch:      req.Vouch,
 		Biscuit:    strings.TrimSpace(req.Biscuit),
 		Capability: strings.TrimSpace(req.Capability),
 		Payment:    req.Payment,
@@ -275,6 +300,9 @@ func Execute(ctx context.Context, h host.Host, req ExecuteRequest, observer Obse
 	}
 
 	observer.OnSuccess(peerID, time.Since(started))
+	if att := reputation.DefaultAttestor(); att != nil {
+		_ = att.Publish(context.Background(), peerID, 1)
+	}
 	return json.RawMessage(resp), nil
 }
 
@@ -310,10 +338,16 @@ func (s *A2AService) handleStream(stream network.Stream) {
 		fail(FailureTypeProtocol, fmt.Errorf("missing biscuit token"))
 		return
 	}
+	claims, err := identity.AuthenticatedPeerPassport(s.host, stream.Conn().RemotePeer())
+	if err != nil {
+		fail(FailureTypeProtocol, fmt.Errorf("passport authentication required: %w", err))
+		return
+	}
 
 	// Identity gate: verify the requester's PeerID is allowed in this federation
 	// before forwarding any payload to the local MCP backend.
-	if err := s.gate.Allow(context.Background(), peerID, strings.TrimSpace(header.Capability)); err != nil {
+	authCtx := withAuthenticatedPassportClaims(context.Background(), claims)
+	if err := s.gate.Allow(authCtx, peerID, strings.TrimSpace(header.Capability)); err != nil {
 		fail(FailureTypeProtocol, fmt.Errorf("federation gate denied peer %s: %w", peerID, err))
 		return
 	}
@@ -378,12 +412,30 @@ func (s *A2AService) handleStream(stream network.Stream) {
 	}
 
 	s.observer.OnSuccess(peerID, time.Since(started))
+	if att := reputation.DefaultAttestor(); att != nil {
+		_ = att.Publish(context.Background(), peerID, 1)
+	}
 }
 
 func writeA2AError(w io.Writer, err error) error {
+	if err == nil {
+		err = fmt.Errorf("a2a request failed")
+	}
 	return json.NewEncoder(w).Encode(struct {
-		Error string `json:"error"`
-	}{Error: err.Error()})
+		JSONRPC string `json:"jsonrpc"`
+		Error   struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+		ID any `json:"id"`
+	}{
+		JSONRPC: "2.0",
+		Error: struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		}{Code: -32001, Message: err.Error()},
+		ID: nil,
+	})
 }
 
 func wrapRuntimeLiveness(pid peer.ID, err error) error {
@@ -426,6 +478,17 @@ func classifyFailure(err error) string {
 }
 
 func decodeA2AError(payload []byte) string {
+	var rpcOut struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(payload, &rpcOut); err == nil {
+		if msg := strings.TrimSpace(rpcOut.Error.Message); msg != "" {
+			return msg
+		}
+	}
+
 	var out struct {
 		Error string `json:"error"`
 	}

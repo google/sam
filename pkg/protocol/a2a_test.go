@@ -125,15 +125,19 @@ func TestExecuteSuccessRecordsObserver(t *testing.T) {
 	defer svc.Close()
 
 	clientObserver := &testObserver{}
+	passport, err := identity.IssuePassportBiscuit(ctx, identity.PassportIssueRequest{
+		PeerID:       clientHost.ID().String(),
+		FederationID: "default",
+		Subject:      "sub",
+	})
+	if err != nil {
+		t.Fatalf("IssuePassportBiscuit() error = %v", err)
+	}
+	if err := identity.SetLocalPassport(clientHost, "default", passport); err != nil {
+		t.Fatalf("SetLocalPassport() error = %v", err)
+	}
 	resp, err := Execute(ctx, clientHost, ExecuteRequest{
-		Target: peer.AddrInfo{ID: serverHost.ID(), Addrs: serverHost.Addrs()},
-		Vouch: identity.NewVouch(
-			clientHost.ID().String(),
-			"self",
-			"sub",
-			map[string]string{"name": "tester"},
-			time.Hour,
-		),
+		Target:     peer.AddrInfo{ID: serverHost.ID(), Addrs: serverHost.Addrs()},
 		Biscuit:    "test-biscuit",
 		Payment:    economy.Micropayment{Amount: 1, Asset: "sam-credit", Nonce: "n-1"},
 		MCPRequest: []byte(`{"jsonrpc":"2.0","id":"sam-call","method":"message","params":{"message":"ping"}}`),
@@ -173,6 +177,17 @@ func TestExecuteReturnsLivenessErrorWhenPeerDown(t *testing.T) {
 	}
 
 	clientObserver := &testObserver{}
+	passport, err := identity.IssuePassportBiscuit(ctx, identity.PassportIssueRequest{
+		PeerID:       clientHost.ID().String(),
+		FederationID: "default",
+		Subject:      "sub",
+	})
+	if err != nil {
+		t.Fatalf("IssuePassportBiscuit() error = %v", err)
+	}
+	if err := identity.SetLocalPassport(clientHost, "default", passport); err != nil {
+		t.Fatalf("SetLocalPassport() error = %v", err)
+	}
 	_, err = Execute(ctx, clientHost, ExecuteRequest{
 		Target:     target,
 		Biscuit:    "test-biscuit",

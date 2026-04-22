@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 
 setup() {
-  export SAM_BINARY="${SAM_BINARY:-./bin/sam}"
+  export SAM_BINARY="${SAM_BINARY:-./bin/sam-agent}"
   if [[ ! -x "$SAM_BINARY" ]]; then
     skip "sam binary not found at $SAM_BINARY"
   fi

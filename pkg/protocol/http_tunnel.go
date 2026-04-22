@@ -37,7 +37,6 @@ import (
 const HTTPTunnelProtocolID coreprotocol.ID = "/sam/tunnel/http/1.0"
 
 type HTTPTunnelOpenRequest struct {
-	Vouch      *identity.Vouch   `json:"vouch,omitempty"`
 	Biscuit    string            `json:"biscuit"`
 	Capability string            `json:"capability,omitempty"`
 	Request    HTTPTunnelRequest `json:"request"`
@@ -95,6 +94,9 @@ func NewHTTPTunnelService(h host.Host, endpoint string, opts ...HTTPTunnelServic
 	for _, opt := range opts {
 		opt(s)
 	}
+	if err := identity.EnsurePassportAuth(h, ""); err != nil {
+		return nil, fmt.Errorf("installing passport auth: %w", err)
+	}
 
 	h.SetStreamHandler(HTTPTunnelProtocolID, s.handleStream)
 	return s, nil
@@ -117,8 +119,8 @@ func TunnelHTTP(ctx context.Context, h host.Host, target peer.ID, req HTTPTunnel
 	if strings.TrimSpace(req.Biscuit) == "" {
 		return nil, fmt.Errorf("biscuit is required")
 	}
-	if req.Vouch == nil {
-		return nil, fmt.Errorf("vouch is required")
+	if err := identity.AuthenticatePeerPassport(ctx, h, target); err != nil {
+		return nil, fmt.Errorf("passport authentication failed: %w", err)
 	}
 	if strings.TrimSpace(req.Request.Method) == "" {
 		return nil, fmt.Errorf("request method is required")
@@ -158,8 +160,7 @@ func (s *HTTPTunnelService) handleStream(stream network.Stream) {
 		return
 	}
 
-	remotePeer := stream.Conn().RemotePeer().String()
-	if err := s.verifyMetadata(context.Background(), remotePeer, &openReq); err != nil {
+	if err := s.verifyMetadata(context.Background(), stream.Conn().RemotePeer(), &openReq); err != nil {
 		_ = json.NewEncoder(stream).Encode(HTTPTunnelResponse{StatusCode: http.StatusForbidden, Error: err.Error()})
 		return
 	}
@@ -168,18 +169,19 @@ func (s *HTTPTunnelService) handleStream(stream network.Stream) {
 	_ = json.NewEncoder(stream).Encode(resp)
 }
 
-func (s *HTTPTunnelService) verifyMetadata(ctx context.Context, remotePeer string, req *HTTPTunnelOpenRequest) error {
-	if req.Vouch == nil {
-		return fmt.Errorf("missing vouch metadata")
-	}
-	if req.Vouch.IsExpired() {
-		return fmt.Errorf("vouch is expired")
-	}
-	if strings.TrimSpace(req.Vouch.PeerID) != remotePeer {
-		return fmt.Errorf("vouch peer mismatch")
+func (s *HTTPTunnelService) verifyMetadata(ctx context.Context, remotePeer peer.ID, req *HTTPTunnelOpenRequest) error {
+	if _, err := identity.AuthenticatedPeerPassport(s.host, remotePeer); err != nil {
+		return fmt.Errorf("passport authentication required: %w", err)
 	}
 	if strings.TrimSpace(req.Biscuit) == "" {
 		return fmt.Errorf("missing biscuit metadata")
+	}
+	authValues := req.Request.Headers["Authorization"]
+	if len(authValues) == 0 {
+		authValues = req.Request.Headers["authorization"]
+	}
+	if _, err := extractBearerFromValues(authValues); err != nil {
+		return err
 	}
 	if strings.TrimSpace(req.Capability) != "" {
 		if err := s.skillGate.CheckSkill(ctx, req.Biscuit, strings.TrimSpace(req.Capability)); err != nil {
@@ -187,6 +189,24 @@ func (s *HTTPTunnelService) verifyMetadata(ctx context.Context, remotePeer strin
 		}
 	}
 	return nil
+}
+
+func extractBearerFromValues(values []string) (string, error) {
+	for _, value := range values {
+		parts := strings.SplitN(strings.TrimSpace(value), " ", 2)
+		if len(parts) != 2 || !strings.EqualFold(strings.TrimSpace(parts[0]), "Bearer") {
+			continue
+		}
+		token := strings.TrimSpace(parts[1])
+		if token == "" {
+			return "", fmt.Errorf("bearer token is empty")
+		}
+		return token, nil
+	}
+	if len(values) == 0 {
+		return "", fmt.Errorf("missing Authorization header")
+	}
+	return "", fmt.Errorf("Authorization must use Bearer scheme")
 }
 
 func (s *HTTPTunnelService) forwardLocal(ctx context.Context, treq HTTPTunnelRequest) HTTPTunnelResponse {

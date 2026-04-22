@@ -21,14 +21,12 @@ import (
 
 const (
 	BucketIdentities = "identities"
-	BucketVouches    = "vouches"
 	BucketReputation = "reputation"
 	BucketCache      = "cache"
 )
 
 var requiredBuckets = []string{
 	BucketIdentities,
-	BucketVouches,
 	BucketReputation,
 	BucketCache,
 }

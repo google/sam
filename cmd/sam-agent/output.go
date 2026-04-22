@@ -57,19 +57,7 @@ type agentRow struct {
 func toAgentRows(cards []*protocol.AgentCard, latencyByPeer map[string]time.Duration) []agentRow {
 	rows := make([]agentRow, 0, len(cards))
 	for _, c := range cards {
-		identity := "unknown"
-		if c.Vouch != nil {
-			switch {
-			case strings.TrimSpace(c.Vouch.Name()) != "":
-				identity = c.Vouch.Name()
-			case strings.TrimSpace(c.Vouch.Email()) != "":
-				identity = c.Vouch.Email()
-			case strings.TrimSpace(c.Vouch.Subject) != "":
-				identity = c.Vouch.Subject
-			case strings.TrimSpace(c.Vouch.Issuer) != "":
-				identity = c.Vouch.Issuer
-			}
-		}
+		identity := c.PeerID
 		caps := c.CapabilityNames()
 		capability := ""
 		if len(caps) > 0 {

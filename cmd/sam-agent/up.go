@@ -16,8 +16,6 @@ package main
 
 import (
 	"context"
-	"crypto/ed25519"
-	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -33,12 +31,11 @@ import (
 func newUpCmd(cfg *runConfig) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "up",
-		Short: "Start a SAM node and initialize identity issuer/verifier",
+		Short: "Start a SAM node",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runUp(cmd.Context(), cfg)
 		},
 	}
-	cmd.Flags().StringVar(&cfg.issuerName, "issuer", "sam.local", "identity issuer name for voucher bootstrap")
 	cmd.Flags().StringVar(&cfg.tunnelHTTPEndpoint, "tunnel-http-endpoint", "", "optional local HTTP endpoint exposed via /sam/tunnel/http/1.0 (for example http://127.0.0.1:11434)")
 	return cmd
 }
@@ -57,17 +54,8 @@ func runUp(parent context.Context, cfg *runConfig) error {
 		return fmt.Errorf("starting node: %w", err)
 	}
 	defer func() { _ = node.Stop(context.Background()) }()
-
-	_, signingKey, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		return fmt.Errorf("generating issuer key: %w", err)
-	}
-	iss, err := identity.NewIssuer(cfg.issuerName, signingKey)
-	if err != nil {
-		return fmt.Errorf("initializing issuer: %w", err)
-	}
-	if _, err = identity.NewVerifier(identity.WithTrustedIssuer(iss.Issuer(), iss.PublicKey())); err != nil {
-		return fmt.Errorf("initializing verifier: %w", err)
+	if err := identity.EnsurePassportAuth(node.Host(), cfg.federation); err != nil {
+		return fmt.Errorf("installing passport auth: %w", err)
 	}
 
 	var tunnel *protocol.HTTPTunnelService
@@ -92,7 +80,6 @@ func runUp(parent context.Context, cfg *runConfig) error {
 	status := map[string]any{
 		"peer_id":  node.PeerID().String(),
 		"addrs":    addrs,
-		"issuer":   iss.Issuer(),
 		"dht_mode": cfg.dhtMode,
 	}
 	if err := json.NewEncoder(os.Stdout).Encode(status); err != nil {

@@ -17,52 +17,65 @@ package protocol
 import (
 	"context"
 	"fmt"
-	"os"
+	"strings"
 
-	internaldb "sam/internal/db"
+	"sam/pkg/identity"
 )
 
-// VouchGate is a FederationGate that allows a peer only when a valid vouch
-// record exists in the local bbolt store for the given federation.
-// Entries in the vouch bucket are keyed by requester PeerID.
-// If the key is absent the peer is denied.
-type VouchGate struct {
-	store internaldb.Store
+type passportClaimsContextKey struct{}
+
+func withAuthenticatedPassportClaims(ctx context.Context, claims *identity.PassportClaims) context.Context {
+	return context.WithValue(ctx, passportClaimsContextKey{}, claims)
 }
 
-// NewVouchGate creates a gate backed by the given store (federation-scoped).
-func NewVouchGate(store internaldb.Store) *VouchGate {
-	return &VouchGate{store: store}
-}
-
-// NewVouchGateForFederation opens (or lazily creates) the federation-scoped
-// bbolt store and returns a VouchGate.  The caller is responsible for calling
-// the returned close function when done.
-func NewVouchGateForFederation(federationID string) (*VouchGate, func() error, error) {
-	mgr, err := internaldb.NewManager()
-	if err != nil {
-		return nil, nil, fmt.Errorf("creating federation manager: %w", err)
+func authenticatedPassportClaimsFromContext(ctx context.Context) (*identity.PassportClaims, bool) {
+	claims, ok := ctx.Value(passportClaimsContextKey{}).(*identity.PassportClaims)
+	if !ok || claims == nil {
+		return nil, false
 	}
-	store, err := mgr.Store(federationID)
-	if err != nil {
-		_ = mgr.Close()
-		return nil, nil, fmt.Errorf("opening federation %q store: %w", federationID, err)
-	}
-	return NewVouchGate(store), mgr.Close, nil
+	return claims, true
 }
 
-// Allow returns nil when the requester's PeerID has a vouch record in the
-// federation store, or a descriptive error when it is absent.
-func (g *VouchGate) Allow(ctx context.Context, peerID string, _ string) error {
+// PassportGate is a FederationGate that allows a peer only when it presents a
+// valid passport biscuit bound to the peer and federation.
+type PassportGate struct {
+	federationID string
+}
+
+// NewPassportGate creates a gate scoped to the default federation.
+func NewPassportGate() *PassportGate {
+	return NewPassportGateWithFederation("default")
+}
+
+// NewPassportGateWithFederation creates a gate with an explicit local federation audience.
+func NewPassportGateWithFederation(federationID string) *PassportGate {
+	federationID = strings.TrimSpace(federationID)
+	if federationID == "" {
+		federationID = "default"
+	}
+	return &PassportGate{federationID: federationID}
+}
+
+// NewPassportGateForFederation returns a passport gate and a no-op close function
+// for compatibility with existing setup code.
+func NewPassportGateForFederation(federationID string) (*PassportGate, func() error, error) {
+	return NewPassportGateWithFederation(federationID), func() error { return nil }, nil
+}
+
+// Allow returns nil when the requester has authenticated passport claims.
+func (g *PassportGate) Allow(ctx context.Context, peerID string, _ string) error {
 	if peerID == "" {
 		return fmt.Errorf("empty peer ID")
 	}
-	_, err := g.store.Get(ctx, internaldb.BucketVouches, peerID)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return fmt.Errorf("peer %s has no vouch in this federation", peerID)
-		}
-		return fmt.Errorf("checking vouch for peer %s: %w", peerID, err)
+	claims, ok := authenticatedPassportClaimsFromContext(ctx)
+	if !ok {
+		return fmt.Errorf("authentication error: missing authenticated passport claims")
+	}
+	if strings.TrimSpace(claims.PeerID) != strings.TrimSpace(peerID) {
+		return fmt.Errorf("authentication error: authenticated peer mismatch")
+	}
+	if strings.TrimSpace(g.federationID) != "" && strings.TrimSpace(claims.FederationID) != strings.TrimSpace(g.federationID) {
+		return fmt.Errorf("authentication error: passport federation mismatch")
 	}
 	return nil
 }

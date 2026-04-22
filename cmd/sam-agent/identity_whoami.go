@@ -15,6 +15,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"time"
@@ -67,28 +68,21 @@ func runIdentityWhoami() error {
 		}
 	}
 
-	if v := creds.Vouch; v != nil {
-		_, _ = fmt.Fprintf(os.Stdout, "PeerID : %s\n", v.PeerID)
-		if v.Subject != "" {
-			_, _ = fmt.Fprintf(os.Stdout, "Subject: %s\n", v.Subject)
-		}
-		if email := v.Email(); email != "" {
-			_, _ = fmt.Fprintf(os.Stdout, "Email  : %s\n", email)
-		}
-		if name := v.Name(); name != "" {
-			_, _ = fmt.Fprintf(os.Stdout, "Name   : %s\n", name)
-		}
-		if org := v.Org(); org != "" {
-			_, _ = fmt.Fprintf(os.Stdout, "Org    : %s\n", org)
-		}
-		_, _ = fmt.Fprintf(os.Stdout, "Issuer : %s\n", v.Issuer)
-		if v.IsExpired() {
-			_, _ = fmt.Fprintf(os.Stdout, "Vouch  : EXPIRED (was %s)\n", v.Expiry.Format(time.RFC3339))
-		} else {
-			_, _ = fmt.Fprintf(os.Stdout, "Vouch  : valid until %s\n", v.Expiry.Format(time.RFC3339))
-		}
-	} else {
-		_, _ = fmt.Fprintln(os.Stdout, "Vouch  : none (Hub does not issue vouches, or run login again)")
+	passport := creds.PassportBiscuit
+	if passport == "" {
+		_, _ = fmt.Fprintln(os.Stdout, "Passport : none")
+		return nil
+	}
+	claims, err := identity.ValidatePassportBiscuit(context.Background(), passport, creds.PeerID, "")
+	if err != nil {
+		_, _ = fmt.Fprintf(os.Stdout, "Passport : INVALID (%v)\n", err)
+		return nil
+	}
+	_, _ = fmt.Fprintf(os.Stdout, "Passport : present\n")
+	_, _ = fmt.Fprintf(os.Stdout, "Subject  : %s\n", claims.Subject)
+	_, _ = fmt.Fprintf(os.Stdout, "Audience : %s\n", claims.FederationID)
+	if email := claims.Claims["email"]; email != "" {
+		_, _ = fmt.Fprintf(os.Stdout, "Email    : %s\n", email)
 	}
 	return nil
 }

@@ -195,50 +195,6 @@ func exchangeDeviceCode(ctx context.Context, tokenEndpoint, deviceCode string, c
 	}, false, nil
 }
 
-// FetchVouch calls the Hub's vouch endpoint to obtain a signed Vouch in
-// exchange for a valid access token and the local PeerID.
-//
-// The Hub is expected to accept a JSON body of the form:
-//
-//	{"peer_id": "<peerID>"}
-//
-// and return a signed Vouch JSON object.
-func FetchVouch(ctx context.Context, vouchEndpoint, accessToken, peerID string, httpClient *http.Client) (*Vouch, error) {
-	payload, err := json.Marshal(map[string]string{"peer_id": peerID})
-	if err != nil {
-		return nil, fmt.Errorf("marshaling vouch request: %w", err)
-	}
-
-	req, err := newPostJSONRequest(ctx, vouchEndpoint, payload)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", "Bearer "+accessToken)
-
-	if httpClient == nil {
-		httpClient = http.DefaultClient
-	}
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("vouch request: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
-	if err != nil {
-		return nil, fmt.Errorf("reading vouch response: %w", err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("vouch endpoint returned %s: %s", resp.Status, body)
-	}
-
-	var v Vouch
-	if err := json.Unmarshal(body, &v); err != nil {
-		return nil, fmt.Errorf("parsing vouch response: %w", err)
-	}
-	return &v, nil
-}
-
 // Device flow sentinel errors.
 var (
 	ErrDeviceAuthPending  = fmt.Errorf("device authorization pending")
