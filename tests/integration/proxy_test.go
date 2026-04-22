@@ -91,6 +91,18 @@ func runProxyTunnelLegacyFlowIntegration(t *testing.T) {
 	if err := providerNode.Start(ctx); err != nil {
 		t.Fatalf("starting provider node: %v", err)
 	}
+	providerPassport, err := identity.IssuePassportBiscuit(ctx, identity.PassportIssueRequest{
+		PeerID:       providerNode.PeerID().String(),
+		FederationID: "default",
+		Subject:      "test-subject",
+		Claims:       map[string]string{"email": "provider@example.com"},
+	})
+	if err != nil {
+		t.Fatalf("issuing provider passport biscuit: %v", err)
+	}
+	if err := identity.SetLocalPassport(providerNode.Host(), "default", providerPassport); err != nil {
+		t.Fatalf("setting provider local passport auth: %v", err)
+	}
 	defer func() { _ = providerNode.Stop(context.Background()) }()
 
 	tunnelSvc, err := protocol.NewHTTPTunnelService(
@@ -110,13 +122,6 @@ func runProxyTunnelLegacyFlowIntegration(t *testing.T) {
 	if err := consumerNode.Start(ctx); err != nil {
 		t.Fatalf("starting consumer node: %v", err)
 	}
-	defer func() { _ = consumerNode.Stop(context.Background()) }()
-
-	providerInfo := peer.AddrInfo{ID: providerNode.PeerID(), Addrs: providerNode.Host().Addrs()}
-	if err := connectProxyWithRetry(ctx, consumerNode, providerInfo); err != nil {
-		t.Fatalf("connecting consumer->provider: %v", err)
-	}
-
 	passport, err := identity.IssuePassportBiscuit(ctx, identity.PassportIssueRequest{
 		PeerID:       consumerNode.PeerID().String(),
 		FederationID: "default",
@@ -129,6 +134,13 @@ func runProxyTunnelLegacyFlowIntegration(t *testing.T) {
 	if err := identity.SetLocalPassport(consumerNode.Host(), "default", passport); err != nil {
 		t.Fatalf("setting local passport auth: %v", err)
 	}
+	defer func() { _ = consumerNode.Stop(context.Background()) }()
+
+	providerInfo := peer.AddrInfo{ID: providerNode.PeerID(), Addrs: providerNode.Host().Addrs()}
+	if err := connectProxyWithRetry(ctx, consumerNode, providerInfo); err != nil {
+		t.Fatalf("connecting consumer->provider: %v", err)
+	}
+
 	proxySrv := httptest.NewServer(proxyTunnelHandler(consumerNode, observer, "X-SAM-Target", "alice;allow_skill=risk-audit", passport))
 	defer proxySrv.Close()
 

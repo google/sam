@@ -117,6 +117,19 @@ func TestExecuteSuccessRecordsObserver(t *testing.T) {
 	}
 	defer func() { _ = clientHost.Close() }()
 
+	// Set up server passport
+	serverPassport, err := identity.IssuePassportBiscuit(ctx, identity.PassportIssueRequest{
+		PeerID:       serverHost.ID().String(),
+		FederationID: "default",
+		Subject:      "server-sub",
+	})
+	if err != nil {
+		t.Fatalf("IssuePassportBiscuit(server) error = %v", err)
+	}
+	if err := identity.SetLocalPassport(serverHost, "default", serverPassport); err != nil {
+		t.Fatalf("SetLocalPassport(server) error = %v", err)
+	}
+
 	serverObserver := &testObserver{}
 	svc, err := NewA2AService(serverHost, staticResponseConnector{}, serverObserver)
 	if err != nil {
@@ -131,10 +144,10 @@ func TestExecuteSuccessRecordsObserver(t *testing.T) {
 		Subject:      "sub",
 	})
 	if err != nil {
-		t.Fatalf("IssuePassportBiscuit() error = %v", err)
+		t.Fatalf("IssuePassportBiscuit(client) error = %v", err)
 	}
 	if err := identity.SetLocalPassport(clientHost, "default", passport); err != nil {
-		t.Fatalf("SetLocalPassport() error = %v", err)
+		t.Fatalf("SetLocalPassport(client) error = %v", err)
 	}
 	resp, err := Execute(ctx, clientHost, ExecuteRequest{
 		Target:     peer.AddrInfo{ID: serverHost.ID(), Addrs: serverHost.Addrs()},

@@ -29,6 +29,7 @@ import (
 	"github.com/multiformats/go-multiaddr"
 
 	"sam/internal/testutils"
+	"sam/pkg/identity"
 	samnet "sam/pkg/net"
 )
 
@@ -161,9 +162,33 @@ func cujStartNode(t *testing.T, cfg cujNodeConfig) samnet.Node {
 	if err != nil {
 		t.Fatalf("creating node: %v", err)
 	}
+
 	if err := n.Start(context.Background()); err != nil {
 		t.Fatalf("starting node: %v", err)
 	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	passport, err := identity.IssuePassportBiscuit(ctx, identity.PassportIssueRequest{
+		PeerID:       n.PeerID().String(),
+		FederationID: "default",
+		Subject:      n.PeerID().String(),
+	})
+	if err != nil {
+		t.Fatalf("issuing test passport: %v", err)
+	}
+	if err := identity.SetLocalPassport(n.Host(), "default", passport); err != nil {
+		t.Fatalf("setting test passport: %v", err)
+	}
+
+	for _, bootstrapAddr := range cfg.bootstrap {
+		pi, err := peer.AddrInfoFromP2pAddr(bootstrapAddr)
+		if err != nil {
+			continue
+		}
+		_ = cujConnectWithRetry(ctx, n, *pi)
+	}
+
 	t.Cleanup(func() {
 		go func() { _ = n.Stop(context.Background()) }()
 	})
@@ -183,6 +208,27 @@ func cujBootstrapAddrs(t *testing.T, n samnet.Node) []multiaddr.Multiaddr {
 	}
 	t.Fatalf("no bootstrap QUIC address found for %s", n.PeerID())
 	return nil
+}
+
+func cujConnectWithRetry(ctx context.Context, n samnet.Node, pi peer.AddrInfo) error {
+	ticker := time.NewTicker(250 * time.Millisecond)
+	defer ticker.Stop()
+	var last error
+	for {
+		if err := n.Connect(ctx, pi); err == nil {
+			return nil
+		} else {
+			last = err
+		}
+		select {
+		case <-ctx.Done():
+			if last != nil {
+				return last
+			}
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
 }
 
 func cujWaitDiscover(ctx context.Context, n samnet.Node, capability, expectedPeerID string) bool {

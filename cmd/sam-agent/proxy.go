@@ -28,9 +28,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ipfs/go-cid"
 	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/multiformats/go-multihash"
 	"github.com/spf13/cobra"
 
 	"sam/pkg/identity"
@@ -409,18 +407,14 @@ func discoverCardsByCapability(ctx context.Context, node samnet.Node, capability
 }
 
 func findProvidersForNamespace(ctx context.Context, node samnet.Node, namespace string) ([]peer.AddrInfo, error) {
-	d := node.DHT()
-	if d == nil {
-		return nil, fmt.Errorf("dht is not available")
-	}
-	topicCID, err := namespaceToCID(namespace)
+	ch, err := node.Discover(ctx, namespace)
 	if err != nil {
 		return nil, err
 	}
 
 	results := make([]peer.AddrInfo, 0)
 	seen := map[string]struct{}{}
-	for info := range d.FindProvidersAsync(ctx, topicCID, 64) {
+	for info := range ch {
 		if info.ID == "" || info.ID == node.PeerID() {
 			continue
 		}
@@ -431,18 +425,6 @@ func findProvidersForNamespace(ctx context.Context, node samnet.Node, namespace 
 		results = append(results, info)
 	}
 	return results, nil
-}
-
-func namespaceToCID(namespace string) (cid.Cid, error) {
-	namespace = strings.TrimSpace(namespace)
-	if namespace == "" {
-		return cid.Undef, fmt.Errorf("namespace is required")
-	}
-	h, err := multihash.Sum([]byte(namespace), multihash.SHA2_256, -1)
-	if err != nil {
-		return cid.Undef, fmt.Errorf("hashing namespace: %w", err)
-	}
-	return cid.NewCidV1(cid.Raw, h), nil
 }
 
 func fetchCardFromDHT(ctx context.Context, node samnet.Node, peerID string) (*protocol.AgentCard, error) {

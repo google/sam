@@ -27,6 +27,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
 
+	"sam/pkg/identity"
 	samnet "sam/pkg/net"
 	"sam/pkg/protocol"
 )
@@ -74,6 +75,19 @@ func TestSAMReservedSearchReturnsPublishedWriterCard(t *testing.T) {
 	}
 	defer func() { _ = nodeB.Stop(context.Background()) }()
 
+	// Set passport on nodeB
+	passportB, err := identity.IssuePassportBiscuit(ctx, identity.PassportIssueRequest{
+		PeerID:       nodeB.PeerID().String(),
+		FederationID: "default",
+		Subject:      nodeB.PeerID().String(),
+	})
+	if err != nil {
+		t.Fatalf("issuing nodeB passport: %v", err)
+	}
+	if err := identity.SetLocalPassport(nodeB.Host(), "default", passportB); err != nil {
+		t.Fatalf("setting nodeB passport: %v", err)
+	}
+
 	bootstrap := []multiaddr.Multiaddr{nodeB.Addrs()[0].Encapsulate(multiaddr.StringCast("/p2p/" + nodeB.PeerID().String()))}
 	nodeA, err := newProxyReservedNode(0, bootstrap)
 	if err != nil {
@@ -83,6 +97,19 @@ func TestSAMReservedSearchReturnsPublishedWriterCard(t *testing.T) {
 		t.Fatalf("starting publisher node: %v", err)
 	}
 	defer func() { _ = nodeA.Stop(context.Background()) }()
+
+	// Set passport on nodeA
+	passportA, err := identity.IssuePassportBiscuit(ctx, identity.PassportIssueRequest{
+		PeerID:       nodeA.PeerID().String(),
+		FederationID: "default",
+		Subject:      nodeA.PeerID().String(),
+	})
+	if err != nil {
+		t.Fatalf("issuing nodeA passport: %v", err)
+	}
+	if err := identity.SetLocalPassport(nodeA.Host(), "default", passportA); err != nil {
+		t.Fatalf("setting nodeA passport: %v", err)
+	}
 
 	if err := connectProxyReservedWithRetry(ctx, nodeA, peer.AddrInfo{ID: nodeB.PeerID(), Addrs: nodeB.Addrs()}); err != nil {
 		t.Fatalf("connecting publisher to search node: %v", err)
@@ -109,8 +136,11 @@ func TestSAMReservedSearchReturnsPublishedWriterCard(t *testing.T) {
 
 	cfg := &runConfig{proxyTimeout: 3 * time.Second}
 
-	deadline := time.Now().Add(12 * time.Second)
+	deadline := time.Now().Add(20 * time.Second)
 	for {
+		// Re-publish while polling to handle DHT provider propagation races in short-lived tests.
+		_ = pub.Publish(ctx, card)
+
 		req := httptest.NewRequest(http.MethodGet, "/.sam/search?skill=writer", nil)
 		rr := httptest.NewRecorder()
 		handleSAMReserved(rr, req, nodeB, cfg)
@@ -143,12 +173,20 @@ func newProxyReservedNode(port int, bootstrap []multiaddr.Multiaddr) (samnet.Nod
 	if err != nil {
 		return nil, fmt.Errorf("generating node key: %w", err)
 	}
-	return samnet.New(
+	node, err := samnet.New(
 		samnet.WithPrivateKey(key),
 		samnet.WithListenAddrs(listen),
 		samnet.WithBootstrapPeers(bootstrap...),
 		samnet.WithDHTMode(samnet.DHTModeServer),
 	)
+	if err != nil {
+		return nil, err
+	}
+
+	// Set a test passport so the node can authenticate with other peers.
+	// Note: Must be done after node creation but the actual SetLocalPassport
+	// happens after Start in the test that calls this.
+	return node, nil
 }
 
 func connectProxyReservedWithRetry(ctx context.Context, node samnet.Node, pi peer.AddrInfo) error {

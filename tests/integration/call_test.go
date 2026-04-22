@@ -186,6 +186,17 @@ func runCallProviderRole() error {
 	if err := node.Start(ctx); err != nil {
 		return fmt.Errorf("provider node start: %w", err)
 	}
+	providerPassport, err := identity.IssuePassportBiscuit(ctx, identity.PassportIssueRequest{
+		PeerID:       node.PeerID().String(),
+		FederationID: "default",
+		Subject:      "test-subject",
+	})
+	if err != nil {
+		return fmt.Errorf("issuing provider passport biscuit: %w", err)
+	}
+	if err := identity.SetLocalPassport(node.Host(), "default", providerPassport); err != nil {
+		return fmt.Errorf("setting provider local passport auth: %w", err)
+	}
 	// In a subprocess role, fire Stop asynchronously so the process can exit
 	// promptly; the OS will clean up resources when the process terminates.
 	defer func() {
@@ -287,6 +298,17 @@ func runCallConsumerRole() error {
 	if err := node.Start(ctx); err != nil {
 		return fmt.Errorf("consumer node start: %w", err)
 	}
+	passport, err := identity.IssuePassportBiscuit(ctx, identity.PassportIssueRequest{
+		PeerID:       node.PeerID().String(),
+		FederationID: "default",
+		Subject:      "test-subject",
+	})
+	if err != nil {
+		return fmt.Errorf("issuing passport biscuit: %w", err)
+	}
+	if err := identity.SetLocalPassport(node.Host(), "default", passport); err != nil {
+		return fmt.Errorf("setting local passport auth: %w", err)
+	}
 	// In a subprocess role, fire Stop asynchronously so the process can exit
 	// promptly; the OS will clean up resources when the process terminates.
 	defer func() {
@@ -307,17 +329,6 @@ func runCallConsumerRole() error {
 	}
 	defer func() { _ = observer.Close() }()
 
-	passport, err := identity.IssuePassportBiscuit(ctx, identity.PassportIssueRequest{
-		PeerID:       node.PeerID().String(),
-		FederationID: "default",
-		Subject:      "test-subject",
-	})
-	if err != nil {
-		return fmt.Errorf("issuing passport biscuit: %w", err)
-	}
-	if err := identity.SetLocalPassport(node.Host(), "default", passport); err != nil {
-		return fmt.Errorf("setting local passport auth: %w", err)
-	}
 	req := protocol.ExecuteRequest{
 		Target:     target,
 		Capability: callCapability,
