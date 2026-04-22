@@ -1,3 +1,18 @@
+Metadata-Version: 2.4
+Name: sam-mesh-client
+Version: 0.1.0
+Summary: Python client framework for SAM (Sovereign Agent Mesh)
+Author: SAM Contributors
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: httpx>=0.24.0
+Requires-Dist: pynacl>=1.5.0
+Provides-Extra: dev
+Requires-Dist: pytest>=7.0; extra == "dev"
+Requires-Dist: pytest-asyncio>=0.21.0; extra == "dev"
+Requires-Dist: black>=23.0; extra == "dev"
+Requires-Dist: ruff>=0.1.0; extra == "dev"
+
 # SAM Python Client Framework
 
 This package provides an idiomatic async Python client for the SAM (Sovereign Agent Mesh):
