@@ -54,7 +54,7 @@ func runPublishMCP(parent context.Context, cfg *runConfig) error {
 		return fmt.Errorf("--port must be a positive integer")
 	}
 
-	node, err := buildNode(cfg)
+	node, _, err := buildNode(cfg)
 	if err != nil {
 		return err
 	}

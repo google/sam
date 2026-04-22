@@ -51,10 +51,18 @@ func runUp(parent context.Context, cfg *runConfig) error {
 		return err
 	}
 
-	node, err := buildNode(cfg)
+	node, hubPeerID, err := buildNode(cfg)
 	if err != nil {
 		return err
 	}
+
+	// Register the hub as a trusted peer before starting the node.
+	// The hub is infrastructure — it doesn't run passport auth — so we
+	// must exempt it from the connection-close-on-auth-failure gate.
+	if hubPeerID != "" {
+		identity.RegisterTrustedPeer(node.Host(), hubPeerID)
+	}
+
 	if err := node.Start(parent); err != nil {
 		return fmt.Errorf("starting node: %w", err)
 	}

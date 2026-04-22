@@ -74,7 +74,7 @@ func runCall(parent context.Context, cfg *runConfig, targetArg string) error {
 		return runCallDryRunClient(cfg, targetArg)
 	}
 
-	node, err := buildNode(cfg)
+	node, _, err := buildNode(cfg)
 	if err != nil {
 		return err
 	}

@@ -94,7 +94,7 @@ func runPublish(parent context.Context, cfg *runConfig) error {
 		return runPublishDryRunClient(cfg)
 	}
 
-	node, err := buildNode(cfg)
+	node, _, err := buildNode(cfg)
 	if err != nil {
 		return err
 	}

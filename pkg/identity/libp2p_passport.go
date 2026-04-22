@@ -30,6 +30,7 @@ type passportAuthManager struct {
 	mu            sync.RWMutex
 	localPassport string
 	peerClaims    map[string]*PassportClaims
+	trustedPeers  map[peer.ID]struct{} // hub, relays — exempt from passport auth
 	installed     bool
 }
 
@@ -53,7 +54,18 @@ func EnsurePassportAuth(h host.Host, _ string) error {
 	h.Network().Notify(&network.NotifyBundle{
 		ConnectedF: func(_ network.Network, conn network.Conn) {
 			go func() {
-				_ = AuthenticatePeerPassport(context.Background(), h, conn.RemotePeer())
+				remote := conn.RemotePeer()
+				mgr.mu.RLock()
+				_, trusted := mgr.trustedPeers[remote]
+				mgr.mu.RUnlock()
+				if trusted {
+					return
+				}
+				if err := AuthenticatePeerPassport(context.Background(), h, remote); err != nil {
+					// Peer could not present a valid hub-issued passport.
+					// Close the connection to prevent unauthenticated mesh participation.
+					_ = conn.Close()
+				}
 			}()
 		},
 		DisconnectedF: func(_ network.Network, conn network.Conn) {
@@ -63,6 +75,20 @@ func EnsurePassportAuth(h host.Host, _ string) error {
 		},
 	})
 	return nil
+}
+
+// RegisterTrustedPeer marks a peer as infrastructure (e.g. the hub) that is
+// exempt from passport authentication. Connections to/from trusted peers are
+// never closed due to a missing biscuit. Must be called before the node starts
+// making connections.
+func RegisterTrustedPeer(h host.Host, p peer.ID) {
+	if h == nil || p == "" {
+		return
+	}
+	mgr := getOrCreatePassportAuthManager(h)
+	mgr.mu.Lock()
+	mgr.trustedPeers[p] = struct{}{}
+	mgr.mu.Unlock()
 }
 
 func SetLocalPassport(h host.Host, _ string, passport string) error {
@@ -158,7 +184,12 @@ func getOrCreatePassportAuthManager(h host.Host) *passportAuthManager {
 	if mgr, ok := passportAuthManagers.Load(h); ok {
 		return mgr.(*passportAuthManager)
 	}
-	mgr := &passportAuthManager{host: h, federationID: "default", peerClaims: map[string]*PassportClaims{}}
+	mgr := &passportAuthManager{
+		host:         h,
+		federationID: "default",
+		peerClaims:   map[string]*PassportClaims{},
+		trustedPeers: map[peer.ID]struct{}{},
+	}
 	actual, _ := passportAuthManagers.LoadOrStore(h, mgr)
 	return actual.(*passportAuthManager)
 }

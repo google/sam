@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/libp2p/go-libp2p/core/crypto"
+	libp2ppeer "github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
 
 	samnet "sam/pkg/net"
@@ -37,20 +38,22 @@ import (
 // buildNode constructs a SAM mesh node from the shared runConfig flags.
 // --hub is mandatory: the hub provides OIDC-backed passport issuance and
 // acts as the mandatory P2P rendezvous/bootstrap point for the mesh.
-func buildNode(cfg *runConfig) (samnet.Node, error) {
+// It also returns the hub's libp2p peer ID so callers can register it as
+// a trusted peer (exempt from passport auth) before joining the mesh.
+func buildNode(cfg *runConfig) (samnet.Node, libp2ppeer.ID, error) {
 	hubURL := strings.TrimSpace(resolveHubURL(cfg))
 	if hubURL == "" {
-		return nil, fmt.Errorf("--hub (or SAM_HUB env) is required: the hub is the rendezvous point and passport issuer for the mesh")
+		return nil, "", fmt.Errorf("--hub (or SAM_HUB env) is required: the hub is the rendezvous point and passport issuer for the mesh")
 	}
 
 	listen, err := parseMultiaddrs(cfg.listenAddrs)
 	if err != nil {
-		return nil, fmt.Errorf("parsing --listen: %w", err)
+		return nil, "", fmt.Errorf("parsing --listen: %w", err)
 	}
 
 	key, err := loadOrGenerateKey(cfg.identityPath)
 	if err != nil {
-		return nil, fmt.Errorf("loading identity key: %w", err)
+		return nil, "", fmt.Errorf("loading identity key: %w", err)
 	}
 
 	// Resolve hub hostname for rendezvous namespace and relay hint.
@@ -59,7 +62,7 @@ func buildNode(cfg *runConfig) (samnet.Node, error) {
 	// Fetch hub P2P bootstrap addresses from the hub's well-known endpoint.
 	// This is the primary rendezvous mechanism: all agents bootstrap through
 	// the hub, which acts as DHT server and relay.
-	hubBootstrap, err := fetchHubP2PAddrs(hubURL)
+	hubBootstrap, hubPeerID, err := fetchHubP2PInfo(hubURL)
 	if err != nil {
 		slog.Default().Warn("could not fetch hub P2P addresses; hub may not be running in P2P mode", "hub", hubURL, "err", err)
 	}
@@ -79,26 +82,33 @@ func buildNode(cfg *runConfig) (samnet.Node, error) {
 		opts = append(opts, samnet.WithRelayService())
 	}
 
-	return samnet.New(opts...)
+	node, err := samnet.New(opts...)
+	if err != nil {
+		return nil, "", err
+	}
+	return node, hubPeerID, nil
 }
 
 // fetchHubP2PAddrs contacts the hub's /.well-known/sam-hub-p2p endpoint and
 // returns the hub's libp2p multiaddrs for use as bootstrap/rendezvous peers.
-func fetchHubP2PAddrs(hubURL string) ([]multiaddr.Multiaddr, error) {
+// fetchHubP2PInfo contacts the hub's /.well-known/sam-hub-p2p endpoint and
+// returns the hub's libp2p multiaddrs and peer ID.
+func fetchHubP2PInfo(hubURL string) ([]multiaddr.Multiaddr, libp2ppeer.ID, error) {
 	endpoint := strings.TrimRight(hubURL, "/") + "/.well-known/sam-hub-p2p"
 	resp, err := http.Get(endpoint) //nolint:gosec // hubURL is user-supplied and validated
 	if err != nil {
-		return nil, fmt.Errorf("fetching hub P2P info: %w", err)
+		return nil, "", fmt.Errorf("fetching hub P2P info: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("hub P2P info returned %d", resp.StatusCode)
+		return nil, "", fmt.Errorf("hub P2P info returned %d", resp.StatusCode)
 	}
 	var info struct {
-		Addrs []string `json:"addrs"`
+		PeerID string   `json:"peer_id"`
+		Addrs  []string `json:"addrs"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
-		return nil, fmt.Errorf("decoding hub P2P info: %w", err)
+		return nil, "", fmt.Errorf("decoding hub P2P info: %w", err)
 	}
 	var out []multiaddr.Multiaddr
 	for _, s := range info.Addrs {
@@ -108,7 +118,8 @@ func fetchHubP2PAddrs(hubURL string) ([]multiaddr.Multiaddr, error) {
 		}
 		out = append(out, ma)
 	}
-	return out, nil
+	hubPeer, _ := libp2ppeer.Decode(info.PeerID) // empty string if hub has no P2P mode
+	return out, hubPeer, nil
 }
 
 func hubHostFromURL(hubURL string) string {

@@ -69,7 +69,7 @@ func runMeshGetAgents(parent context.Context, cfg *runConfig) error {
 		return err
 	}
 
-	node, err := buildNode(cfg)
+	node, _, err := buildNode(cfg)
 	if err != nil {
 		return err
 	}

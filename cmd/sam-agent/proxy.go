@@ -73,7 +73,7 @@ func runProxy(parent context.Context, cfg *runConfig) error {
 		cfg.proxyTimeout = 30 * time.Second
 	}
 
-	node, err := buildNode(cfg)
+	node, _, err := buildNode(cfg)
 	if err != nil {
 		return err
 	}

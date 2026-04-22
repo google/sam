@@ -94,7 +94,7 @@ func runIdentityLogin(parent context.Context, cfg *runConfig, clientID string) e
 	fmt.Fprintf(os.Stderr, "Authorization successful. Issuing identity passport …\n")
 
 	// Build the node to obtain our stable PeerID.
-	node, err := buildNode(cfg)
+	node, _, err := buildNode(cfg)
 	if err != nil {
 		return err
 	}

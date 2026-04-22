@@ -45,7 +45,7 @@ func runPublishCard(parent context.Context, cfg *runConfig) error {
 		return fmt.Errorf("at least one --capability is required")
 	}
 
-	node, err := buildNode(cfg)
+	node, _, err := buildNode(cfg)
 	if err != nil {
 		return err
 	}
