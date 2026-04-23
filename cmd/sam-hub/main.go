@@ -16,12 +16,14 @@ import (
 	"github.com/libp2p/go-libp2p"
 	p2phttp "github.com/libp2p/go-libp2p-http"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
+	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/p2p/net/gostream"
 	"github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/relay"
 	libp2ptls "github.com/libp2p/go-libp2p/p2p/security/tls"
 	libp2pquic "github.com/libp2p/go-libp2p/p2p/transport/quic"
+
 	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
 	"github.com/spf13/cobra"
 	"golang.org/x/oauth2"
@@ -49,6 +51,8 @@ type Hub struct {
 	Verifier   *oidc.IDTokenVerifier
 	BiscuitKey ed25519.PrivateKey
 	MeshID     string
+	PubSub     *pubsub.PubSub
+	EventTopic *pubsub.Topic
 	gater      *hubConnGate
 }
 
@@ -112,6 +116,16 @@ func NewHub(ctx context.Context) (*Hub, error) {
 	}
 
 	h.Network().Notify(&notifier{hub: hub})
+	ps, err := pubsub.NewGossipSub(ctx, h)
+	if err != nil {
+		return nil, err
+	}
+	topic, err := ps.Join("sam/mesh/events/v1")
+	if err != nil {
+		return nil, err
+	}
+	hub.PubSub = ps
+	hub.EventTopic = topic
 	return hub, nil
 }
 

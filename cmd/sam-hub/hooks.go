@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -70,8 +72,26 @@ func (n *notifier) Connected(network.Network, network.Conn)          {}
 func (n *notifier) Disconnected(_ network.Network, c network.Conn) {
 	p := c.RemotePeer()
 	n.hub.gater.mu.Lock()
+	wasAuth := n.hub.gater.authenticated[p]
 	delete(n.hub.gater.authenticated, p)
 	delete(n.hub.gater.pending, p)
 	n.hub.gater.mu.Unlock()
 	fmt.Printf("[Mesh] Peer %s disconnected. Authorization cleared.\n", p)
+	if wasAuth {
+		event := MeshEvent{PeerID: p, Action: "LEFT"}
+		data, err := json.Marshal(event)
+		if err != nil {
+			fmt.Printf("Failed to marshal mesh event: %v\n", err)
+			return
+		}
+		// Notify the mesh about the peer disconnection
+		n.hub.EventTopic.Publish(context.Background(), data)
+		fmt.Printf("[Mesh] Peer %s left. Broadcasted departure to agents.\n", p)
+	}
+}
+
+// MeshEvent defines the message sent over Gossipsub
+type MeshEvent struct {
+	PeerID peer.ID `json:"peer_id"`
+	Action string  `json:"action"` // "JOINED", "LEFT", "BANNED"
 }
