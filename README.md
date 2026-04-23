@@ -1,88 +1,73 @@
 # SAM: Sovereign Agent Mesh
 
-SAM is a zero-trust, pure P2P networking layer for autonomous agents.
+SAM is a minimal libp2p-based mesh with two binaries:
 
-It is built for environments where centralized gateways and centralized trust are a liability. Agents discover each other over libp2p DHT, authenticate with passport biscuits, authorize capabilities with Biscuit caveats, and communicate directly over A2A streams.
+- `sam-hub`: OIDC bridge + Biscuit issuer + connection gater
+- `sam-node`: node identity/login flow + mesh node runtime
 
-## Why SAM
+The current repository intentionally focuses on basic functionality and testability.
 
-- Pure P2P: no API gateway in the data path
-- Zero-trust by default: every call is authenticated and authorized
-- Isolated mesh namespace: separate SAM protocol space and storage scope
-- Auditability: inspect tokens/cards and dry-run key flows
-
-## Quick Start
-
-### Build
+## Build
 
 ```bash
 make build
-./bin/sam-agent --help
+./bin/sam-node --help
 ./bin/sam-hub --help
 ```
 
-### Run tests
+## Basic Usage
+
+### 1. Run the hub
+
+```bash
+SAM_OIDC_ISSUER=https://issuer.example.com \
+SAM_OIDC_ID=sam-client \
+SAM_OIDC_SECRET=sam-secret \
+SAM_HUB_KEY=$(openssl rand -hex 32) \
+./bin/sam-hub
+```
+
+### 2. Login a node
+
+```bash
+./bin/sam-node login --hub http://localhost:8080
+```
+
+This prints a login URL. After authenticating in browser, paste the returned biscuit token back into the CLI prompt.
+
+### 3. Run a node
+
+```bash
+./bin/sam-node run
+```
+
+Or pass a token directly:
+
+```bash
+./bin/sam-node run --token <identity-biscuit>
+```
+
+## Testing
 
 ```bash
 make test
 make test-e2e
+make test-e2e-container
 ```
 
-### First workflow
+`test-e2e-container` runs a containerized BATS framework that starts:
 
-```bash
-# Authenticate
-sam-agent identity login --hub https://identity.example.com
-
-# Publish an agent capability
-sam-agent publish --skill risk-audit --mcp-port 8080
-
-# Call by capability
-sam-agent call risk-audit --message "audit this report"
-
-# Inspect credential artifacts
-sam-agent inspect biscuit "vendor-bot;allow_skill=risk-audit"
-```
+- a mock OIDC container
+- a `sam-hub` container
+- multiple `sam-node` containers
 
 ## Documentation
 
-- Docs site: https://aojea.github.io/sam
-- Manifesto: https://aojea.github.io/sam/#/README.md
-- User journey (dark mesh): https://aojea.github.io/sam/#/guides/dark-mesh.md
-- Hub as rendezvous point: https://aojea.github.io/sam/#/guides/hub-rendezvous.md
-- CLI reference: https://aojea.github.io/sam/#/cli/reference.md
-- Testing guide: https://aojea.github.io/sam/#/testing.md
-
-## Architecture
-
-SAM keeps control at the edge: discovery is federated, trust is verified locally, and execution stays peer-to-peer.
-
-```mermaid
-flowchart LR
-	A[Agent A / Caller] -->|Discover capability| DHT[(Federated DHT\n/sam/fed/<id>)]
-	DHT -->|Peer candidates| A
-	A -->|A2A stream + Vouch + Biscuit| B[Agent B / Callee]
-	B -->|Federation Gate\nverify vouch + peer identity| G[AuthZ Layer]
-	G -->|BiscuitSkillGate\nallow_skill(c)| E[MCP Resource / Skill]
-	E -->|Result| B
-	B -->|A2A response| A
-```
-
-Trust flow summary:
-
-- Discovery: agents find peers by capability in an isolated federation namespace.
-- Authentication: callee verifies caller identity with a locally trusted vouch.
-- Authorization: Biscuit caveats constrain which capability can be executed.
-- Execution: skill runs locally through the agent backend (JSON-RPC) and the response returns over A2A.
-
-## Development
-
-Key make targets:
-
-- `make build`
-- `make test`
-- `make test-e2e`
-- `make lint`
+- Docs index: `docs/index.html`
+- Project docs landing page: `docs/README.md`
+- Quickstart: `docs/quickstart.md`
+- CLI reference: `docs/cli/reference.md`
+- Testing guide: `docs/testing.md`
 
 ## License
 

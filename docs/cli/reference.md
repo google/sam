@@ -1,169 +1,72 @@
-# SAM CLI Reference
+# CLI Reference
 
-SAM uses a kubectl-style command hierarchy with shared node/runtime flags.
+The current repository exposes two CLIs:
 
-## Global Flags
+- `sam-node`
+- `sam-hub`
 
-Most commands accept these shared flags:
-
-| Flag | Type | Default | Description |
-|------|------|---------|-------------|
-| `--listen` | stringSlice | `/ip4/0.0.0.0/udp/0/quic-v1` | libp2p listen multiaddrs |
-| `--bootstrap` | stringSlice | empty | bootstrap peer multiaddrs |
-| `--dht-mode` | string | `client` | DHT mode: `client`, `server`, `auto` |
-| `--relay-service` | bool | `false` | enable relay service |
-| `--user-agent` | string | `sam/0.1.0` | libp2p user-agent |
-| `--run-for` | duration | `0` | optional duration before graceful shutdown |
-| `--hub` | string | empty | OIDC hub URL for identity login/passport issuance |
-| `--identity` | string | empty | PEM-encoded Ed25519 private key path |
-| `--debug` | bool | `false` | enable debug logging |
-
-## sam-agent identity
-
-Authentication and credential management.
-
-### sam-agent identity login
-
-Authenticate with the hub using device flow and store credentials plus passport biscuit locally.
+## sam-node
 
 ```bash
-sam-agent identity login --hub https://identity.acme.corp
+sam-node --help
 ```
 
-### sam-agent identity whoami
+### sam-node login
 
-Show current authenticated identity.
+Start the login flow and persist identity biscuit in the local store.
 
 ```bash
-sam-agent identity whoami
+sam-node login --hub http://localhost:8080
 ```
 
-## sam-agent publish
+Flags:
 
-Publish an agent card to DHT namespaces.
+- `--hub`: hub base URL (default `http://localhost:8080`)
 
-### Quick Mode
+### sam-node run
+
+Start the mesh node.
 
 ```bash
-sam-agent publish --skill risk-audit --mcp-port 8080
+sam-node run
 ```
 
-Useful flags:
-- `--skill` or repeatable `--capability`
-- `--mcp-port`
-- `--republish-every`
-- `--dry-run=client|server`
-- `--resource-name`, `--resource-kind`, `--resource-endpoint`, `--resource-description`
+Flags:
 
-### sam-agent publish card
+- `--token`: identity biscuit override (if omitted, load from local store)
+- `--listen`: repeatable libp2p listen addresses
+
+Examples:
 
 ```bash
-sam-agent publish card --file agent-card.json --republish-every 5m
+sam-node run --token <identity-biscuit>
+sam-node run --listen /ip4/0.0.0.0/udp/5001/quic-v1 --listen /ip4/0.0.0.0/tcp/5002
 ```
 
-### sam-agent publish mcp
+## sam-hub
 
 ```bash
-sam-agent publish mcp --port 8080 --name "Risk Audit Tool"
+sam-hub --help
 ```
 
-## sam-agent call
+`sam-hub` runs the OIDC bridge, issues identity biscuits, and gates unauthenticated peers.
 
-Execute an A2A task against a remote agent.
+Flags:
+
+- `--issuer`: OIDC issuer URL
+- `--client-id`: OIDC client ID
+- `--client-secret`: OIDC client secret
+- `--key`: 32-byte hex seed used to derive Ed25519 biscuit signing key
+- `--listen`: repeatable libp2p listen addresses
+- `--mesh`: mesh name
+- `--public-url`: public callback base URL
+
+Example:
 
 ```bash
-sam-agent call risk-audit --message "Audit the Q1 risk report"
+sam-hub \
+  --issuer https://issuer.example.com \
+  --client-id sam-client \
+  --client-secret sam-secret \
+  --key $(openssl rand -hex 32)
 ```
-
-Useful flags:
-- `--message`
-- `--biscuit`
-- `--timeout`
-- `--amount`, `--asset`, `--nonce`
-- `--dry-run=client|server`
-
-## sam-agent proxy
-
-Start a local HTTP proxy that tunnels over SAM.
-
-```bash
-sam-agent proxy --port 8081
-```
-
-Useful flags:
-- `--port`
-- `--target-header`
-- `--biscuit`
-- `--timeout`
-
-## sam-agent inspect
-
-Decode local artifacts for auditing.
-
-### sam-agent inspect biscuit
-
-```bash
-sam-agent inspect biscuit "alice;allow_skill=risk-audit,weather-bot"
-```
-
-### sam-agent inspect card
-
-```bash
-sam-agent inspect card '{"peer_id":"...","agent_card":{...}}'
-```
-
-## sam-agent mesh
-
-Mesh visibility commands.
-
-### sam-agent mesh get agents
-
-```bash
-sam-agent mesh get agents
-sam-agent mesh get agents --capability risk-audit
-sam-agent mesh get agents --watch -o json
-```
-
-## sam-agent up
-
-Start a SAM node and wait for shutdown.
-
-```bash
-sam-agent up \
-  --listen /ip4/0.0.0.0/udp/4001/quic-v1 \
-  --bootstrap /ip4/192.168.1.100/udp/4001/quic-v1/p2p/12D3KooXA7cBj4VKrpv7HzKLmvnWKLVqZZHJm9NyN6Td3Y4hMWjK
-```
-
-## Patterns
-
-### Publish workflow
-
-```bash
-# Preview card locally
-sam-agent publish --skill new-capability --mcp-port 9000 --dry-run=client
-
-# Publish to mesh
-sam-agent publish --skill new-capability --mcp-port 9000
-```
-
-### Call workflow with Biscuit
-
-```bash
-TOKEN="partner-bot;allow_skill=risk-audit"
-sam-agent inspect biscuit "$TOKEN"
-sam-agent call risk-audit --biscuit "$TOKEN" --message "Check compliance"
-```
-
-## Dry-Run Philosophy
-
-Dry-run modes support audit transparency and safe rollout:
-
-- `--dry-run=client`: build and validate payloads locally, no network activity
-- `--dry-run=server`: initialize runtime, skip final network commit
-
-Use these to preview behavior, capture JSON artifacts for security review, and gate CI checks.
-
-## Next Steps
-
-- **[User Journey Guide](#/guides/dark-mesh.md)**: scenario walkthrough
-- **[FAQ](#/faq.md)**: troubleshooting and operational tips
