@@ -1,0 +1,10 @@
+FROM alpine:3.20
+
+RUN addgroup -S sam && adduser -S -G sam sam
+
+COPY bin/sam-node /usr/local/bin/sam-node
+COPY bin/sam-hub /usr/local/bin/sam-hub
+RUN chmod +x /usr/local/bin/sam-node /usr/local/bin/sam-hub
+
+USER sam
+WORKDIR /home/sam

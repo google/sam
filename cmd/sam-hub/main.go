@@ -297,6 +297,7 @@ func main() {
 			fmt.Printf("SAM Hub Online (QUIC + TCP)\n")
 			fmt.Printf("MeshID: %s\n", h.MeshID)
 			fmt.Printf("PeerID: %s\n", h.Host.ID())
+			select {}
 		},
 	}
 

@@ -30,7 +30,13 @@ test-e2e: build
 			exit 1; \
 		fi; \
 	}
-	SAM_BINARY=$(OUT_DIR)/sam-node bats --verbose-run tests/e2e/
+	SAM_NODE_BINARY=$(OUT_DIR)/sam-node SAM_HUB_BINARY=$(OUT_DIR)/sam-hub bats --verbose-run tests/e2e/
+
+test-e2e-container: build
+	@command -v docker >/dev/null 2>&1 || { echo "docker not found"; exit 1; }
+	@docker info >/dev/null 2>&1 || { echo "docker daemon is not running"; exit 1; }
+	@command -v bats >/dev/null 2>&1 || { echo "bats not found"; exit 1; }
+	bats --verbose-run tests/e2e/container_mesh.bats
 
 # code linters
 lint:
