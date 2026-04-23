@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
@@ -55,4 +56,22 @@ func (g *hubConnGate) InterceptUpgraded(c network.Conn) (bool, control.Disconnec
 
 	// REJECT BY DEFAULT: If not authenticated via OIDC, block any other protocol
 	return g.authenticated[c.RemotePeer()], control.DisconnectReason(0)
+}
+
+var _ network.Notifiee = (*notifier)(nil)
+
+type notifier struct {
+	hub *Hub
+}
+
+func (n *notifier) Listen(network.Network, multiaddr.Multiaddr)      {}
+func (n *notifier) ListenClose(network.Network, multiaddr.Multiaddr) {}
+func (n *notifier) Connected(network.Network, network.Conn)          {}
+func (n *notifier) Disconnected(_ network.Network, c network.Conn) {
+	p := c.RemotePeer()
+	n.hub.gater.mu.Lock()
+	delete(n.hub.gater.authenticated, p)
+	delete(n.hub.gater.pending, p)
+	n.hub.gater.mu.Unlock()
+	fmt.Printf("[Mesh] Peer %s disconnected. Authorization cleared.\n", p)
 }

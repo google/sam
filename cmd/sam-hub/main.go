@@ -27,16 +27,9 @@ import (
 	"golang.org/x/oauth2"
 )
 
-// Hub handles identity bridging and network discovery
-type Hub struct {
-	Host       host.Host
-	DHT        *dht.IpfsDHT
-	OIDCConfig *oauth2.Config
-	Verifier   *oidc.IDTokenVerifier
-	BiscuitKey ed25519.PrivateKey
-	MeshID     string
-	gater      *hubConnGate
-}
+const (
+	GracePeriod = 60 * time.Second
+)
 
 var (
 	oidcIssuer   string
@@ -47,6 +40,17 @@ var (
 	meshName     string
 	publicAddr   string
 )
+
+// Hub handles identity bridging and network discovery
+type Hub struct {
+	Host       host.Host
+	DHT        *dht.IpfsDHT
+	OIDCConfig *oauth2.Config
+	Verifier   *oidc.IDTokenVerifier
+	BiscuitKey ed25519.PrivateKey
+	MeshID     string
+	gater      *hubConnGate
+}
 
 // NewHub starts a host supporting both QUIC and TCP (with TLS 1.3)
 func NewHub(ctx context.Context) (*Hub, error) {
@@ -84,14 +88,6 @@ func NewHub(ctx context.Context) (*Hub, error) {
 		return nil, err
 	}
 
-	conf := &oauth2.Config{
-		ClientID:     clientID,
-		ClientSecret: clientSecret,
-		Endpoint:     provider.Endpoint(),
-		RedirectURL:  fmt.Sprintf("%s/callback", publicAddr),
-		Scopes:       []string{oidc.ScopeOpenID, "profile", "email"},
-	}
-
 	// SAM_HUB_KEY stores an ed25519 seed as a 32-byte hex value.
 	keyBytes, err := hex.DecodeString(biscuitHex)
 	if err != nil || len(keyBytes) != 32 {
@@ -99,15 +95,24 @@ func NewHub(ctx context.Context) (*Hub, error) {
 	}
 	bKey := ed25519.NewKeyFromSeed(keyBytes)
 
-	return &Hub{
-		Host:       h,
-		DHT:        kadDHT,
-		OIDCConfig: conf,
+	hub := &Hub{
+		Host:  h,
+		DHT:   kadDHT,
+		gater: gater,
+		OIDCConfig: &oauth2.Config{
+			ClientID:     clientID,
+			ClientSecret: clientSecret,
+			Endpoint:     provider.Endpoint(),
+			RedirectURL:  fmt.Sprintf("%s/callback", publicAddr),
+			Scopes:       []string{oidc.ScopeOpenID, "profile", "email"},
+		},
 		Verifier:   provider.Verifier(&oidc.Config{ClientID: clientID}),
 		BiscuitKey: bKey,
 		MeshID:     meshName,
-		gater:      gater,
-	}, nil
+	}
+
+	h.Network().Notify(&notifier{hub: hub})
+	return hub, nil
 }
 
 func (h *Hub) handleLogin(w http.ResponseWriter, r *http.Request) {
@@ -218,9 +223,31 @@ func (h *Hub) issueStandardBiscuit(p peer.ID, sub string, email string, groups [
 	if err != nil {
 		return "", err
 	}
-	data, _ := t.Serialize()
+	data, err := t.Serialize()
+	if err != nil {
+		return "", err
+	}
 	return base64.StdEncoding.EncodeToString(data), nil
 }
+
+func (h *Hub) startWatchdog() {
+	go func() {
+		ticker := time.NewTicker(10 * time.Second)
+		for range ticker.C {
+			h.gater.mu.Lock()
+			now := time.Now()
+			for pID, connectedAt := range h.gater.pending {
+				if now.Sub(connectedAt) > GracePeriod {
+					fmt.Printf("[Security] Evicting unauthenticated peer: %s\n", pID)
+					h.Host.Network().ClosePeer(pID)
+					delete(h.gater.pending, pID)
+				}
+			}
+			h.gater.mu.Unlock()
+		}
+	}()
+}
+
 func main() {
 	rootCmd := &cobra.Command{
 		Use:   "sam-hub",
@@ -233,34 +260,7 @@ func main() {
 			}
 
 			// Watchdog: Expel peers that connect but never finish OIDC
-			go func() {
-				const timeout = 60 * time.Second
-				ticker := time.NewTicker(10 * time.Second)
-				defer ticker.Stop()
-
-				for {
-					select {
-					case <-ctx.Done():
-						return
-					case <-ticker.C:
-						h.gater.mu.Lock()
-						now := time.Now()
-						for pID, startTime := range h.gater.pending {
-							if now.Sub(startTime) > timeout {
-								log.Printf("GATER: Evicting peer %s (OIDC timeout exceeded)", pID)
-
-								// 1. Physically sever the swarm connection
-								h.Host.Network().ClosePeer(pID)
-
-								// 2. Cleanup gater state
-								delete(h.gater.authenticated, pID)
-								delete(h.gater.pending, pID)
-							}
-						}
-						h.gater.mu.Unlock()
-					}
-				}
-			}()
+			h.startWatchdog()
 
 			mux := http.NewServeMux()
 			mux.HandleFunc("/login", h.handleLogin)
