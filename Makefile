@@ -6,7 +6,7 @@ CGO_ENABLED=0
 export GOROOT GO111MODULE CGO_ENABLED
 
 build:
-	go build -v -o "$(OUT_DIR)/sam-agent" ./cmd/sam-agent
+	go build -v -o "$(OUT_DIR)/sam-node" ./cmd/sam-node
 	go build -v -o "$(OUT_DIR)/sam-hub" ./cmd/sam-hub
 
 clean:
@@ -30,7 +30,7 @@ test-e2e: build
 			exit 1; \
 		fi; \
 	}
-	SAM_BINARY=$(OUT_DIR)/sam-agent bats --verbose-run tests/e2e/
+	SAM_BINARY=$(OUT_DIR)/sam-node bats --verbose-run tests/e2e/
 
 # code linters
 lint:
