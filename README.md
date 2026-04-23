@@ -73,7 +73,7 @@ Trust flow summary:
 - Discovery: agents find peers by capability in an isolated federation namespace.
 - Authentication: callee verifies caller identity with a locally trusted vouch.
 - Authorization: Biscuit caveats constrain which capability can be executed.
-- Execution: skill runs locally (for example via MCP) and response returns over A2A.
+- Execution: skill runs locally through the agent backend (JSON-RPC) and the response returns over A2A.
 
 ## Development
 

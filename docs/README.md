@@ -139,7 +139,7 @@ Agent A                          DHT (Discovery)               Agent B
   │                                                                ├─ Check vouch
   ├─ Send A2A request ──────────────────────────────────────────→│ BiscuitGate
   │                                                                ├─ Verify skill
-  │                                 ← ── MCP Response ────────────┤ Execute
+  │                                 ← ── Task Response ────────────┤ Execute
   │                                                                │
   └─ Return result to CLI                                          │
 ```

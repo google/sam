@@ -6,7 +6,7 @@ The **A2A (Agent-to-Agent)** protocol is how agents call skills offered by other
 
 - **Transport**: libp2p streams (TLS-encrypted)
 - **Port/Namespace**: `/sam/a2a/1.0` 
-- **Message Format**: JSON-RPC 2.0 + MCP
+- **Message Format**: JSON-RPC 2.0 task envelope
 - **Authentication**: Vouch (federation membership)
 - **Authorization**: Biscuit token (skill access)
 
@@ -79,8 +79,8 @@ Client                           Server
 {
   "jsonrpc": "2.0",           // Protocol version
   "id": "string",             // Request ID (echo in response)
-  "method": "message",        // Always "message" (MCP calls skill)
-  "params": {                 // MCP parameters
+  "method": "message",        // Always "message" (A2A task request)
+  "params": {                 // task parameters
     "message": "..."          // Natural-language prompt
   }
 }
@@ -158,7 +158,7 @@ If no → Return ErrSkillNotAllowed
 
 ### Step 3: Execution
 
-Server calls local MCP endpoint with the skill request.
+Server calls the local agent backend with the skill request.
 
 ```
 POST http://127.0.0.1:8080
@@ -196,7 +196,7 @@ Server returns response to client
 | `ErrNotInFederation` | Vouch not in federation | Authenticate: `sam-agent identity login --hub <url>` |
 | `ErrVouchExpired` | Vouch timestamp > expiry | Re-authenticate: `sam-agent identity login --hub <url>` |
 | `ErrSkillNotAllowed` | Skill not in Biscuit caveats | Get new Biscuit with skill, or ask for permission |
-| `ErrMCPFailed` | MCP server error | Check MCP server logs |
+| `ErrBackendFailed` | Local backend error | Check local backend logs |
 
 ---
 
@@ -210,7 +210,7 @@ Server returns response to client
 3. Server validates vouch (FederationGate)
 4. Client sends biscuit header + skill request
 5. Server validates biscuit (BiscuitSkillGate)
-6. Server executes skill (calls local MCP)
+6. Server executes skill (calls local backend)
 7. Server sends response
 8. Stream closes
 ```
@@ -266,8 +266,8 @@ func (s *A2AService) handleStream(stream libp2pnet.Stream) error {
         return fmt.Errorf("decoding request: %w", err)
     }
 
-    // 7. Execute skill (call local MCP)
-    resp, err := s.executeMCP(ctx, capability, req.Params)
+    // 7. Execute skill (call local backend)
+    resp, err := s.executeBackend(ctx, capability, req.Params)
     if err != nil {
         return fmt.Errorf("executing skill: %w", err)
     }
@@ -370,7 +370,7 @@ Typical A2A call latency:
 - DHT discovery: 500ms - 5s (cached after first call)
 - Stream setup: 50-200ms
 - RPC roundtrip: 100-500ms
-- MCP execution: 1-10s (depends on implementation)
+- Backend execution: 1-10s (depends on implementation)
 - **Total**: 2-15 seconds
 
 ### Firewalls
