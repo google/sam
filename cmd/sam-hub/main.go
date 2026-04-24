@@ -200,20 +200,21 @@ func (h *Hub) handleCallback(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// issueStandardBiscuit creates a biscuit with standard facts for user, email, groups, and hardware binding (peer ID).
 func (h *Hub) issueStandardBiscuit(p peer.ID, sub string, email string, groups []string) (string, error) {
 	builder := biscuit.NewBuilder(h.BiscuitKey)
 
-	// user_id mapping (sub)
+	// user mapping (sub)
 	if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
-		Name: "user_id",
+		Name: "user",
 		IDs:  []biscuit.Term{biscuit.String(sub)},
 	}}); err != nil {
 		return "", err
 	}
 
-	// user_email mapping (email)
+	// email mapping (email)
 	if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
-		Name: "user_email",
+		Name: "email",
 		IDs:  []biscuit.Term{biscuit.String(email)},
 	}}); err != nil {
 		return "", err
@@ -231,7 +232,7 @@ func (h *Hub) issueStandardBiscuit(p peer.ID, sub string, email string, groups [
 
 	// peer_id mapping (hardware binding)
 	if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
-		Name: "peer_id",
+		Name: "node",
 		IDs:  []biscuit.Term{biscuit.String(p.String())},
 	}}); err != nil {
 		return "", err
@@ -239,7 +240,7 @@ func (h *Hub) issueStandardBiscuit(p peer.ID, sub string, email string, groups [
 
 	// mesh_id mapping (namespace)
 	if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
-		Name: "mesh_id",
+		Name: "namespace",
 		IDs:  []biscuit.Term{biscuit.String(h.MeshID)},
 	}}); err != nil {
 		return "", err
