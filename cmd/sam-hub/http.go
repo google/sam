@@ -18,6 +18,7 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -91,21 +92,49 @@ func (h *Hub) handleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rawID, _ := token.Extra("id_token").(string)
-	idToken, err := h.Verifier.Verify(ctx, rawID)
-	if err != nil {
-		http.Error(w, "ID Token verification failed", http.StatusUnauthorized)
-		return
-	}
-	// standard claims mapping
 	var claims struct {
 		Subject string   `json:"sub"`
 		Email   string   `json:"email"`
 		Groups  []string `json:"groups"`
 	}
-	if err := idToken.Claims(&claims); err != nil {
-		http.Error(w, "Failed to parse claims", 500)
-		return
+
+	if h.AuthProvider == "oauth2" {
+		req, _ := http.NewRequest("GET", h.OAuth2UserURL, nil)
+		req.Header.Set("Authorization", "Bearer "+token.AccessToken)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil || resp.StatusCode != 200 {
+			http.Error(w, "Failed to fetch user info from OAuth2 provider", 500)
+			return
+		}
+		defer resp.Body.Close()
+
+		var userData map[string]interface{}
+		if err := json.NewDecoder(resp.Body).Decode(&userData); err != nil {
+			http.Error(w, "Failed to parse user info JSON", 500)
+			return
+		}
+
+		if sub, ok := userData[h.OAuth2UserField]; ok {
+			claims.Subject = fmt.Sprintf("%v", sub)
+		} else {
+			http.Error(w, "User ID field not found in response", 500)
+			return
+		}
+
+		if email, ok := userData[h.OAuth2EmailField]; ok {
+			claims.Email = fmt.Sprintf("%v", email)
+		}
+	} else {
+		rawID, _ := token.Extra("id_token").(string)
+		idToken, err := h.Verifier.Verify(ctx, rawID)
+		if err != nil {
+			http.Error(w, "ID Token verification failed", http.StatusUnauthorized)
+			return
+		}
+		if err := idToken.Claims(&claims); err != nil {
+			http.Error(w, "Failed to parse claims", 500)
+			return
+		}
 	}
 
 	p, err := peer.Decode(peerIDStr)

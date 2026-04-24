@@ -48,14 +48,20 @@ const (
 )
 
 var (
-	oidcIssuer   string
-	clientID     string
-	clientSecret string
-	biscuitHex   string
-	listenAddrs  []string
-	meshName     string
-	publicAddr   string
-	httpAddr     string // Mandatory HTTP listener flag
+	authProvider     string
+	oidcIssuer       string
+	clientID         string
+	clientSecret     string
+	biscuitHex       string
+	listenAddrs      []string
+	meshName         string
+	publicAddr       string
+	httpAddr         string // Mandatory HTTP listener flag
+	oauth2AuthURL    string
+	oauth2TokenURL   string
+	oauth2UserURL    string
+	oauth2UserField  string
+	oauth2EmailField string
 )
 
 // Hub handles identity bridging and network discovery
@@ -68,7 +74,11 @@ type Hub struct {
 	MeshID     string
 	PubSub     *pubsub.PubSub
 	EventTopic *pubsub.Topic
-	gater      *hubConnGate
+	gater            *hubConnGate
+	AuthProvider     string
+	OAuth2UserURL    string
+	OAuth2UserField  string
+	OAuth2EmailField string
 }
 
 // NewHub starts a host supporting both QUIC and TCP (with TLS 1.3)
@@ -102,9 +112,33 @@ func NewHub(ctx context.Context) (*Hub, error) {
 		return nil, err
 	}
 
-	provider, err := oidc.NewProvider(ctx, oidcIssuer)
-	if err != nil {
-		return nil, err
+	var oidcConfig *oauth2.Config
+	var verifier *oidc.IDTokenVerifier
+
+	if authProvider == "oauth2" {
+		oidcConfig = &oauth2.Config{
+			ClientID:     clientID,
+			ClientSecret: clientSecret,
+			Endpoint: oauth2.Endpoint{
+				AuthURL:  oauth2AuthURL,
+				TokenURL: oauth2TokenURL,
+			},
+			RedirectURL: fmt.Sprintf("%s/callback", publicAddr),
+			Scopes:      []string{"user:email"},
+		}
+	} else {
+		provider, err := oidc.NewProvider(ctx, oidcIssuer)
+		if err != nil {
+			return nil, err
+		}
+		oidcConfig = &oauth2.Config{
+			ClientID:     clientID,
+			ClientSecret: clientSecret,
+			Endpoint:     provider.Endpoint(),
+			RedirectURL:  fmt.Sprintf("%s/callback", publicAddr),
+			Scopes:       []string{oidc.ScopeOpenID, "profile", "email"},
+		}
+		verifier = provider.Verifier(&oidc.Config{ClientID: clientID})
 	}
 
 	// SAM_HUB_KEY stores an ed25519 seed as a 32-byte hex value.
@@ -115,19 +149,17 @@ func NewHub(ctx context.Context) (*Hub, error) {
 	bKey := ed25519.NewKeyFromSeed(keyBytes)
 
 	hub := &Hub{
-		Host:  h,
-		DHT:   kadDHT,
-		gater: gater,
-		OIDCConfig: &oauth2.Config{
-			ClientID:     clientID,
-			ClientSecret: clientSecret,
-			Endpoint:     provider.Endpoint(),
-			RedirectURL:  fmt.Sprintf("%s/callback", publicAddr),
-			Scopes:       []string{oidc.ScopeOpenID, "profile", "email"},
-		},
-		Verifier:   provider.Verifier(&oidc.Config{ClientID: clientID}),
-		BiscuitKey: bKey,
-		MeshID:     meshName,
+		Host:             h,
+		DHT:              kadDHT,
+		gater:            gater,
+		OIDCConfig:       oidcConfig,
+		Verifier:         verifier,
+		BiscuitKey:       bKey,
+		MeshID:           meshName,
+		AuthProvider:     authProvider,
+		OAuth2UserURL:    oauth2UserURL,
+		OAuth2UserField:  oauth2UserField,
+		OAuth2EmailField: oauth2EmailField,
 	}
 
 	h.Network().Notify(&notifier{hub: hub})
@@ -276,7 +308,13 @@ func main() {
 		},
 	}
 
+	rootCmd.Flags().StringVar(&authProvider, "auth-provider", "oidc", "Authentication provider (oidc or oauth2)")
 	rootCmd.Flags().StringVar(&oidcIssuer, "issuer", os.Getenv("SAM_OIDC_ISSUER"), "OIDC Issuer URL")
+	rootCmd.Flags().StringVar(&oauth2AuthURL, "oauth2-auth-url", "", "OAuth2 Authorization URL")
+	rootCmd.Flags().StringVar(&oauth2TokenURL, "oauth2-token-url", "", "OAuth2 Token URL")
+	rootCmd.Flags().StringVar(&oauth2UserURL, "oauth2-user-url", "", "OAuth2 User Info URL")
+	rootCmd.Flags().StringVar(&oauth2UserField, "oauth2-user-field", "id", "JSON field for User ID")
+	rootCmd.Flags().StringVar(&oauth2EmailField, "oauth2-email-field", "email", "JSON field for Email")
 	rootCmd.Flags().StringVar(&clientID, "client-id", os.Getenv("SAM_OIDC_ID"), "OIDC Client ID")
 	rootCmd.Flags().StringVar(&clientSecret, "client-secret", os.Getenv("SAM_OIDC_SECRET"), "OIDC Client Secret")
 	rootCmd.Flags().StringVar(&biscuitHex, "key", os.Getenv("SAM_HUB_KEY"), "Hub Private Key (32-byte Hex)")
