@@ -54,10 +54,10 @@ update:
 	go mod tidy
 
 docker-build-hub:
-	docker build -t sam-hub:latest -f Dockerfile.sam-hub .
+	docker build -t sam-hub:local -f Dockerfile.sam-hub .
 
 docker-build-node:
-	docker build -t sam-node:latest -f Dockerfile.sam-node .
+	docker build -t sam-node:local -f Dockerfile.sam-node .
 
 docker-build: docker-build-hub docker-build-node
 

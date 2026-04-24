@@ -150,7 +150,7 @@ EOF
       --name "${name}" \
       --network "${MESH_NETWORK}" \
       --network-alias sam-hub \
-      "sam-hub:latest" \
+      "sam-hub:local" \
       --issuer "http://mock-oidc:18080" \
       --client-id "sam-e2e" \
       --client-secret "sam-e2e-secret" \
@@ -172,7 +172,7 @@ EOF
       --name "${name}" \
       --network "${MESH_NETWORK}" \
       --network-alias "sam-node-${idx}" \
-      "sam-node:latest" \
+      "sam-node:local" \
       run \
       --hub "http://sam-hub:8080" \
       --token "token-${idx}" \
