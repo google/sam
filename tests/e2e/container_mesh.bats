@@ -11,7 +11,6 @@ setup() {
     skip "missing binaries; run: make build"
   fi
 
-  mesh_build_runtime_image
   mesh_setup_env
 }
 

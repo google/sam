@@ -1,0 +1,12 @@
+# Stage 1: Build
+FROM golang:1.25.7 AS builder
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build -buildvcs=false -o sam-node ./cmd/sam-node
+
+# Stage 2: Final
+FROM gcr.io/distroless/static:latest
+COPY --from=builder /app/sam-node /
+ENTRYPOINT ["/sam-node"]

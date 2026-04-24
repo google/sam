@@ -150,8 +150,7 @@ EOF
       --name "${name}" \
       --network "${MESH_NETWORK}" \
       --network-alias sam-hub \
-      "${MESH_RUNTIME_IMAGE}" \
-      /usr/local/bin/sam-hub \
+      "sam-hub:latest" \
       --issuer "http://mock-oidc:18080" \
       --client-id "sam-e2e" \
       --client-secret "sam-e2e-secret" \
@@ -173,8 +172,8 @@ EOF
       --name "${name}" \
       --network "${MESH_NETWORK}" \
       --network-alias "sam-node-${idx}" \
-      "${MESH_RUNTIME_IMAGE}" \
-      /usr/local/bin/sam-node run \
+      "sam-node:latest" \
+      run \
       --hub "http://sam-hub:8080" \
       --token "token-${idx}" \
       --listen "/ip4/0.0.0.0/udp/5001/quic-v1" \

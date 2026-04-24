@@ -36,7 +36,7 @@ test-e2e: build
 	}
 	SAM_NODE_BINARY=$(OUT_DIR)/sam-node SAM_HUB_BINARY=$(OUT_DIR)/sam-hub bats --verbose-run tests/e2e/
 
-test-e2e-container: build
+test-e2e-container: docker-build
 	@command -v docker >/dev/null 2>&1 || { echo "docker not found"; exit 1; }
 	@docker info >/dev/null 2>&1 || { echo "docker daemon is not running"; exit 1; }
 	@command -v bats >/dev/null 2>&1 || { echo "bats not found"; exit 1; }
@@ -52,3 +52,13 @@ verify:
 
 update:
 	go mod tidy
+
+docker-build-hub:
+	docker build -t sam-hub:latest -f Dockerfile.sam-hub .
+
+docker-build-node:
+	docker build -t sam-node:latest -f Dockerfile.sam-node .
+
+docker-build: docker-build-hub docker-build-node
+
+.PHONY: docker-build-hub docker-build-node docker-build
