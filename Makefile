@@ -46,5 +46,9 @@ test-e2e-container: build
 lint:
 	hack/lint.sh
 
+.PHONY: verify
+verify:
+	./hack/verify-generated.sh
+
 update:
 	go mod tidy
