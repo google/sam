@@ -23,7 +23,7 @@ import (
 	"time"
 )
 
-func TestSamNodeRunWithManualTokenStarts(t *testing.T) {
+func TestSamNodeLogin(t *testing.T) {
 	nodeBin := buildBinary(t, "./cmd/sam-node")
 	_, hubAddr := startMockLibp2pHub(t)
 	tmpHome := t.TempDir()
@@ -32,7 +32,32 @@ func TestSamNodeRunWithManualTokenStarts(t *testing.T) {
 		"XDG_CONFIG_HOME="+filepath.Join(tmpHome, ".config"),
 	)
 
+	// We simulate the user pasting the token followed by a newline.
+	stdin := "test-jwt-token\n"
+
 	stdout, stderr, err := runCommand(
+		t,
+		repoRoot(t),
+		5*time.Second,
+		env,
+		stdin,
+		nodeBin,
+		"login",
+		"--hub", hubAddr,
+		"--token-url", "http://example.com/token",
+	)
+	if err != nil {
+		t.Fatalf("login command failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+	}
+
+	out := stdout + stderr
+	if !strings.Contains(out, "Login successful and identity stored.") {
+		t.Fatalf("login did not succeed:\n%s", out)
+	}
+
+	// Verify that the identity is actually stored.
+	// We can try to run the node without flags now!
+	stdout, stderr, err = runCommand(
 		t,
 		repoRoot(t),
 		3*time.Second,
@@ -41,15 +66,14 @@ func TestSamNodeRunWithManualTokenStarts(t *testing.T) {
 		nodeBin,
 		"run",
 		"--hub", hubAddr,
-		"--jwt", "test-jwt",
-		"--listen", "/ip4/127.0.0.1/udp/0/quic-v1",
-		"--listen", "/ip4/127.0.0.1/tcp/0",
 	)
+	// We expect it to keep running because it uses stored identity.
 	if err != context.DeadlineExceeded {
-		t.Fatalf("expected run command to keep running until timeout, got: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+		t.Fatalf("expected run command to keep running, got: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
 	}
-	out := stdout + stderr
-	if !strings.Contains(out, "SAM Node Online") {
-		t.Fatalf("node did not reach online state:\n%s", out)
+
+	out = stdout + stderr
+	if !strings.Contains(out, "Using stored identity.") {
+		t.Fatalf("node did not use stored identity:\n%s", out)
 	}
 }

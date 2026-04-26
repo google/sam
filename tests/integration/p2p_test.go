@@ -30,11 +30,11 @@ func TestSamNodeRunWithoutIdentity(t *testing.T) {
 		"XDG_CONFIG_HOME=" + filepath.Join(tmpHome, ".config"),
 	}
 	stdout, stderr, err := runCommand(t, repoRoot(t), 10*time.Second, append(os.Environ(), env...), "", nodeBin, "run")
-	if err != nil {
-		t.Fatalf("sam-node run without identity failed unexpectedly: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+	if err == nil {
+		t.Fatalf("expected sam-node run without identity to fail, but it succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
 	}
 	out := stdout + stderr
-	if !strings.Contains(out, "No identity found") {
+	if !strings.Contains(out, "No JWT or stored identity found") {
 		t.Fatalf("expected missing identity message, got:\n%s", out)
 	}
 }

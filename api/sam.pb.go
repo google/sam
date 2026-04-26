@@ -471,6 +471,134 @@ func (x *RevocationMsg) GetSignature() []byte {
 	return nil
 }
 
+type EnrollRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Jwt           string                 `protobuf:"bytes,1,opt,name=jwt,proto3" json:"jwt,omitempty"`
+	PeerId        string                 `protobuf:"bytes,2,opt,name=peer_id,json=peerId,proto3" json:"peer_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EnrollRequest) Reset() {
+	*x = EnrollRequest{}
+	mi := &file_api_sam_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EnrollRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EnrollRequest) ProtoMessage() {}
+
+func (x *EnrollRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_api_sam_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EnrollRequest.ProtoReflect.Descriptor instead.
+func (*EnrollRequest) Descriptor() ([]byte, []int) {
+	return file_api_sam_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *EnrollRequest) GetJwt() string {
+	if x != nil {
+		return x.Jwt
+	}
+	return ""
+}
+
+func (x *EnrollRequest) GetPeerId() string {
+	if x != nil {
+		return x.PeerId
+	}
+	return ""
+}
+
+type EnrollResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	BiscuitToken  []byte                 `protobuf:"bytes,1,opt,name=biscuit_token,json=biscuitToken,proto3" json:"biscuit_token,omitempty"`
+	ErrorMessage  string                 `protobuf:"bytes,2,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
+	HubPublicKey  []byte                 `protobuf:"bytes,3,opt,name=hub_public_key,json=hubPublicKey,proto3" json:"hub_public_key,omitempty"`
+	HubAddresses  []string               `protobuf:"bytes,4,rep,name=hub_addresses,json=hubAddresses,proto3" json:"hub_addresses,omitempty"`
+	Expiration    int64                  `protobuf:"varint,5,opt,name=expiration,proto3" json:"expiration,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EnrollResponse) Reset() {
+	*x = EnrollResponse{}
+	mi := &file_api_sam_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EnrollResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EnrollResponse) ProtoMessage() {}
+
+func (x *EnrollResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_api_sam_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EnrollResponse.ProtoReflect.Descriptor instead.
+func (*EnrollResponse) Descriptor() ([]byte, []int) {
+	return file_api_sam_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *EnrollResponse) GetBiscuitToken() []byte {
+	if x != nil {
+		return x.BiscuitToken
+	}
+	return nil
+}
+
+func (x *EnrollResponse) GetErrorMessage() string {
+	if x != nil {
+		return x.ErrorMessage
+	}
+	return ""
+}
+
+func (x *EnrollResponse) GetHubPublicKey() []byte {
+	if x != nil {
+		return x.HubPublicKey
+	}
+	return nil
+}
+
+func (x *EnrollResponse) GetHubAddresses() []string {
+	if x != nil {
+		return x.HubAddresses
+	}
+	return nil
+}
+
+func (x *EnrollResponse) GetExpiration() int64 {
+	if x != nil {
+		return x.Expiration
+	}
+	return 0
+}
+
 var File_api_sam_proto protoreflect.FileDescriptor
 
 const file_api_sam_proto_rawDesc = "" +
@@ -512,7 +640,18 @@ const file_api_sam_proto_rawDesc = "" +
 	"\x0etarget_peer_id\x18\x01 \x01(\tR\ftargetPeerId\x12\x16\n" +
 	"\x06reason\x18\x02 \x01(\tR\x06reason\x12\x1c\n" +
 	"\ttimestamp\x18\x03 \x01(\x03R\ttimestamp\x12\x1c\n" +
-	"\tsignature\x18\x04 \x01(\fR\tsignatureB\x1bZ\x19github.com/google/sam/apib\x06proto3"
+	"\tsignature\x18\x04 \x01(\fR\tsignature\":\n" +
+	"\rEnrollRequest\x12\x10\n" +
+	"\x03jwt\x18\x01 \x01(\tR\x03jwt\x12\x17\n" +
+	"\apeer_id\x18\x02 \x01(\tR\x06peerId\"\xc5\x01\n" +
+	"\x0eEnrollResponse\x12#\n" +
+	"\rbiscuit_token\x18\x01 \x01(\fR\fbiscuitToken\x12#\n" +
+	"\rerror_message\x18\x02 \x01(\tR\ferrorMessage\x12$\n" +
+	"\x0ehub_public_key\x18\x03 \x01(\fR\fhubPublicKey\x12#\n" +
+	"\rhub_addresses\x18\x04 \x03(\tR\fhubAddresses\x12\x1e\n" +
+	"\n" +
+	"expiration\x18\x05 \x01(\x03R\n" +
+	"expirationB\x1bZ\x19github.com/google/sam/apib\x06proto3"
 
 var (
 	file_api_sam_proto_rawDescOnce sync.Once
@@ -526,28 +665,30 @@ func file_api_sam_proto_rawDescGZIP() []byte {
 	return file_api_sam_proto_rawDescData
 }
 
-var file_api_sam_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_api_sam_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
 var file_api_sam_proto_goTypes = []any{
-	(*AuthEnvelope)(nil),  // 0: sam.v1.AuthEnvelope
-	(*HubConfig)(nil),     // 1: sam.v1.HubConfig
-	(*PeerProfile)(nil),   // 2: sam.v1.PeerProfile
-	(*PeerRegistry)(nil),  // 3: sam.v1.PeerRegistry
-	(*ModelProperty)(nil), // 4: sam.v1.ModelProperty
-	(*AgentCard)(nil),     // 5: sam.v1.AgentCard
-	(*RevocationMsg)(nil), // 6: sam.v1.RevocationMsg
-	nil,                   // 7: sam.v1.PeerRegistry.PeersEntry
-	nil,                   // 8: sam.v1.AgentCard.MetadataEntry
+	(*AuthEnvelope)(nil),   // 0: sam.v1.AuthEnvelope
+	(*HubConfig)(nil),      // 1: sam.v1.HubConfig
+	(*PeerProfile)(nil),    // 2: sam.v1.PeerProfile
+	(*PeerRegistry)(nil),   // 3: sam.v1.PeerRegistry
+	(*ModelProperty)(nil),  // 4: sam.v1.ModelProperty
+	(*AgentCard)(nil),      // 5: sam.v1.AgentCard
+	(*RevocationMsg)(nil),  // 6: sam.v1.RevocationMsg
+	(*EnrollRequest)(nil),  // 7: sam.v1.EnrollRequest
+	(*EnrollResponse)(nil), // 8: sam.v1.EnrollResponse
+	nil,                    // 9: sam.v1.PeerRegistry.PeersEntry
+	nil,                    // 10: sam.v1.AgentCard.MetadataEntry
 }
 var file_api_sam_proto_depIdxs = []int32{
-	7, // 0: sam.v1.PeerRegistry.peers:type_name -> sam.v1.PeerRegistry.PeersEntry
-	4, // 1: sam.v1.AgentCard.models:type_name -> sam.v1.ModelProperty
-	8, // 2: sam.v1.AgentCard.metadata:type_name -> sam.v1.AgentCard.MetadataEntry
-	2, // 3: sam.v1.PeerRegistry.PeersEntry.value:type_name -> sam.v1.PeerProfile
-	4, // [4:4] is the sub-list for method output_type
-	4, // [4:4] is the sub-list for method input_type
-	4, // [4:4] is the sub-list for extension type_name
-	4, // [4:4] is the sub-list for extension extendee
-	0, // [0:4] is the sub-list for field type_name
+	9,  // 0: sam.v1.PeerRegistry.peers:type_name -> sam.v1.PeerRegistry.PeersEntry
+	4,  // 1: sam.v1.AgentCard.models:type_name -> sam.v1.ModelProperty
+	10, // 2: sam.v1.AgentCard.metadata:type_name -> sam.v1.AgentCard.MetadataEntry
+	2,  // 3: sam.v1.PeerRegistry.PeersEntry.value:type_name -> sam.v1.PeerProfile
+	4,  // [4:4] is the sub-list for method output_type
+	4,  // [4:4] is the sub-list for method input_type
+	4,  // [4:4] is the sub-list for extension type_name
+	4,  // [4:4] is the sub-list for extension extendee
+	0,  // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_api_sam_proto_init() }
@@ -561,7 +702,7 @@ func file_api_sam_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_sam_proto_rawDesc), len(file_api_sam_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   9,
+			NumMessages:   11,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

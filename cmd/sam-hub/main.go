@@ -17,30 +17,32 @@ package main
 import (
 	"context"
 	"crypto/ed25519"
-	"encoding/base64"
+	"crypto/tls"
 	"encoding/hex"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/biscuit-auth/biscuit-go/v2"
 	"github.com/coreos/go-oidc/v3/oidc"
+	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/sam/api"
 	"github.com/libp2p/go-libp2p"
-	p2phttp "github.com/libp2p/go-libp2p-http"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/host"
-	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/libp2p/go-libp2p/p2p/net/gostream"
+	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/relay"
 	libp2ptls "github.com/libp2p/go-libp2p/p2p/security/tls"
 	libp2pquic "github.com/libp2p/go-libp2p/p2p/transport/quic"
+	"github.com/libp2p/go-msgio"
 
 	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
 	"github.com/spf13/cobra"
-	"golang.org/x/oauth2"
+	"google.golang.org/protobuf/proto"
 )
 
 const (
@@ -48,37 +50,24 @@ const (
 )
 
 var (
-	authProvider     string
-	oidcIssuer       string
-	clientID         string
-	clientSecret     string
-	biscuitHex       string
-	listenAddrs      []string
-	meshName         string
-	publicAddr       string
-	httpAddr         string // Mandatory HTTP listener flag
-	oauth2AuthURL    string
-	oauth2TokenURL   string
-	oauth2UserURL    string
-	oauth2UserField  string
-	oauth2EmailField string
+	oidcIssuer            string
+	clientID              string
+	biscuitHex            string
+	listenAddrs           []string
+	meshName              string
+	insecureSkipTLSVerify bool
 )
 
 // Hub handles identity bridging and network discovery
 type Hub struct {
 	Host       host.Host
 	DHT        *dht.IpfsDHT
-	OIDCConfig *oauth2.Config
-	Verifier   *oidc.IDTokenVerifier
+	Providers  map[string]*oidc.Provider
 	BiscuitKey ed25519.PrivateKey
 	MeshID     string
 	PubSub     *pubsub.PubSub
 	EventTopic *pubsub.Topic
-	gater            *hubConnGate
-	AuthProvider     string
-	OAuth2UserURL    string
-	OAuth2UserField  string
-	OAuth2EmailField string
+	gater      *hubConnGate
 }
 
 // NewHub starts a host supporting both QUIC and TCP (with TLS 1.3)
@@ -112,33 +101,27 @@ func NewHub(ctx context.Context) (*Hub, error) {
 		return nil, err
 	}
 
-	var oidcConfig *oauth2.Config
-	var verifier *oidc.IDTokenVerifier
-
-	if authProvider == "oauth2" {
-		oidcConfig = &oauth2.Config{
-			ClientID:     clientID,
-			ClientSecret: clientSecret,
-			Endpoint: oauth2.Endpoint{
-				AuthURL:  oauth2AuthURL,
-				TokenURL: oauth2TokenURL,
-			},
-			RedirectURL: fmt.Sprintf("%s/callback", publicAddr),
-			Scopes:      []string{"user:email"},
+	issuers := strings.Split(oidcIssuer, ",")
+	providers := make(map[string]*oidc.Provider)
+	for _, iss := range issuers {
+		iss = strings.TrimSpace(iss)
+		if iss == "" {
+			continue
 		}
-	} else {
-		provider, err := oidc.NewProvider(ctx, oidcIssuer)
+		var providerCtx = ctx
+		if insecureSkipTLSVerify {
+			tr := &http.Transport{
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+			}
+			client := &http.Client{Transport: tr}
+			providerCtx = oidc.ClientContext(ctx, client)
+		}
+		provider, err := oidc.NewProvider(providerCtx, iss)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to create provider for %s: %w", iss, err)
 		}
-		oidcConfig = &oauth2.Config{
-			ClientID:     clientID,
-			ClientSecret: clientSecret,
-			Endpoint:     provider.Endpoint(),
-			RedirectURL:  fmt.Sprintf("%s/callback", publicAddr),
-			Scopes:       []string{oidc.ScopeOpenID, "profile", "email"},
-		}
-		verifier = provider.Verifier(&oidc.Config{ClientID: clientID})
+		providers[iss] = provider
+		fmt.Printf("[OIDC] Trusted issuer: %s\n", iss)
 	}
 
 	// SAM_HUB_KEY stores an ed25519 seed as a 32-byte hex value.
@@ -149,17 +132,12 @@ func NewHub(ctx context.Context) (*Hub, error) {
 	bKey := ed25519.NewKeyFromSeed(keyBytes)
 
 	hub := &Hub{
-		Host:             h,
-		DHT:              kadDHT,
-		gater:            gater,
-		OIDCConfig:       oidcConfig,
-		Verifier:         verifier,
-		BiscuitKey:       bKey,
-		MeshID:           meshName,
-		AuthProvider:     authProvider,
-		OAuth2UserURL:    oauth2UserURL,
-		OAuth2UserField:  oauth2UserField,
-		OAuth2EmailField: oauth2EmailField,
+		Host:       h,
+		DHT:        kadDHT,
+		gater:      gater,
+		Providers:  providers,
+		BiscuitKey: bKey,
+		MeshID:     meshName,
 	}
 
 	h.Network().Notify(&notifier{hub: hub})
@@ -167,7 +145,7 @@ func NewHub(ctx context.Context) (*Hub, error) {
 	if err != nil {
 		return nil, err
 	}
-	topic, err := ps.Join("sam/mesh/events/v1")
+	topic, err := ps.Join(api.GossipEvents)
 	if err != nil {
 		return nil, err
 	}
@@ -176,61 +154,164 @@ func NewHub(ctx context.Context) (*Hub, error) {
 	return hub, nil
 }
 
-// issueStandardBiscuit creates a biscuit with standard facts for user, email, groups, and hardware binding (peer ID).
-func (h *Hub) issueStandardBiscuit(p peer.ID, sub string, email string, groups []string) (string, error) {
-	builder := biscuit.NewBuilder(h.BiscuitKey)
+func (h *Hub) handleEnroll(s network.Stream) {
+	defer func() {
+		_ = s.Close()
+	}()
+	remotePeer := s.Conn().RemotePeer()
+	fmt.Printf("[Enroll] New enrollment request from %s\n", remotePeer)
 
-	// user mapping (sub)
-	if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
-		Name: "user",
-		IDs:  []biscuit.Term{biscuit.String(sub)},
-	}}); err != nil {
-		return "", err
+	reader := msgio.NewVarintReaderSize(s, 1024*64)
+	msg, err := reader.ReadMsg()
+	if err != nil {
+		fmt.Printf("[Enroll] Failed to read message: %v\n", err)
+		return
+	}
+	defer reader.ReleaseMsg(msg)
+
+	var req api.EnrollRequest
+	if err := proto.Unmarshal(msg, &req); err != nil {
+		fmt.Printf("[Enroll] Failed to unmarshal request: %v\n", err)
+		return
 	}
 
-	// email mapping (email)
-	if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
-		Name: "email",
-		IDs:  []biscuit.Term{biscuit.String(email)},
-	}}); err != nil {
-		return "", err
+	if req.PeerId != remotePeer.String() {
+		fmt.Printf("[Enroll] Peer ID mismatch: %s != %s\n", req.PeerId, remotePeer)
+		h.sendEnrollResponse(s, nil, "Peer ID mismatch", 0)
+		return
 	}
 
-	// group mapping (groups)
-	for _, g := range groups {
-		if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
-			Name: "group",
-			IDs:  []biscuit.Term{biscuit.String(g)},
-		}}); err != nil {
-			return "", err
+	// Parse JWT unverified to get issuer and audience
+	parser := jwt.Parser{}
+	jwtToken, _, err := parser.ParseUnverified(req.Jwt, jwt.MapClaims{})
+	if err != nil {
+		fmt.Printf("[Enroll] Failed to parse JWT: %v\n", err)
+		h.sendEnrollResponse(s, nil, "Failed to parse JWT", 0)
+		return
+	}
+	claims, ok := jwtToken.Claims.(jwt.MapClaims)
+	if !ok {
+		fmt.Printf("[Enroll] Invalid JWT claims\n")
+		h.sendEnrollResponse(s, nil, "Invalid JWT claims", 0)
+		return
+	}
+	iss, _ := claims["iss"].(string)
+
+	var aud string
+	switch a := claims["aud"].(type) {
+	case string:
+		aud = a
+	case []any:
+		if len(a) > 0 {
+			aud, _ = a[0].(string)
 		}
 	}
 
-	// peer_id mapping (hardware binding)
-	if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
-		Name: "node",
-		IDs:  []biscuit.Term{biscuit.String(p.String())},
-	}}); err != nil {
-		return "", err
+	provider, ok := h.Providers[iss]
+	if !ok {
+		fmt.Printf("[Enroll] Unknown issuer: %s\n", iss)
+		h.sendEnrollResponse(s, nil, fmt.Sprintf("Unknown issuer: %s", iss), 0)
+		return
 	}
 
-	// mesh_id mapping (namespace)
+	// TODO: Revisit client check later (enforce specific audience)
+	// For now we accept whatever audience is in the token by passing it as expected ClientID
+	verifier := provider.Verifier(&oidc.Config{ClientID: aud})
+
+	token, err := verifier.Verify(context.Background(), req.Jwt)
+	if err != nil {
+		fmt.Printf("[Enroll] JWT validation failed: %v\n", err)
+		h.sendEnrollResponse(s, nil, fmt.Sprintf("JWT validation failed: %v", err), 0)
+		return
+	}
+
+	var roles []string
+	if rolesAny, ok := claims["roles"].([]any); ok {
+		for _, r := range rolesAny {
+			if str, ok := r.(string); ok {
+				roles = append(roles, str)
+			}
+		}
+	}
+
+	builder := biscuit.NewBuilder(h.BiscuitKey)
+
 	if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
-		Name: "namespace",
-		IDs:  []biscuit.Term{biscuit.String(h.MeshID)},
+		Name: "expiration",
+		IDs:  []biscuit.Term{biscuit.Date(token.Expiry)},
 	}}); err != nil {
-		return "", err
+		fmt.Printf("[Enroll] Failed to add expiration fact: %v\n", err)
+		h.sendEnrollResponse(s, nil, "Failed to mint biscuit", 0)
+		return
+	}
+
+	if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+		Name: "node",
+		IDs:  []biscuit.Term{biscuit.String(remotePeer.String())},
+	}}); err != nil {
+		fmt.Printf("[Enroll] Failed to add node fact: %v\n", err)
+		h.sendEnrollResponse(s, nil, "Failed to mint biscuit", 0)
+		return
+	}
+
+	for _, role := range roles {
+		if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+			Name: "group",
+			IDs:  []biscuit.Term{biscuit.String(role)},
+		}}); err != nil {
+			fmt.Printf("[Enroll] Failed to add group fact: %v\n", err)
+			h.sendEnrollResponse(s, nil, "Failed to mint biscuit", 0)
+			return
+		}
 	}
 
 	t, err := builder.Build()
 	if err != nil {
-		return "", err
+		fmt.Printf("[Enroll] Failed to build biscuit: %v\n", err)
+		h.sendEnrollResponse(s, nil, "Failed to build biscuit", 0)
+		return
 	}
-	data, err := t.Serialize()
+
+	biscuitData, err := t.Serialize()
 	if err != nil {
-		return "", err
+		fmt.Printf("[Enroll] Failed to serialize biscuit: %v\n", err)
+		h.sendEnrollResponse(s, nil, "Failed to serialize biscuit", 0)
+		return
 	}
-	return base64.StdEncoding.EncodeToString(data), nil
+
+	h.gater.mu.Lock()
+	h.gater.authenticated[remotePeer] = true
+	delete(h.gater.pending, remotePeer)
+	h.gater.mu.Unlock()
+
+	h.sendEnrollResponse(s, biscuitData, "", token.Expiry.Unix())
+	fmt.Printf("[Enroll] Successfully enrolled peer %s\n", remotePeer)
+}
+
+func (h *Hub) sendEnrollResponse(s network.Stream, biscuitToken []byte, errMsg string, expiration int64) {
+	var hubAddrs []string
+	for _, addr := range h.Host.Addrs() {
+		hubAddrs = append(hubAddrs, addr.String()+"/p2p/"+h.Host.ID().String())
+	}
+
+	pubKey := h.BiscuitKey.Public().(ed25519.PublicKey)
+
+	resp := &api.EnrollResponse{
+		BiscuitToken: biscuitToken,
+		ErrorMessage: errMsg,
+		HubPublicKey: pubKey,
+		HubAddresses: hubAddrs,
+		Expiration:   expiration,
+	}
+	data, err := proto.Marshal(resp)
+	if err != nil {
+		fmt.Printf("[Enroll] Failed to marshal response: %v\n", err)
+		return
+	}
+	writer := msgio.NewVarintWriter(s)
+	if err := writer.WriteMsg(data); err != nil {
+		fmt.Printf("[Enroll] Failed to write response: %v\n", err)
+	}
 }
 
 // startWatchdog periodically checks for peers that have connected but not completed OIDC
@@ -265,63 +346,30 @@ func main() {
 			if err != nil {
 				log.Fatal(err)
 			}
+			h.Host.SetStreamHandler(api.EnrollProtocolID, h.handleEnroll)
 
-			// Watchdog: Expel peers that connect but never finish OIDC
+			// Watchdog: Expel peers that connect but never finish authentication
 			h.startWatchdog()
-
-			mux := http.NewServeMux()
-			// OIDC Endpoints
-			mux.HandleFunc("/login", h.handleLogin)
-			mux.HandleFunc("/callback", h.handleCallback)
-			// API endpoints for agents to fetch config and peer registry
-			mux.HandleFunc("/api/v1/config", h.handleConfig)
-			mux.HandleFunc("/api/v1/peers", h.authMiddleware(h.handlePeers))
-
-			// Corrected libp2phttp Serve logic
-			// This allows agents to reach OIDC via libp2p streams
-			listener, err := gostream.Listen(h.Host, p2phttp.DefaultP2PProtocol)
-			if err != nil {
-				log.Fatal(err)
-			}
-			defer func() {
-				if err := listener.Close(); err != nil {
-					log.Printf("closing p2p listener: %v", err)
-				}
-			}()
-			// Serve the HTTP handler over libp2p streams
-			go func() {
-				server := &http.Server{
-					Handler: mux,
-				}
-				if err := server.Serve(listener); err != nil {
-					log.Printf("p2p http server exited: %v", err)
-				}
-			}()
 
 			fmt.Printf("SAM Hub Online (QUIC + TCP)\n")
 			fmt.Printf("MeshID: %s\n", h.MeshID)
 			fmt.Printf("PeerID: %s\n", h.Host.ID())
 
-			// Standard HTTP server for browser-based OIDC and config API
-			fmt.Printf("Starting Standard HTTP Frontend on %s\n", httpAddr)
-			log.Fatal(http.ListenAndServe(httpAddr, mux))
+			fmt.Printf("Hub running on P2P transports only.\n")
+			select {}
 		},
 	}
 
-	rootCmd.Flags().StringVar(&authProvider, "auth-provider", "oidc", "Authentication provider (oidc or oauth2)")
-	rootCmd.Flags().StringVar(&oidcIssuer, "issuer", os.Getenv("SAM_OIDC_ISSUER"), "OIDC Issuer URL")
-	rootCmd.Flags().StringVar(&oauth2AuthURL, "oauth2-auth-url", "", "OAuth2 Authorization URL")
-	rootCmd.Flags().StringVar(&oauth2TokenURL, "oauth2-token-url", "", "OAuth2 Token URL")
-	rootCmd.Flags().StringVar(&oauth2UserURL, "oauth2-user-url", "", "OAuth2 User Info URL")
-	rootCmd.Flags().StringVar(&oauth2UserField, "oauth2-user-field", "id", "JSON field for User ID")
-	rootCmd.Flags().StringVar(&oauth2EmailField, "oauth2-email-field", "email", "JSON field for Email")
+	defIssuer := os.Getenv("SAM_OIDC_ISSUER")
+	if defIssuer == "" {
+		defIssuer = "https://accounts.google.com"
+	}
+	rootCmd.Flags().StringVar(&oidcIssuer, "issuer", defIssuer, "OIDC Issuer URL")
 	rootCmd.Flags().StringVar(&clientID, "client-id", os.Getenv("SAM_OIDC_ID"), "OIDC Client ID")
-	rootCmd.Flags().StringVar(&clientSecret, "client-secret", os.Getenv("SAM_OIDC_SECRET"), "OIDC Client Secret")
 	rootCmd.Flags().StringVar(&biscuitHex, "key", os.Getenv("SAM_HUB_KEY"), "Hub Private Key (32-byte Hex)")
-	rootCmd.Flags().StringSliceVar(&listenAddrs, "listen", []string{"/ip4/0.0.0.0/udp/4001/quic-v1", "/ip4/0.0.0.0/tcp/4002"}, "libp2p Listen Addrs")
+	rootCmd.Flags().StringSliceVar(&listenAddrs, "listen", []string{"/ip4/0.0.0.0/udp/8080/quic-v1", "/ip4/0.0.0.0/tcp/8080"}, "libp2p Listen Addrs")
 	rootCmd.Flags().StringVar(&meshName, "mesh", "public-mesh", "Mesh federation name")
-	rootCmd.Flags().StringVar(&publicAddr, "public-url", "http://localhost:8080", "Public URL for browser OIDC")
-	rootCmd.Flags().StringVar(&httpAddr, "http-listen", ":8080", "Standard HTTP listen address for OIDC and Config")
+	rootCmd.Flags().BoolVar(&insecureSkipTLSVerify, "insecure-skip-tls-verify", false, "Skip TLS verification for OIDC issuers")
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)

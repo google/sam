@@ -15,22 +15,37 @@
 package main
 
 import (
-	"bufio"
 	"context"
+	"crypto/ed25519"
+	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"log"
+	"net"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/google/sam/api"
 	"github.com/libp2p/go-libp2p/core/crypto"
+	"github.com/libp2p/go-msgio"
+	"github.com/multiformats/go-multiaddr"
 	"github.com/spf13/cobra"
+	"google.golang.org/protobuf/proto"
 )
 
 var (
 	hubAddr     string
 	listenAddrs []string
-	tokenFlag   string
+
+	jwtFlag          string
+	jwtPathFlag      string
+	clientIDFlag     string
+	clientSecretFlag string
+	tokenURLFlag     string
+	hubPublicKeyFlag string
 )
 
 func main() {
@@ -39,79 +54,16 @@ func main() {
 		Short: "Sovereign Agent Mesh Node",
 	}
 
-	// LOGIN COMMAND: For Headless Environments
-	loginCmd := &cobra.Command{
-		Use:   "login",
-		Short: "Establish sovereign identity with the Hub",
-		Run: func(cmd *cobra.Command, args []string) {
-			dataDir, err := GetDataDir()
-			if err != nil {
-				log.Fatalf("Critical: %v", err)
-			}
-
-			store, err := NewStore(dataDir)
-			if err != nil {
-				log.Fatalf("Critical: %v", err)
-			}
-			defer func() {
-				if err := store.Close(); err != nil {
-					log.Printf("closing store: %v", err)
-				}
-			}()
-
-			hubPubKey, hubAddrs, err := api.FetchConfig(context.Background(), hubAddr)
-			if err != nil {
-				log.Printf("Failed to fetch hub config from %s: %v", hubAddr, err)
-				fmt.Println("\n💡 Tip: If you don't have a private hub running, you can try the public community mesh:")
-				fmt.Printf("   sam-node login --hub https://community.sam-mesh.dev\n\n")
-				log.Fatalf("Critical: Cannot proceed without a valid hub.")
-			}
-
-			priv := getOrGenerateKey(store)
-			// Temporary host to determine PeerID
-			tempNode, err := NewSamNode(context.Background(), priv, hubPubKey, hubAddrs, store)
-			if err != nil {
-				log.Fatalf("Failed to initialize identity: %v", err)
-			}
-			defer func() {
-				if err := tempNode.Host.Close(); err != nil {
-					log.Printf("closing temporary node host: %v", err)
-				}
-			}()
-
-			loginURL := fmt.Sprintf("%s/login?peer_id=%s", hubAddr, tempNode.Host.ID())
-
-			fmt.Println("--- Sovereign Identity Login ---")
-			fmt.Printf("1. Please open the following URL in your browser:\n\n   %s\n\n", loginURL)
-			fmt.Println("2. Authenticate via your OIDC provider.")
-			fmt.Println("3. Copy the 'Identity Biscuit' provided at the end of the flow.")
-			fmt.Print("\nPaste your Identity Biscuit here: ")
-
-			reader := bufio.NewReader(os.Stdin)
-			token, err := reader.ReadString('\n')
-			if err != nil {
-				log.Fatalf("Failed to read input: %v", err)
-			}
-			token = strings.TrimSpace(token)
-
-			if token == "" {
-				log.Fatal("Error: No token provided.")
-			}
-
-			if err := store.SaveIdentity(token); err != nil {
-				log.Fatalf("Failed to save identity: %v", err)
-			}
-
-			fmt.Printf("\nSuccess! Identity stored for PeerID: %s\n", tempNode.Host.ID())
-		},
-	}
-
 	// RUN COMMAND: Start the Mesh
 	runCmd := &cobra.Command{
 		Use:   "run",
 		Short: "Start the sovereign mesh node",
 		Run: func(cmd *cobra.Command, args []string) {
-			dataDir, _ := GetDataDir()
+			ctx := cmd.Context()
+			dataDir, err := GetDataDir()
+			if err != nil {
+				log.Fatalf("Failed to get data dir: %v", err)
+			}
 			store, err := NewStore(dataDir)
 			if err != nil {
 				log.Fatalf("Failed to open store: %v", err)
@@ -122,49 +74,263 @@ func main() {
 				}
 			}()
 
-			token := tokenFlag
-			if token == "" {
-				token, err = store.LoadIdentity()
-				if err != nil {
-					log.Printf("Failed to load identity: %v", err)
+			var hubPubKey ed25519.PublicKey
+			var hubAddrs []multiaddr.Multiaddr
+
+			storedPubKey, storedAddrs, _ := store.LoadHubConfig()
+			if len(storedPubKey) > 0 {
+				hubPubKey = storedPubKey
+				for _, addrStr := range storedAddrs {
+					ma, _ := multiaddr.NewMultiaddr(addrStr)
+					hubAddrs = append(hubAddrs, ma)
 				}
 			}
-			if token == "" {
-				fmt.Println("No identity found. Please run 'sam-node login' or provide --token")
-				return
+
+			if hubPublicKeyFlag != "" {
+				pubBytes, err := hex.DecodeString(hubPublicKeyFlag)
+				if err != nil {
+					log.Fatalf("Invalid hub public key: %v", err)
+				}
+				hubPubKey = pubBytes
 			}
 
-			hubPubKey, hubAddrs, err := api.FetchConfig(context.Background(), hubAddr)
-			if err != nil {
-				log.Printf("Failed to fetch hub config from %s: %v", hubAddr, err)
-				fmt.Println("\n💡 Tip: If you don't have a private hub running, you can try the public community mesh:")
-				fmt.Printf("   sam-node run --hub https://community.sam-mesh.dev\n\n")
-				log.Fatalf("Critical: Cannot proceed without a valid hub.")
+			var node *SamNode
+
+			var jwtStr string
+
+			if jwtFlag != "" {
+				jwtStr = jwtFlag
+			} else if jwtPathFlag != "" {
+				data, err := os.ReadFile(jwtPathFlag)
+				if err != nil {
+					log.Fatalf("Failed to read JWT file: %v", err)
+				}
+				jwtStr = strings.TrimSpace(string(data))
+			} else if tokenURLFlag != "" {
+				fmt.Println("Fetching JWT via OIDC Client Credentials...")
+				dummyNode := &SamNode{}
+				var err error
+				jwtStr, err = dummyNode.FetchJWT(context.Background(), tokenURLFlag, clientIDFlag, clientSecretFlag)
+				if err != nil {
+					log.Fatalf("Failed to fetch JWT: %v", err)
+				}
 			}
 
-			priv := getOrGenerateKey(store)
-			node, err := NewSamNode(context.Background(), priv, hubPubKey, hubAddrs, store)
-			if err != nil {
-				log.Fatalf("Failed to start mesh node: %v", err)
+			if jwtStr == "" {
+				token, _ := store.LoadIdentity()
+				if token == "" {
+					log.Fatal("No JWT or stored identity found. Cannot authenticate.")
+				}
+				fmt.Println("Using stored identity.")
+
+				if len(hubPubKey) == 0 {
+					log.Fatal("Hub public key not found in store and not provided. Cannot verify peers.")
+				}
+				priv := getOrGenerateKey(store)
+				node, err = NewSamNode(context.Background(), priv, hubPubKey, hubAddrs, store)
+				if err != nil {
+					log.Fatalf("Failed to start mesh node: %v", err)
+				}
+			} else {
+				var initHubAddrs []multiaddr.Multiaddr
+				ma, err := multiaddr.NewMultiaddr(hubAddr)
+				if err == nil {
+					initHubAddrs = []multiaddr.Multiaddr{ma}
+				} else {
+					// Try parsing as host:port
+					host, port, err := net.SplitHostPort(hubAddr)
+					if err == nil {
+						ip := net.ParseIP(host)
+						var maddr multiaddr.Multiaddr
+						if ip != nil {
+							maddr, _ = multiaddr.NewMultiaddr(fmt.Sprintf("/ip4/%s/tcp/%s", host, port))
+						} else {
+							maddr, _ = multiaddr.NewMultiaddr(fmt.Sprintf("/dns4/%s/tcp/%s", host, port))
+						}
+						initHubAddrs = []multiaddr.Multiaddr{maddr}
+					} else {
+						if len(hubAddrs) > 0 {
+							initHubAddrs = hubAddrs
+						} else {
+							log.Fatalf("Invalid hub address and no stored config: %v", err)
+						}
+					}
+				}
+
+				priv := getOrGenerateKey(store)
+				node, err = NewSamNode(context.Background(), priv, nil, initHubAddrs, store)
+				if err != nil {
+					log.Fatalf("Failed to initialize node for enrollment: %v", err)
+				}
+
+				err = node.Enroll(context.Background(), jwtStr)
+				if err != nil {
+					log.Fatalf("Enrollment failed: %v", err)
+				}
+
+				storedPubKey, _, _ = store.LoadHubConfig()
+				hubPubKey = storedPubKey
+
+				node.HubPublicKey = hubPubKey
 			}
 
-			// Ensure the auth protocol handler is always installed.
+			// Start renewal loop
+			go func() {
+				for {
+					var renewAfter = 50 * time.Minute // Default fallback
+
+					exp, err := node.Store.LoadIdentityExpiration()
+					if err == nil && exp > 0 {
+						expTime := time.Unix(exp, 0)
+						duration := time.Until(expTime)
+						// Renew 10 minutes before expiration if duration permits
+						if duration > 15*time.Minute {
+							renewAfter = duration - 10*time.Minute
+						} else if duration > 0 {
+							renewAfter = duration / 2 // half of remaining time
+						} else {
+							renewAfter = 1 * time.Minute // already expired or immediate
+						}
+					}
+
+					fmt.Printf("[Auth] Next renewal in %v\n", renewAfter)
+					timer := time.NewTimer(renewAfter)
+
+					select {
+					case <-ctx.Done():
+						timer.Stop()
+						return
+					case <-timer.C:
+						fmt.Println("Renewing enrollment...")
+						var newJWT string
+						if tokenURLFlag != "" {
+							var err error
+							newJWT, err = node.FetchJWT(ctx, tokenURLFlag, clientIDFlag, clientSecretFlag)
+							if err != nil {
+								fmt.Printf("Failed to fetch JWT for renewal: %v\n", err)
+								continue
+							}
+						} else if jwtPathFlag != "" {
+							data, err := os.ReadFile(jwtPathFlag)
+							if err != nil {
+								fmt.Printf("Failed to read JWT file for renewal: %v\n", err)
+								continue
+							}
+							newJWT = strings.TrimSpace(string(data))
+						} else {
+							fmt.Println("No credentials available for renewal.")
+							continue
+						}
+
+						if err := node.Enroll(ctx, newJWT); err != nil {
+							fmt.Printf("Renewal enrollment failed: %v\n", err)
+						} else {
+							fmt.Println("Enrollment renewed successfully.")
+						}
+					}
+				}
+			}()
+
 			node.Host.SetStreamHandler(AuthProtocolID, node.HandleAuthHandshake)
 
 			fmt.Printf("SAM Node Online.\nPeerID: %s\nListening on: %v\n", node.Host.ID(), listenAddrs)
 
 			// Block forever
-			select {}
+			<-ctx.Done()
+			fmt.Println("Shutting down...")
+		},
+	}
+
+	loginCmd := &cobra.Command{
+		Use:   "login",
+		Short: "Log in to the mesh via interactive OIDC flow",
+		Run: func(cmd *cobra.Command, args []string) {
+			ctx := cmd.Context()
+			dataDir, err := GetDataDir()
+			if err != nil {
+				log.Fatalf("Failed to get data dir: %v", err)
+			}
+			store, err := NewStore(dataDir)
+			if err != nil {
+				log.Fatalf("Failed to open store: %v", err)
+			}
+			defer func() {
+				if err := store.Close(); err != nil {
+					log.Printf("closing store: %v", err)
+				}
+			}()
+
+			if tokenURLFlag == "" {
+				log.Fatal("--token-url is required for login")
+			}
+
+			dummyNode := &SamNode{Store: store}
+			jwtStr, err := dummyNode.InteractiveLogin(ctx, tokenURLFlag)
+			if err != nil {
+				log.Fatalf("Failed to get token: %v", err)
+			}
+
+			// Connect to Hub and Enroll
+			var initHubAddrs []multiaddr.Multiaddr
+			ma, err := multiaddr.NewMultiaddr(hubAddr)
+			if err == nil {
+				initHubAddrs = []multiaddr.Multiaddr{ma}
+			} else {
+				host, port, err := net.SplitHostPort(hubAddr)
+				if err == nil {
+					ip := net.ParseIP(host)
+					var maddr multiaddr.Multiaddr
+					if ip != nil {
+						maddr, _ = multiaddr.NewMultiaddr(fmt.Sprintf("/ip4/%s/tcp/%s", host, port))
+					} else {
+						maddr, _ = multiaddr.NewMultiaddr(fmt.Sprintf("/dns4/%s/tcp/%s", host, port))
+					}
+					initHubAddrs = []multiaddr.Multiaddr{maddr}
+				} else {
+					log.Fatalf("Invalid hub address: %v", err)
+				}
+			}
+
+			priv := getOrGenerateKey(store)
+			node, err := NewSamNode(context.Background(), priv, nil, initHubAddrs, store)
+			if err != nil {
+				log.Fatalf("Failed to initialize node for enrollment: %v", err)
+			}
+
+			err = node.Enroll(context.Background(), jwtStr)
+			if err != nil {
+				log.Fatalf("Enrollment failed: %v", err)
+			}
+
+			fmt.Println("Login successful and identity stored.")
 		},
 	}
 
 	// Configure Flags
-	runCmd.Flags().StringVar(&tokenFlag, "token", os.Getenv("SAM_NODE_TOKEN"), "Manual Identity Biscuit (overrides store)")
 	runCmd.Flags().StringSliceVar(&listenAddrs, "listen", []string{"/ip4/0.0.0.0/udp/5001/quic-v1", "/ip4/0.0.0.0/tcp/5002"}, "libp2p Listen Addrs")
+	runCmd.Flags().StringVar(&jwtFlag, "jwt", "", "Pre-fetched JWT token")
+	runCmd.Flags().StringVar(&jwtPathFlag, "jwt-path", "", "Path to file containing JWT token")
+	runCmd.Flags().StringVar(&clientIDFlag, "client-id", os.Getenv("SAM_OIDC_ID"), "OIDC Client ID for M2M")
+	runCmd.Flags().StringVar(&clientSecretFlag, "client-secret", os.Getenv("SAM_OIDC_SECRET"), "OIDC Client Secret for M2M")
+	runCmd.Flags().StringVar(&hubPublicKeyFlag, "hub-public-key", "", "Hub Public Key (32-byte Hex)")
 	rootCmd.PersistentFlags().StringVar(&hubAddr, "hub", "http://localhost:8080", "Hub URL")
+	rootCmd.PersistentFlags().StringVar(&tokenURLFlag, "token-url", "", "OIDC Token URL")
 
-	rootCmd.AddCommand(loginCmd, runCmd)
-	if err := rootCmd.Execute(); err != nil {
+	rootCmd.AddCommand(runCmd)
+	rootCmd.AddCommand(loginCmd)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-sigChan
+		fmt.Println("\n[Signal] Received interrupt, shutting down...")
+		cancel()
+	}()
+
+	if err := rootCmd.ExecuteContext(ctx); err != nil {
 		os.Exit(1)
 	}
 }
@@ -189,4 +355,66 @@ func getOrGenerateKey(s *Store) crypto.PrivKey {
 		log.Fatalf("Corrupt key in store: %v", err)
 	}
 	return priv
+}
+
+func (n *SamNode) Enroll(ctx context.Context, jwt string) error {
+	if n.HubPeerID == "" {
+		return fmt.Errorf("not connected to any hub")
+	}
+
+	s, err := n.Host.NewStream(ctx, n.HubPeerID, "/sam/enroll/1.0.0")
+	if err != nil {
+		return fmt.Errorf("failed to open enroll stream: %v", err)
+	}
+	defer func() { _ = s.Close() }()
+
+	req := &api.EnrollRequest{
+		Jwt:    jwt,
+		PeerId: n.Host.ID().String(),
+	}
+	data, err := proto.Marshal(req)
+	if err != nil {
+		return fmt.Errorf("failed to marshal enroll request: %v", err)
+	}
+
+	writer := msgio.NewVarintWriter(s)
+	if err := writer.WriteMsg(data); err != nil {
+		return fmt.Errorf("failed to write enroll request: %v", err)
+	}
+
+	reader := msgio.NewVarintReaderSize(s, 1024*64)
+	respMsg, err := reader.ReadMsg()
+	if err != nil {
+		return fmt.Errorf("failed to read enroll response: %v", err)
+	}
+	defer reader.ReleaseMsg(respMsg)
+
+	var resp api.EnrollResponse
+	if err := proto.Unmarshal(respMsg, &resp); err != nil {
+		return fmt.Errorf("failed to unmarshal enroll response: %v", err)
+	}
+
+	if resp.ErrorMessage != "" {
+		return fmt.Errorf("enrollment failed: %s", resp.ErrorMessage)
+	}
+
+	if len(resp.BiscuitToken) == 0 {
+		return fmt.Errorf("received empty biscuit token")
+	}
+
+	tokenStr := base64.StdEncoding.EncodeToString(resp.BiscuitToken)
+	if err := n.Store.SaveIdentity(tokenStr); err != nil {
+		return fmt.Errorf("failed to save identity: %v", err)
+	}
+
+	if err := n.Store.SaveIdentityExpiration(resp.Expiration); err != nil {
+		return fmt.Errorf("failed to save identity expiration: %v", err)
+	}
+
+	if err := n.Store.SaveHubConfig(resp.HubPublicKey, resp.HubAddresses); err != nil {
+		return fmt.Errorf("failed to save hub config: %v", err)
+	}
+
+	fmt.Println("Successfully enrolled and stored identity and hub config.")
+	return nil
 }

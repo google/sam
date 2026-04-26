@@ -22,7 +22,6 @@ import (
 	"github.com/biscuit-auth/biscuit-go/v2"
 	"github.com/google/sam/api"
 	"github.com/libp2p/go-libp2p"
-	"google.golang.org/protobuf/proto"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/crypto"
@@ -35,11 +34,10 @@ import (
 	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
 	"github.com/libp2p/go-msgio"
 	"github.com/multiformats/go-multiaddr"
+	"google.golang.org/protobuf/proto"
 )
 
 const AuthProtocolID = protocol.ID("/sam/auth/1.0.0")
-
-
 
 type SamNode struct {
 	Host         host.Host
@@ -47,6 +45,7 @@ type SamNode struct {
 	PubSub       *pubsub.PubSub
 	Store        *Store
 	HubPublicKey ed25519.PublicKey
+	HubPeerID    peer.ID
 }
 
 // NewSamNode creates a new Agent instance secured with the 4-layer pipeline.
@@ -81,11 +80,31 @@ func NewSamNode(ctx context.Context, privKey crypto.PrivKey, hubPubKey ed25519.P
 
 	// Bootstrap: Connect to the Hub
 	for _, addr := range hubAddrs {
-		addrInfo, _ := peer.AddrInfoFromP2pAddr(addr)
-		if addrInfo != nil {
-			if err := h.Connect(ctx, *addrInfo); err != nil {
-				fmt.Printf("Warning: Failed to bootstrap to hub %s: %v\n", addr, err)
+		addrInfo, err := peer.AddrInfoFromP2pAddr(addr)
+		if err != nil || addrInfo == nil {
+			// Try to connect without Peer ID in address
+			addrInfo = &peer.AddrInfo{
+				Addrs: []multiaddr.Multiaddr{addr},
 			}
+			fmt.Println("[Warning] Connecting to hub without Peer ID verification in address.")
+		}
+		if err := h.Connect(ctx, *addrInfo); err != nil {
+			fmt.Printf("Warning: Failed to bootstrap to hub %s: %v\n", addr, err)
+		} else {
+			if addrInfo.ID == "" {
+				// Discover Peer ID from connection
+				for _, c := range h.Network().Conns() {
+					if c.RemoteMultiaddr().Equal(addr) {
+						node.HubPeerID = c.RemotePeer()
+						fmt.Printf("Connected to hub (discovered PeerID): %s\n", node.HubPeerID)
+						break
+					}
+				}
+			} else {
+				node.HubPeerID = addrInfo.ID
+				fmt.Printf("Connected to hub: %s\n", addrInfo.ID)
+			}
+			break
 		}
 	}
 
@@ -107,7 +126,7 @@ func NewSamNode(ctx context.Context, privKey crypto.PrivKey, hubPubKey ed25519.P
 
 // listenForHubEvents listens to the topic established by the Hub
 func (n *SamNode) listenForHubEvents(ctx context.Context) {
-	topic, err := n.PubSub.Join("sam/mesh/events/v1")
+	topic, err := n.PubSub.Join(api.GossipEvents)
 	if err != nil {
 		return
 	}
@@ -204,3 +223,5 @@ func (n *SamNode) HandleAuthHandshake(s network.Stream) {
 
 	fmt.Printf("[AuthN] Successfully authenticated peer %s (%s)\n", remotePeer, identity.UserEmail)
 }
+
+

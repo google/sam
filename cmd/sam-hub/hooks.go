@@ -21,12 +21,10 @@ import (
 	"sync"
 	"time"
 
-	p2phttp "github.com/libp2p/go-libp2p-http"
 	"github.com/libp2p/go-libp2p/core/connmgr"
 	"github.com/libp2p/go-libp2p/core/control"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/libp2p/go-libp2p/p2p/protocol/identify"
 	"github.com/multiformats/go-multiaddr"
 )
 
@@ -61,18 +59,9 @@ func (g *hubConnGate) InterceptSecured(dir network.Direction, p peer.ID, mas net
 }
 
 func (g *hubConnGate) InterceptUpgraded(c network.Conn) (bool, control.DisconnectReason) {
-	protocolID := c.ConnState().StreamMultiplexer
-
-	// Always allow the OIDC bridge protocol and basic identify
-	if protocolID == p2phttp.DefaultP2PProtocol || protocolID == identify.ID {
-		return true, 0
-	}
-
-	g.mu.RLock()
-	defer g.mu.RUnlock()
-
-	// REJECT BY DEFAULT: If not authenticated via OIDC, block any other protocol
-	return g.authenticated[c.RemotePeer()], control.DisconnectReason(0)
+	// We allow all connections to be upgraded. Protocol-level authorization
+	// is handled at the stream level or by the watchdog.
+	return true, 0
 }
 
 var _ network.Notifiee = (*notifier)(nil)

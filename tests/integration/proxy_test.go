@@ -16,38 +16,61 @@ package integration_test
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"go.etcd.io/bbolt"
 )
 
-func TestSamNodeLoginThenRunWithStoredIdentity(t *testing.T) {
+func TestSamNodeRunWithStoredIdentity(t *testing.T) {
 	nodeBin := buildBinary(t, "./cmd/sam-node")
-	hubURL := startMockHubConfigServer(t)
 	tmpHome := t.TempDir()
+
+	// Pre-populate store
+	configDir := filepath.Join(tmpHome, ".config", "sam-mesh")
+	err := os.MkdirAll(configDir, 0700)
+	if err != nil {
+		t.Fatalf("failed to create config dir: %v", err)
+	}
+
+	dbPath := filepath.Join(configDir, "agent.db")
+	db, err := bbolt.Open(dbPath, 0600, nil)
+	if err != nil {
+		t.Fatalf("failed to open db: %v", err)
+	}
+	err = db.Update(func(tx *bbolt.Tx) error {
+		b, err := tx.CreateBucketIfNotExists([]byte("identity"))
+		if err != nil {
+			return err
+		}
+		// The following constants are mock values used for testing.
+		// 'mock-biscuit-token' is a dummy token string.
+		// 'mock-hub-pub-key' is a dummy public key string.
+		if err := b.Put([]byte("identity_biscuit"), []byte("mock-biscuit-token")); err != nil {
+			return err
+		}
+		if err := b.Put([]byte("hub_public_key"), []byte("mock-hub-pub-key")); err != nil {
+			return err
+		}
+		addrsData, _ := json.Marshal([]string{"/ip4/127.0.0.1/tcp/4002/p2p/Qm..."})
+		if err := b.Put([]byte("hub_addresses"), addrsData); err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("failed to update db: %v", err)
+	}
+	_ = db.Close()
+
 	env := append(os.Environ(),
 		"HOME="+tmpHome,
 		"XDG_CONFIG_HOME="+filepath.Join(tmpHome, ".config"),
 	)
-
-	loginOut, loginErrOut, err := runCommand(
-		t,
-		repoRoot(t),
-		10*time.Second,
-		env,
-		"test-biscuit-token\n",
-		nodeBin,
-		"login",
-		"--hub", hubURL,
-	)
-	if err != nil {
-		t.Fatalf("sam-node login failed: %v\nstdout:\n%s\nstderr:\n%s", err, loginOut, loginErrOut)
-	}
-	if !strings.Contains(loginOut+loginErrOut, "Success! Identity stored") {
-		t.Fatalf("unexpected login output:\n%s\n%s", loginOut, loginErrOut)
-	}
 
 	runOut, runErrOut, err := runCommand(
 		t,
@@ -57,17 +80,18 @@ func TestSamNodeLoginThenRunWithStoredIdentity(t *testing.T) {
 		"",
 		nodeBin,
 		"run",
-		"--hub", hubURL,
 		"--listen", "/ip4/127.0.0.1/udp/0/quic-v1",
 		"--listen", "/ip4/127.0.0.1/tcp/0",
 	)
 	if err != context.DeadlineExceeded {
 		t.Fatalf("expected run command to keep running until timeout, got: %v\nstdout:\n%s\nstderr:\n%s", err, runOut, runErrOut)
 	}
-	if strings.Contains(runOut+runErrOut, "No identity found") {
-		t.Fatalf("run command did not use stored identity:\n%s\n%s", runOut, runErrOut)
+
+	out := runOut + runErrOut
+	if !strings.Contains(out, "Using stored identity.") {
+		t.Fatalf("run command did not use stored identity:\n%s", out)
 	}
-	if !strings.Contains(runOut+runErrOut, "SAM Node Online") {
-		t.Fatalf("node did not reach online state:\n%s\n%s", runOut, runErrOut)
+	if !strings.Contains(out, "SAM Node Online") {
+		t.Fatalf("node did not reach online state:\n%s", out)
 	}
 }

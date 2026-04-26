@@ -20,14 +20,14 @@ import (
 	"time"
 )
 
-func TestSamNodeLoginHelp(t *testing.T) {
+func TestSamNodeRunHelp(t *testing.T) {
 	nodeBin := buildBinary(t, "./cmd/sam-node")
-	stdout, stderr, err := runCommand(t, repoRoot(t), 10*time.Second, nil, "", nodeBin, "login", "--help")
+	stdout, stderr, err := runCommand(t, repoRoot(t), 10*time.Second, nil, "", nodeBin, "run", "--help")
 	if err != nil {
-		t.Fatalf("sam-node login --help failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+		t.Fatalf("sam-node run --help failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
 	}
 	out := stdout + stderr
-	if !strings.Contains(out, "Establish sovereign identity with the Hub") {
+	if !strings.Contains(out, "Start the sovereign mesh node") {
 		t.Fatalf("unexpected help output:\n%s", out)
 	}
 }

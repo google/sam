@@ -17,21 +17,21 @@ package integration_test
 import (
 	"bytes"
 	"context"
-	"crypto/ed25519"
-	"crypto/rand"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
-	"net/http"
-	"net/http/httptest"
+	"fmt"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"testing"
 	"time"
 
-	corecrypto "github.com/libp2p/go-libp2p/core/crypto"
+	"github.com/google/sam/api"
+	"github.com/libp2p/go-libp2p"
+	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-libp2p/core/protocol"
+	"github.com/libp2p/go-msgio"
+	"google.golang.org/protobuf/proto"
 )
 
 func repoRoot(t *testing.T) string {
@@ -90,37 +90,37 @@ func runCommand(
 	return stdout.String(), stderr.String(), err
 }
 
-func startMockHubConfigServer(t *testing.T) string {
+func startMockLibp2pHub(t *testing.T) (peer.ID, string) {
 	t.Helper()
 
-	pubKey, _, err := ed25519.GenerateKey(rand.Reader)
+	h, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 	if err != nil {
-		t.Fatalf("generating hub public key: %v", err)
+		t.Fatalf("failed to create mock libp2p host: %v", err)
 	}
 
-	bootstrapPriv, _, err := corecrypto.GenerateEd25519Key(rand.Reader)
-	if err != nil {
-		t.Fatalf("generating bootstrap key: %v", err)
-	}
-	bootstrapPeerID, err := peer.IDFromPrivateKey(bootstrapPriv)
-	if err != nil {
-		t.Fatalf("deriving bootstrap peer id: %v", err)
-	}
-	bootstrapAddr := "/ip4/127.0.0.1/tcp/4002/p2p/" + bootstrapPeerID.String()
+	h.SetStreamHandler(protocol.ID("/sam/enroll/1.0.0"), func(s network.Stream) {
+		defer func() { _ = s.Close() }()
 
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/api/v1/config":
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"public_key_hex":  hex.EncodeToString(pubKey),
-				"mesh_id":         "test-mesh",
-				"bootstrap_nodes": []string{bootstrapAddr},
-			})
-		default:
-			http.NotFound(w, r)
+		// The following constants are mock values used for testing.
+		// 'mock-biscuit-token' is a dummy token string.
+		// 'mock-hub-pub-key' is a dummy public key string.
+		resp := &api.EnrollResponse{
+			BiscuitToken: []byte("mock-biscuit-token"),
+			HubPublicKey: []byte("mock-hub-pub-key"),
+			HubAddresses: []string{h.Addrs()[0].String() + "/p2p/" + h.ID().String()},
 		}
-	}))
-	t.Cleanup(ts.Close)
-	return ts.URL
+		data, err := proto.Marshal(resp)
+		if err != nil {
+			fmt.Printf("Failed to marshal mock response: %v\n", err)
+			return
+		}
+		writer := msgio.NewVarintWriter(s)
+		if err := writer.WriteMsg(data); err != nil {
+			fmt.Printf("Failed to write mock response: %v\n", err)
+		}
+	})
+
+	t.Cleanup(func() { _ = h.Close() })
+
+	return h.ID(), h.Addrs()[0].String() + "/p2p/" + h.ID().String()
 }

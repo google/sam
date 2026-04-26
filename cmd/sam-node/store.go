@@ -28,6 +28,7 @@ const (
 	bucketIdentity = "identity"
 	keyBiscuit     = "identity_biscuit"
 	keyPrivKey     = "node_private_key"
+	keyIdentityExp = "identity_expiration"
 )
 
 type Store struct {
@@ -89,6 +90,31 @@ func (s *Store) LoadIdentity() (string, error) {
 	return string(val), nil
 }
 
+func (s *Store) SaveIdentityExpiration(exp int64) error {
+	return s.db.Update(func(tx *bbolt.Tx) error {
+		b := tx.Bucket([]byte(bucketIdentity))
+		return b.Put([]byte(keyIdentityExp), []byte(fmt.Sprintf("%d", exp)))
+	})
+}
+
+func (s *Store) LoadIdentityExpiration() (int64, error) {
+	var val []byte
+	_ = s.db.View(func(tx *bbolt.Tx) error {
+		b := tx.Bucket([]byte(bucketIdentity))
+		val = b.Get([]byte(keyIdentityExp))
+		return nil
+	})
+	if len(val) == 0 {
+		return 0, fmt.Errorf("no identity expiration found")
+	}
+	var exp int64
+	_, err := fmt.Sscanf(string(val), "%d", &exp)
+	if err != nil {
+		return 0, err
+	}
+	return exp, nil
+}
+
 func (s *Store) SaveKey(key []byte) error {
 	return s.db.Update(func(tx *bbolt.Tx) error {
 		b := tx.Bucket([]byte(bucketIdentity))
@@ -104,6 +130,32 @@ func (s *Store) LoadKey() ([]byte, error) {
 		return nil
 	})
 	return val, nil
+}
+
+func (s *Store) SaveHubConfig(pubKey []byte, addrs []string) error {
+	return s.db.Update(func(tx *bbolt.Tx) error {
+		b := tx.Bucket([]byte(bucketIdentity))
+		if err := b.Put([]byte("hub_public_key"), pubKey); err != nil {
+			return err
+		}
+		data, _ := json.Marshal(addrs)
+		return b.Put([]byte("hub_addresses"), data)
+	})
+}
+
+func (s *Store) LoadHubConfig() ([]byte, []string, error) {
+	var pubKey []byte
+	var addrs []string
+	err := s.db.View(func(tx *bbolt.Tx) error {
+		b := tx.Bucket([]byte(bucketIdentity))
+		pubKey = b.Get([]byte("hub_public_key"))
+		addrsBytes := b.Get([]byte("hub_addresses"))
+		if len(addrsBytes) > 0 {
+			return json.Unmarshal(addrsBytes, &addrs)
+		}
+		return nil
+	})
+	return pubKey, addrs, err
 }
 
 func (s *Store) Close() error {

@@ -18,6 +18,9 @@ import (
 	"fmt"
 
 	"github.com/biscuit-auth/biscuit-go/v2"
+
+	"github.com/google/sam/api"
+
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
@@ -33,8 +36,8 @@ type RequestContext struct {
 
 func (n *SamNode) WrapSecurely(pid protocol.ID, handler network.StreamHandler) {
 	n.Host.SetStreamHandler(pid, func(s network.Stream) {
-		// Allow the auth protocol to proceed without checks
-		if pid == AuthProtocolID {
+		// Allow the auth protocol and enroll protocol to proceed without checks
+		if pid == AuthProtocolID || pid == api.EnrollProtocolID {
 			handler(s)
 			return
 		}
@@ -77,6 +80,15 @@ func (n *SamNode) Authorize(rawToken []byte, req RequestContext) error {
 	authorizer, err := b.Authorizer(n.HubPublicKey)
 	if err != nil {
 		return err
+	}
+
+	// Verify that the token is bound to the connecting peer's ID
+	boundFact := biscuit.Fact{Predicate: biscuit.Predicate{
+		Name: "node",
+		IDs:  []biscuit.Term{biscuit.String(req.PeerID.String())},
+	}}
+	if _, err := b.GetBlockID(boundFact); err != nil {
+		return fmt.Errorf("token is not bound to peer %s", req.PeerID)
 	}
 
 	// Inject the current action context (Standard Vocabulary)

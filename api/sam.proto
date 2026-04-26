@@ -59,3 +59,16 @@ message RevocationMsg {
   int64 timestamp = 3;
   bytes signature = 4;
 }
+
+message EnrollRequest {
+  string jwt = 1;
+  string peer_id = 2;
+}
+
+message EnrollResponse {
+  bytes biscuit_token = 1;
+  string error_message = 2;
+  bytes hub_public_key = 3;
+  repeated string hub_addresses = 4;
+  int64 expiration = 5;
+}
