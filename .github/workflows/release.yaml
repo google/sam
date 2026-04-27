@@ -1,0 +1,85 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+   publish:
+    name: publish
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    timeout-minutes: 100
+    
+    steps:
+    - name: Check out code
+      uses: actions/checkout@v6
+
+    - name: Set up QEMU
+      uses: docker/setup-qemu-action@v3
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Log in to the Container registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Extract metadata for Hub
+      id: meta-hub
+      uses: docker/metadata-action@318604b99e75e41977312d83839a89be02ca4893
+      with:
+        images: ${{ env.REGISTRY }}/google/sam-hub
+
+    - name: Build and push Hub image
+      uses: docker/build-push-action@v6
+      with:
+        context: .
+        file: Dockerfile.sam-hub
+        platforms: linux/amd64,linux/arm64
+        push: true
+        tags: |
+          ${{ steps.meta-hub.outputs.tags }}
+          ${{ env.REGISTRY }}/google/sam-hub:stable
+        labels: ${{ steps.meta-hub.outputs.labels }}
+
+    - name: Extract metadata for Node
+      id: meta-node
+      uses: docker/metadata-action@318604b99e75e41977312d83839a89be02ca4893
+      with:
+        images: ${{ env.REGISTRY }}/google/sam-node
+
+    - name: Build and push Node image
+      uses: docker/build-push-action@v6
+      with:
+        context: .
+        file: Dockerfile.sam-node
+        platforms: linux/amd64,linux/arm64
+        push: true
+        tags: |
+          ${{ steps.meta-node.outputs.tags }}
+          ${{ env.REGISTRY }}/google/sam-node:stable
+        labels: ${{ steps.meta-node.outputs.labels }}
