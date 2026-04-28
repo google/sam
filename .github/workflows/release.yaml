@@ -55,7 +55,7 @@ jobs:
         images: ${{ env.REGISTRY }}/google/sam-hub
 
     - name: Build and push Hub image
-      uses: docker/build-push-action@v6
+      uses: docker/build-push-action@v7
       with:
         context: .
         file: Dockerfile.sam-hub
@@ -73,7 +73,7 @@ jobs:
         images: ${{ env.REGISTRY }}/google/sam-node
 
     - name: Build and push Node image
-      uses: docker/build-push-action@v6
+      uses: docker/build-push-action@v7
       with:
         context: .
         file: Dockerfile.sam-node
