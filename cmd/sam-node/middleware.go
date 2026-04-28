@@ -18,12 +18,12 @@ import (
 	"fmt"
 
 	"github.com/biscuit-auth/biscuit-go/v2"
-
-	"github.com/google/sam/api"
-
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
+	"github.com/libp2p/go-msgio"
+	"github.com/google/sam/api"
+	"google.golang.org/protobuf/proto"
 )
 
 // RequestContext carries the security metadata for a specific stream request
@@ -34,41 +34,58 @@ type RequestContext struct {
 	Protocol protocol.ID
 }
 
-func (n *SamNode) WrapSecurely(pid protocol.ID, handler network.StreamHandler) {
-	n.Host.SetStreamHandler(pid, func(s network.Stream) {
-		// Allow the auth protocol and enroll protocol to proceed without checks
-		if pid == AuthProtocolID || pid == api.EnrollProtocolID {
-			handler(s)
-			return
-		}
-		// Before handling any other stream, we must ensure the peer is authenticated and authorized.
+// WithBiscuitAuth enforces a Protobuf handshake on a stream before calling the next handler.
+func (n *SamNode) WithBiscuitAuth(next network.StreamHandler) network.StreamHandler {
+	return func(s network.Stream) {
+		defer func() {
+			if err := s.Close(); err != nil {
+				fmt.Printf("Failed to close stream: %v\n", err)
+			}
+		}()
 		remotePeer := s.Conn().RemotePeer()
 
-		identity, err := n.Store.GetVerifiedIdentity(remotePeer)
+		// Read AuthFrame
+		reader := msgio.NewVarintReaderSize(s, 1024*64)
+		msg, err := reader.ReadMsg()
 		if err != nil {
-			if resetErr := s.Reset(); resetErr != nil {
-				fmt.Printf("failed to reset unauthenticated stream: %v\n", resetErr)
-			}
+			fmt.Printf("[Auth] Failed to read auth frame from %s: %v\n", remotePeer, err)
+			return
+		}
+		defer reader.ReleaseMsg(msg)
+
+		var authFrame api.AuthFrame
+		if err := proto.Unmarshal(msg, &authFrame); err != nil {
+			fmt.Printf("[Auth] Invalid auth frame from %s\n", remotePeer)
 			return
 		}
 
+		// Verify token
 		reqCtx := RequestContext{
 			PeerID:   remotePeer,
-			User:     identity.UserID,
-			Protocol: pid,
+			User:     "", // Not used in Authorize
+			Protocol: s.Protocol(),
 		}
 
-		// AuthZ Check
-		if err := n.Authorize(identity.RawBiscuit, reqCtx); err != nil {
-			fmt.Printf("[AuthZ] Denied %s to %s: %v\n", pid, identity.UserID, err)
-			if resetErr := s.Reset(); resetErr != nil {
-				fmt.Printf("failed to reset unauthorized stream: %v\n", resetErr)
-			}
+		writer := msgio.NewVarintWriter(s)
+
+		if err := n.Authorize(authFrame.Biscuit, reqCtx); err != nil {
+			fmt.Printf("[Auth] AuthZ Denied %s: %v\n", remotePeer, err)
+			resp := &api.AuthResponse{Success: false, Error: err.Error()}
+			respBytes, _ := proto.Marshal(resp)
+			_ = writer.WriteMsg(respBytes)
 			return
 		}
 
-		handler(s)
-	})
+		// Valid
+		resp := &api.AuthResponse{Success: true}
+		respBytes, _ := proto.Marshal(resp)
+		if err := writer.WriteMsg(respBytes); err != nil {
+			fmt.Printf("[Auth] Failed to write ACK to %s: %v\n", remotePeer, err)
+			return
+		}
+
+		next(s)
+	}
 }
 
 func (n *SamNode) Authorize(rawToken []byte, req RequestContext) error {

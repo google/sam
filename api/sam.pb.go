@@ -81,7 +81,7 @@ func (x MeshEvent_Type) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use MeshEvent_Type.Descriptor instead.
 func (MeshEvent_Type) EnumDescriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{7, 0}
+	return file_api_sam_proto_rawDescGZIP(), []int{9, 0}
 }
 
 type AuthEnvelope struct {
@@ -144,6 +144,102 @@ func (x *AuthEnvelope) GetProof() []byte {
 	return nil
 }
 
+type AuthFrame struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Biscuit       []byte                 `protobuf:"bytes,1,opt,name=biscuit,proto3" json:"biscuit,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AuthFrame) Reset() {
+	*x = AuthFrame{}
+	mi := &file_api_sam_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AuthFrame) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AuthFrame) ProtoMessage() {}
+
+func (x *AuthFrame) ProtoReflect() protoreflect.Message {
+	mi := &file_api_sam_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AuthFrame.ProtoReflect.Descriptor instead.
+func (*AuthFrame) Descriptor() ([]byte, []int) {
+	return file_api_sam_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *AuthFrame) GetBiscuit() []byte {
+	if x != nil {
+		return x.Biscuit
+	}
+	return nil
+}
+
+type AuthResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	Error         string                 `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"` // populated only if success is false
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AuthResponse) Reset() {
+	*x = AuthResponse{}
+	mi := &file_api_sam_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AuthResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AuthResponse) ProtoMessage() {}
+
+func (x *AuthResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_api_sam_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AuthResponse.ProtoReflect.Descriptor instead.
+func (*AuthResponse) Descriptor() ([]byte, []int) {
+	return file_api_sam_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *AuthResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *AuthResponse) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
 type HubConfig struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	PublicKeyHex   string                 `protobuf:"bytes,1,opt,name=public_key_hex,json=publicKeyHex,proto3" json:"public_key_hex,omitempty"`
@@ -155,7 +251,7 @@ type HubConfig struct {
 
 func (x *HubConfig) Reset() {
 	*x = HubConfig{}
-	mi := &file_api_sam_proto_msgTypes[1]
+	mi := &file_api_sam_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -167,7 +263,7 @@ func (x *HubConfig) String() string {
 func (*HubConfig) ProtoMessage() {}
 
 func (x *HubConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[1]
+	mi := &file_api_sam_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -180,7 +276,7 @@ func (x *HubConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HubConfig.ProtoReflect.Descriptor instead.
 func (*HubConfig) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{1}
+	return file_api_sam_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *HubConfig) GetPublicKeyHex() string {
@@ -214,7 +310,7 @@ type PeerProfile struct {
 
 func (x *PeerProfile) Reset() {
 	*x = PeerProfile{}
-	mi := &file_api_sam_proto_msgTypes[2]
+	mi := &file_api_sam_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -226,7 +322,7 @@ func (x *PeerProfile) String() string {
 func (*PeerProfile) ProtoMessage() {}
 
 func (x *PeerProfile) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[2]
+	mi := &file_api_sam_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -239,7 +335,7 @@ func (x *PeerProfile) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PeerProfile.ProtoReflect.Descriptor instead.
 func (*PeerProfile) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{2}
+	return file_api_sam_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *PeerProfile) GetEmail() string {
@@ -265,7 +361,7 @@ type PeerRegistry struct {
 
 func (x *PeerRegistry) Reset() {
 	*x = PeerRegistry{}
-	mi := &file_api_sam_proto_msgTypes[3]
+	mi := &file_api_sam_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -277,7 +373,7 @@ func (x *PeerRegistry) String() string {
 func (*PeerRegistry) ProtoMessage() {}
 
 func (x *PeerRegistry) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[3]
+	mi := &file_api_sam_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -290,7 +386,7 @@ func (x *PeerRegistry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PeerRegistry.ProtoReflect.Descriptor instead.
 func (*PeerRegistry) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{3}
+	return file_api_sam_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *PeerRegistry) GetPeers() map[string]*PeerProfile {
@@ -311,7 +407,7 @@ type ModelProperty struct {
 
 func (x *ModelProperty) Reset() {
 	*x = ModelProperty{}
-	mi := &file_api_sam_proto_msgTypes[4]
+	mi := &file_api_sam_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -323,7 +419,7 @@ func (x *ModelProperty) String() string {
 func (*ModelProperty) ProtoMessage() {}
 
 func (x *ModelProperty) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[4]
+	mi := &file_api_sam_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -336,7 +432,7 @@ func (x *ModelProperty) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelProperty.ProtoReflect.Descriptor instead.
 func (*ModelProperty) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{4}
+	return file_api_sam_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *ModelProperty) GetName() string {
@@ -375,7 +471,7 @@ type AgentCard struct {
 
 func (x *AgentCard) Reset() {
 	*x = AgentCard{}
-	mi := &file_api_sam_proto_msgTypes[5]
+	mi := &file_api_sam_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -387,7 +483,7 @@ func (x *AgentCard) String() string {
 func (*AgentCard) ProtoMessage() {}
 
 func (x *AgentCard) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[5]
+	mi := &file_api_sam_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -400,7 +496,7 @@ func (x *AgentCard) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentCard.ProtoReflect.Descriptor instead.
 func (*AgentCard) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{5}
+	return file_api_sam_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *AgentCard) GetPeerId() string {
@@ -464,7 +560,7 @@ type RevocationMsg struct {
 
 func (x *RevocationMsg) Reset() {
 	*x = RevocationMsg{}
-	mi := &file_api_sam_proto_msgTypes[6]
+	mi := &file_api_sam_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -476,7 +572,7 @@ func (x *RevocationMsg) String() string {
 func (*RevocationMsg) ProtoMessage() {}
 
 func (x *RevocationMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[6]
+	mi := &file_api_sam_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -489,7 +585,7 @@ func (x *RevocationMsg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RevocationMsg.ProtoReflect.Descriptor instead.
 func (*RevocationMsg) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{6}
+	return file_api_sam_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *RevocationMsg) GetTargetPeerId() string {
@@ -531,7 +627,7 @@ type MeshEvent struct {
 
 func (x *MeshEvent) Reset() {
 	*x = MeshEvent{}
-	mi := &file_api_sam_proto_msgTypes[7]
+	mi := &file_api_sam_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -543,7 +639,7 @@ func (x *MeshEvent) String() string {
 func (*MeshEvent) ProtoMessage() {}
 
 func (x *MeshEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[7]
+	mi := &file_api_sam_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -556,7 +652,7 @@ func (x *MeshEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MeshEvent.ProtoReflect.Descriptor instead.
 func (*MeshEvent) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{7}
+	return file_api_sam_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *MeshEvent) GetType() MeshEvent_Type {
@@ -590,7 +686,7 @@ type EnrollRequest struct {
 
 func (x *EnrollRequest) Reset() {
 	*x = EnrollRequest{}
-	mi := &file_api_sam_proto_msgTypes[8]
+	mi := &file_api_sam_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -602,7 +698,7 @@ func (x *EnrollRequest) String() string {
 func (*EnrollRequest) ProtoMessage() {}
 
 func (x *EnrollRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[8]
+	mi := &file_api_sam_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -615,7 +711,7 @@ func (x *EnrollRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EnrollRequest.ProtoReflect.Descriptor instead.
 func (*EnrollRequest) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{8}
+	return file_api_sam_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *EnrollRequest) GetJwt() string {
@@ -646,7 +742,7 @@ type EnrollResponse struct {
 
 func (x *EnrollResponse) Reset() {
 	*x = EnrollResponse{}
-	mi := &file_api_sam_proto_msgTypes[9]
+	mi := &file_api_sam_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -658,7 +754,7 @@ func (x *EnrollResponse) String() string {
 func (*EnrollResponse) ProtoMessage() {}
 
 func (x *EnrollResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[9]
+	mi := &file_api_sam_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -671,7 +767,7 @@ func (x *EnrollResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EnrollResponse.ProtoReflect.Descriptor instead.
 func (*EnrollResponse) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{9}
+	return file_api_sam_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *EnrollResponse) GetBiscuitToken() []byte {
@@ -724,7 +820,12 @@ const file_api_sam_proto_rawDesc = "" +
 	"\fAuthEnvelope\x12\x18\n" +
 	"\abiscuit\x18\x01 \x01(\fR\abiscuit\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12\x14\n" +
-	"\x05proof\x18\x03 \x01(\fR\x05proof\"s\n" +
+	"\x05proof\x18\x03 \x01(\fR\x05proof\"%\n" +
+	"\tAuthFrame\x12\x18\n" +
+	"\abiscuit\x18\x01 \x01(\fR\abiscuit\">\n" +
+	"\fAuthResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x14\n" +
+	"\x05error\x18\x02 \x01(\tR\x05error\"s\n" +
 	"\tHubConfig\x12$\n" +
 	"\x0epublic_key_hex\x18\x01 \x01(\tR\fpublicKeyHex\x12\x17\n" +
 	"\amesh_id\x18\x02 \x01(\tR\x06meshId\x12'\n" +
@@ -794,28 +895,30 @@ func file_api_sam_proto_rawDescGZIP() []byte {
 }
 
 var file_api_sam_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_api_sam_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_api_sam_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
 var file_api_sam_proto_goTypes = []any{
 	(MeshEvent_Type)(0),    // 0: sam.v1.MeshEvent.Type
 	(*AuthEnvelope)(nil),   // 1: sam.v1.AuthEnvelope
-	(*HubConfig)(nil),      // 2: sam.v1.HubConfig
-	(*PeerProfile)(nil),    // 3: sam.v1.PeerProfile
-	(*PeerRegistry)(nil),   // 4: sam.v1.PeerRegistry
-	(*ModelProperty)(nil),  // 5: sam.v1.ModelProperty
-	(*AgentCard)(nil),      // 6: sam.v1.AgentCard
-	(*RevocationMsg)(nil),  // 7: sam.v1.RevocationMsg
-	(*MeshEvent)(nil),      // 8: sam.v1.MeshEvent
-	(*EnrollRequest)(nil),  // 9: sam.v1.EnrollRequest
-	(*EnrollResponse)(nil), // 10: sam.v1.EnrollResponse
-	nil,                    // 11: sam.v1.PeerRegistry.PeersEntry
-	nil,                    // 12: sam.v1.AgentCard.MetadataEntry
+	(*AuthFrame)(nil),      // 2: sam.v1.AuthFrame
+	(*AuthResponse)(nil),   // 3: sam.v1.AuthResponse
+	(*HubConfig)(nil),      // 4: sam.v1.HubConfig
+	(*PeerProfile)(nil),    // 5: sam.v1.PeerProfile
+	(*PeerRegistry)(nil),   // 6: sam.v1.PeerRegistry
+	(*ModelProperty)(nil),  // 7: sam.v1.ModelProperty
+	(*AgentCard)(nil),      // 8: sam.v1.AgentCard
+	(*RevocationMsg)(nil),  // 9: sam.v1.RevocationMsg
+	(*MeshEvent)(nil),      // 10: sam.v1.MeshEvent
+	(*EnrollRequest)(nil),  // 11: sam.v1.EnrollRequest
+	(*EnrollResponse)(nil), // 12: sam.v1.EnrollResponse
+	nil,                    // 13: sam.v1.PeerRegistry.PeersEntry
+	nil,                    // 14: sam.v1.AgentCard.MetadataEntry
 }
 var file_api_sam_proto_depIdxs = []int32{
-	11, // 0: sam.v1.PeerRegistry.peers:type_name -> sam.v1.PeerRegistry.PeersEntry
-	5,  // 1: sam.v1.AgentCard.models:type_name -> sam.v1.ModelProperty
-	12, // 2: sam.v1.AgentCard.metadata:type_name -> sam.v1.AgentCard.MetadataEntry
+	13, // 0: sam.v1.PeerRegistry.peers:type_name -> sam.v1.PeerRegistry.PeersEntry
+	7,  // 1: sam.v1.AgentCard.models:type_name -> sam.v1.ModelProperty
+	14, // 2: sam.v1.AgentCard.metadata:type_name -> sam.v1.AgentCard.MetadataEntry
 	0,  // 3: sam.v1.MeshEvent.type:type_name -> sam.v1.MeshEvent.Type
-	3,  // 4: sam.v1.PeerRegistry.PeersEntry.value:type_name -> sam.v1.PeerProfile
+	5,  // 4: sam.v1.PeerRegistry.PeersEntry.value:type_name -> sam.v1.PeerProfile
 	5,  // [5:5] is the sub-list for method output_type
 	5,  // [5:5] is the sub-list for method input_type
 	5,  // [5:5] is the sub-list for extension type_name
@@ -834,7 +937,7 @@ func file_api_sam_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_sam_proto_rawDesc), len(file_api_sam_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   12,
+			NumMessages:   14,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

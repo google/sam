@@ -22,6 +22,15 @@ message AuthEnvelope {
   bytes proof = 3;
 }
 
+message AuthFrame {
+  bytes biscuit = 1;
+}
+
+message AuthResponse {
+  bool success = 1;
+  string error = 2; // populated only if success is false
+}
+
 message HubConfig {
   string public_key_hex = 1;
   string mesh_id = 2;

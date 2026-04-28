@@ -20,19 +20,20 @@ import (
 	"fmt"
 	"sync"
 
+	"time"
+
 	"github.com/biscuit-auth/biscuit-go/v2"
 	"github.com/google/sam/api"
 	"github.com/libp2p/go-libp2p"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
-	"github.com/libp2p/go-libp2p/p2p/discovery/routing"
-	"github.com/libp2p/go-libp2p/p2p/discovery/util"
-	"time"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
+	"github.com/libp2p/go-libp2p/p2p/discovery/routing"
+	"github.com/libp2p/go-libp2p/p2p/discovery/util"
 	libp2ptls "github.com/libp2p/go-libp2p/p2p/security/tls"
 	libp2pquic "github.com/libp2p/go-libp2p/p2p/transport/quic"
 	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
@@ -55,7 +56,7 @@ type SamNode struct {
 }
 
 // NewSamNode creates a new Agent instance secured with the 4-layer pipeline.
-func NewSamNode(ctx context.Context, privKey crypto.PrivKey, hubPubKey ed25519.PublicKey, hubAddrs []multiaddr.Multiaddr, store *Store, meshID string, discoveryInterval string) (*SamNode, error) {
+func NewSamNode(ctx context.Context, privKey crypto.PrivKey, hubPubKey ed25519.PublicKey, hubAddrs []multiaddr.Multiaddr, store *Store, meshID string, discoveryInterval string, listenAddrs []string) (*SamNode, error) {
 	node := &SamNode{
 		Store:        store,
 		HubPublicKey: hubPubKey,
@@ -72,6 +73,7 @@ func NewSamNode(ctx context.Context, privKey crypto.PrivKey, hubPubKey ed25519.P
 		libp2p.Transport(tcp.NewTCPTransport),
 		libp2p.Security(libp2ptls.ID, libp2ptls.New),
 		libp2p.ConnectionGater(gater),
+		libp2p.ListenAddrStrings(listenAddrs...),
 	)
 	if err != nil {
 		return nil, err
@@ -84,6 +86,10 @@ func NewSamNode(ctx context.Context, privKey crypto.PrivKey, hubPubKey ed25519.P
 		return nil, err
 	}
 	node.DHT = kdht
+
+	if err := kdht.Bootstrap(ctx); err != nil {
+		fmt.Printf("[DHT] Warning: Failed to bootstrap DHT: %v\n", err)
+	}
 
 	// Bootstrap: Connect to the Hub
 	for _, addr := range hubAddrs {
@@ -135,8 +141,10 @@ func NewSamNode(ctx context.Context, privKey crypto.PrivKey, hubPubKey ed25519.P
 	go node.startDiscovery(ctx, meshID, interval)
 
 	// Layer 3: Open the Lobby Door (Auth Protocol is bypassed by Layer 4)
-	node.WrapSecurely(AuthProtocolID, node.HandleAuthHandshake)
+	node.Host.SetStreamHandler(AuthProtocolID, node.HandleAuthHandshake)
 
+	// Layer 3: Wire up MCP handler wrapped in middleware
+	node.Host.SetStreamHandler(api.MCPProtocolID, node.WithBiscuitAuth(node.HandleMCPStream))
 	return node, nil
 }
 
@@ -161,7 +169,7 @@ func (n *SamNode) listenForHubEvents(ctx context.Context) {
 			fmt.Printf("[Mesh Event] Failed to unmarshal event from %s: %v\n", msg.ReceivedFrom, err)
 			continue
 		}
-		
+
 		n.mu.Lock()
 		switch event.Type {
 		case api.MeshEvent_JOIN:
@@ -200,6 +208,11 @@ func (n *SamNode) startDiscovery(ctx context.Context, meshID string, interval ti
 				if !n.knownPeers[p.ID.String()] {
 					n.knownPeers[p.ID.String()] = true
 					fmt.Printf("[Discovery] Found new peer via DHT: %s\n", p.ID)
+					go func(pi peer.AddrInfo) {
+						if err := n.Host.Connect(ctx, pi); err != nil {
+							fmt.Printf("[Discovery] Failed to connect to %s: %v\n", pi.ID, err)
+						}
+					}(p)
 				}
 				n.mu.Unlock()
 			}
@@ -281,5 +294,3 @@ func (n *SamNode) HandleAuthHandshake(s network.Stream) {
 
 	fmt.Printf("[AuthN] Successfully authenticated peer %s (%s)\n", remotePeer, identity.UserEmail)
 }
-
-

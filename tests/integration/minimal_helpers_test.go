@@ -27,6 +27,7 @@ import (
 
 	"github.com/google/sam/api"
 	"github.com/libp2p/go-libp2p"
+	dht "github.com/libp2p/go-libp2p-kad-dht"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
@@ -98,6 +99,11 @@ func startMockLibp2pHub(t *testing.T) (peer.ID, string) {
 		t.Fatalf("failed to create mock libp2p host: %v", err)
 	}
 
+	kdht, err := dht.New(context.Background(), h, dht.Mode(dht.ModeServer))
+	if err != nil {
+		t.Fatalf("failed to create DHT on mock hub: %v", err)
+	}
+
 	h.SetStreamHandler(protocol.ID("/sam/enroll/1.0.0"), func(s network.Stream) {
 		defer func() { _ = s.Close() }()
 
@@ -120,7 +126,10 @@ func startMockLibp2pHub(t *testing.T) (peer.ID, string) {
 		}
 	})
 
-	t.Cleanup(func() { _ = h.Close() })
+	t.Cleanup(func() {
+		_ = kdht.Close()
+		_ = h.Close()
+	})
 
 	return h.ID(), h.Addrs()[0].String() + "/p2p/" + h.ID().String()
 }

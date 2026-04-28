@@ -15,47 +15,111 @@
 package main
 
 import (
-	"bytes"
-	"net/http"
-	"net/http/httptest"
-	"strings"
+	"io"
 	"testing"
+	"time"
+
+	"github.com/libp2p/go-libp2p/core/network"
+	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-libp2p/core/protocol"
 )
 
-func TestMCPServer(t *testing.T) {
-	handler := NewMCPHandler(nil)
 
-	t.Run("initialize", func(t *testing.T) {
-		reqBody := []byte(`{"jsonrpc":"2.0","method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test-client","version":"1.0"}},"id":1}`)
-		req := httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewBuffer(reqBody))
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Accept", "application/json, text/event-stream")
-		w := httptest.NewRecorder()
+type mockStream struct {
+	r        io.Reader
+	w        io.Writer
+	protocol protocol.ID
+}
 
-		handler.ServeHTTP(w, req)
+func (s *mockStream) Read(p []byte) (n int, err error) {
+	return s.r.Read(p)
+}
+func (s *mockStream) Write(p []byte) (n int, err error) {
+	return s.w.Write(p)
+}
+func (s *mockStream) Close() error {
+	if c, ok := s.w.(io.Closer); ok {
+		return c.Close()
+	}
+	return nil
+}
+func (s *mockStream) Protocol() protocol.ID {
+	return s.protocol
+}
 
-		if w.Code != http.StatusOK {
-			t.Errorf("Expected status OK, got %v", w.Code)
-		}
-	})
+type mockConn struct {
+	network.Conn // Embed interface
+	remotePeer peer.ID
+}
 
-	t.Run("tools/list", func(t *testing.T) {
-		reqBody := []byte(`{"jsonrpc":"2.0","method":"tools/list","id":2}`)
-		req := httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewBuffer(reqBody))
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Accept", "application/json, text/event-stream")
-		w := httptest.NewRecorder()
+func (c *mockConn) RemotePeer() peer.ID {
+	return c.remotePeer
+}
 
-		handler.ServeHTTP(w, req)
+func (s *mockStream) Conn() network.Conn {
+	return &mockConn{remotePeer: peer.ID("dummy-peer-id")}
+}
+func (s *mockStream) Reset() error {
+	return nil
+}
+func (s *mockStream) CloseRead() error {
+	return nil
+}
+func (s *mockStream) CloseWrite() error {
+	return nil
+}
+func (s *mockStream) ID() string {
+	return "dummy-stream-id"
+}
+func (s *mockStream) ResetWithError(code network.StreamErrorCode) error {
+	return nil
+}
+func (s *mockStream) Scope() network.StreamScope {
+	return nil
+}
+func (s *mockStream) SetDeadline(t time.Time) error {
+	return nil
+}
+func (s *mockStream) SetReadDeadline(t time.Time) error {
+	return nil
+}
+func (s *mockStream) SetWriteDeadline(t time.Time) error {
+	return nil
+}
+func (s *mockStream) SetProtocol(id protocol.ID) error {
+	s.protocol = id
+	return nil
+}
+func (s *mockStream) Stat() network.Stats {
+	return network.Stats{}
+}
 
-		if w.Code != http.StatusOK {
-			t.Errorf("Expected status OK, got %v", w.Code)
-		}
+func TestZeroTrustMCPServer(t *testing.T) {
+	pr1, pw1 := io.Pipe()
+	pr2, pw2 := io.Pipe()
 
-		body := w.Body.String()
-		// We expect an error because we haven't established a full session (SSE handshake + initialize).
-		if !strings.Contains(body, "invalid during session initialization") {
-			t.Errorf("Expected session initialization error, got: %s", body)
-		}
-	})
+	serverStream := &mockStream{r: pr1, w: pw2, protocol: protocol.ID("/sam/mcp/1.0.0")}
+	clientStream := &mockStream{r: pr2, w: pw1, protocol: protocol.ID("/sam/mcp/1.0.0")}
+
+	node := &SamNode{}
+
+	go func() {
+		handler := node.WithBiscuitAuth(node.HandleMCPStream)
+		handler(serverStream)
+	}()
+
+	// Test: Skip sending AuthFrame and write MCP message directly!
+	if _, err := pw1.Write([]byte(`{"jsonrpc":"2.0","method":"initialize"}`)); err != nil {
+		t.Fatalf("failed to write to pipe: %v", err)
+	}
+	if err := pw1.Close(); err != nil {
+		t.Fatalf("failed to close pipe: %v", err)
+	}
+
+	// Server should read invalid auth frame and close stream!
+	msg := make([]byte, 100)
+	_, err := clientStream.Read(msg)
+	if err == nil {
+		t.Errorf("Expected error reading from stream (stream should be closed by server), got nil")
+	}
 }

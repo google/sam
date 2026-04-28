@@ -132,7 +132,7 @@ func main() {
 					log.Fatal("Hub public key not found in store and not provided. Cannot verify peers.")
 				}
 				priv := getOrGenerateKey(store)
-				node, err = NewSamNode(context.Background(), priv, hubPubKey, hubAddrs, store, meshFlag, discoveryIntervalFlag)
+				node, err = NewSamNode(context.Background(), priv, hubPubKey, hubAddrs, store, meshFlag, discoveryIntervalFlag, listenAddrs)
 				if err != nil {
 					log.Fatalf("Failed to start mesh node: %v", err)
 				}
@@ -163,7 +163,7 @@ func main() {
 				}
 
 				priv := getOrGenerateKey(store)
-				node, err = NewSamNode(context.Background(), priv, nil, initHubAddrs, store, meshFlag, discoveryIntervalFlag)
+				node, err = NewSamNode(context.Background(), priv, nil, initHubAddrs, store, meshFlag, discoveryIntervalFlag, listenAddrs)
 				if err != nil {
 					log.Fatalf("Failed to initialize node for enrollment: %v", err)
 				}
@@ -266,7 +266,7 @@ func main() {
 				}
 			}()
 
-			fmt.Printf("SAM Node Online.\nPeerID: %s\nListening on: %v\n", node.Host.ID(), listenAddrs)
+			fmt.Printf("SAM Node Online.\nPeerID: %s\nListening on: %v\n", node.Host.ID(), node.Host.Addrs())
 
 			// Block forever
 			<-ctx.Done()
@@ -325,7 +325,7 @@ func main() {
 			}
 
 			priv := getOrGenerateKey(store)
-			node, err := NewSamNode(context.Background(), priv, nil, initHubAddrs, store, meshFlag, discoveryIntervalFlag)
+			node, err := NewSamNode(context.Background(), priv, nil, initHubAddrs, store, meshFlag, discoveryIntervalFlag, listenAddrs)
 			if err != nil {
 				log.Fatalf("Failed to initialize node for enrollment: %v", err)
 			}
