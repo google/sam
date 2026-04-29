@@ -89,7 +89,7 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
     local timeout_s="${3:-20}"
     local i
     for ((i=0; i<timeout_s*10; i++)); do
-      if docker logs "${container}" 2>&1 | grep -q "${needle}"; then
+      if docker logs "${container}" 2>&1 | grep -Fq "${needle}"; then
         return 0
       fi
       sleep 0.1
@@ -305,17 +305,18 @@ EOF
       --mesh "e2e-mesh" >/dev/null
 
     MESH_CONTAINERS+=("${name}")
-    mesh_wait_for_log "${name}" "SAM Hub Online" 20
+    mesh_wait_for_log "${name}" "PeerID:" 20
     
     # Extract Peer ID for nodes to use
     local peer_id
-    peer_id=$(docker logs "${name}" | grep "PeerID:" | awk '{print $2}' | tr -d '\r')
+    peer_id=$(docker logs "${name}" 2>&1 | grep -oE '12D3Koo[a-zA-Z0-9]+' | head -n 1)
     echo "${peer_id}" > "/tmp/${MESH_PREFIX}-hub-peer-id"
     echo "Extracted Hub PeerID: ${peer_id}"
   }
 
   mesh_start_node() {
     local idx="$1"
+    local flags="${2:-}"
     local name="${MESH_PREFIX}-node-${idx}"
 
     local hub_peer_id
@@ -328,6 +329,7 @@ EOF
       -v "${MESH_SOCKET_DIR}:/sockets" \
       "sam-node:local" \
       run \
+      ${flags} \
       --hub "/dns4/sam-hub/tcp/4002/p2p/${hub_peer_id}" \
       --client-id "sam-e2e" \
       --client-secret "sam-e2e-secret" \

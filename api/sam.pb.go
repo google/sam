@@ -729,15 +729,16 @@ func (x *EnrollRequest) GetPeerId() string {
 }
 
 type EnrollResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	BiscuitToken  []byte                 `protobuf:"bytes,1,opt,name=biscuit_token,json=biscuitToken,proto3" json:"biscuit_token,omitempty"`
-	ErrorMessage  string                 `protobuf:"bytes,2,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
-	HubPublicKey  []byte                 `protobuf:"bytes,3,opt,name=hub_public_key,json=hubPublicKey,proto3" json:"hub_public_key,omitempty"`
-	HubAddresses  []string               `protobuf:"bytes,4,rep,name=hub_addresses,json=hubAddresses,proto3" json:"hub_addresses,omitempty"`
-	Expiration    int64                  `protobuf:"varint,5,opt,name=expiration,proto3" json:"expiration,omitempty"`
-	KnownPeers    []string               `protobuf:"bytes,6,rep,name=known_peers,json=knownPeers,proto3" json:"known_peers,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	BiscuitToken    []byte                 `protobuf:"bytes,1,opt,name=biscuit_token,json=biscuitToken,proto3" json:"biscuit_token,omitempty"`
+	ErrorMessage    string                 `protobuf:"bytes,2,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
+	HubPublicKey    []byte                 `protobuf:"bytes,3,opt,name=hub_public_key,json=hubPublicKey,proto3" json:"hub_public_key,omitempty"`
+	HubAddresses    []string               `protobuf:"bytes,4,rep,name=hub_addresses,json=hubAddresses,proto3" json:"hub_addresses,omitempty"`
+	Expiration      int64                  `protobuf:"varint,5,opt,name=expiration,proto3" json:"expiration,omitempty"`
+	KnownPeers      []string               `protobuf:"bytes,6,rep,name=known_peers,json=knownPeers,proto3" json:"known_peers,omitempty"`
+	DatalogPolicies []string               `protobuf:"bytes,7,rep,name=datalog_policies,json=datalogPolicies,proto3" json:"datalog_policies,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *EnrollResponse) Reset() {
@@ -812,6 +813,13 @@ func (x *EnrollResponse) GetKnownPeers() []string {
 	return nil
 }
 
+func (x *EnrollResponse) GetDatalogPolicies() []string {
+	if x != nil {
+		return x.DatalogPolicies
+	}
+	return nil
+}
+
 var File_api_sam_proto protoreflect.FileDescriptor
 
 const file_api_sam_proto_rawDesc = "" +
@@ -870,7 +878,7 @@ const file_api_sam_proto_rawDesc = "" +
 	"\x06BANNED\x10\x02\":\n" +
 	"\rEnrollRequest\x12\x10\n" +
 	"\x03jwt\x18\x01 \x01(\tR\x03jwt\x12\x17\n" +
-	"\apeer_id\x18\x02 \x01(\tR\x06peerId\"\xe6\x01\n" +
+	"\apeer_id\x18\x02 \x01(\tR\x06peerId\"\x91\x02\n" +
 	"\x0eEnrollResponse\x12#\n" +
 	"\rbiscuit_token\x18\x01 \x01(\fR\fbiscuitToken\x12#\n" +
 	"\rerror_message\x18\x02 \x01(\tR\ferrorMessage\x12$\n" +
@@ -880,7 +888,8 @@ const file_api_sam_proto_rawDesc = "" +
 	"expiration\x18\x05 \x01(\x03R\n" +
 	"expiration\x12\x1f\n" +
 	"\vknown_peers\x18\x06 \x03(\tR\n" +
-	"knownPeersB\x1bZ\x19github.com/google/sam/apib\x06proto3"
+	"knownPeers\x12)\n" +
+	"\x10datalog_policies\x18\a \x03(\tR\x0fdatalogPoliciesB\x1bZ\x19github.com/google/sam/apib\x06proto3"
 
 var (
 	file_api_sam_proto_rawDescOnce sync.Once

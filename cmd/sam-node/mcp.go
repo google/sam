@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/google/sam/api"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -58,6 +59,74 @@ func NewMCPHandler(node *SamNode) http.Handler {
 		Name:        "send_message",
 		Description: "Send a message to another agent in the mesh",
 	}, handleSendMessage)
+
+	// Add the mesh_pubsub_broadcast tool.
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "mesh_pubsub_broadcast",
+		Description: "Publish an event payload to a custom GossipSub topic",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, params struct {
+		Topic   string `json:"topic" jsonschema:"GossipSub topic name"`
+		Payload string `json:"payload" jsonschema:"Payload to publish"`
+	}) (*mcp.CallToolResult, any, error) {
+		node.mu.Lock()
+		t, ok := node.topics[params.Topic]
+		var err error
+		if !ok {
+			t, err = node.PubSub.Join(params.Topic)
+			if err == nil {
+				node.topics[params.Topic] = t
+			}
+		}
+		node.mu.Unlock()
+		if err != nil {
+			return nil, nil, err
+		}
+		if err := t.Publish(ctx, []byte(params.Payload)); err != nil {
+			return nil, nil, err
+		}
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{Text: "Published"},
+			},
+		}, nil, nil
+	})
+
+	// Add the poll_messages tool.
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "poll_messages",
+		Description: "Poll for incoming messages on custom GossipSub topics",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, params struct {
+		Topic string `json:"topic" jsonschema:"GossipSub topic name"`
+	}) (*mcp.CallToolResult, any, error) {
+		node.mu.Lock()
+		msgs := node.receivedMsgs[params.Topic]
+		delete(node.receivedMsgs, params.Topic) // Clear on read!
+		node.mu.Unlock()
+
+		response := fmt.Sprintf("Messages on topic %s: %v", params.Topic, msgs)
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{Text: response},
+			},
+		}, nil, nil
+	})
+
+	// Add the subscribe_topic tool.
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "subscribe_topic",
+		Description: "Subscribe to a custom GossipSub topic",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, params struct {
+		Topic string `json:"topic" jsonschema:"GossipSub topic name"`
+	}) (*mcp.CallToolResult, any, error) {
+		if err := node.subscribeToTopic(ctx, params.Topic); err != nil {
+			return nil, nil, err
+		}
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{Text: "Subscribed"},
+			},
+		}, nil, nil
+	})
 
 	// Add the get_mesh_info tool.
 	mcp.AddTool(server, &mcp.Tool{
@@ -122,6 +191,24 @@ func NewMCPHandler(node *SamNode) http.Handler {
 
 // CallMCPTool opens a stream to a remote peer, performs the handshake, and calls a tool.
 func (n *SamNode) CallMCPTool(ctx context.Context, targetPeer peer.ID, toolName string, params any) (*mcp.CallToolResult, error) {
+	var res *mcp.CallToolResult
+	var err error
+	maxRetries := 3
+	backoff := 1 * time.Second
+
+	for i := 0; i < maxRetries; i++ {
+		res, err = n.callMCPToolOnce(ctx, targetPeer, toolName, params)
+		if err == nil {
+			return res, nil
+		}
+		logger.Warnf("[MCP] Tool call failed, retrying in %v: %v", backoff, err)
+		time.Sleep(backoff)
+		backoff *= 2
+	}
+	return nil, fmt.Errorf("failed after %d retries: %w", maxRetries, err)
+}
+
+func (n *SamNode) callMCPToolOnce(ctx context.Context, targetPeer peer.ID, toolName string, params any) (*mcp.CallToolResult, error) {
 	// Open stream
 	s, err := n.Host.NewStream(ctx, targetPeer, api.MCPProtocolID)
 	if err != nil {
@@ -129,7 +216,7 @@ func (n *SamNode) CallMCPTool(ctx context.Context, targetPeer peer.ID, toolName 
 	}
 	defer func() {
 		if err := s.Close(); err != nil {
-			fmt.Printf("failed to close stream: %v\n", err)
+			logger.Errorf("[MCP] Failed to close stream: %v", err)
 		}
 	}()
 
@@ -180,10 +267,6 @@ func (n *SamNode) CallMCPTool(ctx context.Context, targetPeer peer.ID, toolName 
 	callParams := &mcp.CallToolParams{
 		Name: toolName,
 	}
-	// Wait, arguments in CallToolParams is likely a map or raw message!
-	// Let's assume it's a raw message or map!
-	// If I pass any type, Go might not allow it!
-	// Let's check if I can use json.Marshal to convert params to raw message!
 	paramsBytes, err := json.Marshal(params)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal params for tool %s: %w", toolName, err)

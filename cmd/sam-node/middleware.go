@@ -16,13 +16,15 @@ package main
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/biscuit-auth/biscuit-go/v2"
+	"github.com/biscuit-auth/biscuit-go/v2/parser"
+	"github.com/google/sam/api"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/libp2p/go-msgio"
-	"github.com/google/sam/api"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -39,7 +41,7 @@ func (n *SamNode) WithBiscuitAuth(next network.StreamHandler) network.StreamHand
 	return func(s network.Stream) {
 		defer func() {
 			if err := s.Close(); err != nil {
-				fmt.Printf("Failed to close stream: %v\n", err)
+				logger.Errorf("[Auth] Failed to close stream: %v", err)
 			}
 		}()
 		remotePeer := s.Conn().RemotePeer()
@@ -48,14 +50,14 @@ func (n *SamNode) WithBiscuitAuth(next network.StreamHandler) network.StreamHand
 		reader := msgio.NewVarintReaderSize(s, 1024*64)
 		msg, err := reader.ReadMsg()
 		if err != nil {
-			fmt.Printf("[Auth] Failed to read auth frame from %s: %v\n", remotePeer, err)
+			logger.Errorf("[Auth] Failed to read auth frame from %s: %v", remotePeer, err)
 			return
 		}
 		defer reader.ReleaseMsg(msg)
 
 		var authFrame api.AuthFrame
 		if err := proto.Unmarshal(msg, &authFrame); err != nil {
-			fmt.Printf("[Auth] Invalid auth frame from %s\n", remotePeer)
+			logger.Warnf("[Auth] Invalid auth frame from %s", remotePeer)
 			return
 		}
 
@@ -69,7 +71,7 @@ func (n *SamNode) WithBiscuitAuth(next network.StreamHandler) network.StreamHand
 		writer := msgio.NewVarintWriter(s)
 
 		if err := n.Authorize(authFrame.Biscuit, reqCtx); err != nil {
-			fmt.Printf("[Auth] AuthZ Denied %s: %v\n", remotePeer, err)
+			logger.Warnf("[Auth] AuthZ Denied %s: %v", remotePeer, err)
 			resp := &api.AuthResponse{Success: false, Error: err.Error()}
 			respBytes, _ := proto.Marshal(resp)
 			_ = writer.WriteMsg(respBytes)
@@ -80,7 +82,7 @@ func (n *SamNode) WithBiscuitAuth(next network.StreamHandler) network.StreamHand
 		resp := &api.AuthResponse{Success: true}
 		respBytes, _ := proto.Marshal(resp)
 		if err := writer.WriteMsg(respBytes); err != nil {
-			fmt.Printf("[Auth] Failed to write ACK to %s: %v\n", remotePeer, err)
+			logger.Errorf("[Auth] Failed to write ACK to %s: %v", remotePeer, err)
 			return
 		}
 
@@ -115,6 +117,20 @@ func (n *SamNode) Authorize(rawToken []byte, req RequestContext) error {
 			IDs:  []biscuit.Term{biscuit.String(req.Protocol)},
 		},
 	})
+
+	// Load dynamic policies from store and add them as facts
+	policies, err := n.Store.LoadPolicies()
+	if err != nil {
+		return fmt.Errorf("failed to load policies: %w", err)
+	}
+	for _, policyStr := range policies {
+		cleanPolicy := strings.TrimRight(strings.TrimSpace(policyStr), ";")
+		p, err := parser.FromStringPolicy(cleanPolicy)
+		if err != nil {
+			return fmt.Errorf("failed to parse policy '%s': %w", policyStr, err)
+		}
+		authorizer.AddPolicy(p)
+	}
 
 	return authorizer.Authorize()
 }

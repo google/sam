@@ -92,4 +92,5 @@ message EnrollResponse {
   repeated string hub_addresses = 4;
   int64 expiration = 5;
   repeated string known_peers = 6;
+  repeated string datalog_policies = 7;
 }

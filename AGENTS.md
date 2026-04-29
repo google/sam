@@ -19,9 +19,16 @@ Enforce strict modularity in testing. The repository uses a defined testing pyra
 * **No Redundancy:** Do not replicate a test in the slower E2E path if it is already sufficiently covered in the Integration path.
 * **Test Domains:**
   * **Unit Tests:** Focus on isolated, internal functions.
-  * **Integration Tests (`tests/integration/`):** Verify module interactions and API compliance in Go.
+  * **Integration Tests (`tests/integration/`):** Verify module interactions and API compliance in Go and those are time bounded, no more than 10 seconds per execution.
   * **E2E Tests (`tests/e2e/*.bats`):** Use Bats (Bash Automated Testing System) exclusively for high-level, black-box testing of core CUJs.
 
 ## 4. Code Quality & Modularity
 * Ensure all new code is highly modular, prioritizing small, single-responsibility functions that are easy to unit test.
 * Respect the existing repository structure (`cmd/`, `api/`, `internal/`, `tests/`).
+
+## 5. Validation
+
+* Ensure binaries build using `make`
+* Ensure linter passes `make lint`
+* Ensure test passes `make test`
+* Ensure e2e test passes `make e2e-test`

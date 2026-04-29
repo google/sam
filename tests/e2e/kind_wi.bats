@@ -145,7 +145,7 @@ EOF
   
   # Get Hub PeerID
   local hub_peer_id
-  hub_peer_id=$(kubectl logs "${hub_pod_name}" | grep "PeerID:" | awk '{print $2}' | tr -d '\r')
+  hub_peer_id=$(kubectl logs "${hub_pod_name}" | grep -oE '12D3Koo[a-zA-Z0-9]+' | head -n 1)
   
   [[ -n "${hub_peer_id}" ]]
 

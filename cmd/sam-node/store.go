@@ -29,6 +29,7 @@ const (
 	keyBiscuit     = "identity_biscuit"
 	keyPrivKey     = "node_private_key"
 	keyIdentityExp = "identity_expiration"
+	keyPolicies    = "datalog_policies"
 )
 
 type Store struct {
@@ -221,4 +222,27 @@ func (s *Store) GetVerifiedIdentity(p peer.ID) (*VerifiedIdentity, error) {
 		return json.Unmarshal(data, &identity)
 	})
 	return &identity, err
+}
+
+func (s *Store) SavePolicies(policies []string) error {
+	return s.db.Update(func(tx *bbolt.Tx) error {
+		b := tx.Bucket([]byte(bucketIdentity))
+		data, _ := json.Marshal(policies)
+		return b.Put([]byte(keyPolicies), data)
+	})
+}
+
+func (s *Store) LoadPolicies() ([]string, error) {
+	var val []byte
+	_ = s.db.View(func(tx *bbolt.Tx) error {
+		b := tx.Bucket([]byte(bucketIdentity))
+		val = b.Get([]byte(keyPolicies))
+		return nil
+	})
+	if len(val) == 0 {
+		return nil, nil // Return empty if none found
+	}
+	var policies []string
+	err := json.Unmarshal(val, &policies)
+	return policies, err
 }
