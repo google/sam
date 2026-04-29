@@ -1,5 +1,7 @@
 # SAM: Sovereign Agent Mesh
 
+<img alt="SAM" src="docs/sam_logo.png" />
+
 SAM is a smart network built for autonomous agents:
 
 *   **Zero Config:** Nodes discover each other and build the network automatically.
