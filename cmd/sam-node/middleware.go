@@ -96,21 +96,34 @@ func (n *SamNode) WithBiscuitAuth(next network.StreamHandler) network.StreamHand
 		tokenHash := sha256.Sum256(authFrame.Biscuit)
 		hashStr := hex.EncodeToString(tokenHash[:]) + ":" + remotePeer.String()
 
-		if valid, ok := n.verificationCache.Get(hashStr); ok && valid {
-			logger.Infof("[Auth] Token cache hit for %s", remotePeer)
-			// Valid
-			resp := &api.AuthResponse{Success: true}
-			respBytes, err := proto.Marshal(resp)
-			if err != nil {
-				logger.Errorf("[Auth] Failed to marshal ACK response: %v", err)
+		if pubKeyStr, ok := n.verificationCache.Get(hashStr); ok {
+			n.keysMu.RLock()
+			keys := n.trustedKeys
+			n.keysMu.RUnlock()
+
+			trusted := false
+			for _, tk := range keys {
+				if hex.EncodeToString(tk.Key) == pubKeyStr {
+					trusted = true
+					break
+				}
+			}
+			if trusted {
+				logger.Infof("[Auth] Token cache hit for %s", remotePeer)
+				// Valid
+				resp := &api.AuthResponse{Success: true}
+				respBytes, err := proto.Marshal(resp)
+				if err != nil {
+					logger.Errorf("[Auth] Failed to marshal ACK response: %v", err)
+					return
+				}
+				if err := writer.WriteMsg(respBytes); err != nil {
+					logger.Errorf("[Auth] Failed to write ACK to %s: %v", remotePeer, err)
+					return
+				}
+				next(s)
 				return
 			}
-			if err := writer.WriteMsg(respBytes); err != nil {
-				logger.Errorf("[Auth] Failed to write ACK to %s: %v", remotePeer, err)
-				return
-			}
-			next(s)
-			return
 		}
 
 		n.keysMu.RLock()
@@ -119,10 +132,12 @@ func (n *SamNode) WithBiscuitAuth(next network.StreamHandler) network.StreamHand
 
 		var authorized bool
 		var lastErr error
+		var successfulKey ed25519.PublicKey
 		for _, pubKey := range keys {
 			logger.Infof("[Auth] Trying key: %x", pubKey.Key)
 			if err := n.Authorize(authFrame.Biscuit, reqCtx, pubKey.Key); err == nil {
 				authorized = true
+				successfulKey = pubKey.Key
 				break
 			} else {
 				lastErr = err
@@ -183,7 +198,7 @@ func (n *SamNode) WithBiscuitAuth(next network.StreamHandler) network.StreamHand
 		}
 
 		// Cache successful verification
-		n.verificationCache.Add(hashStr, true)
+		n.verificationCache.Add(hashStr, hex.EncodeToString(successfulKey))
 
 		// Valid
 		resp := &api.AuthResponse{Success: true}
@@ -198,6 +213,9 @@ func (n *SamNode) WithBiscuitAuth(next network.StreamHandler) network.StreamHand
 }
 
 func (n *SamNode) Authorize(rawToken []byte, req RequestContext, pubKey ed25519.PublicKey) error {
+	if len(pubKey) != ed25519.PublicKeySize {
+		return fmt.Errorf("invalid public key size: %d", len(pubKey))
+	}
 	b, err := biscuit.Unmarshal(rawToken)
 	if err != nil {
 		return fmt.Errorf("invalid biscuit: %w", err)

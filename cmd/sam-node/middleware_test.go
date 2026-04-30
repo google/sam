@@ -52,8 +52,6 @@ func TestAuthorize(t *testing.T) {
 		_ = store.Close()
 	}()
 
-
-
 	// Create a biscuit token
 	pub, priv, err := ed25519.GenerateKey(nil)
 	if err != nil {
@@ -101,8 +99,8 @@ func TestAuthorize(t *testing.T) {
 	}
 
 	node := &SamNode{
-		Store:        store,
-		trustedKeys:  []TrustedKey{{Key: pub, ReceivedAt: time.Now()}},
+		Store:       store,
+		trustedKeys: []TrustedKey{{Key: pub, ReceivedAt: time.Now()}},
 	}
 
 	req := RequestContext{
@@ -204,7 +202,7 @@ attenuation:
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			builder := biscuit.NewBuilder(priv)
-			
+
 			err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
 				Name: "node",
 				IDs:  []biscuit.Term{biscuit.String(dummyPeer.String())},
@@ -249,8 +247,8 @@ attenuation:
 			}
 
 			node := &SamNode{
-				trustedKeys:  []TrustedKey{{Key: pub, ReceivedAt: time.Now()}},
-				LocalPolicy:  localPolicy,
+				trustedKeys: []TrustedKey{{Key: pub, ReceivedAt: time.Now()}},
+				LocalPolicy: localPolicy,
 			}
 
 			req := RequestContext{
@@ -307,9 +305,11 @@ func TestRevocation(t *testing.T) {
 	}
 
 	cache, _ := lru.New[string, int64](10000)
+	rl, _ := NewPeerRateLimiter(100)
 	node := &SamNode{
 		trustedKeys:  []TrustedKey{{Key: pub, ReceivedAt: time.Now()}},
 		revokedPeers: cache,
+		rateLimiter:  rl,
 	}
 
 	// Mark as revoked
@@ -319,7 +319,7 @@ func TestRevocation(t *testing.T) {
 	pr2, pw2 := io.Pipe()
 
 	serverStream := &mockStream{r: pr1, w: pw2, protocol: protocol.ID("/test/proto")}
-	
+
 	// Run handler in goroutine
 	go func() {
 		handler := node.WithBiscuitAuth(func(s network.Stream) {
@@ -342,7 +342,7 @@ func TestRevocation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to read response: %v", err)
 	}
-	
+
 	var resp api.AuthResponse
 	if err := proto.Unmarshal(msg, &resp); err != nil {
 		t.Fatal(err)
@@ -425,8 +425,8 @@ func TestHandleAuthHandshakeCache(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cache, _ := lru.New[string, bool](10)
-	
+	cache, _ := lru.New[string, string](10)
+
 	dir := t.TempDir()
 	store, err := NewStore(dir)
 	if err != nil {
@@ -443,7 +443,7 @@ func TestHandleAuthHandshakeCache(t *testing.T) {
 	pr1, pw1 := io.Pipe()
 
 	serverStream := &mockStream{r: pr1, w: io.Discard, protocol: protocol.ID("/sam/auth/1.0.0")}
-	
+
 	go func() {
 		node.HandleAuthHandshake(serverStream)
 	}()
@@ -456,30 +456,32 @@ func TestHandleAuthHandshakeCache(t *testing.T) {
 	}
 
 	time.Sleep(1 * time.Second)
-	
+
 	_, err = store.GetVerifiedIdentity(dummyPeer)
 	if err != nil {
 		t.Fatalf("Expected identity to be saved, got err: %v", err)
 	}
 
 	tokenHash := sha256.Sum256(tokenBytes)
-	hashStr := hex.EncodeToString(tokenHash[:])
-	
-	if valid, ok := cache.Get(hashStr); !ok || !valid {
-		t.Fatal("Expected token to be in verification cache")
+	hashStr := hex.EncodeToString(tokenHash[:]) + ":" + dummyPeer.String()
+
+	if pubKeyStr, ok := cache.Get(hashStr); !ok || pubKeyStr != hex.EncodeToString(pub) {
+		t.Fatal("Expected token to be in verification cache with correct key")
 	}
 
 	// Now corrupt keys and try again.
 	node.keysMu.Lock()
-	node.trustedKeys = []TrustedKey{{Key: []byte("invalid-key"), ReceivedAt: time.Now()}}
+	invalidKey := make([]byte, ed25519.PublicKeySize)
+	copy(invalidKey, []byte("invalid-key"))
+	node.trustedKeys = []TrustedKey{{Key: invalidKey, ReceivedAt: time.Now()}}
 	node.keysMu.Unlock()
 
 	dir2 := t.TempDir()
 	store2, _ := NewStore(dir2)
 	defer func() { _ = store2.Close() }()
-	
+
 	node.Store = store2
-	
+
 	pr5, pw5 := io.Pipe()
 	serverStream3 := &mockStream{r: pr5, w: io.Discard, protocol: protocol.ID("/sam/auth/1.0.0")}
 
@@ -493,9 +495,9 @@ func TestHandleAuthHandshakeCache(t *testing.T) {
 	}
 
 	time.Sleep(1 * time.Second)
-	
+
 	_, err = store2.GetVerifiedIdentity(dummyPeer)
-	if err != nil {
-		t.Fatalf("Expected identity to be saved via cache hit, got err: %v", err)
+	if err == nil {
+		t.Fatal("Expected identity to NOT be saved via cache hit with invalid key")
 	}
 }

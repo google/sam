@@ -23,6 +23,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -40,9 +41,11 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+// init forces the biscuit-go parser to build its underlying participle 
+// lexer and reflection caches synchronously at startup. This prevents 
+// a known data race when multiple goroutines parse facts concurrently.
 func init() {
-	// Force initialization of parser to avoid data race in tests
-	_, _ = parser.FromStringFact(`dummy("fact")`)
+	_, _ = parser.FromStringFact(`warmup("cache")`)
 }
 
 func TestFallbackReEnrollment(t *testing.T) {
@@ -116,8 +119,8 @@ func TestFallbackReEnrollment(t *testing.T) {
 	cmd.Dir = repoRoot(t)
 	cmd.Env = env
 	
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
+	var stdout safeBuffer
+	var stderr safeBuffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	
@@ -286,4 +289,21 @@ func startMockHubDynamic(t *testing.T, pubA, pubB ed25519.PublicKey) (peer.ID, s
 	})
 
 	return h.ID(), h.Addrs()[0].String() + "/p2p/" + h.ID().String()
+}
+
+type safeBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (s *safeBuffer) Write(p []byte) (n int, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.Write(p)
+}
+
+func (s *safeBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.String()
 }

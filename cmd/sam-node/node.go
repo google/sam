@@ -66,7 +66,7 @@ type SamNode struct {
 	mu                sync.Mutex
 	LocalPolicy       *CompiledLocalPolicy
 	revokedPeers      *lru.Cache[string, int64]
-	verificationCache *lru.Cache[string, bool]
+	verificationCache *lru.Cache[string, string]
 	trustedKeys       []TrustedKey
 	keysMu            sync.RWMutex
 	rateLimiter       *PeerRateLimiter
@@ -98,7 +98,7 @@ func NewSamNode(ctx context.Context, privKey crypto.PrivKey, hubPubKey ed25519.P
 		return nil, fmt.Errorf("failed to create revocation cache: %w", err)
 	}
 
-	node.verificationCache, err = lru.New[string, bool](1000)
+	node.verificationCache, err = lru.New[string, string](1000)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create verification cache: %w", err)
 	}
@@ -445,9 +445,22 @@ func (n *SamNode) HandleAuthHandshake(s network.Stream) {
 	tokenHash := sha256.Sum256(exchange.Biscuit)
 	hashStr := hex.EncodeToString(tokenHash[:]) + ":" + remotePeer.String()
 
-	if valid, ok := n.verificationCache.Get(hashStr); ok && valid {
-		logger.Infof("[AuthN] Token cache hit for %s", remotePeer)
-		return
+	if pubKeyStr, ok := n.verificationCache.Get(hashStr); ok {
+		n.keysMu.RLock()
+		keys := n.trustedKeys
+		n.keysMu.RUnlock()
+
+		trusted := false
+		for _, tk := range keys {
+			if hex.EncodeToString(tk.Key) == pubKeyStr {
+				trusted = true
+				break
+			}
+		}
+		if trusted {
+			logger.Infof("[AuthN] Token cache hit for %s", remotePeer)
+			return
+		}
 	}
 
 	// 2. Unmarshal and verify token format
@@ -458,12 +471,16 @@ func (n *SamNode) HandleAuthHandshake(s network.Stream) {
 	}
 
 	authorized := false
+	var successfulKey ed25519.PublicKey
 	// 3. Verify signature chain against the trusted Hub keys.
 	n.keysMu.RLock()
 	keys := n.trustedKeys
 	n.keysMu.RUnlock()
 
 	for _, tk := range keys {
+		if len(tk.Key) != ed25519.PublicKeySize {
+			continue
+		}
 		authorizer, err := b.Authorizer(tk.Key)
 		if err != nil {
 			continue
@@ -479,13 +496,14 @@ func (n *SamNode) HandleAuthHandshake(s network.Stream) {
 
 		if err := authorizer.Authorize(); err == nil {
 			authorized = true
+			successfulKey = tk.Key
 			break
 		}
 	}
 
 	if authorized {
 		// Cache successful verification
-		n.verificationCache.Add(hashStr, true)
+		n.verificationCache.Add(hashStr, hex.EncodeToString(successfulKey))
 	}
 
 	if !authorized {
