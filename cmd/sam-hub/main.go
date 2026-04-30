@@ -19,11 +19,16 @@ import (
 	"crypto/ed25519"
 	"crypto/tls"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
 	"strings"
 	"time"
+
+	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/multiformats/go-multiaddr"
+	"go.etcd.io/bbolt"
 
 	"github.com/biscuit-auth/biscuit-go/v2"
 	"github.com/biscuit-auth/biscuit-go/v2/parser"
@@ -519,9 +524,9 @@ func (h *Hub) startRotation(ctx context.Context) {
 			select {
 			case <-ticker.C:
 				logger.Infow("Rotating keys")
-				newPub, oldPriv, err := h.KeyRing.Rotate(keyGracePeriod)
+				newPub, newPriv, oldPriv, err := h.KeyRing.PrepareRotation()
 				if err != nil {
-					logger.Errorw("Failed to rotate keys", "error", err)
+					logger.Errorw("Failed to prepare key rotation", "error", err)
 					continue
 				}
 				samHubKeyRotationsTotal.Inc()
@@ -552,6 +557,13 @@ func (h *Hub) startRotation(ctx context.Context) {
 				} else {
 					logger.Infow("Broadcasted new public key", "public_key", hex.EncodeToString(newPub))
 					samHubMeshEventsTotal.WithLabelValues("KEY_ROTATION").Inc()
+
+					// Promote the new key after successful broadcast
+					if err := h.KeyRing.CommitRotation(newPub, newPriv, keyGracePeriod); err != nil {
+						logger.Errorw("Failed to commit key rotation", "error", err)
+					} else {
+						logger.Infow("Committed new key to keyring")
+					}
 				}
 			case <-ctx.Done():
 				return
@@ -640,6 +652,128 @@ func main() {
 	rootCmd.Flags().DurationVar(&keyGracePeriod, "key-grace-period", 24*time.Hour, "Key grace period for old keys (e.g. 24h).")
 	rootCmd.Flags().StringVar(&keysDBPath, "keys-db", "keys.db", "Path to BoltDB file for keys")
 	rootCmd.Flags().StringVar(&metricsAddr, "metrics-addr", ":9090", "Address to listen on for Prometheus metrics")
+
+	var peerToBan string
+	var banReason string
+	var connectAddr string
+
+	adminCmd := &cobra.Command{
+		Use:   "admin",
+		Short: "Administrative commands for SAM Hub",
+	}
+
+	banCmd := &cobra.Command{
+		Use:   "ban",
+		Short: "Ban a peer from the mesh",
+		Run: func(cmd *cobra.Command, args []string) {
+			if peerToBan == "" {
+				logger.Fatal("Missing --peer flag")
+			}
+
+			// 1. Open BoltDB and extract key
+			db, err := bbolt.Open(keysDBPath, 0600, nil)
+			if err != nil {
+				logger.Fatal(err)
+			}
+			defer db.Close()
+
+			var kr KeyRing
+			err = db.View(func(tx *bbolt.Tx) error {
+				b := tx.Bucket([]byte("keyring"))
+				data := b.Get([]byte("data"))
+				if data == nil {
+					return fmt.Errorf("keyring not found in DB")
+				}
+				return json.Unmarshal(data, &kr)
+			})
+			if err != nil {
+				logger.Fatal(err)
+			}
+
+			privKey := ed25519.PrivateKey(kr.Current.Private)
+
+			// 2. Create and sign MeshEvent_BANNED
+			event := &api.MeshEvent{
+				Type:      api.MeshEvent_BANNED,
+				PeerId:    peerToBan,
+				Timestamp: time.Now().Unix(),
+			}
+
+			event.Signature = nil
+			data, err := proto.Marshal(event)
+			if err != nil {
+				logger.Fatal(err)
+			}
+			event.Signature = ed25519.Sign(privKey, data)
+
+			eventData, err := proto.Marshal(event)
+			if err != nil {
+				logger.Fatal(err)
+			}
+
+			// 3. Initialize minimal libp2p host and pubsub
+			ctx := context.Background()
+			h, err := libp2p.New(
+				libp2p.Transport(libp2pquic.NewTransport),
+				libp2p.Transport(tcp.NewTCPTransport),
+				libp2p.Security(libp2ptls.ID, libp2ptls.New),
+			)
+			if err != nil {
+				logger.Fatal(err)
+			}
+			defer h.Close()
+
+			ps, err := pubsub.NewGossipSub(ctx, h)
+			if err != nil {
+				logger.Fatal(err)
+			}
+
+			topic, err := ps.Join(api.GossipEvents)
+			if err != nil {
+				logger.Fatal(err)
+			}
+
+			if connectAddr != "" {
+				addr, err := multiaddr.NewMultiaddr(connectAddr)
+				if err != nil {
+					logger.Fatal(err)
+				}
+				addrInfo, err := peer.AddrInfoFromP2pAddr(addr)
+				if err != nil {
+					logger.Fatal(err)
+				}
+				if err := h.Connect(ctx, *addrInfo); err != nil {
+					logger.Fatal(err)
+				}
+				logger.Infof("Connected to %s", connectAddr)
+			} else {
+				logger.Warn("No --connect address provided. Event might not be broadcasted if no peers are connected.")
+			}
+
+			// Wait for pubsub peers
+			fmt.Println("Waiting for pubsub peers...")
+			for i := 0; i < 60; i++ {
+				peers := topic.ListPeers()
+				if len(peers) > 0 {
+					fmt.Printf("Found %d pubsub peers\n", len(peers))
+					break
+				}
+				time.Sleep(500 * time.Millisecond)
+			}
+
+			if err := topic.Publish(ctx, eventData); err != nil {
+				logger.Fatal(err)
+			}
+			logger.Infof("Published BANNED event for peer %s", peerToBan)
+		},
+	}
+
+	banCmd.Flags().StringVar(&peerToBan, "peer", "", "Peer ID to ban")
+	banCmd.Flags().StringVar(&banReason, "reason", "", "Reason for banning")
+	banCmd.Flags().StringVar(&connectAddr, "connect", "", "Address of a peer in the mesh to connect to")
+
+	adminCmd.AddCommand(banCmd)
+	rootCmd.AddCommand(adminCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
