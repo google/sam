@@ -425,12 +425,11 @@ func (n *SamNode) HandleAuthHandshake(s network.Stream) {
 
 	// Check verification cache
 	tokenHash := sha256.Sum256(exchange.Biscuit)
-	hashStr := hex.EncodeToString(tokenHash[:])
+	hashStr := hex.EncodeToString(tokenHash[:]) + ":" + remotePeer.String()
 
-	cacheHit := false
 	if valid, ok := n.verificationCache.Get(hashStr); ok && valid {
 		logger.Infof("[AuthN] Token cache hit for %s", remotePeer)
-		cacheHit = true
+		return
 	}
 
 	// 2. Unmarshal and verify token format
@@ -441,38 +440,34 @@ func (n *SamNode) HandleAuthHandshake(s network.Stream) {
 	}
 
 	authorized := false
-	if cacheHit {
-		authorized = true
-	} else {
-		// 3. Verify signature chain against the trusted Hub keys.
-		n.keysMu.RLock()
-		keys := n.trustedKeys
-		n.keysMu.RUnlock()
+	// 3. Verify signature chain against the trusted Hub keys.
+	n.keysMu.RLock()
+	keys := n.trustedKeys
+	n.keysMu.RUnlock()
 
-		for _, tk := range keys {
-			authorizer, err := b.Authorizer(tk.Key)
-			if err != nil {
-				continue
-			}
-
-			// Admission only requires a valid signature, so allow if true
-			rule, err := parser.FromStringPolicy("allow if true")
-			if err != nil {
-				logger.Errorf("[AuthN] Failed to parse rule: %v", err)
-				continue
-			}
-			authorizer.AddPolicy(rule)
-
-			if err := authorizer.Authorize(); err == nil {
-				authorized = true
-				break
-			}
+	for _, tk := range keys {
+		authorizer, err := b.Authorizer(tk.Key)
+		if err != nil {
+			continue
 		}
 
-		if authorized {
-			// Cache successful verification
-			n.verificationCache.Add(hashStr, true)
+		// Admission only requires a valid signature, so allow if true
+		rule, err := parser.FromStringPolicy("allow if true")
+		if err != nil {
+			logger.Errorf("[AuthN] Failed to parse rule: %v", err)
+			continue
 		}
+		authorizer.AddPolicy(rule)
+
+		if err := authorizer.Authorize(); err == nil {
+			authorized = true
+			break
+		}
+	}
+
+	if authorized {
+		// Cache successful verification
+		n.verificationCache.Add(hashStr, true)
 	}
 
 	if !authorized {

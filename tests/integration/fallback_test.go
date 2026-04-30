@@ -1,0 +1,269 @@
+// Copyright 2026 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package integration_test
+
+import (
+	"bytes"
+	"context"
+	"crypto/ed25519"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/biscuit-auth/biscuit-go/v2"
+	"github.com/biscuit-auth/biscuit-go/v2/parser"
+	"github.com/google/sam/api"
+	"github.com/libp2p/go-libp2p"
+	dht "github.com/libp2p/go-libp2p-kad-dht"
+	"github.com/libp2p/go-libp2p/core/network"
+	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-libp2p/core/protocol"
+	"github.com/libp2p/go-msgio"
+	"github.com/multiformats/go-multiaddr"
+	"google.golang.org/protobuf/proto"
+)
+
+func TestFallbackReEnrollment(t *testing.T) {
+	nodeBin := buildBinary(t, "./cmd/sam-node")
+
+	// 1. Generate Keys
+	pubA, _, _ := ed25519.GenerateKey(nil)
+	pubB, privB, _ := ed25519.GenerateKey(nil)
+
+	// 2. Start Mock Hub with dynamic key response
+	// First call returns Key A, subsequent calls return Key B
+	_, hubAddr := startMockHubDynamic(t, pubA, pubB)
+
+	tmpHome := t.TempDir()
+	env := append(os.Environ(),
+		"HOME="+tmpHome,
+		"XDG_CONFIG_HOME="+filepath.Join(tmpHome, ".config"),
+	)
+
+	// 4. Start a mock libp2p client in the test
+	clientHost, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer clientHost.Close()
+
+	// Create a dummy JWT file for fallback
+	jwtPath := filepath.Join(tmpHome, "jwt.txt")
+	if err := os.WriteFile(jwtPath, []byte("dummy-jwt"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 5. Create Biscuit token signed by Key B
+	builder := biscuit.NewBuilder(privB)
+	
+	// Bind to client peer ID
+	nodeFact, _ := parser.FromStringFact(fmt.Sprintf(`node("%s")`, clientHost.ID()))
+	builder.AddAuthorityFact(nodeFact)
+	
+	// Add client_peer_id fact for replay check
+	clientPeerFact, _ := parser.FromStringFact(fmt.Sprintf(`client_peer_id("%s")`, clientHost.ID()))
+	builder.AddAuthorityFact(clientPeerFact)
+	
+	// Add wildcard tool access
+	toolFact, _ := parser.FromStringFact(`allow_mcp_tool("*")`)
+	builder.AddAuthorityFact(toolFact)
+	
+	b, _ := builder.Build()
+	
+	// Verify it in test
+	authorizer, err := b.Authorizer(pubB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy, _ := parser.FromStringPolicy("allow if true")
+	authorizer.AddPolicy(policy)
+	if err := authorizer.Authorize(); err != nil {
+		t.Fatalf("Token generated in test is invalid: %v", err)
+	}
+	
+	tokenBytes, _ := b.Serialize()
+
+	// 6. Run Node in background
+	// It will enroll on startup and get Key A!
+	cmd := exec.Command(nodeBin, "run", "--hub", hubAddr, "--listen", "/ip4/127.0.0.1/tcp/0", "--jwt-path", jwtPath)
+	cmd.Dir = repoRoot(t)
+	cmd.Env = env
+	
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = cmd.Process.Kill()
+	}()
+
+	// Wait for it to be ready (print address)
+	var out string
+	for i := 0; i < 50; i++ {
+		out = stdout.String() + stderr.String()
+		if strings.Contains(out, "Listening on:") {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	if !strings.Contains(out, "Listening on:") {
+		t.Fatalf("Node failed to start or didn't print address in time.\nOutput:\n%s", out)
+	}
+
+	// 7. Extract Node address
+	var nodeAddr string
+	lines := strings.Split(out, "\n")
+	for _, line := range lines {
+		if strings.Contains(line, "Listening on:") {
+			idx := strings.Index(line, "[")
+			idx2 := strings.Index(line, "]")
+			if idx != -1 && idx2 != -1 {
+				addrsStr := line[idx+1 : idx2]
+				addrs := strings.Split(addrsStr, " ")
+				for _, a := range addrs {
+					if strings.Contains(a, "/tcp/") {
+						nodeAddr = a
+						break
+					}
+				}
+			}
+		}
+	}
+
+	if nodeAddr == "" {
+		t.Fatalf("Failed to extract node address from output:\n%s", out)
+	}
+
+	// Extract Peer ID
+	var nodePeerID string
+	for _, line := range lines {
+		if strings.Contains(line, "PeerID:") {
+			parts := strings.Split(line, " ")
+			if len(parts) >= 2 {
+				nodePeerID = strings.TrimSpace(parts[len(parts)-1])
+			}
+		}
+	}
+
+	if nodePeerID == "" {
+		t.Fatalf("Failed to extract node PeerID from output:\n%s", out)
+	}
+
+	nodeFullAddr := nodeAddr + "/p2p/" + nodePeerID
+
+	// 8. Connect to Node via libp2p
+	targetAddr, err := multiaddr.NewMultiaddr(nodeFullAddr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	targetInfo, err := peer.AddrInfoFromP2pAddr(targetAddr)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := clientHost.Connect(context.Background(), *targetInfo); err != nil {
+		t.Fatal(err)
+	}
+
+	// 9. Connect to Node via libp2p on api.MCPProtocolID
+	s, err := clientHost.NewStream(context.Background(), targetInfo.ID, api.MCPProtocolID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	// 10. Send AuthFrame with token B
+	writer := msgio.NewVarintWriter(s)
+	authFrame := &api.AuthFrame{Biscuit: tokenBytes}
+	authFrameBytes, _ := proto.Marshal(authFrame)
+	if err := writer.WriteMsg(authFrameBytes); err != nil {
+		t.Fatal(err)
+	}
+
+	// 11. Read response
+	reader := msgio.NewVarintReaderSize(s, 1024*64)
+	respMsg, err := reader.ReadMsg()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.ReleaseMsg(respMsg)
+
+	var resp api.AuthResponse
+	if err := proto.Unmarshal(respMsg, &resp); err != nil {
+		t.Fatal(err)
+	}
+
+	if !resp.Success {
+		t.Fatalf("Auth failed: %s\nNode Output:\n%s", resp.Error, stdout.String()+stderr.String())
+	}
+
+	// Verify log shows fallback was triggered
+	out = stdout.String() + stderr.String()
+	if !strings.Contains(out, "triggering re-enrollment fallback") {
+		t.Errorf("Expected log to contain fallback trigger message\nNode Output:\n%s", out)
+	}
+}
+
+func startMockHubDynamic(t *testing.T, pubA, pubB ed25519.PublicKey) (peer.ID, string) {
+	t.Helper()
+
+	h, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	if err != nil {
+		t.Fatalf("failed to create mock libp2p host: %v", err)
+	}
+
+	kdht, err := dht.New(context.Background(), h, dht.Mode(dht.ModeServer))
+	if err != nil {
+		t.Fatalf("failed to create DHT on mock hub: %v", err)
+	}
+
+	var callCount int
+	h.SetStreamHandler(protocol.ID("/sam/enroll/1.0.0"), func(s network.Stream) {
+		defer func() { _ = s.Close() }()
+		callCount++
+
+		var pub []byte
+		if callCount == 1 {
+			pub = pubA
+		} else {
+			pub = pubB
+		}
+
+		resp := &api.EnrollResponse{
+			BiscuitToken: []byte("mock-biscuit-token"),
+			HubPublicKey: pub,
+			HubAddresses: []string{h.Addrs()[0].String() + "/p2p/" + h.ID().String()},
+		}
+		data, _ := proto.Marshal(resp)
+		writer := msgio.NewVarintWriter(s)
+		_ = writer.WriteMsg(data)
+	})
+
+	t.Cleanup(func() {
+		_ = kdht.Close()
+		_ = h.Close()
+	})
+
+	return h.ID(), h.Addrs()[0].String() + "/p2p/" + h.ID().String()
+}

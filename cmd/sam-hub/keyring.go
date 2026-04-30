@@ -97,15 +97,18 @@ func (kr *KeyRing) save() error {
 }
 
 // Rotate generates a new keypair and moves the current one to the previous list.
-func (kr *KeyRing) Rotate(gracePeriod time.Duration) ([]byte, error) {
+// It returns the new public key and the old private key for signing rotation events.
+func (kr *KeyRing) Rotate(gracePeriod time.Duration) ([]byte, ed25519.PrivateKey, error) {
 	kr.mu.Lock()
 	defer kr.mu.Unlock()
 
+	oldPriv := ed25519.PrivateKey(kr.Current.Private)
+
 	err := kr.rotate(gracePeriod)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return kr.Current.Public, nil
+	return kr.Current.Public, oldPriv, nil
 }
 
 func (kr *KeyRing) rotate(gracePeriod time.Duration) error {

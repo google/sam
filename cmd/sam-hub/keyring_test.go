@@ -51,7 +51,7 @@ func TestKeyRingRotate(t *testing.T) {
 
 	oldPub := kr.Current.Public
 
-	newPub, err := kr.Rotate(24 * time.Hour)
+	newPub, _, err := kr.Rotate(24 * time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +104,7 @@ func TestKeyRingCleanup(t *testing.T) {
 
 	oldPub := kr.Current.Public
 
-	_, err = kr.Rotate(1 * time.Millisecond)
+	_, _, err = kr.Rotate(1 * time.Millisecond)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +116,7 @@ func TestKeyRingCleanup(t *testing.T) {
 	time.Sleep(5 * time.Millisecond) // Wait for expiration
 
 	// Rotate again to trigger cleanup
-	_, err = kr.Rotate(1 * time.Millisecond)
+	_, _, err = kr.Rotate(1 * time.Millisecond)
 	if err != nil {
 		t.Fatal(err)
 	}

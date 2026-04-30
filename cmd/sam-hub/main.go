@@ -462,7 +462,7 @@ func (h *Hub) startRotation(ctx context.Context) {
 			select {
 			case <-ticker.C:
 				logger.Info("[Rotation] Rotating keys...")
-				newPub, err := h.KeyRing.Rotate(keyGracePeriod)
+				newPub, oldPriv, err := h.KeyRing.Rotate(keyGracePeriod)
 				if err != nil {
 					logger.Errorf("[Rotation] Failed to rotate keys: %v", err)
 					continue
@@ -474,10 +474,16 @@ func (h *Hub) startRotation(ctx context.Context) {
 					Timestamp:    time.Now().Unix(),
 					NewPublicKey: newPub,
 				}
-				if err := h.signEvent(event); err != nil {
-					logger.Errorf("[Rotation] Failed to sign event: %v", err)
+				
+				// Sign with the OLD key so nodes can verify it!
+				event.Signature = nil
+				data, err := proto.Marshal(event)
+				if err != nil {
+					logger.Errorf("[Rotation] Failed to marshal event: %v", err)
 					continue
 				}
+				event.Signature = ed25519.Sign(oldPriv, data)
+
 				eventData, err := proto.Marshal(event)
 				if err != nil {
 					logger.Errorf("[Rotation] Failed to marshal event: %v", err)

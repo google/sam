@@ -20,6 +20,8 @@ import (
 	"os"
 	"path/filepath"
 
+	"math/rand"
+
 	"github.com/libp2p/go-libp2p/core/peer"
 	"go.etcd.io/bbolt"
 )
@@ -202,6 +204,23 @@ func (s *Store) SaveVerifiedIdentity(p peer.ID, identity VerifiedIdentity) error
 				return err
 			}
 		}
+		// Enforce bound
+		keyN := b.Stats().KeyN
+		if keyN >= 10000 {
+			// Delete a random entry to be fair
+			randIdx := rand.Intn(keyN)
+			c := b.Cursor()
+			k, _ := c.First()
+			for i := 0; i < randIdx && k != nil; i++ {
+				k, _ = c.Next()
+			}
+			if k != nil {
+				if err := b.Delete(k); err != nil {
+					return err
+				}
+			}
+		}
+
 		data, _ := json.Marshal(identity)
 		return b.Put([]byte(p.String()), data)
 	})
@@ -222,5 +241,3 @@ func (s *Store) GetVerifiedIdentity(p peer.ID) (*VerifiedIdentity, error) {
 	})
 	return &identity, err
 }
-
-

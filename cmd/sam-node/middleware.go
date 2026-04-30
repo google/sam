@@ -88,7 +88,7 @@ func (n *SamNode) WithBiscuitAuth(next network.StreamHandler) network.StreamHand
 
 		// Check verification cache
 		tokenHash := sha256.Sum256(authFrame.Biscuit)
-		hashStr := hex.EncodeToString(tokenHash[:])
+		hashStr := hex.EncodeToString(tokenHash[:]) + ":" + remotePeer.String()
 
 		if valid, ok := n.verificationCache.Get(hashStr); ok && valid {
 			logger.Infof("[Auth] Token cache hit for %s", remotePeer)
@@ -114,6 +114,7 @@ func (n *SamNode) WithBiscuitAuth(next network.StreamHandler) network.StreamHand
 		var authorized bool
 		var lastErr error
 		for _, pubKey := range keys {
+			logger.Infof("[Auth] Trying key: %x", pubKey.Key)
 			if err := n.Authorize(authFrame.Biscuit, reqCtx, pubKey.Key); err == nil {
 				authorized = true
 				break
@@ -152,6 +153,7 @@ func (n *SamNode) WithBiscuitAuth(next network.StreamHandler) network.StreamHand
 					n.keysMu.RUnlock()
 
 					for _, pubKey := range keys {
+						logger.Infof("[Auth] Retrying with key: %x", pubKey.Key)
 						if err := n.Authorize(authFrame.Biscuit, reqCtx, pubKey.Key); err == nil {
 							authorized = true
 							break
