@@ -71,21 +71,11 @@ teardown() {
   sleep 5
 
   # Publish ban event for Node 2
-  # We run publish_ban.go in a golang container attached to the mesh network
-  run docker run --rm \
-    --network "${MESH_NETWORK}" \
-    -v "$(pwd):/src" \
-    -w /src \
-    golang:1.26 \
-    go run tests/e2e/publish_ban/publish_ban.go \
-      --key "${hub_key}" \
-      --peer "${node2_peer_id}" \
-      --addr "/dns4/sam-hub/tcp/4002/p2p/${hub_peer_id}" \
-      --addr "/dns4/sam-node-1/tcp/5002/p2p/${node1_peer_id}"
+  run docker exec "${hub_name}" /sam-hub admin ban --peer "${node2_peer_id}" --connect "/ip4/127.0.0.1/tcp/4002"
   
-  echo "publish_ban output: $output"
+  echo "admin ban output: $output"
   [[ "$status" -eq 0 ]]
-  [[ "$output" == *"Published ban event"* ]]
+  [[ "$output" == *"Published BANNED event"* ]]
 
   # Verify Node 1 receives the ban event and logs it
   run mesh_wait_for_log "${node1_name}" "Peer banned: ${node2_peer_id}" 20
