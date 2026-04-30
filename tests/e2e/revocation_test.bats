@@ -47,7 +47,7 @@ teardown() {
   echo "${hub_peer_id}" > "/tmp/${MESH_PREFIX}-hub-peer-id"
 
   # Start Node 1
-  run mesh_start_node 1
+  run mesh_start_node 1 "--discovery-interval 100ms"
   [[ "$status" -eq 0 ]]
   local node1_name="${MESH_PREFIX}-node-1"
   mesh_wait_for_log "${node1_name}" "SAM Node Online" 20
@@ -56,7 +56,7 @@ teardown() {
   node1_peer_id=$(docker logs "${node1_name}" 2>&1 | grep -oE '12D3Koo[a-zA-Z0-9]+' | head -n 1)
 
   # Start Node 2
-  run mesh_start_node 2
+  run mesh_start_node 2 "--discovery-interval 100ms"
   [[ "$status" -eq 0 ]]
   local node2_name="${MESH_PREFIX}-node-2"
   mesh_wait_for_log "${node2_name}" "SAM Node Online" 20
@@ -67,8 +67,9 @@ teardown() {
   [[ -n "${node2_peer_id}" ]]
 
   # Verify nodes are connected to each other or at least known
-  # We wait a bit for discovery
-  sleep 5
+  # Wait for Node 1 to see 2 peers (Hub + Node 2)
+  run mesh_wait_for_node_count 1 2 20
+  [[ "$status" -eq 0 ]]
 
   # Publish ban event for Node 2
   run docker exec "${hub_name}" /sam-hub admin ban --peer "${node2_peer_id}" --connect "/ip4/127.0.0.1/tcp/4002"
