@@ -20,10 +20,12 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/biscuit-auth/biscuit-go/v2"
 	"github.com/biscuit-auth/biscuit-go/v2/parser"
 	"github.com/google/sam/api"
+	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
@@ -98,7 +100,7 @@ func TestAuthorize(t *testing.T) {
 
 	node := &SamNode{
 		Store:        store,
-		HubPublicKey: pub,
+		trustedKeys:  []TrustedKey{{Key: pub, ReceivedAt: time.Now()}},
 	}
 
 	req := RequestContext{
@@ -106,7 +108,7 @@ func TestAuthorize(t *testing.T) {
 		Protocol: "/test/proto",
 	}
 
-	if err := node.Authorize(tokenBytes, req); err != nil {
+	if err := node.Authorize(tokenBytes, req, pub); err != nil {
 		t.Fatalf("Authorize failed: %v", err)
 	}
 }
@@ -245,7 +247,7 @@ attenuation:
 			}
 
 			node := &SamNode{
-				HubPublicKey: pub,
+				trustedKeys:  []TrustedKey{{Key: pub, ReceivedAt: time.Now()}},
 				LocalPolicy:  localPolicy,
 			}
 
@@ -254,7 +256,7 @@ attenuation:
 				Protocol: protocol.ID(tt.operation),
 			}
 
-			err = node.Authorize(tokenBytes, req)
+			err = node.Authorize(tokenBytes, req, pub)
 			if tt.expectSuccess {
 				if err != nil {
 					t.Errorf("expected success, got error: %v", err)
@@ -302,15 +304,14 @@ func TestRevocation(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	cache, _ := lru.New[string, int64](10000)
 	node := &SamNode{
-		HubPublicKey: pub,
-		revokedPeers: make(map[string]bool),
+		trustedKeys:  []TrustedKey{{Key: pub, ReceivedAt: time.Now()}},
+		revokedPeers: cache,
 	}
 
 	// Mark as revoked
-	node.revocationMu.Lock()
-	node.revokedPeers[dummyPeer.String()] = true
-	node.revocationMu.Unlock()
+	node.revokedPeers.Add(dummyPeer.String(), time.Now().Unix())
 
 	pr1, pw1 := io.Pipe()
 	pr2, pw2 := io.Pipe()
@@ -350,5 +351,47 @@ func TestRevocation(t *testing.T) {
 	}
 	if resp.Error != "Peer is revoked" {
 		t.Errorf("expected error 'Peer is revoked', got %q", resp.Error)
+	}
+}
+
+func TestVerifyEvent(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	node := &SamNode{
+		trustedKeys: []TrustedKey{{Key: pub, ReceivedAt: time.Now()}},
+	}
+
+	event := &api.MeshEvent{
+		Type:      api.MeshEvent_BANNED,
+		PeerId:    "attacker-peer",
+		Timestamp: time.Now().Unix(),
+	}
+
+	// Sign it
+	event.Signature = nil
+	data, err := proto.Marshal(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	event.Signature = ed25519.Sign(priv, data)
+
+	// Case 1: Valid signature
+	if !node.verifyEvent(event) {
+		t.Error("Expected event to be verified, got false")
+	}
+
+	// Case 2: Invalid signature
+	event.Signature = []byte("invalid-sig")
+	if node.verifyEvent(event) {
+		t.Error("Expected event verification to fail, got true")
+	}
+
+	// Case 3: Missing signature
+	event.Signature = nil
+	if node.verifyEvent(event) {
+		t.Error("Expected event verification to fail for missing signature, got true")
 	}
 }
