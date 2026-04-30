@@ -675,7 +675,7 @@ func main() {
 			if err != nil {
 				logger.Fatal(err)
 			}
-			defer db.Close()
+			defer db.Close() // nolint:errcheck
 
 			var kr KeyRing
 			err = db.View(func(tx *bbolt.Tx) error {
@@ -721,7 +721,7 @@ func main() {
 			if err != nil {
 				logger.Fatal(err)
 			}
-			defer h.Close()
+			defer func() { _ = h.Close() }() // nolint:errcheck
 
 			ps, err := pubsub.NewGossipSub(ctx, h)
 			if err != nil {
