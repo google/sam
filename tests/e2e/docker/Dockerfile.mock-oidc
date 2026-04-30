@@ -1,0 +1,8 @@
+FROM python:3.12-slim
+
+RUN pip install pyjwt cryptography
+
+COPY tests/e2e/docker/mock_oidc.py /usr/local/bin/mock_oidc.py
+
+CMD ["python3", "/usr/local/bin/mock_oidc.py"]
+
