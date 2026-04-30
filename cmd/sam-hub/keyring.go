@@ -87,9 +87,18 @@ func NewKeyRing(dbPath string, gracePeriod time.Duration, initialSeed []byte) (*
 			}
 		}
 	} else if len(kr.Current.Private) == 0 {
-		if err := kr.rotate(gracePeriod); err != nil {
+		pub, priv, err := ed25519.GenerateKey(rand.Reader)
+		if err != nil {
 			_ = db.Close()
 			return nil, fmt.Errorf("failed to generate initial key: %w", err)
+		}
+		kr.Current = KeyPair{
+			Private: priv,
+			Public:  pub,
+		}
+		if err := kr.save(); err != nil {
+			_ = db.Close()
+			return nil, fmt.Errorf("failed to save initial key: %w", err)
 		}
 	}
 
@@ -118,26 +127,21 @@ func (kr *KeyRing) save() error {
 	})
 }
 
-// Rotate generates a new keypair and moves the current one to the previous list.
-// It returns the new public key and the old private key for signing rotation events.
-func (kr *KeyRing) Rotate(gracePeriod time.Duration) ([]byte, ed25519.PrivateKey, error) {
-	kr.mu.Lock()
-	defer kr.mu.Unlock()
+// PrepareRotation generates a new keypair and returns it along with the old private key for signing.
+// It does NOT update the current key in the keyring yet.
+func (kr *KeyRing) PrepareRotation() (newPub ed25519.PublicKey, newPriv ed25519.PrivateKey, oldPriv ed25519.PrivateKey, err error) {
+	kr.mu.RLock()
+	defer kr.mu.RUnlock()
 
-	oldPriv := ed25519.PrivateKey(kr.Current.Private)
-
-	err := kr.rotate(gracePeriod)
-	if err != nil {
-		return nil, nil, err
-	}
-	return kr.Current.Public, oldPriv, nil
+	oldPriv = ed25519.PrivateKey(kr.Current.Private)
+	newPub, newPriv, err = ed25519.GenerateKey(rand.Reader)
+	return newPub, newPriv, oldPriv, err
 }
 
-func (kr *KeyRing) rotate(gracePeriod time.Duration) error {
-	pub, priv, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		return err
-	}
+// CommitRotation promotes the new key to current and moves the old current to previous.
+func (kr *KeyRing) CommitRotation(newPub ed25519.PublicKey, newPriv ed25519.PrivateKey, gracePeriod time.Duration) error {
+	kr.mu.Lock()
+	defer kr.mu.Unlock()
 
 	if len(kr.Current.Private) > 0 {
 		kr.Current.Expiration = time.Now().Add(gracePeriod)
@@ -145,8 +149,8 @@ func (kr *KeyRing) rotate(gracePeriod time.Duration) error {
 	}
 
 	kr.Current = KeyPair{
-		Private: priv,
-		Public:  pub,
+		Private: newPriv,
+		Public:  newPub,
 	}
 
 	// Clean up expired keys

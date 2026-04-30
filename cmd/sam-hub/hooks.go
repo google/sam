@@ -16,16 +16,16 @@ package main
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"sync"
 	"time"
 
+	"github.com/google/sam/api"
 	"github.com/libp2p/go-libp2p/core/connmgr"
 	"github.com/libp2p/go-libp2p/core/control"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
+	"google.golang.org/protobuf/proto"
 )
 
 var _ connmgr.ConnectionGater = (*hubConnGate)(nil)
@@ -80,25 +80,33 @@ func (n *notifier) Disconnected(_ network.Network, c network.Conn) {
 	delete(n.hub.gater.authenticated, p)
 	delete(n.hub.gater.pending, p)
 	n.hub.gater.mu.Unlock()
-	fmt.Printf("[Mesh] Peer %s disconnected. Authorization cleared.\n", p)
-	if wasAuth {
-		event := MeshEvent{PeerID: p, Action: "LEFT"}
-		data, err := json.Marshal(event)
-		if err != nil {
-			fmt.Printf("Failed to marshal mesh event: %v\n", err)
-			return
-		}
-		// Notify the mesh about the peer disconnection
-		if err := n.hub.EventTopic.Publish(context.Background(), data); err != nil {
-			fmt.Printf("Failed to publish mesh event: %v\n", err)
-			return
-		}
-		fmt.Printf("[Mesh] Peer %s left. Broadcasted departure to agents.\n", p)
-	}
-}
+	
+	logger.Infow("Peer disconnected", "peer_id", p, "was_authenticated", wasAuth)
 
-// MeshEvent defines the message sent over Gossipsub
-type MeshEvent struct {
-	PeerID peer.ID `json:"peer_id"`
-	Action string  `json:"action"` // "JOINED", "LEFT", "BANNED"
+	if wasAuth {
+		samHubActiveNodes.Dec() // Decrement active nodes
+
+		event := &api.MeshEvent{
+			Type:      api.MeshEvent_EXIT,
+			PeerId:    p.String(),
+			Timestamp: time.Now().Unix(),
+		}
+		// Sign event
+		if err := n.hub.signEvent(event); err != nil {
+			logger.Errorw("Failed to sign mesh event", "peer_id", p, "error", err)
+		} else {
+			data, err := proto.Marshal(event)
+			if err != nil {
+				logger.Errorw("Failed to marshal mesh event", "peer_id", p, "error", err)
+				return
+			}
+			// Notify the mesh about the peer disconnection
+			if err := n.hub.EventTopic.Publish(context.Background(), data); err != nil {
+				logger.Errorw("Failed to publish mesh event", "peer_id", p, "error", err)
+				return
+			}
+			logger.Infow("Published EXIT event", "peer_id", p)
+			samHubMeshEventsTotal.WithLabelValues("EXIT").Inc()
+		}
+	}
 }
