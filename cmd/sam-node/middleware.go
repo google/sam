@@ -15,7 +15,13 @@
 package main
 
 import (
+	"context"
+	"crypto/ed25519"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"os"
+	"strings"
 
 	"github.com/biscuit-auth/biscuit-go/v2"
 	"github.com/biscuit-auth/biscuit-go/v2/parser"
@@ -59,8 +65,6 @@ func (n *SamNode) WithBiscuitAuth(next network.StreamHandler) network.StreamHand
 			logger.Warnf("[Auth] Invalid auth frame from %s", remotePeer)
 			return
 		}
-
-		// Verify token
 		reqCtx := RequestContext{
 			PeerID:   remotePeer,
 			User:     "", // Not used in Authorize
@@ -69,13 +73,109 @@ func (n *SamNode) WithBiscuitAuth(next network.StreamHandler) network.StreamHand
 
 		writer := msgio.NewVarintWriter(s)
 
-		if err := n.Authorize(authFrame.Biscuit, reqCtx); err != nil {
-			logger.Warnf("[Auth] AuthZ Denied %s: %v", remotePeer, err)
-			resp := &api.AuthResponse{Success: false, Error: err.Error()}
+		// Check revocation cache
+		if _, isRevoked := n.revokedPeers.Get(remotePeer.String()); isRevoked {
+			logger.Warnf("[Auth] Peer %s is revoked", remotePeer)
+			resp := &api.AuthResponse{Success: false, Error: "Peer is revoked"}
+			respBytes, err := proto.Marshal(resp)
+			if err != nil {
+				logger.Errorf("[Auth] Failed to marshal revocation response: %v", err)
+				return
+			}
+			_ = writer.WriteMsg(respBytes)
+			return
+		}
+
+		// Check verification cache
+		tokenHash := sha256.Sum256(authFrame.Biscuit)
+		hashStr := hex.EncodeToString(tokenHash[:])
+
+		if valid, ok := n.verificationCache.Get(hashStr); ok && valid {
+			logger.Infof("[Auth] Token cache hit for %s", remotePeer)
+			// Valid
+			resp := &api.AuthResponse{Success: true}
+			respBytes, err := proto.Marshal(resp)
+			if err != nil {
+				logger.Errorf("[Auth] Failed to marshal ACK response: %v", err)
+				return
+			}
+			if err := writer.WriteMsg(respBytes); err != nil {
+				logger.Errorf("[Auth] Failed to write ACK to %s: %v", remotePeer, err)
+				return
+			}
+			next(s)
+			return
+		}
+
+		n.keysMu.RLock()
+		keys := n.trustedKeys
+		n.keysMu.RUnlock()
+
+		var authorized bool
+		var lastErr error
+		for _, pubKey := range keys {
+			if err := n.Authorize(authFrame.Biscuit, reqCtx, pubKey.Key); err == nil {
+				authorized = true
+				break
+			} else {
+				lastErr = err
+			}
+		}
+
+		if !authorized {
+			logger.Infof("[Auth] All keys failed, triggering re-enrollment fallback for %s", remotePeer)
+			var jwtStr string
+			var err error
+
+			if tokenURLFlag != "" {
+				jwtStr, err = n.FetchJWT(context.Background(), tokenURLFlag, clientIDFlag, clientSecretFlag)
+				if err != nil {
+					logger.Errorf("[Auth] Failed to fetch JWT for fallback: %v", err)
+				}
+			} else if jwtPathFlag != "" {
+				data, err := os.ReadFile(jwtPathFlag)
+				if err != nil {
+					logger.Errorf("[Auth] Failed to read JWT file for fallback: %v", err)
+				} else {
+					jwtStr = strings.TrimSpace(string(data))
+				}
+			}
+
+			if jwtStr != "" {
+				err = n.Enroll(context.Background(), jwtStr)
+				if err != nil {
+					logger.Errorf("[Auth] Fallback enrollment failed: %v", err)
+				} else {
+					// Retry authorization with new keys
+					n.keysMu.RLock()
+					keys = n.trustedKeys
+					n.keysMu.RUnlock()
+
+					for _, pubKey := range keys {
+						if err := n.Authorize(authFrame.Biscuit, reqCtx, pubKey.Key); err == nil {
+							authorized = true
+							break
+						} else {
+							lastErr = err
+						}
+					}
+				}
+			}
+		}
+
+		if !authorized {
+			logger.Warnf("[Auth] AuthZ Denied %s: %v", remotePeer, lastErr)
+			resp := &api.AuthResponse{Success: false, Error: "Authorization failed"}
+			if lastErr != nil {
+				resp.Error = lastErr.Error()
+			}
 			respBytes, _ := proto.Marshal(resp)
 			_ = writer.WriteMsg(respBytes)
 			return
 		}
+
+		// Cache successful verification
+		n.verificationCache.Add(hashStr, true)
 
 		// Valid
 		resp := &api.AuthResponse{Success: true}
@@ -89,13 +189,13 @@ func (n *SamNode) WithBiscuitAuth(next network.StreamHandler) network.StreamHand
 	}
 }
 
-func (n *SamNode) Authorize(rawToken []byte, req RequestContext) error {
+func (n *SamNode) Authorize(rawToken []byte, req RequestContext, pubKey ed25519.PublicKey) error {
 	b, err := biscuit.Unmarshal(rawToken)
 	if err != nil {
 		return fmt.Errorf("invalid biscuit: %w", err)
 	}
 
-	authorizer, err := b.Authorizer(n.HubPublicKey)
+	authorizer, err := b.Authorizer(pubKey)
 	if err != nil {
 		return err
 	}
@@ -116,6 +216,22 @@ func (n *SamNode) Authorize(rawToken []byte, req RequestContext) error {
 			IDs:  []biscuit.Term{biscuit.String(req.Protocol)},
 		},
 	})
+
+	// Inject connection_peer_id fact for replay defense
+	authorizer.AddFact(biscuit.Fact{
+		Predicate: biscuit.Predicate{
+			Name: "connection_peer_id",
+			IDs:  []biscuit.Term{biscuit.String(req.PeerID.String())},
+		},
+	})
+
+	// Enforce client_peer_id matches connection_peer_id
+	replayCheckStr := `check if client_peer_id($id), connection_peer_id($id)`
+	replayCheck, err := parser.FromStringCheck(replayCheckStr)
+	if err != nil {
+		return fmt.Errorf("failed to parse replay check: %w", err)
+	}
+	authorizer.AddCheck(replayCheck)
 
 	// Apply Pre-compiled Local Attenuation
 	if n.LocalPolicy != nil {

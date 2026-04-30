@@ -16,15 +16,23 @@ package main
 
 import (
 	"crypto/ed25519"
+	"crypto/sha256"
+	"encoding/hex"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/biscuit-auth/biscuit-go/v2"
 	"github.com/biscuit-auth/biscuit-go/v2/parser"
 	"github.com/google/sam/api"
+	lru "github.com/hashicorp/golang-lru/v2"
+	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
+	"github.com/libp2p/go-msgio"
+	"google.golang.org/protobuf/proto"
 )
 
 func TestAuthorize(t *testing.T) {
@@ -64,6 +72,15 @@ func TestAuthorize(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Add client_peer_id for replay check
+	err = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+		Name: "client_peer_id",
+		IDs:  []biscuit.Term{biscuit.String(dummyPeer.String())},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	// Add fact to match baseline rule
 	err = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
 		Name: api.FactMCPTool,
@@ -85,7 +102,7 @@ func TestAuthorize(t *testing.T) {
 
 	node := &SamNode{
 		Store:        store,
-		HubPublicKey: pub,
+		trustedKeys:  []TrustedKey{{Key: pub, ReceivedAt: time.Now()}},
 	}
 
 	req := RequestContext{
@@ -93,7 +110,7 @@ func TestAuthorize(t *testing.T) {
 		Protocol: "/test/proto",
 	}
 
-	if err := node.Authorize(tokenBytes, req); err != nil {
+	if err := node.Authorize(tokenBytes, req, pub); err != nil {
 		t.Fatalf("Authorize failed: %v", err)
 	}
 }
@@ -196,6 +213,15 @@ attenuation:
 				t.Fatal(err)
 			}
 
+			// Add client_peer_id for replay check
+			err = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+				Name: "client_peer_id",
+				IDs:  []biscuit.Term{biscuit.String(dummyPeer.String())},
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+
 			tt.mintToken(t, builder)
 
 			b, err := builder.Build()
@@ -223,7 +249,7 @@ attenuation:
 			}
 
 			node := &SamNode{
-				HubPublicKey: pub,
+				trustedKeys:  []TrustedKey{{Key: pub, ReceivedAt: time.Now()}},
 				LocalPolicy:  localPolicy,
 			}
 
@@ -232,7 +258,7 @@ attenuation:
 				Protocol: protocol.ID(tt.operation),
 			}
 
-			err = node.Authorize(tokenBytes, req)
+			err = node.Authorize(tokenBytes, req, pub)
 			if tt.expectSuccess {
 				if err != nil {
 					t.Errorf("expected success, got error: %v", err)
@@ -243,5 +269,233 @@ attenuation:
 				}
 			}
 		})
+	}
+}
+
+func TestRevocation(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dummyPeer := peer.ID("dummy-peer-id") // Must match mockStream.Conn().RemotePeer()
+
+	builder := biscuit.NewBuilder(priv)
+	err = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+		Name: "node",
+		IDs:  []biscuit.Term{biscuit.String(dummyPeer.String())},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+		Name: "client_peer_id",
+		IDs:  []biscuit.Term{biscuit.String(dummyPeer.String())},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	b, err := builder.Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tokenBytes, err := b.Serialize()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cache, _ := lru.New[string, int64](10000)
+	node := &SamNode{
+		trustedKeys:  []TrustedKey{{Key: pub, ReceivedAt: time.Now()}},
+		revokedPeers: cache,
+	}
+
+	// Mark as revoked
+	node.revokedPeers.Add(dummyPeer.String(), time.Now().Unix())
+
+	pr1, pw1 := io.Pipe()
+	pr2, pw2 := io.Pipe()
+
+	serverStream := &mockStream{r: pr1, w: pw2, protocol: protocol.ID("/test/proto")}
+	
+	// Run handler in goroutine
+	go func() {
+		handler := node.WithBiscuitAuth(func(s network.Stream) {
+			t.Error("Handler should not be called for revoked peer")
+		})
+		handler(serverStream)
+	}()
+
+	// Send AuthFrame
+	writer := msgio.NewVarintWriter(pw1)
+	authFrame := &api.AuthFrame{Biscuit: tokenBytes}
+	data, _ := proto.Marshal(authFrame)
+	if err := writer.WriteMsg(data); err != nil {
+		t.Fatal(err)
+	}
+
+	// Read response
+	reader := msgio.NewVarintReaderSize(pr2, 1024*64)
+	msg, err := reader.ReadMsg()
+	if err != nil {
+		t.Fatalf("failed to read response: %v", err)
+	}
+	
+	var resp api.AuthResponse
+	if err := proto.Unmarshal(msg, &resp); err != nil {
+		t.Fatal(err)
+	}
+
+	if resp.Success {
+		t.Error("expected failure for revoked peer, got success")
+	}
+	if resp.Error != "Peer is revoked" {
+		t.Errorf("expected error 'Peer is revoked', got %q", resp.Error)
+	}
+}
+
+func TestVerifyEvent(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	node := &SamNode{
+		trustedKeys: []TrustedKey{{Key: pub, ReceivedAt: time.Now()}},
+	}
+
+	event := &api.MeshEvent{
+		Type:      api.MeshEvent_BANNED,
+		PeerId:    "attacker-peer",
+		Timestamp: time.Now().Unix(),
+	}
+
+	// Sign it
+	event.Signature = nil
+	data, err := proto.Marshal(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	event.Signature = ed25519.Sign(priv, data)
+
+	// Case 1: Valid signature
+	if !node.verifyEvent(event) {
+		t.Error("Expected event to be verified, got false")
+	}
+
+	// Case 2: Invalid signature
+	event.Signature = []byte("invalid-sig")
+	if node.verifyEvent(event) {
+		t.Error("Expected event verification to fail, got true")
+	}
+
+	// Case 3: Missing signature
+	event.Signature = nil
+	if node.verifyEvent(event) {
+		t.Error("Expected event verification to fail for missing signature, got true")
+	}
+}
+
+func TestHandleAuthHandshakeCache(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dummyPeer := peer.ID("dummy-peer-id")
+
+	builder := biscuit.NewBuilder(priv)
+	err = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+		Name: "node",
+		IDs:  []biscuit.Term{biscuit.String(dummyPeer.String())},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	b, err := builder.Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tokenBytes, err := b.Serialize()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cache, _ := lru.New[string, bool](10)
+	
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+
+	node := &SamNode{
+		trustedKeys:       []TrustedKey{{Key: pub, ReceivedAt: time.Now()}},
+		verificationCache: cache,
+		Store:             store,
+	}
+
+	pr1, pw1 := io.Pipe()
+
+	serverStream := &mockStream{r: pr1, w: io.Discard, protocol: protocol.ID("/sam/auth/1.0.0")}
+	
+	go func() {
+		node.HandleAuthHandshake(serverStream)
+	}()
+
+	writer := msgio.NewVarintWriter(pw1)
+	envelope := &api.AuthEnvelope{Biscuit: tokenBytes}
+	envelopeBytes, _ := proto.Marshal(envelope)
+	if err := writer.WriteMsg(envelopeBytes); err != nil {
+		t.Fatal(err)
+	}
+
+	time.Sleep(1 * time.Second)
+	
+	_, err = store.GetVerifiedIdentity(dummyPeer)
+	if err != nil {
+		t.Fatalf("Expected identity to be saved, got err: %v", err)
+	}
+
+	tokenHash := sha256.Sum256(tokenBytes)
+	hashStr := hex.EncodeToString(tokenHash[:])
+	
+	if valid, ok := cache.Get(hashStr); !ok || !valid {
+		t.Fatal("Expected token to be in verification cache")
+	}
+
+	// Now corrupt keys and try again.
+	node.keysMu.Lock()
+	node.trustedKeys = []TrustedKey{{Key: []byte("invalid-key"), ReceivedAt: time.Now()}}
+	node.keysMu.Unlock()
+
+	dir2 := t.TempDir()
+	store2, _ := NewStore(dir2)
+	defer func() { _ = store2.Close() }()
+	
+	node.Store = store2
+	
+	pr5, pw5 := io.Pipe()
+	serverStream3 := &mockStream{r: pr5, w: io.Discard, protocol: protocol.ID("/sam/auth/1.0.0")}
+
+	go func() {
+		node.HandleAuthHandshake(serverStream3)
+	}()
+
+	writer3 := msgio.NewVarintWriter(pw5)
+	if err := writer3.WriteMsg(envelopeBytes); err != nil {
+		t.Fatal(err)
+	}
+
+	time.Sleep(1 * time.Second)
+	
+	_, err = store2.GetVerifiedIdentity(dummyPeer)
+	if err != nil {
+		t.Fatalf("Expected identity to be saved via cache hit, got err: %v", err)
 	}
 }

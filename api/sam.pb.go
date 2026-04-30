@@ -38,9 +38,10 @@ const (
 type MeshEvent_Type int32
 
 const (
-	MeshEvent_JOIN   MeshEvent_Type = 0
-	MeshEvent_EXIT   MeshEvent_Type = 1
-	MeshEvent_BANNED MeshEvent_Type = 2
+	MeshEvent_JOIN         MeshEvent_Type = 0
+	MeshEvent_EXIT         MeshEvent_Type = 1
+	MeshEvent_BANNED       MeshEvent_Type = 2
+	MeshEvent_KEY_ROTATION MeshEvent_Type = 3
 )
 
 // Enum value maps for MeshEvent_Type.
@@ -49,11 +50,13 @@ var (
 		0: "JOIN",
 		1: "EXIT",
 		2: "BANNED",
+		3: "KEY_ROTATION",
 	}
 	MeshEvent_Type_value = map[string]int32{
-		"JOIN":   0,
-		"EXIT":   1,
-		"BANNED": 2,
+		"JOIN":         0,
+		"EXIT":         1,
+		"BANNED":       2,
+		"KEY_ROTATION": 3,
 	}
 )
 
@@ -241,12 +244,14 @@ func (x *AuthResponse) GetError() string {
 }
 
 type HubConfig struct {
-	state          protoimpl.MessageState `protogen:"open.v1"`
-	PublicKeyHex   string                 `protobuf:"bytes,1,opt,name=public_key_hex,json=publicKeyHex,proto3" json:"public_key_hex,omitempty"`
-	MeshId         string                 `protobuf:"bytes,2,opt,name=mesh_id,json=meshId,proto3" json:"mesh_id,omitempty"`
-	BootstrapNodes []string               `protobuf:"bytes,3,rep,name=bootstrap_nodes,json=bootstrapNodes,proto3" json:"bootstrap_nodes,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	state               protoimpl.MessageState `protogen:"open.v1"`
+	PublicKeyHex        string                 `protobuf:"bytes,1,opt,name=public_key_hex,json=publicKeyHex,proto3" json:"public_key_hex,omitempty"`
+	MeshId              string                 `protobuf:"bytes,2,opt,name=mesh_id,json=meshId,proto3" json:"mesh_id,omitempty"`
+	BootstrapNodes      []string               `protobuf:"bytes,3,rep,name=bootstrap_nodes,json=bootstrapNodes,proto3" json:"bootstrap_nodes,omitempty"`
+	KeyRotationInterval int64                  `protobuf:"varint,4,opt,name=key_rotation_interval,json=keyRotationInterval,proto3" json:"key_rotation_interval,omitempty"`
+	KeyGracePeriod      int64                  `protobuf:"varint,5,opt,name=key_grace_period,json=keyGracePeriod,proto3" json:"key_grace_period,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *HubConfig) Reset() {
@@ -298,6 +303,20 @@ func (x *HubConfig) GetBootstrapNodes() []string {
 		return x.BootstrapNodes
 	}
 	return nil
+}
+
+func (x *HubConfig) GetKeyRotationInterval() int64 {
+	if x != nil {
+		return x.KeyRotationInterval
+	}
+	return 0
+}
+
+func (x *HubConfig) GetKeyGracePeriod() int64 {
+	if x != nil {
+		return x.KeyGracePeriod
+	}
+	return 0
 }
 
 type PeerProfile struct {
@@ -621,6 +640,8 @@ type MeshEvent struct {
 	Type          MeshEvent_Type         `protobuf:"varint,1,opt,name=type,proto3,enum=sam.v1.MeshEvent_Type" json:"type,omitempty"`
 	PeerId        string                 `protobuf:"bytes,2,opt,name=peer_id,json=peerId,proto3" json:"peer_id,omitempty"`
 	Timestamp     int64                  `protobuf:"varint,3,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	NewPublicKey  []byte                 `protobuf:"bytes,4,opt,name=new_public_key,json=newPublicKey,proto3" json:"new_public_key,omitempty"`
+	Signature     []byte                 `protobuf:"bytes,5,opt,name=signature,proto3" json:"signature,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -674,6 +695,20 @@ func (x *MeshEvent) GetTimestamp() int64 {
 		return x.Timestamp
 	}
 	return 0
+}
+
+func (x *MeshEvent) GetNewPublicKey() []byte {
+	if x != nil {
+		return x.NewPublicKey
+	}
+	return nil
+}
+
+func (x *MeshEvent) GetSignature() []byte {
+	if x != nil {
+		return x.Signature
+	}
+	return nil
 }
 
 type EnrollRequest struct {
@@ -825,11 +860,13 @@ const file_api_sam_proto_rawDesc = "" +
 	"\abiscuit\x18\x01 \x01(\fR\abiscuit\">\n" +
 	"\fAuthResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\"s\n" +
+	"\x05error\x18\x02 \x01(\tR\x05error\"\xd1\x01\n" +
 	"\tHubConfig\x12$\n" +
 	"\x0epublic_key_hex\x18\x01 \x01(\tR\fpublicKeyHex\x12\x17\n" +
 	"\amesh_id\x18\x02 \x01(\tR\x06meshId\x12'\n" +
-	"\x0fbootstrap_nodes\x18\x03 \x03(\tR\x0ebootstrapNodes\";\n" +
+	"\x0fbootstrap_nodes\x18\x03 \x03(\tR\x0ebootstrapNodes\x122\n" +
+	"\x15key_rotation_interval\x18\x04 \x01(\x03R\x13keyRotationInterval\x12(\n" +
+	"\x10key_grace_period\x18\x05 \x01(\x03R\x0ekeyGracePeriod\";\n" +
 	"\vPeerProfile\x12\x14\n" +
 	"\x05email\x18\x01 \x01(\tR\x05email\x12\x16\n" +
 	"\x06groups\x18\x02 \x03(\tR\x06groups\"\x94\x01\n" +
@@ -858,16 +895,19 @@ const file_api_sam_proto_rawDesc = "" +
 	"\x0etarget_peer_id\x18\x01 \x01(\tR\ftargetPeerId\x12\x16\n" +
 	"\x06reason\x18\x02 \x01(\tR\x06reason\x12\x1c\n" +
 	"\ttimestamp\x18\x03 \x01(\x03R\ttimestamp\x12\x1c\n" +
-	"\tsignature\x18\x04 \x01(\fR\tsignature\"\x96\x01\n" +
+	"\tsignature\x18\x04 \x01(\fR\tsignature\"\xec\x01\n" +
 	"\tMeshEvent\x12*\n" +
 	"\x04type\x18\x01 \x01(\x0e2\x16.sam.v1.MeshEvent.TypeR\x04type\x12\x17\n" +
 	"\apeer_id\x18\x02 \x01(\tR\x06peerId\x12\x1c\n" +
-	"\ttimestamp\x18\x03 \x01(\x03R\ttimestamp\"&\n" +
+	"\ttimestamp\x18\x03 \x01(\x03R\ttimestamp\x12$\n" +
+	"\x0enew_public_key\x18\x04 \x01(\fR\fnewPublicKey\x12\x1c\n" +
+	"\tsignature\x18\x05 \x01(\fR\tsignature\"8\n" +
 	"\x04Type\x12\b\n" +
 	"\x04JOIN\x10\x00\x12\b\n" +
 	"\x04EXIT\x10\x01\x12\n" +
 	"\n" +
-	"\x06BANNED\x10\x02\":\n" +
+	"\x06BANNED\x10\x02\x12\x10\n" +
+	"\fKEY_ROTATION\x10\x03\":\n" +
 	"\rEnrollRequest\x12\x10\n" +
 	"\x03jwt\x18\x01 \x01(\tR\x03jwt\x12\x17\n" +
 	"\apeer_id\x18\x02 \x01(\tR\x06peerId\"\xe6\x01\n" +

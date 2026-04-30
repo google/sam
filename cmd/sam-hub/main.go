@@ -18,7 +18,6 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/tls"
-	"encoding/hex"
 	"fmt"
 	"net/http"
 	"os"
@@ -59,6 +58,9 @@ var (
 	insecureSkipTLSVerify bool
 	logLevel              string
 	policyFile            string
+	keyRotationInterval   time.Duration
+	keyGracePeriod        time.Duration
+	keysDBPath            string
 )
 
 var logger = golog.Logger("sam-hub")
@@ -68,7 +70,7 @@ type Hub struct {
 	Host       host.Host
 	DHT        *dht.IpfsDHT
 	Providers  map[string]*oidc.Provider
-	BiscuitKey ed25519.PrivateKey
+	KeyRing    *KeyRing
 	MeshID     string
 	PubSub     *pubsub.PubSub
 	EventTopic *pubsub.Topic
@@ -130,21 +132,19 @@ func NewHub(ctx context.Context, policy *api.PolicyConfig) (*Hub, error) {
 		logger.Infof("[OIDC] Trusted issuer: %s", iss)
 	}
 
-	// SAM_HUB_KEY stores an ed25519 seed as a 32-byte hex value.
-	keyBytes, err := hex.DecodeString(biscuitHex)
-	if err != nil || len(keyBytes) != 32 {
-		return nil, fmt.Errorf("invalid SAM_HUB_KEY: must be 32-byte hex string")
+	kr, err := NewKeyRing(keysDBPath, keyGracePeriod)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create keyring: %w", err)
 	}
-	bKey := ed25519.NewKeyFromSeed(keyBytes)
 
 	hub := &Hub{
-		Host:       h,
-		DHT:        kadDHT,
-		gater:      gater,
-		Providers:  providers,
-		BiscuitKey: bKey,
-		MeshID:     meshName,
-		Policy:     policy,
+		Host:      h,
+		DHT:       kadDHT,
+		gater:     gater,
+		Providers: providers,
+		KeyRing:   kr,
+		MeshID:    meshName,
+		Policy:    policy,
 	}
 
 	h.Network().Notify(&notifier{hub: hub})
@@ -234,7 +234,7 @@ func (h *Hub) handleEnroll(s network.Stream) {
 		return
 	}
 
-	verifier := provider.Verifier(&oidc.Config{ClientID: aud})
+	verifier := provider.Verifier(&oidc.Config{ClientID: clientID})
 
 	token, err := verifier.Verify(context.Background(), req.Jwt)
 	if err != nil {
@@ -260,7 +260,7 @@ func (h *Hub) handleEnroll(s network.Stream) {
 		}
 	}
 
-	builder := biscuit.NewBuilder(h.BiscuitKey)
+	builder := biscuit.NewBuilder(h.KeyRing.GetCurrentKey())
 
 	if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
 		Name: "expiration",
@@ -276,6 +276,15 @@ func (h *Hub) handleEnroll(s network.Stream) {
 		IDs:  []biscuit.Term{biscuit.String(remotePeer.String())},
 	}}); err != nil {
 		logger.Errorf("[Enroll] Failed to add node fact: %v", err)
+		h.sendEnrollResponse(s, nil, "Failed to mint biscuit", 0, nil, nil)
+		return
+	}
+
+	if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+		Name: "client_peer_id",
+		IDs:  []biscuit.Term{biscuit.String(remotePeer.String())},
+	}}); err != nil {
+		logger.Errorf("[Enroll] Failed to add client_peer_id fact: %v", err)
 		h.sendEnrollResponse(s, nil, "Failed to mint biscuit", 0, nil, nil)
 		return
 	}
@@ -371,14 +380,18 @@ func (h *Hub) handleEnroll(s network.Stream) {
 		PeerId:    remotePeer.String(),
 		Timestamp: time.Now().Unix(),
 	}
-	eventData, err := proto.Marshal(event)
-	if err != nil {
-		logger.Errorf("[Enroll] Failed to marshal event: %v", err)
+	if err := h.signEvent(event); err != nil {
+		logger.Errorf("[Enroll] Failed to sign event: %v", err)
 	} else {
-		if err := h.EventTopic.Publish(context.Background(), eventData); err != nil {
-			logger.Errorf("[Enroll] Failed to publish event: %v", err)
+		eventData, err := proto.Marshal(event)
+		if err != nil {
+			logger.Errorf("[Enroll] Failed to marshal event: %v", err)
 		} else {
-			logger.Infof("[Enroll] Published JOIN event for %s", remotePeer)
+			if err := h.EventTopic.Publish(context.Background(), eventData); err != nil {
+				logger.Errorf("[Enroll] Failed to publish event: %v", err)
+			} else {
+				logger.Infof("[Enroll] Published JOIN event for %s", remotePeer)
+			}
 		}
 	}
 }
@@ -389,7 +402,7 @@ func (h *Hub) sendEnrollResponse(s network.Stream, biscuitToken []byte, errMsg s
 		hubAddrs = append(hubAddrs, addr.String()+"/p2p/"+h.Host.ID().String())
 	}
 
-	pubKey := h.BiscuitKey.Public().(ed25519.PublicKey)
+	pubKey := h.KeyRing.GetCurrentPublicKey()
 
 	resp := &api.EnrollResponse{
 		BiscuitToken: biscuitToken,
@@ -412,10 +425,16 @@ func (h *Hub) sendEnrollResponse(s network.Stream, biscuitToken []byte, errMsg s
 
 // startWatchdog periodically checks for peers that have connected but not completed OIDC
 // authentication within the grace period, and evicts them from the network.
-func (h *Hub) startWatchdog() {
+func (h *Hub) startWatchdog(ctx context.Context) {
 	go func() {
 		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
 		for range ticker.C {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
 			h.gater.mu.Lock()
 			now := time.Now()
 			for pID, connectedAt := range h.gater.pending {
@@ -430,6 +449,60 @@ func (h *Hub) startWatchdog() {
 			h.gater.mu.Unlock()
 		}
 	}()
+}
+
+func (h *Hub) startRotation(ctx context.Context) {
+	if keyRotationInterval <= 0 {
+		return
+	}
+	go func() {
+		ticker := time.NewTicker(keyRotationInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				logger.Info("[Rotation] Rotating keys...")
+				newPub, err := h.KeyRing.Rotate(keyGracePeriod)
+				if err != nil {
+					logger.Errorf("[Rotation] Failed to rotate keys: %v", err)
+					continue
+				}
+
+				// Broadcast event
+				event := &api.MeshEvent{
+					Type:         api.MeshEvent_KEY_ROTATION,
+					Timestamp:    time.Now().Unix(),
+					NewPublicKey: newPub,
+				}
+				if err := h.signEvent(event); err != nil {
+					logger.Errorf("[Rotation] Failed to sign event: %v", err)
+					continue
+				}
+				eventData, err := proto.Marshal(event)
+				if err != nil {
+					logger.Errorf("[Rotation] Failed to marshal event: %v", err)
+					continue
+				}
+				if err := h.EventTopic.Publish(ctx, eventData); err != nil {
+					logger.Errorf("[Rotation] Failed to publish event: %v", err)
+				} else {
+					logger.Infof("[Rotation] Broadcasted new public key: %x", newPub)
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+}
+
+func (h *Hub) signEvent(event *api.MeshEvent) error {
+	event.Signature = nil
+	data, err := proto.Marshal(event)
+	if err != nil {
+		return err
+	}
+	event.Signature = ed25519.Sign(h.KeyRing.GetCurrentKey(), data)
+	return nil
 }
 
 func main() {
@@ -459,8 +532,11 @@ func main() {
 			}
 			h.Host.SetStreamHandler(api.EnrollProtocolID, h.handleEnroll)
 
+			// Start key rotation if enabled
+			h.startRotation(ctx)
+
 			// Watchdog: Expel peers that connect but never finish authentication
-			h.startWatchdog()
+			h.startWatchdog(ctx)
 
 			logger.Infof("SAM Hub Online (QUIC + TCP)")
 			logger.Infof("MeshID: %s", h.MeshID)
@@ -483,6 +559,9 @@ func main() {
 	rootCmd.Flags().BoolVar(&insecureSkipTLSVerify, "insecure-skip-tls-verify", false, "Skip TLS verification for OIDC issuers")
 	rootCmd.Flags().StringVar(&logLevel, "log-level", "info", "Log level (debug, info, warn, error)")
 	rootCmd.Flags().StringVar(&policyFile, "policy-file", "policies.yaml", "Path to policies.yaml")
+	rootCmd.Flags().DurationVar(&keyRotationInterval, "key-rotation-interval", 0, "Key rotation interval (e.g. 12h). 0 disables rotation.")
+	rootCmd.Flags().DurationVar(&keyGracePeriod, "key-grace-period", 24*time.Hour, "Key grace period for old keys (e.g. 24h).")
+	rootCmd.Flags().StringVar(&keysDBPath, "keys-db", "keys.db", "Path to BoltDB file for keys")
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)

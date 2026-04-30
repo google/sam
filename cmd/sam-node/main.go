@@ -53,6 +53,7 @@ var (
 	enableRelayFlag       bool
 	logLevelFlag          string
 	localPolicyFile       string
+	keyGracePeriodFlag    time.Duration
 )
 
 var logger = golog.Logger("sam-node")
@@ -151,7 +152,7 @@ func main() {
 					logger.Fatal("Hub public key not found in store and not provided. Cannot verify peers.")
 				}
 				priv := getOrGenerateKey(store)
-				node, err = NewSamNode(context.Background(), priv, hubPubKey, hubAddrs, store, meshFlag, discoveryIntervalFlag, listenAddrs, enableRelayFlag, localPolicy)
+				node, err = NewSamNode(context.Background(), priv, hubPubKey, hubAddrs, store, meshFlag, discoveryIntervalFlag, listenAddrs, enableRelayFlag, localPolicy, keyGracePeriodFlag)
 				if err != nil {
 					logger.Fatalf("Failed to start mesh node: %v", err)
 				}
@@ -182,7 +183,7 @@ func main() {
 				}
 
 				priv := getOrGenerateKey(store)
-				node, err = NewSamNode(context.Background(), priv, nil, initHubAddrs, store, meshFlag, discoveryIntervalFlag, listenAddrs, enableRelayFlag, localPolicy)
+				node, err = NewSamNode(context.Background(), priv, nil, initHubAddrs, store, meshFlag, discoveryIntervalFlag, listenAddrs, enableRelayFlag, localPolicy, keyGracePeriodFlag)
 				if err != nil {
 					logger.Fatalf("Failed to initialize node for enrollment: %v", err)
 				}
@@ -195,7 +196,9 @@ func main() {
 				storedPubKey, _, _ = store.LoadHubConfig()
 				hubPubKey = storedPubKey
 
-				node.HubPublicKey = hubPubKey
+				node.keysMu.Lock()
+				node.trustedKeys = []TrustedKey{{Key: hubPubKey, ReceivedAt: time.Now()}}
+				node.keysMu.Unlock()
 			}
 
 			// Start renewal loop
@@ -349,7 +352,7 @@ func main() {
 			}
 
 			priv := getOrGenerateKey(store)
-			node, err := NewSamNode(context.Background(), priv, nil, initHubAddrs, store, meshFlag, discoveryIntervalFlag, listenAddrs, enableRelayFlag, localPolicy)
+			node, err := NewSamNode(context.Background(), priv, nil, initHubAddrs, store, meshFlag, discoveryIntervalFlag, listenAddrs, enableRelayFlag, localPolicy, keyGracePeriodFlag)
 			if err != nil {
 				logger.Fatalf("Failed to initialize node for enrollment: %v", err)
 			}
@@ -375,6 +378,7 @@ func main() {
 	runCmd.Flags().StringVar(&discoveryIntervalFlag, "discovery-interval", "2s", "Polling interval for DHT discovery")
 	runCmd.Flags().BoolVar(&enableRelayFlag, "enable-relay", false, "Allow this node to serve as a relay for others")
 	runCmd.Flags().StringVar(&logLevelFlag, "log-level", "info", "Log level (debug, info, warn, error)")
+	runCmd.Flags().DurationVar(&keyGracePeriodFlag, "key-grace-period", 24*time.Hour, "Key grace period for old keys (e.g. 24h)")
 	rootCmd.PersistentFlags().StringVar(&hubAddr, "hub", "http://localhost:8080", "Hub URL")
 	rootCmd.PersistentFlags().StringVar(&localPolicyFile, "local-policy", "local_policy.yaml", "Path to local_policy.yaml")
 	rootCmd.PersistentFlags().StringVar(&tokenURLFlag, "token-url", "", "OIDC Token URL")
@@ -476,6 +480,10 @@ func (n *SamNode) Enroll(ctx context.Context, jwt string) error {
 	if err := n.Store.SaveHubConfig(resp.HubPublicKey, resp.HubAddresses); err != nil {
 		return fmt.Errorf("failed to save hub config: %v", err)
 	}
+
+	n.keysMu.Lock()
+	n.trustedKeys = append(n.trustedKeys, TrustedKey{Key: ed25519.PublicKey(resp.HubPublicKey), ReceivedAt: time.Now()})
+	n.keysMu.Unlock()
 
 
 

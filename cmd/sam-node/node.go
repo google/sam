@@ -17,12 +17,17 @@ package main
 import (
 	"context"
 	"crypto/ed25519"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 	"sync"
 
 	"time"
 
 	"github.com/biscuit-auth/biscuit-go/v2"
+	"github.com/biscuit-auth/biscuit-go/v2/parser"
 	"github.com/google/sam/api"
+	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/libp2p/go-libp2p"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
@@ -43,29 +48,53 @@ import (
 
 const AuthProtocolID = protocol.ID("/sam/auth/1.0.0")
 
+type TrustedKey struct {
+	Key        ed25519.PublicKey
+	ReceivedAt time.Time
+}
+
 type SamNode struct {
-	Host         host.Host
-	DHT          *dht.IpfsDHT
-	PubSub       *pubsub.PubSub
-	Store        *Store
-	HubPublicKey ed25519.PublicKey
-	HubPeerID    peer.ID
-	knownPeers   map[string]bool
-	receivedMsgs map[string][]string
-	topics       map[string]*pubsub.Topic
-	mu           sync.Mutex
-	LocalPolicy  *CompiledLocalPolicy
+	Host              host.Host
+	DHT               *dht.IpfsDHT
+	PubSub            *pubsub.PubSub
+	Store             *Store
+	HubPeerID         peer.ID
+	knownPeers        map[string]bool
+	receivedMsgs      map[string][]string
+	topics            map[string]*pubsub.Topic
+	mu                sync.Mutex
+	LocalPolicy       *CompiledLocalPolicy
+	revokedPeers      *lru.Cache[string, int64]
+	verificationCache *lru.Cache[string, bool]
+	trustedKeys       []TrustedKey
+	keysMu            sync.RWMutex
 }
 
 // NewSamNode creates a new Agent instance secured with the 4-layer pipeline.
-func NewSamNode(ctx context.Context, privKey crypto.PrivKey, hubPubKey ed25519.PublicKey, hubAddrs []multiaddr.Multiaddr, store *Store, meshID string, discoveryInterval string, listenAddrs []string, enableRelay bool, localPolicy *CompiledLocalPolicy) (*SamNode, error) {
+func NewSamNode(ctx context.Context, privKey crypto.PrivKey, hubPubKey ed25519.PublicKey, hubAddrs []multiaddr.Multiaddr, store *Store, meshID string, discoveryInterval string, listenAddrs []string, enableRelay bool, localPolicy *CompiledLocalPolicy, keyGracePeriod time.Duration) (*SamNode, error) {
+	var trustedKeys []TrustedKey
+	if len(hubPubKey) > 0 {
+		trustedKeys = []TrustedKey{{Key: hubPubKey, ReceivedAt: time.Now()}}
+	}
+
 	node := &SamNode{
 		Store:        store,
-		HubPublicKey: hubPubKey,
+		trustedKeys:  trustedKeys,
 		knownPeers:   make(map[string]bool),
 		receivedMsgs: make(map[string][]string),
 		topics:       make(map[string]*pubsub.Topic),
 		LocalPolicy:  localPolicy,
+	}
+
+	var err error
+	node.revokedPeers, err = lru.New[string, int64](10000)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create revocation cache: %w", err)
+	}
+
+	node.verificationCache, err = lru.New[string, bool](1000)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create verification cache: %w", err)
 	}
 
 	// Layer 2: Attach the Bouncer (Gater)
@@ -172,6 +201,10 @@ func NewSamNode(ctx context.Context, privKey crypto.PrivKey, hubPubKey ed25519.P
 
 	// Layer 3: Wire up MCP handler wrapped in middleware
 	node.Host.SetStreamHandler(api.MCPProtocolID, node.WithBiscuitAuth(node.HandleMCPStream))
+
+	// Start key pruning
+	node.startKeyPruning(ctx, keyGracePeriod)
+
 	return node, nil
 }
 
@@ -197,17 +230,101 @@ func (n *SamNode) listenForHubEvents(ctx context.Context) {
 			continue
 		}
 
+		// use the original author not the one that just relay the message
+		if msg.GetFrom() != n.HubPeerID {
+			logger.Warnf("[Mesh Event] Ignored event from non-hub peer: %s", msg.ReceivedFrom)
+			continue
+		}
+
+		if !n.verifyEvent(&event) {
+			logger.Warnf("[Mesh Event] Potential spoofing attempt: invalid signature on event from %s", msg.ReceivedFrom)
+			continue
+		}
+
+		// Freshness check: reject events older than 5 minutes to prevent replay attacks
+		if time.Since(time.Unix(event.Timestamp, 0)) > 5*time.Minute {
+			logger.Warnf("[Mesh Event] Dropping stale event from %s (timestamp: %d)", msg.ReceivedFrom, event.Timestamp)
+			continue
+		}
+
 		n.mu.Lock()
 		switch event.Type {
 		case api.MeshEvent_JOIN:
 			n.knownPeers[event.PeerId] = true
 			logger.Infof("[Mesh Event] Peer joined: %s", event.PeerId)
-		case api.MeshEvent_EXIT, api.MeshEvent_BANNED:
+		case api.MeshEvent_EXIT:
 			delete(n.knownPeers, event.PeerId)
-			logger.Infof("[Mesh Event] Peer left/banned: %s", event.PeerId)
+			logger.Infof("[Mesh Event] Peer left: %s", event.PeerId)
+		case api.MeshEvent_BANNED:
+			delete(n.knownPeers, event.PeerId)
+			logger.Infof("[Mesh Event] Peer banned: %s", event.PeerId)
+
+			n.revokedPeers.Add(event.PeerId, event.Timestamp)
+			// close all streams from this peer
+			if p, err := peer.Decode(event.PeerId); err == nil {
+				_ = n.Host.Network().ClosePeer(p)
+			}
+		case api.MeshEvent_KEY_ROTATION:
+			logger.Infof("[Mesh Event] Key rotation received")
+			n.keysMu.Lock()
+			n.trustedKeys = append(n.trustedKeys, TrustedKey{Key: ed25519.PublicKey(event.NewPublicKey), ReceivedAt: time.Now()})
+			n.keysMu.Unlock()
 		}
 		n.mu.Unlock()
 	}
+}
+
+func (n *SamNode) startKeyPruning(ctx context.Context, gracePeriod time.Duration) {
+	if gracePeriod <= 0 {
+		return
+	}
+	go func() {
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				logger.Info("[KeyPruning] Pruning expired keys...")
+				n.keysMu.Lock()
+				now := time.Now()
+				var activeKeys []TrustedKey
+				for _, tk := range n.trustedKeys {
+					if now.Sub(tk.ReceivedAt) <= gracePeriod {
+						activeKeys = append(activeKeys, tk)
+					}
+				}
+				n.trustedKeys = activeKeys
+				n.keysMu.Unlock()
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+}
+
+func (n *SamNode) verifyEvent(event *api.MeshEvent) bool {
+	sig := event.Signature
+	event.Signature = nil
+	data, err := proto.Marshal(event)
+	event.Signature = sig // Restore
+	if err != nil {
+		logger.Errorf("[Mesh Event] Failed to marshal event for verification: %v", err)
+		return false
+	}
+
+	n.keysMu.RLock()
+	keys := n.trustedKeys
+	n.keysMu.RUnlock()
+
+	for _, tk := range keys {
+		if len(tk.Key) != ed25519.PublicKeySize {
+			continue
+		}
+		if ed25519.Verify(tk.Key, data, sig) {
+			return true
+		}
+	}
+	return false
 }
 
 func (n *SamNode) subscribeToTopic(ctx context.Context, topicName string) error {
@@ -306,6 +423,16 @@ func (n *SamNode) HandleAuthHandshake(s network.Stream) {
 		return
 	}
 
+	// Check verification cache
+	tokenHash := sha256.Sum256(exchange.Biscuit)
+	hashStr := hex.EncodeToString(tokenHash[:])
+
+	cacheHit := false
+	if valid, ok := n.verificationCache.Get(hashStr); ok && valid {
+		logger.Infof("[AuthN] Token cache hit for %s", remotePeer)
+		cacheHit = true
+	}
+
 	// 2. Unmarshal and verify token format
 	b, err := biscuit.Unmarshal(exchange.Biscuit)
 	if err != nil {
@@ -313,14 +440,43 @@ func (n *SamNode) HandleAuthHandshake(s network.Stream) {
 		return
 	}
 
-	// 3. Verify signature chain against the trusted Hub key.
-	authorizer, err := b.Authorizer(n.HubPublicKey)
-	if err != nil {
-		logger.Errorf("[AuthN] Signature verification setup failed for %s: %v", remotePeer, err)
-		return
+	authorized := false
+	if cacheHit {
+		authorized = true
+	} else {
+		// 3. Verify signature chain against the trusted Hub keys.
+		n.keysMu.RLock()
+		keys := n.trustedKeys
+		n.keysMu.RUnlock()
+
+		for _, tk := range keys {
+			authorizer, err := b.Authorizer(tk.Key)
+			if err != nil {
+				continue
+			}
+
+			// Admission only requires a valid signature, so allow if true
+			rule, err := parser.FromStringPolicy("allow if true")
+			if err != nil {
+				logger.Errorf("[AuthN] Failed to parse rule: %v", err)
+				continue
+			}
+			authorizer.AddPolicy(rule)
+
+			if err := authorizer.Authorize(); err == nil {
+				authorized = true
+				break
+			}
+		}
+
+		if authorized {
+			// Cache successful verification
+			n.verificationCache.Add(hashStr, true)
+		}
 	}
-	if err := authorizer.Authorize(); err != nil {
-		logger.Warnf("[AuthN] Authorization failed for %s: %v", remotePeer, err)
+
+	if !authorized {
+		logger.Warnf("[AuthN] Authorization failed for %s: no valid key found", remotePeer)
 		return
 	}
 

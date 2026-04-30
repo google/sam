@@ -40,5 +40,26 @@ func LoadPolicyConfig(path string) (*api.PolicyConfig, error) {
 		}
 	}
 
+	if err := ValidatePolicyConfig(&config); err != nil {
+		return nil, err
+	}
+
 	return &config, nil
+}
+
+// ValidatePolicyConfig ensures that no wildcards are used in policies.
+func ValidatePolicyConfig(config *api.PolicyConfig) error {
+	for role, rolePolicy := range config.Roles {
+		for _, target := range rolePolicy.Network.AllowedTargets {
+			if target == "*" {
+				return fmt.Errorf("wildcard target '*' is not allowed in role %q", role)
+			}
+		}
+		for _, tool := range rolePolicy.MCP.AllowedTools {
+			if tool == "*" {
+				return fmt.Errorf("wildcard tool '*' is not allowed in role %q", role)
+			}
+		}
+	}
+	return nil
 }

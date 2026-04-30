@@ -94,4 +94,22 @@ roles:
 	if err == nil {
 		t.Error("expected error for invalid custom datalog, got nil")
 	}
+
+	// 5. Test wildcard rejection
+	wildcardYAML := `
+version: "v1alpha1"
+roles:
+  admin:
+    network:
+      allowed_targets: ["*"]
+`
+	wildcardFile := filepath.Join(dir, "wildcard.yaml")
+	if err := os.WriteFile(wildcardFile, []byte(wildcardYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = LoadPolicyConfig(wildcardFile)
+	if err == nil {
+		t.Error("expected error for wildcard target, got nil")
+	}
 }

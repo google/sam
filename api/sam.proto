@@ -35,6 +35,8 @@ message HubConfig {
   string public_key_hex = 1;
   string mesh_id = 2;
   repeated string bootstrap_nodes = 3;
+  int64 key_rotation_interval = 4;
+  int64 key_grace_period = 5;
 }
 
 message PeerProfile {
@@ -74,10 +76,13 @@ message MeshEvent {
     JOIN = 0;
     EXIT = 1;
     BANNED = 2;
+    KEY_ROTATION = 3;
   }
   Type type = 1;
   string peer_id = 2;
   int64 timestamp = 3;
+  bytes new_public_key = 4;
+  bytes signature = 5;
 }
 
 message EnrollRequest {
