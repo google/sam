@@ -26,10 +26,8 @@ test-python:
 	./sam-mcp-python/.venv/bin/pip install -e ./sam-mcp-python[test]
 	./sam-mcp-python/.venv/bin/pytest sam-mcp-python/tests/unit
 
-test-python-e2e: build
-	python3 -m venv sam-mcp-python/.venv
-	./sam-mcp-python/.venv/bin/pip install -e ./sam-mcp-python[test]
-	./sam-mcp-python/.venv/bin/pytest sam-mcp-python/tests/e2e
+test-python-e2e: build docker-build
+	bats --verbose-run tests/e2e/python_sdk_test.bats
 
 e2e-test:
 	bats --verbose-run tests/e2e/
