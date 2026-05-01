@@ -442,7 +442,7 @@ func TestHandleAuthHandshakeCache(t *testing.T) {
 
 	pr1, pw1 := io.Pipe()
 
-	serverStream := &mockStream{r: pr1, w: io.Discard, protocol: protocol.ID("/sam/auth/1.0.0")}
+	serverStream := &mockStream{r: pr1, w: io.Discard, protocol: api.AuthProtocolID}
 
 	go func() {
 		node.HandleAuthHandshake(serverStream)
@@ -483,7 +483,7 @@ func TestHandleAuthHandshakeCache(t *testing.T) {
 	node.Store = store2
 
 	pr5, pw5 := io.Pipe()
-	serverStream3 := &mockStream{r: pr5, w: io.Discard, protocol: protocol.ID("/sam/auth/1.0.0")}
+	serverStream3 := &mockStream{r: pr5, w: io.Discard, protocol: api.AuthProtocolID}
 
 	go func() {
 		node.HandleAuthHandshake(serverStream3)

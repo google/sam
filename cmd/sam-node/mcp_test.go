@@ -22,6 +22,7 @@ import (
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/google/sam/api"
 	"github.com/libp2p/go-libp2p/core/protocol"
 )
 
@@ -99,8 +100,8 @@ func TestZeroTrustMCPServer(t *testing.T) {
 	pr1, pw1 := io.Pipe()
 	pr2, pw2 := io.Pipe()
 
-	serverStream := &mockStream{r: pr1, w: pw2, protocol: protocol.ID("/sam/mcp/1.0.0")}
-	clientStream := &mockStream{r: pr2, w: pw1, protocol: protocol.ID("/sam/mcp/1.0.0")}
+	serverStream := &mockStream{r: pr1, w: pw2, protocol: api.MCPProtocolID}
+	clientStream := &mockStream{r: pr2, w: pw1, protocol: api.MCPProtocolID}
 
 	rl, _ := NewPeerRateLimiter(100)
 	rp, _ := lru.New[string, int64](100)

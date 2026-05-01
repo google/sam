@@ -35,7 +35,6 @@ import (
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/libp2p/go-msgio"
 	"github.com/multiformats/go-multiaddr"
 	"google.golang.org/protobuf/proto"
@@ -262,7 +261,7 @@ func startMockHubDynamic(t *testing.T, pubA, pubB ed25519.PublicKey) (peer.ID, s
 	}
 
 	var callCount int
-	h.SetStreamHandler(protocol.ID("/sam/enroll/1.0.0"), func(s network.Stream) {
+	h.SetStreamHandler(api.EnrollProtocolID, func(s network.Stream) {
 		defer func() { _ = s.Close() }()
 		callCount++
 

@@ -216,7 +216,7 @@ func main() {
 			// Start renewal loop
 			node.StartRenewalLoop(ctx, tokenURLFlag, clientIDFlag, clientSecretFlag, jwtPathFlag)
 
-			node.Host.SetStreamHandler(AuthProtocolID, node.HandleAuthHandshake)
+			node.Host.SetStreamHandler(api.AuthProtocolID, node.HandleAuthHandshake)
 
 			// Start MCP Server
 			startMCPServer(node, mcpSocketFlag, dataDir)

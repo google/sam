@@ -64,12 +64,6 @@ const (
 	HighWaterMark   = 400
 	ConnGracePeriod = 1 * time.Minute
 
-	// Biscuit fact names
-	FactExpiration   = "expiration"
-	FactNode         = "node"
-	FactClientPeerID = "client_peer_id"
-	FactGroup        = "group"
-
 	// Defaults
 	DefaultOIDCIssuer  = "https://accounts.google.com"
 	DefaultMeshName    = "public-mesh"
@@ -405,21 +399,21 @@ func (h *Hub) mintBiscuitToken(claims jwt.MapClaims, token *oidc.IDToken, remote
 	builder := biscuit.NewBuilder(h.KeyRing.GetCurrentKey())
 
 	if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
-		Name: FactExpiration,
+		Name: api.FactExpiration,
 		IDs:  []biscuit.Term{biscuit.Date(token.Expiry)},
 	}}); err != nil {
 		return nil, fmt.Errorf("failed to add expiration fact: %w", err)
 	}
 
 	if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
-		Name: FactNode,
+		Name: api.FactNode,
 		IDs:  []biscuit.Term{biscuit.String(remotePeer.String())},
 	}}); err != nil {
 		return nil, fmt.Errorf("failed to add node fact: %w", err)
 	}
 
 	if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
-		Name: FactClientPeerID,
+		Name: api.FactClientPeerID,
 		IDs:  []biscuit.Term{biscuit.String(remotePeer.String())},
 	}}); err != nil {
 		return nil, fmt.Errorf("failed to add client_peer_id fact: %w", err)
@@ -427,7 +421,7 @@ func (h *Hub) mintBiscuitToken(claims jwt.MapClaims, token *oidc.IDToken, remote
 
 	for _, role := range roles {
 		if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
-			Name: FactGroup,
+			Name: api.FactGroup,
 			IDs:  []biscuit.Term{biscuit.String(role)},
 		}}); err != nil {
 			return nil, fmt.Errorf("failed to add group fact: %w", err)

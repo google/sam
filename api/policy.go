@@ -1,13 +1,5 @@
 package api
 
-const (
-	// FactMCPTool is the Datalog fact name injected by the Hub to authorize specific MCP tools.
-	FactMCPTool = "allow_mcp_tool"
-	
-	// FactNetworkTarget is the Datalog fact name injected by the Hub to authorize connections to specific agents.
-	FactNetworkTarget = "allow_network_target"
-)
-
 // PolicyConfig is the root authorization configuration for the SAM Hub.
 type PolicyConfig struct {
 	Version string                `yaml:"version"`

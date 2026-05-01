@@ -37,7 +37,6 @@ import (
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/libp2p/go-libp2p/p2p/discovery/routing"
 	"github.com/libp2p/go-libp2p/p2p/discovery/util"
 	"github.com/libp2p/go-libp2p/p2p/net/connmgr"
@@ -50,8 +49,6 @@ import (
 )
 
 const (
-	AuthProtocolID = protocol.ID("/sam/auth/1.0.0")
-
 	// Cache sizes
 	RateLimiterSize       = 1000
 	RevocationCacheSize   = 10000
@@ -224,7 +221,7 @@ func NewSamNode(ctx context.Context, privKey crypto.PrivKey, hubPubKey ed25519.P
 	go node.startDiscovery(ctx, meshID, interval)
 
 	// Layer 3: Open the Lobby Door (Auth Protocol is bypassed by Layer 4)
-	node.Host.SetStreamHandler(AuthProtocolID, node.HandleAuthHandshake)
+	node.Host.SetStreamHandler(api.AuthProtocolID, node.HandleAuthHandshake)
 
 	// Layer 3: Wire up MCP handler wrapped in middleware
 	node.Host.SetStreamHandler(api.MCPProtocolID, node.WithBiscuitAuth(node.HandleMCPStream))

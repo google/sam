@@ -30,7 +30,6 @@ import (
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/libp2p/go-msgio"
 	"google.golang.org/protobuf/proto"
 )
@@ -104,7 +103,7 @@ func startMockLibp2pHub(t *testing.T) (peer.ID, string) {
 		t.Fatalf("failed to create DHT on mock hub: %v", err)
 	}
 
-	h.SetStreamHandler(protocol.ID("/sam/enroll/1.0.0"), func(s network.Stream) {
+	h.SetStreamHandler(api.EnrollProtocolID, func(s network.Stream) {
 		defer func() { _ = s.Close() }()
 
 		// The following constants are mock values used for testing.

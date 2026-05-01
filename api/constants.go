@@ -19,3 +19,14 @@ import "github.com/libp2p/go-libp2p/core/protocol"
 const EnrollProtocolID protocol.ID = "/sam/enroll/1.0.0"
 const MCPProtocolID protocol.ID = "/sam/mcp/1.0.0"
 const GossipEvents = "/sam/mesh/events/v1"
+const AuthProtocolID protocol.ID = "/sam/auth/1.0.0"
+
+// Biscuit fact names
+const (
+	FactExpiration    = "expiration"
+	FactNode          = "node"
+	FactClientPeerID  = "client_peer_id"
+	FactGroup         = "group"
+	FactMCPTool       = "allow_mcp_tool"
+	FactNetworkTarget = "allow_network_target"
+)
