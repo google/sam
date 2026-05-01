@@ -24,6 +24,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/biscuit-auth/biscuit-go/v2"
@@ -42,7 +43,7 @@ import (
 	libp2ptls "github.com/libp2p/go-libp2p/p2p/security/tls"
 	libp2pquic "github.com/libp2p/go-libp2p/p2p/transport/quic"
 	"github.com/libp2p/go-msgio"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
+
 	"golang.org/x/time/rate"
 
 	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
@@ -56,7 +57,14 @@ const (
 	// Rate limiting defaults
 	EnrollRateLimit = 10
 	EnrollBurst     = 20
+
+	// ConnManager limits
+	LowWaterMark    = 100
+	HighWaterMark   = 400
+	ConnGracePeriod = 1 * time.Minute
 )
+
+var isHubReady atomic.Bool
 
 var (
 	oidcIssuer            string
@@ -70,7 +78,7 @@ var (
 	keyRotationInterval   time.Duration
 	keyGracePeriod        time.Duration
 	keysDBPath            string
-	metricsAddr           string
+	bindAddress           string
 	adminToken            string
 	tlsCertFile           string
 	tlsKeyFile            string
@@ -98,7 +106,7 @@ func NewHub(ctx context.Context, policy *api.PolicyConfig) (*Hub, error) {
 	gater := newHubConnGate()
 
 	// Connection Manager for DoS protection
-	cm, err := connmgr.NewConnManager(100, 400, connmgr.WithGracePeriod(time.Minute))
+	cm, err := connmgr.NewConnManager(LowWaterMark, HighWaterMark, connmgr.WithGracePeriod(ConnGracePeriod))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create connection manager: %w", err)
 	}
@@ -629,59 +637,10 @@ func main() {
 			// Watchdog: Expel peers that connect but never finish authentication
 			h.startWatchdog(ctx)
 
-			go func() {
-				mux := http.NewServeMux()
-				mux.Handle("/metrics", promhttp.Handler())
-				mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
-					w.WriteHeader(http.StatusOK)
-					_, _ = w.Write([]byte("ok"))
-				})
-
-				mux.HandleFunc("/admin/ban", func(w http.ResponseWriter, r *http.Request) {
-					if adminToken != "" {
-						authHeader := r.Header.Get("Authorization")
-						if authHeader != "Bearer "+adminToken {
-							http.Error(w, "Unauthorized", http.StatusUnauthorized)
-							return
-						}
-					}
-					handleBan(h)(w, r)
-				})
-
-				server := &http.Server{
-					Addr:    metricsAddr,
-					Handler: mux,
-				}
-
-				// Configure TLS if requested
-				if tlsCertFile != "" && tlsKeyFile != "" {
-					tlsConfig := &tls.Config{}
-					if tlsCAFile != "" {
-						caCert, err := os.ReadFile(tlsCAFile)
-						if err != nil {
-							logger.Fatalf("Failed to read CA cert: %v", err)
-						}
-						caCertPool := x509.NewCertPool()
-						caCertPool.AppendCertsFromPEM(caCert)
-						tlsConfig.ClientCAs = caCertPool
-						tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
-						logger.Info("mTLS enabled for admin service")
-					}
-					server.TLSConfig = tlsConfig
-
-					logger.Infof("Starting HTTPS server on %s", metricsAddr)
-					if err := server.ListenAndServeTLS(tlsCertFile, tlsKeyFile); err != nil {
-						logger.Errorf("HTTPS server failed: %v", err)
-					}
-				} else {
-					logger.Infof("Starting HTTP server on %s", metricsAddr)
-					if err := server.ListenAndServe(); err != nil {
-						logger.Errorf("HTTP server failed: %v", err)
-					}
-				}
-			}()
+			startHTTPServer(h, bindAddress, adminToken, tlsCertFile, tlsKeyFile, tlsCAFile, &isHubReady)
 
 			logger.Infof("SAM Hub Online (QUIC + TCP)")
+			isHubReady.Store(true)
 			logger.Infof("MeshID: %s", h.MeshID)
 			logger.Infof("PeerID: %s", h.Host.ID())
 
@@ -705,7 +664,7 @@ func main() {
 	rootCmd.Flags().DurationVar(&keyRotationInterval, "key-rotation-interval", 0, "Key rotation interval (e.g. 12h). 0 disables rotation.")
 	rootCmd.Flags().DurationVar(&keyGracePeriod, "key-grace-period", 24*time.Hour, "Key grace period for old keys (e.g. 24h).")
 	rootCmd.Flags().StringVar(&keysDBPath, "keys-db", "keys.db", "Path to BoltDB file for keys")
-	rootCmd.PersistentFlags().StringVar(&metricsAddr, "metrics-addr", ":9090", "Address to listen on for Prometheus metrics")
+	rootCmd.PersistentFlags().StringVar(&bindAddress, "bind-address", ":9090", "Address to listen on for HTTP/HTTPS service")
 	rootCmd.PersistentFlags().StringVar(&adminToken, "admin-token", "", "Secret token for authorizing admin requests")
 	rootCmd.PersistentFlags().StringVar(&tlsCertFile, "tls-cert-file", "", "Path to TLS certificate for the server")
 	rootCmd.PersistentFlags().StringVar(&tlsKeyFile, "tls-key-file", "", "Path to TLS private key for the server")
@@ -728,7 +687,7 @@ func main() {
 				logger.Fatal("Missing --peer flag")
 			}
 
-			targetAddr := metricsAddr
+			targetAddr := bindAddress
 			if strings.HasPrefix(targetAddr, ":") {
 				targetAddr = "localhost" + targetAddr
 			}

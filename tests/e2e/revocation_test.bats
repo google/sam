@@ -110,6 +110,14 @@ teardown() {
   [[ "$status" -eq 0 ]]
 
   # Verify Node 1 disconnects from Node 2
-  # In a full test we would check active connections, but checking the log is a good proxy
-  # since node.go calls ClosePeer.
+  echo "[$(date +%T)] Waiting for disconnection"
+  run mesh_wait_for_peer_disconnection 1 "${node2_peer_id}" 20
+  [[ "$status" -eq 0 ]]
+
+  # Verify Node 1 cannot reconnect to Node 2
+  echo "[$(date +%T)] Attempting to reconnect (should fail)"
+  local node2_addr="/dns4/sam-node-2/tcp/5002/p2p/${node2_peer_id}"
+  run docker run --rm -v "${MESH_SOCKET_DIR}:/sockets" -v "$(pwd)/bin/mcp-client:/mcp-client" python:3.12 /mcp-client -socket "/sockets/node-1.sock" -tool "connect_peer" -args "{\"peer_addr\":\"${node2_addr}\"}"
+  echo "Reconnect output: $output"
+  [[ "$output" == *"gater disallows connection"* ]]
 }

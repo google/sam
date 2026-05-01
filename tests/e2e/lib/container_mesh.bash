@@ -184,6 +184,26 @@ sys.exit(1)
     return 1
   }
 
+  mesh_wait_for_peer_disconnection() {
+    local idx="$1"
+    local target_peer="$2"
+    local timeout_s="${3:-20}"
+    local i
+    for ((i=0; i<timeout_s; i++)); do
+      local output
+      output="$(timeout 15s docker run --rm -v "${MESH_SOCKET_DIR}:/sockets" -v "$(pwd)/bin/mcp-client:/mcp-client" python:3.12 /mcp-client -socket "/sockets/node-${idx}.sock" 2>/dev/null)"
+      echo "[$(date +%T)] Node ${idx} get_mesh_info raw output: ${output}"
+      local connected
+      connected="$(echo "${output}" | jq -r --arg peer "$target_peer" '.connected_peers | index($peer) != null')"
+      echo "[$(date +%T)] Node ${idx} connection to ${target_peer}: ${connected}"
+      if [[ "${connected}" == "false" ]]; then
+        return 0
+      fi
+      sleep 1
+    done
+    return 1
+  }
+
   mesh_start_mock_oidc() {
     local name="${MESH_PREFIX}-oidc"
     docker run -d \

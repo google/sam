@@ -40,6 +40,9 @@ type nodeConnGate struct {
 
 // InterceptPeerDial controls who we are allowed to call (Outbound)
 func (g *nodeConnGate) InterceptPeerDial(p peer.ID) (allow bool) {
+	if g.node.revokedPeers.Contains(p.String()) {
+		return false
+	}
 	return !g.node.Store.IsBanned(p)
 }
 
@@ -55,6 +58,10 @@ func (g *nodeConnGate) InterceptAccept(n network.ConnMultiaddrs) (allow bool) {
 
 // InterceptSecured is called after TLS handshake. This is our Layer 2 Check.
 func (g *nodeConnGate) InterceptSecured(dir network.Direction, p peer.ID, n network.ConnMultiaddrs) (allow bool) {
+	if g.node.revokedPeers.Contains(p.String()) {
+		fmt.Printf("[Layer 2] Dropping connection: Peer %s is in revoked cache\n", p)
+		return false
+	}
 	if g.node.Store.IsBanned(p) {
 		fmt.Printf("[Layer 2] Dropping connection: Peer %s is explicitly BANNED\n", p)
 		return false
