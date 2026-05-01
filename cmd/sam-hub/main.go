@@ -277,11 +277,16 @@ func (h *Hub) handleEnroll(s network.Stream) {
 	delete(h.gater.pending, remotePeer)
 
 	// Collect authenticated peers
-	var knownPeers []string
+	var authPeers []peer.ID
 	for p := range h.gater.authenticated {
-		knownPeers = append(knownPeers, p.String())
+		authPeers = append(authPeers, p)
 	}
 	h.gater.mu.Unlock()
+
+	var knownPeers []string
+	for _, p := range authPeers {
+		knownPeers = append(knownPeers, p.String())
+	}
 
 	policies := []string{
 		`allow if operation($op)`,
