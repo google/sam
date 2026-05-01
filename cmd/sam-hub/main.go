@@ -64,6 +64,9 @@ const (
 	HighWaterMark   = 400
 	ConnGracePeriod = 1 * time.Minute
 
+	// Timeouts
+	JWTVerificationTimeout = 10 * time.Second
+
 	// Defaults
 	DefaultOIDCIssuer  = "https://accounts.google.com"
 	DefaultMeshName    = "public-mesh"
@@ -247,7 +250,9 @@ func (h *Hub) handleEnroll(s network.Stream) {
 		return
 	}
 
-	claims, token, err := h.parseAndVerifyJWT(context.Background(), req.Jwt, remotePeer)
+	ctx, cancel := context.WithTimeout(context.Background(), JWTVerificationTimeout)
+	defer cancel()
+	claims, token, err := h.parseAndVerifyJWT(ctx, req.Jwt, remotePeer)
 	if err != nil {
 		logger.Errorw("JWT verification failed", "peer_id", remotePeer, "error", err)
 		samHubEnrollmentTotal.WithLabelValues("failed").Inc()
