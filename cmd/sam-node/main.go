@@ -100,7 +100,7 @@ func main() {
 			if err != nil {
 				logger.Fatalf("Failed to open store: %v", err)
 			}
-			
+
 			localPolicy, err := LoadLocalPolicy(localPolicyFile)
 			if err != nil {
 				logger.Fatalf("Failed to load local policy: %v", err)
@@ -242,7 +242,7 @@ func main() {
 			if err != nil {
 				logger.Fatalf("Failed to open store: %v", err)
 			}
-			
+
 			localPolicy, err := LoadLocalPolicy(localPolicyFile)
 			if err != nil {
 				logger.Fatalf("Failed to load local policy: %v", err)
@@ -364,7 +364,9 @@ func startMCPServer(node *SamNode, socketPath string, dataDir string) {
 			socketPath = filepath.Join(dataDir, "mcp.sock")
 		}
 
-		_ = os.Remove(socketPath)
+		if err := os.Remove(socketPath); err != nil && !os.IsNotExist(err) {
+			logger.Errorf("Failed to remove old socket %s: %v", socketPath, err)
+		}
 
 		listener, err := net.Listen("unix", socketPath)
 		if err != nil {
@@ -444,8 +446,6 @@ func (n *SamNode) Enroll(ctx context.Context, jwt string) error {
 	n.keysMu.Lock()
 	n.trustedKeys = append(n.trustedKeys, TrustedKey{Key: ed25519.PublicKey(resp.HubPublicKey), ReceivedAt: time.Now()})
 	n.keysMu.Unlock()
-
-
 
 	// Add known peers from response
 	n.mu.Lock()
