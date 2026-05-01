@@ -15,6 +15,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/json"
@@ -41,7 +42,7 @@ type KeyRing struct {
 }
 
 // NewKeyRing opens or creates a BoltDB file to store the keyring.
-func NewKeyRing(dbPath string, gracePeriod time.Duration) (*KeyRing, error) {
+func NewKeyRing(dbPath string, gracePeriod time.Duration, initialSeed []byte) (*KeyRing, error) {
 	db, err := bbolt.Open(dbPath, 0600, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open db: %w", err)
@@ -63,11 +64,41 @@ func NewKeyRing(dbPath string, gracePeriod time.Duration) (*KeyRing, error) {
 		return nil, fmt.Errorf("failed to load keyring: %w", err)
 	}
 
-	// Generate initial key if empty
-	if len(kr.Current.Private) == 0 {
-		if err := kr.rotate(gracePeriod); err != nil {
+	if len(initialSeed) > 0 {
+		if len(initialSeed) != ed25519.SeedSize {
+			_ = db.Close()
+			return nil, fmt.Errorf("invalid seed size: %d, expected %d", len(initialSeed), ed25519.SeedSize)
+		}
+		priv := ed25519.NewKeyFromSeed(initialSeed)
+		pub := priv.Public().(ed25519.PublicKey)
+		
+		if !bytes.Equal(kr.Current.Private, priv) {
+			if len(kr.Current.Private) > 0 {
+				kr.Current.Expiration = time.Now().Add(gracePeriod)
+				kr.Previous = append(kr.Previous, kr.Current)
+			}
+			kr.Current = KeyPair{
+				Private: priv,
+				Public:  pub,
+			}
+			if err := kr.save(); err != nil {
+				_ = db.Close()
+				return nil, fmt.Errorf("failed to save initial key: %w", err)
+			}
+		}
+	} else if len(kr.Current.Private) == 0 {
+		pub, priv, err := ed25519.GenerateKey(rand.Reader)
+		if err != nil {
 			_ = db.Close()
 			return nil, fmt.Errorf("failed to generate initial key: %w", err)
+		}
+		kr.Current = KeyPair{
+			Private: priv,
+			Public:  pub,
+		}
+		if err := kr.save(); err != nil {
+			_ = db.Close()
+			return nil, fmt.Errorf("failed to save initial key: %w", err)
 		}
 	}
 
@@ -96,23 +127,21 @@ func (kr *KeyRing) save() error {
 	})
 }
 
-// Rotate generates a new keypair and moves the current one to the previous list.
-func (kr *KeyRing) Rotate(gracePeriod time.Duration) ([]byte, error) {
-	kr.mu.Lock()
-	defer kr.mu.Unlock()
+// PrepareRotation generates a new keypair and returns it along with the old private key for signing.
+// It does NOT update the current key in the keyring yet.
+func (kr *KeyRing) PrepareRotation() (newPub ed25519.PublicKey, newPriv ed25519.PrivateKey, oldPriv ed25519.PrivateKey, err error) {
+	kr.mu.RLock()
+	defer kr.mu.RUnlock()
 
-	err := kr.rotate(gracePeriod)
-	if err != nil {
-		return nil, err
-	}
-	return kr.Current.Public, nil
+	oldPriv = ed25519.PrivateKey(kr.Current.Private)
+	newPub, newPriv, err = ed25519.GenerateKey(rand.Reader)
+	return newPub, newPriv, oldPriv, err
 }
 
-func (kr *KeyRing) rotate(gracePeriod time.Duration) error {
-	pub, priv, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		return err
-	}
+// CommitRotation promotes the new key to current and moves the old current to previous.
+func (kr *KeyRing) CommitRotation(newPub ed25519.PublicKey, newPriv ed25519.PrivateKey, gracePeriod time.Duration) error {
+	kr.mu.Lock()
+	defer kr.mu.Unlock()
 
 	if len(kr.Current.Private) > 0 {
 		kr.Current.Expiration = time.Now().Add(gracePeriod)
@@ -120,8 +149,8 @@ func (kr *KeyRing) rotate(gracePeriod time.Duration) error {
 	}
 
 	kr.Current = KeyPair{
-		Private: priv,
-		Public:  pub,
+		Private: newPriv,
+		Public:  newPub,
 	}
 
 	// Clean up expired keys

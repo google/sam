@@ -38,6 +38,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/libp2p/go-libp2p/p2p/discovery/routing"
 	"github.com/libp2p/go-libp2p/p2p/discovery/util"
+	"github.com/libp2p/go-libp2p/p2p/net/connmgr"
 	libp2ptls "github.com/libp2p/go-libp2p/p2p/security/tls"
 	libp2pquic "github.com/libp2p/go-libp2p/p2p/transport/quic"
 	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
@@ -65,9 +66,10 @@ type SamNode struct {
 	mu                sync.Mutex
 	LocalPolicy       *CompiledLocalPolicy
 	revokedPeers      *lru.Cache[string, int64]
-	verificationCache *lru.Cache[string, bool]
+	verificationCache *lru.Cache[string, string]
 	trustedKeys       []TrustedKey
 	keysMu            sync.RWMutex
+	rateLimiter       *PeerRateLimiter
 }
 
 // NewSamNode creates a new Agent instance secured with the 4-layer pipeline.
@@ -87,12 +89,16 @@ func NewSamNode(ctx context.Context, privKey crypto.PrivKey, hubPubKey ed25519.P
 	}
 
 	var err error
+	node.rateLimiter, err = NewPeerRateLimiter(1000)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create rate limiter: %w", err)
+	}
 	node.revokedPeers, err = lru.New[string, int64](10000)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create revocation cache: %w", err)
 	}
 
-	node.verificationCache, err = lru.New[string, bool](1000)
+	node.verificationCache, err = lru.New[string, string](1000)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create verification cache: %w", err)
 	}
@@ -108,6 +114,11 @@ func NewSamNode(ctx context.Context, privKey crypto.PrivKey, hubPubKey ed25519.P
 		}
 	}
 
+	cm, err := connmgr.NewConnManager(100, 400, connmgr.WithGracePeriod(time.Minute))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create connection manager: %w", err)
+	}
+
 	// Layer 1: Establish FIPS-compliant Transports & NAT Services
 	opts := []libp2p.Option{
 		libp2p.Identity(privKey),
@@ -117,6 +128,7 @@ func NewSamNode(ctx context.Context, privKey crypto.PrivKey, hubPubKey ed25519.P
 		libp2p.ConnectionGater(gater),
 		libp2p.ListenAddrStrings(listenAddrs...),
 		libp2p.EnableNATService(),
+		libp2p.ConnectionManager(cm),
 	}
 
 	// If we have a Hub, configure it as our static fallback relay for NAT hole-punching
@@ -224,6 +236,12 @@ func (n *SamNode) listenForHubEvents(ctx context.Context) {
 		if err != nil {
 			return
 		}
+
+		if !n.rateLimiter.Allow(msg.ReceivedFrom.String()) {
+			logger.Warnf("[Mesh Event] Rate limit exceeded for %s, dropping message", msg.ReceivedFrom)
+			continue
+		}
+
 		var event api.MeshEvent
 		if err := proto.Unmarshal(msg.Data, &event); err != nil {
 			logger.Errorf("[Mesh Event] Failed to unmarshal event from %s: %v", msg.ReceivedFrom, err)
@@ -250,7 +268,9 @@ func (n *SamNode) listenForHubEvents(ctx context.Context) {
 		n.mu.Lock()
 		switch event.Type {
 		case api.MeshEvent_JOIN:
-			n.knownPeers[event.PeerId] = true
+			if event.PeerId != n.Host.ID().String() {
+				n.knownPeers[event.PeerId] = true
+			}
 			logger.Infof("[Mesh Event] Peer joined: %s", event.PeerId)
 		case api.MeshEvent_EXIT:
 			delete(n.knownPeers, event.PeerId)
@@ -384,16 +404,17 @@ func (n *SamNode) startDiscovery(ctx context.Context, meshID string, interval ti
 					continue
 				}
 				n.mu.Lock()
-				if !n.knownPeers[p.ID.String()] {
-					n.knownPeers[p.ID.String()] = true
-					logger.Infof("[Discovery] Found new peer via DHT: %s", p.ID)
+				n.knownPeers[p.ID.String()] = true
+				n.mu.Unlock()
+
+				if n.Host.Network().Connectedness(p.ID) != network.Connected {
+					logger.Infof("[Discovery] Found peer not connected via DHT: %s", p.ID)
 					go func(pi peer.AddrInfo) {
 						if err := n.Host.Connect(ctx, pi); err != nil {
 							logger.Errorf("[Discovery] Failed to connect to %s: %v", pi.ID, err)
 						}
 					}(p)
 				}
-				n.mu.Unlock()
 			}
 		}
 	}
@@ -425,12 +446,24 @@ func (n *SamNode) HandleAuthHandshake(s network.Stream) {
 
 	// Check verification cache
 	tokenHash := sha256.Sum256(exchange.Biscuit)
-	hashStr := hex.EncodeToString(tokenHash[:])
+	hashStr := hex.EncodeToString(tokenHash[:]) + ":" + remotePeer.String()
 
-	cacheHit := false
-	if valid, ok := n.verificationCache.Get(hashStr); ok && valid {
-		logger.Infof("[AuthN] Token cache hit for %s", remotePeer)
-		cacheHit = true
+	if pubKeyStr, ok := n.verificationCache.Get(hashStr); ok {
+		n.keysMu.RLock()
+		keys := n.trustedKeys
+		n.keysMu.RUnlock()
+
+		trusted := false
+		for _, tk := range keys {
+			if hex.EncodeToString(tk.Key) == pubKeyStr {
+				trusted = true
+				break
+			}
+		}
+		if trusted {
+			logger.Infof("[AuthN] Token cache hit for %s", remotePeer)
+			return
+		}
 	}
 
 	// 2. Unmarshal and verify token format
@@ -441,38 +474,39 @@ func (n *SamNode) HandleAuthHandshake(s network.Stream) {
 	}
 
 	authorized := false
-	if cacheHit {
-		authorized = true
-	} else {
-		// 3. Verify signature chain against the trusted Hub keys.
-		n.keysMu.RLock()
-		keys := n.trustedKeys
-		n.keysMu.RUnlock()
+	var successfulKey ed25519.PublicKey
+	// 3. Verify signature chain against the trusted Hub keys.
+	n.keysMu.RLock()
+	keys := n.trustedKeys
+	n.keysMu.RUnlock()
 
-		for _, tk := range keys {
-			authorizer, err := b.Authorizer(tk.Key)
-			if err != nil {
-				continue
-			}
-
-			// Admission only requires a valid signature, so allow if true
-			rule, err := parser.FromStringPolicy("allow if true")
-			if err != nil {
-				logger.Errorf("[AuthN] Failed to parse rule: %v", err)
-				continue
-			}
-			authorizer.AddPolicy(rule)
-
-			if err := authorizer.Authorize(); err == nil {
-				authorized = true
-				break
-			}
+	for _, tk := range keys {
+		if len(tk.Key) != ed25519.PublicKeySize {
+			continue
+		}
+		authorizer, err := b.Authorizer(tk.Key)
+		if err != nil {
+			continue
 		}
 
-		if authorized {
-			// Cache successful verification
-			n.verificationCache.Add(hashStr, true)
+		// Admission only requires a valid signature, so allow if true
+		rule, err := parser.FromStringPolicy("allow if true")
+		if err != nil {
+			logger.Errorf("[AuthN] Failed to parse rule: %v", err)
+			continue
 		}
+		authorizer.AddPolicy(rule)
+
+		if err := authorizer.Authorize(); err == nil {
+			authorized = true
+			successfulKey = tk.Key
+			break
+		}
+	}
+
+	if authorized {
+		// Cache successful verification
+		n.verificationCache.Add(hashStr, hex.EncodeToString(successfulKey))
 	}
 
 	if !authorized {

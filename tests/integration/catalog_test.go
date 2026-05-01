@@ -2,7 +2,7 @@ package integration_test
 
 import (
 	"context"
-	"fmt"
+	"encoding/json"
 	"net"
 	"net/http"
 	"os"
@@ -212,16 +212,15 @@ func TestCatalogRoutingAndFailover(t *testing.T) {
 
 		t.Logf("Poll result:\n%s", text)
 
-		lines := strings.Split(text, "\n")
-		for _, line := range lines {
-			if strings.HasPrefix(line, "Connected peers: ") {
-				var cp int
-				_, err := fmt.Sscanf(line, "Connected peers: %d", &cp)
-				if err == nil && cp >= 3 {
-					connected = true
-					break
-				}
-			}
+		var data map[string]any
+		if err := json.Unmarshal([]byte(text), &data); err != nil {
+			t.Logf("Failed to parse JSON: %v", err)
+			time.Sleep(2 * time.Second)
+			continue
+		}
+		connectedPeers, ok := data["connected_peers"].([]any)
+		if ok && len(connectedPeers) >= 3 {
+			connected = true
 		}
 
 		if connected {

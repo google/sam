@@ -117,8 +117,8 @@ EOF
       --name "${name}" \
       --network "${MESH_NETWORK}" \
       --network-alias mock-oidc \
-      python:3.12 \
-      sh -lc "pip install pyjwt cryptography && ${cmd}" >/dev/null
+      sam-mock-oidc:local \
+      sh -c "${cmd}" >/dev/null
 
     MESH_CONTAINERS+=("${name}")
     mesh_wait_for_log "${name}" "Mock OIDC server ready" 30

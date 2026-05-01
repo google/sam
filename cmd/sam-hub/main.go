@@ -18,10 +18,13 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/tls"
+	"crypto/x509"
+	"encoding/hex"
 	"fmt"
 	"net/http"
 	"os"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/biscuit-auth/biscuit-go/v2"
@@ -35,10 +38,13 @@ import (
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
+	"github.com/libp2p/go-libp2p/p2p/net/connmgr"
 	"github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/relay"
 	libp2ptls "github.com/libp2p/go-libp2p/p2p/security/tls"
 	libp2pquic "github.com/libp2p/go-libp2p/p2p/transport/quic"
 	"github.com/libp2p/go-msgio"
+
+	"golang.org/x/time/rate"
 
 	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
 	"github.com/spf13/cobra"
@@ -47,7 +53,18 @@ import (
 
 const (
 	GracePeriod = 60 * time.Second
+
+	// Rate limiting defaults
+	EnrollRateLimit = 10
+	EnrollBurst     = 20
+
+	// ConnManager limits
+	LowWaterMark    = 100
+	HighWaterMark   = 400
+	ConnGracePeriod = 1 * time.Minute
 )
+
+var isHubReady atomic.Bool
 
 var (
 	oidcIssuer            string
@@ -61,6 +78,11 @@ var (
 	keyRotationInterval   time.Duration
 	keyGracePeriod        time.Duration
 	keysDBPath            string
+	bindAddress           string
+	adminToken            string
+	tlsCertFile           string
+	tlsKeyFile            string
+	tlsCAFile             string
 )
 
 var logger = golog.Logger("sam-hub")
@@ -76,11 +98,19 @@ type Hub struct {
 	EventTopic *pubsub.Topic
 	gater      *hubConnGate
 	Policy     *api.PolicyConfig
+	limiter    *rate.Limiter
 }
 
 // NewHub starts a host supporting both QUIC and TCP (with TLS 1.3)
 func NewHub(ctx context.Context, policy *api.PolicyConfig) (*Hub, error) {
 	gater := newHubConnGate()
+
+	// Connection Manager for DoS protection
+	cm, err := connmgr.NewConnManager(LowWaterMark, HighWaterMark, connmgr.WithGracePeriod(ConnGracePeriod))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create connection manager: %w", err)
+	}
+
 	// Multi-transport setup for firewall traversal
 	h, err := libp2p.New(
 		libp2p.Transport(libp2pquic.NewTransport),
@@ -91,6 +121,7 @@ func NewHub(ctx context.Context, policy *api.PolicyConfig) (*Hub, error) {
 		libp2p.EnableRelayService(),
 		libp2p.ConnectionGater(gater),
 		libp2p.EnableNATService(),
+		libp2p.ConnectionManager(cm),
 	)
 	if err != nil {
 		return nil, err
@@ -132,7 +163,15 @@ func NewHub(ctx context.Context, policy *api.PolicyConfig) (*Hub, error) {
 		logger.Infof("[OIDC] Trusted issuer: %s", iss)
 	}
 
-	kr, err := NewKeyRing(keysDBPath, keyGracePeriod)
+	var initialSeed []byte
+	if biscuitHex != "" {
+		var err error
+		initialSeed, err = hex.DecodeString(biscuitHex)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode key flag: %w", err)
+		}
+	}
+	kr, err := NewKeyRing(keysDBPath, keyGracePeriod, initialSeed)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create keyring: %w", err)
 	}
@@ -145,6 +184,7 @@ func NewHub(ctx context.Context, policy *api.PolicyConfig) (*Hub, error) {
 		KeyRing:   kr,
 		MeshID:    meshName,
 		Policy:    policy,
+		limiter:   rate.NewLimiter(rate.Limit(EnrollRateLimit), EnrollBurst),
 	}
 
 	h.Network().Notify(&notifier{hub: hub})
@@ -166,24 +206,35 @@ func (h *Hub) handleEnroll(s network.Stream) {
 		_ = s.Close()
 	}()
 	remotePeer := s.Conn().RemotePeer()
-	logger.Infof("[Enroll] New enrollment request from %s", remotePeer)
+
+	if !h.limiter.Allow() {
+		logger.Warnw("Rate limit exceeded during enrollment", "peer_id", remotePeer)
+		samHubEnrollmentTotal.WithLabelValues("failed").Inc()
+		_ = s.Reset()
+		return
+	}
+
+	logger.Infow("New enrollment request", "peer_id", remotePeer)
 
 	reader := msgio.NewVarintReaderSize(s, 1024*64)
 	msg, err := reader.ReadMsg()
 	if err != nil {
-		logger.Errorf("[Enroll] Failed to read message: %v", err)
+		logger.Errorw("Failed to read enrollment message", "peer_id", remotePeer, "error", err)
+		samHubEnrollmentTotal.WithLabelValues("failed").Inc()
 		return
 	}
 	defer reader.ReleaseMsg(msg)
 
 	var req api.EnrollRequest
 	if err := proto.Unmarshal(msg, &req); err != nil {
-		logger.Errorf("[Enroll] Failed to unmarshal request: %v", err)
+		logger.Errorw("Failed to unmarshal enrollment request", "peer_id", remotePeer, "error", err)
+		samHubEnrollmentTotal.WithLabelValues("failed").Inc()
 		return
 	}
 
 	if req.PeerId != remotePeer.String() {
-		logger.Warnf("[Enroll] Peer ID mismatch: %s != %s", req.PeerId, remotePeer)
+		logger.Warnw("Peer ID mismatch in enrollment", "peer_id", remotePeer, "requested_peer_id", req.PeerId)
+		samHubEnrollmentTotal.WithLabelValues("failed").Inc()
 		h.sendEnrollResponse(s, nil, "Peer ID mismatch", 0, nil, nil)
 		return
 	}
@@ -192,13 +243,15 @@ func (h *Hub) handleEnroll(s network.Stream) {
 	jwtParser := jwt.Parser{}
 	jwtToken, _, err := jwtParser.ParseUnverified(req.Jwt, jwt.MapClaims{})
 	if err != nil {
-		logger.Errorf("[Enroll] Failed to parse JWT: %v", err)
+		logger.Errorw("Failed to parse JWT in enrollment", "peer_id", remotePeer, "error", err)
+		samHubEnrollmentTotal.WithLabelValues("failed").Inc()
 		h.sendEnrollResponse(s, nil, "Failed to parse JWT", 0, nil, nil)
 		return
 	}
 	claims, ok := jwtToken.Claims.(jwt.MapClaims)
 	if !ok {
-		logger.Warn("[Enroll] Invalid JWT claims")
+		logger.Warnw("Invalid JWT claims in enrollment", "peer_id", remotePeer)
+		samHubEnrollmentTotal.WithLabelValues("failed").Inc()
 		h.sendEnrollResponse(s, nil, "Invalid JWT claims", 0, nil, nil)
 		return
 	}
@@ -215,21 +268,24 @@ func (h *Hub) handleEnroll(s network.Stream) {
 	}
 
 	if aud == "" {
-		logger.Warn("[Enroll] Missing aud claim")
+		logger.Warnw("Missing aud claim in enrollment", "peer_id", remotePeer)
+		samHubEnrollmentTotal.WithLabelValues("failed").Inc()
 		h.sendEnrollResponse(s, nil, "Missing aud claim", 0, nil, nil)
 		return
 	}
 
 	alg, ok := jwtToken.Header["alg"].(string)
 	if !ok || alg == "" {
-		logger.Warn("[Enroll] Missing alg header")
+		logger.Warnw("Missing alg header in enrollment", "peer_id", remotePeer)
+		samHubEnrollmentTotal.WithLabelValues("failed").Inc()
 		h.sendEnrollResponse(s, nil, "Missing alg header", 0, nil, nil)
 		return
 	}
 
 	provider, ok := h.Providers[iss]
 	if !ok {
-		logger.Warnf("[Enroll] Unknown issuer: %s", iss)
+		logger.Warnw("Unknown issuer in enrollment", "peer_id", remotePeer, "issuer", iss)
+		samHubEnrollmentTotal.WithLabelValues("failed").Inc()
 		h.sendEnrollResponse(s, nil, fmt.Sprintf("Unknown issuer: %s", iss), 0, nil, nil)
 		return
 	}
@@ -238,18 +294,20 @@ func (h *Hub) handleEnroll(s network.Stream) {
 
 	token, err := verifier.Verify(context.Background(), req.Jwt)
 	if err != nil {
-		logger.Errorf("[Enroll] JWT validation failed: %v", err)
+		logger.Errorw("JWT validation failed in enrollment", "peer_id", remotePeer, "error", err)
+		samHubEnrollmentTotal.WithLabelValues("failed").Inc()
 		h.sendEnrollResponse(s, nil, fmt.Sprintf("JWT validation failed: %v", err), 0, nil, nil)
 		return
 	}
 
 	// Strictly enforce aud and alg after verification
 	if alg == "none" {
-		logger.Warnf("[Enroll] Invalid alg claim: %s", alg)
+		logger.Warnw("Invalid alg claim in enrollment", "peer_id", remotePeer, "alg", alg)
+		samHubEnrollmentTotal.WithLabelValues("failed").Inc()
 		h.sendEnrollResponse(s, nil, "Invalid alg claim", 0, nil, nil)
 		return
 	}
-	logger.Infof("[Enroll] JWT validated with aud: %s, alg: %s", aud, alg)
+	logger.Infow("JWT validated", "peer_id", remotePeer, "aud", aud, "alg", alg)
 
 	var roles []string
 	if rolesAny, ok := claims["roles"].([]any); ok {
@@ -266,7 +324,8 @@ func (h *Hub) handleEnroll(s network.Stream) {
 		Name: "expiration",
 		IDs:  []biscuit.Term{biscuit.Date(token.Expiry)},
 	}}); err != nil {
-		logger.Errorf("[Enroll] Failed to add expiration fact: %v", err)
+		logger.Errorw("Failed to add expiration fact to biscuit", "peer_id", remotePeer, "error", err)
+		samHubEnrollmentTotal.WithLabelValues("failed").Inc()
 		h.sendEnrollResponse(s, nil, "Failed to mint biscuit", 0, nil, nil)
 		return
 	}
@@ -275,7 +334,8 @@ func (h *Hub) handleEnroll(s network.Stream) {
 		Name: "node",
 		IDs:  []biscuit.Term{biscuit.String(remotePeer.String())},
 	}}); err != nil {
-		logger.Errorf("[Enroll] Failed to add node fact: %v", err)
+		logger.Errorw("Failed to add node fact to biscuit", "peer_id", remotePeer, "error", err)
+		samHubEnrollmentTotal.WithLabelValues("failed").Inc()
 		h.sendEnrollResponse(s, nil, "Failed to mint biscuit", 0, nil, nil)
 		return
 	}
@@ -284,7 +344,8 @@ func (h *Hub) handleEnroll(s network.Stream) {
 		Name: "client_peer_id",
 		IDs:  []biscuit.Term{biscuit.String(remotePeer.String())},
 	}}); err != nil {
-		logger.Errorf("[Enroll] Failed to add client_peer_id fact: %v", err)
+		logger.Errorw("Failed to add client_peer_id fact to biscuit", "peer_id", remotePeer, "error", err)
+		samHubEnrollmentTotal.WithLabelValues("failed").Inc()
 		h.sendEnrollResponse(s, nil, "Failed to mint biscuit", 0, nil, nil)
 		return
 	}
@@ -294,7 +355,8 @@ func (h *Hub) handleEnroll(s network.Stream) {
 			Name: "group",
 			IDs:  []biscuit.Term{biscuit.String(role)},
 		}}); err != nil {
-			logger.Errorf("[Enroll] Failed to add group fact: %v", err)
+			logger.Errorw("Failed to add group fact to biscuit", "peer_id", remotePeer, "role", role, "error", err)
+			samHubEnrollmentTotal.WithLabelValues("failed").Inc()
 			h.sendEnrollResponse(s, nil, "Failed to mint biscuit", 0, nil, nil)
 			return
 		}
@@ -306,7 +368,7 @@ func (h *Hub) handleEnroll(s network.Stream) {
 						Name: api.FactMCPTool,
 						IDs:  []biscuit.Term{biscuit.String(tool)},
 					}}); err != nil {
-						logger.Errorf("[Enroll] Failed to add fact %s: %v", api.FactMCPTool, err)
+						logger.Errorw("Failed to add MCP tool fact to biscuit", "peer_id", remotePeer, "tool", tool, "error", err)
 					}
 				}
 				for _, target := range rolePolicy.Network.AllowedTargets {
@@ -314,7 +376,7 @@ func (h *Hub) handleEnroll(s network.Stream) {
 						Name: api.FactNetworkTarget,
 						IDs:  []biscuit.Term{biscuit.String(target)},
 					}}); err != nil {
-						logger.Errorf("[Enroll] Failed to add fact %s: %v", api.FactNetworkTarget, err)
+						logger.Errorw("Failed to add network target fact to biscuit", "peer_id", remotePeer, "target", target, "error", err)
 					}
 				}
 				for _, customFact := range rolePolicy.CustomDatalog {
@@ -325,16 +387,16 @@ func (h *Hub) handleEnroll(s network.Stream) {
 					func() {
 						defer func() {
 							if r := recover(); r != nil {
-								logger.Errorf("[Enroll] Panic parsing custom fact %q: %v", trimmed, r)
+								logger.Errorw("Panic parsing custom fact", "peer_id", remotePeer, "fact", trimmed, "recover", r)
 							}
 						}()
 						fact, err := parser.FromStringFact(trimmed)
 						if err != nil {
-							logger.Errorf("[Enroll] Failed to parse custom fact %q: %v", trimmed, err)
+							logger.Errorw("Failed to parse custom fact", "peer_id", remotePeer, "fact", trimmed, "error", err)
 							return
 						}
 						if err := builder.AddAuthorityFact(fact); err != nil {
-							logger.Errorf("[Enroll] Failed to add custom fact %s: %v", trimmed, err)
+							logger.Errorw("Failed to add custom fact to biscuit", "peer_id", remotePeer, "fact", trimmed, "error", err)
 						}
 					}()
 				}
@@ -344,19 +406,25 @@ func (h *Hub) handleEnroll(s network.Stream) {
 
 	t, err := builder.Build()
 	if err != nil {
-		logger.Errorf("[Enroll] Failed to build biscuit: %v", err)
+		logger.Errorw("Failed to build biscuit", "peer_id", remotePeer, "error", err)
+		samHubEnrollmentTotal.WithLabelValues("failed").Inc()
 		h.sendEnrollResponse(s, nil, "Failed to build biscuit", 0, nil, nil)
 		return
 	}
 
 	biscuitData, err := t.Serialize()
 	if err != nil {
-		logger.Errorf("[Enroll] Failed to serialize biscuit: %v", err)
+		logger.Errorw("Failed to serialize biscuit", "peer_id", remotePeer, "error", err)
+		samHubEnrollmentTotal.WithLabelValues("failed").Inc()
 		h.sendEnrollResponse(s, nil, "Failed to serialize biscuit", 0, nil, nil)
 		return
 	}
 
 	h.gater.mu.Lock()
+	// Update active nodes gauge if this is a new node
+	if !h.gater.authenticated[remotePeer] {
+		samHubActiveNodes.Inc()
+	}
 	h.gater.authenticated[remotePeer] = true
 	delete(h.gater.pending, remotePeer)
 
@@ -372,7 +440,8 @@ func (h *Hub) handleEnroll(s network.Stream) {
 	}
 
 	h.sendEnrollResponse(s, biscuitData, "", token.Expiry.Unix(), knownPeers, policies)
-	logger.Infof("[Enroll] Successfully enrolled peer %s", remotePeer)
+	logger.Infow("Successfully enrolled peer", "peer_id", remotePeer)
+	samHubEnrollmentTotal.WithLabelValues("success").Inc()
 
 	// Publish JOIN event
 	event := &api.MeshEvent{
@@ -381,16 +450,17 @@ func (h *Hub) handleEnroll(s network.Stream) {
 		Timestamp: time.Now().Unix(),
 	}
 	if err := h.signEvent(event); err != nil {
-		logger.Errorf("[Enroll] Failed to sign event: %v", err)
+		logger.Errorw("Failed to sign mesh event", "peer_id", remotePeer, "error", err)
 	} else {
 		eventData, err := proto.Marshal(event)
 		if err != nil {
-			logger.Errorf("[Enroll] Failed to marshal event: %v", err)
+			logger.Errorw("Failed to marshal mesh event", "peer_id", remotePeer, "error", err)
 		} else {
 			if err := h.EventTopic.Publish(context.Background(), eventData); err != nil {
-				logger.Errorf("[Enroll] Failed to publish event: %v", err)
+				logger.Errorw("Failed to publish mesh event", "peer_id", remotePeer, "error", err)
 			} else {
-				logger.Infof("[Enroll] Published JOIN event for %s", remotePeer)
+				logger.Infow("Published JOIN event", "peer_id", remotePeer)
+				samHubMeshEventsTotal.WithLabelValues("JOIN").Inc()
 			}
 		}
 	}
@@ -461,12 +531,13 @@ func (h *Hub) startRotation(ctx context.Context) {
 		for {
 			select {
 			case <-ticker.C:
-				logger.Info("[Rotation] Rotating keys...")
-				newPub, err := h.KeyRing.Rotate(keyGracePeriod)
+				logger.Infow("Rotating keys")
+				newPub, newPriv, oldPriv, err := h.KeyRing.PrepareRotation()
 				if err != nil {
-					logger.Errorf("[Rotation] Failed to rotate keys: %v", err)
+					logger.Errorw("Failed to prepare key rotation", "error", err)
 					continue
 				}
+				samHubKeyRotationsTotal.Inc()
 
 				// Broadcast event
 				event := &api.MeshEvent{
@@ -474,19 +545,33 @@ func (h *Hub) startRotation(ctx context.Context) {
 					Timestamp:    time.Now().Unix(),
 					NewPublicKey: newPub,
 				}
-				if err := h.signEvent(event); err != nil {
-					logger.Errorf("[Rotation] Failed to sign event: %v", err)
+
+				// Sign with the OLD key so nodes can verify it!
+				event.Signature = nil
+				data, err := proto.Marshal(event)
+				if err != nil {
+					logger.Errorw("Failed to marshal key rotation event", "error", err)
 					continue
 				}
+				event.Signature = ed25519.Sign(oldPriv, data)
+
 				eventData, err := proto.Marshal(event)
 				if err != nil {
-					logger.Errorf("[Rotation] Failed to marshal event: %v", err)
+					logger.Errorw("Failed to marshal key rotation event", "error", err)
 					continue
 				}
 				if err := h.EventTopic.Publish(ctx, eventData); err != nil {
-					logger.Errorf("[Rotation] Failed to publish event: %v", err)
+					logger.Errorw("Failed to publish key rotation event", "error", err)
 				} else {
-					logger.Infof("[Rotation] Broadcasted new public key: %x", newPub)
+					logger.Infow("Broadcasted new public key", "public_key", hex.EncodeToString(newPub))
+					samHubMeshEventsTotal.WithLabelValues("KEY_ROTATION").Inc()
+
+					// Promote the new key after successful broadcast
+					if err := h.KeyRing.CommitRotation(newPub, newPriv, keyGracePeriod); err != nil {
+						logger.Errorw("Failed to commit key rotation", "error", err)
+					} else {
+						logger.Infow("Committed new key to keyring")
+					}
 				}
 			case <-ctx.Done():
 				return
@@ -505,14 +590,28 @@ func (h *Hub) signEvent(event *api.MeshEvent) error {
 	return nil
 }
 
+func (h *Hub) PublishEvent(ctx context.Context, event *api.MeshEvent) error {
+	if err := h.signEvent(event); err != nil {
+		return err
+	}
+	data, err := proto.Marshal(event)
+	if err != nil {
+		return err
+	}
+	return h.EventTopic.Publish(ctx, data)
+}
+
 func main() {
 	rootCmd := &cobra.Command{
 		Use:   "sam-hub",
 		Short: "Sovereign Agent Mesh - Multi-Transport Hub",
 		Run: func(cmd *cobra.Command, args []string) {
-			ctx := context.Background()
+			ctx := cmd.Context()
 
 			// Initialize logging
+			if os.Getenv("LOG_FORMAT") == "json" {
+				_ = os.Setenv("GOLOG_LOG_FMT", "json")
+			}
 			golog.SetAllLoggers(golog.LevelInfo)
 			if logLevel != "" {
 				lvl, err := golog.LevelFromString(logLevel)
@@ -538,12 +637,15 @@ func main() {
 			// Watchdog: Expel peers that connect but never finish authentication
 			h.startWatchdog(ctx)
 
+			startHTTPServer(h, bindAddress, adminToken, tlsCertFile, tlsKeyFile, tlsCAFile, &isHubReady)
+
 			logger.Infof("SAM Hub Online (QUIC + TCP)")
+			isHubReady.Store(true)
 			logger.Infof("MeshID: %s", h.MeshID)
 			logger.Infof("PeerID: %s", h.Host.ID())
 
 			logger.Infof("Hub running on P2P transports only.")
-			select {}
+			<-ctx.Done()
 		},
 	}
 
@@ -562,6 +664,89 @@ func main() {
 	rootCmd.Flags().DurationVar(&keyRotationInterval, "key-rotation-interval", 0, "Key rotation interval (e.g. 12h). 0 disables rotation.")
 	rootCmd.Flags().DurationVar(&keyGracePeriod, "key-grace-period", 24*time.Hour, "Key grace period for old keys (e.g. 24h).")
 	rootCmd.Flags().StringVar(&keysDBPath, "keys-db", "keys.db", "Path to BoltDB file for keys")
+	rootCmd.PersistentFlags().StringVar(&bindAddress, "bind-address", ":9090", "Address to listen on for HTTP/HTTPS service")
+	rootCmd.PersistentFlags().StringVar(&adminToken, "admin-token", "", "Secret token for authorizing admin requests")
+	rootCmd.PersistentFlags().StringVar(&tlsCertFile, "tls-cert-file", "", "Path to TLS certificate for the server")
+	rootCmd.PersistentFlags().StringVar(&tlsKeyFile, "tls-key-file", "", "Path to TLS private key for the server")
+	rootCmd.PersistentFlags().StringVar(&tlsCAFile, "tls-ca-file", "", "Path to CA certificate to verify client certificates (enables mTLS)")
+
+	var peerToBan string
+	var banReason string
+	var connectAddr string
+
+	adminCmd := &cobra.Command{
+		Use:   "admin",
+		Short: "Administrative commands for SAM Hub",
+	}
+
+	banCmd := &cobra.Command{
+		Use:   "ban",
+		Short: "Ban a peer from the mesh",
+		Run: func(cmd *cobra.Command, args []string) {
+			if peerToBan == "" {
+				logger.Fatal("Missing --peer flag")
+			}
+
+			targetAddr := bindAddress
+			if strings.HasPrefix(targetAddr, ":") {
+				targetAddr = "localhost" + targetAddr
+			}
+
+			scheme := "http"
+			var tlsConfig *tls.Config
+			if tlsCertFile != "" || tlsCAFile != "" {
+				scheme = "https"
+				tlsConfig = &tls.Config{
+					InsecureSkipVerify: true, // For tests, usually self-signed
+				}
+				if tlsCAFile != "" {
+					caCert, err := os.ReadFile(tlsCAFile)
+					if err != nil {
+						logger.Fatalf("Failed to read CA cert: %v", err)
+					}
+					caCertPool := x509.NewCertPool()
+					caCertPool.AppendCertsFromPEM(caCert)
+					tlsConfig.RootCAs = caCertPool
+					tlsConfig.InsecureSkipVerify = false // Verify if CA is provided!
+				}
+			}
+
+			client := &http.Client{
+				Transport: &http.Transport{
+					TLSClientConfig: tlsConfig,
+				},
+			}
+
+			url := fmt.Sprintf("%s://%s/admin/ban?peer=%s", scheme, targetAddr, peerToBan)
+			req, err := http.NewRequest("POST", url, nil)
+			if err != nil {
+				logger.Fatalf("Failed to create request: %v", err)
+			}
+
+			if adminToken != "" {
+				req.Header.Set("Authorization", "Bearer "+adminToken)
+			}
+
+			resp, err := client.Do(req)
+			if err != nil {
+				logger.Fatalf("Failed to send ban request: %v", err)
+			}
+			defer func() { _ = resp.Body.Close() }()
+
+			if resp.StatusCode != http.StatusOK {
+				logger.Fatalf("Ban request failed: %s", resp.Status)
+			}
+
+			fmt.Printf("Published BANNED event for peer %s\n", peerToBan)
+		},
+	}
+
+	banCmd.Flags().StringVar(&peerToBan, "peer", "", "Peer ID to ban")
+	banCmd.Flags().StringVar(&banReason, "reason", "", "Reason for banning")
+	banCmd.Flags().StringVar(&connectAddr, "connect", "", "Address of a peer in the mesh to connect to")
+
+	adminCmd.AddCommand(banCmd)
+	rootCmd.AddCommand(adminCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)

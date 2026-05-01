@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
@@ -101,7 +102,14 @@ func TestZeroTrustMCPServer(t *testing.T) {
 	serverStream := &mockStream{r: pr1, w: pw2, protocol: protocol.ID("/sam/mcp/1.0.0")}
 	clientStream := &mockStream{r: pr2, w: pw1, protocol: protocol.ID("/sam/mcp/1.0.0")}
 
-	node := &SamNode{}
+	rl, _ := NewPeerRateLimiter(100)
+	rp, _ := lru.New[string, int64](100)
+	vc, _ := lru.New[string, string](100)
+	node := &SamNode{
+		rateLimiter:       rl,
+		revokedPeers:      rp,
+		verificationCache: vc,
+	}
 
 	go func() {
 		handler := node.WithBiscuitAuth(node.HandleMCPStream)

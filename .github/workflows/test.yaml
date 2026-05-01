@@ -22,20 +22,35 @@ on:
   pull_request:
     branches: [ main ]
 
+env:
+  GO_VERSION: "1.26"
+
 jobs:
   test:
-    strategy:
-      fail-fast: false
-      matrix:
-        go-version: [1.26.x]
     runs-on: ubuntu-latest
     steps:
     - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
       with:
-        go-version: ${{ matrix.go-version }}
+        go-version: ${{ env.GO_VERSION }}
     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
     - run: sudo make test
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+      with:
+        go-version: ${{ env.GO_VERSION }}
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
     - run: make lint
+
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+      with:
+        go-version: ${{ env.GO_VERSION }}
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
     - name: Install protoc
       run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
     - run: make verify

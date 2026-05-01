@@ -22,6 +22,10 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -30,13 +34,29 @@ func main() {
 	socketPath := flag.String("socket", "", "Path to Unix domain socket")
 	toolName := flag.String("tool", "get_mesh_info", "Tool to call")
 	toolArgs := flag.String("args", "{}", "JSON arguments for the tool")
+	timoutArgs := flag.Int("timeout", 10, "Timeout in seconds")
 	flag.Parse()
 
 	if *socketPath == "" {
 		log.Fatal("Must specify -socket")
 	}
 
-	ctx := context.Background()
+	var ctx context.Context
+	var cancel context.CancelFunc
+	if timoutArgs != nil {
+		ctx, cancel = context.WithTimeout(context.Background(), time.Duration(*timoutArgs)*time.Second)
+	} else {
+		ctx = context.Background()
+	}
+	defer cancel()
+
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigs
+		fmt.Println("Received signal, shutting down...")
+		cancel()
+	}()
 
 	// Override default HTTP client transport to use Unix socket
 	http.DefaultClient.Transport = &http.Transport{
