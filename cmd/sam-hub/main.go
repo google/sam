@@ -252,7 +252,7 @@ func (h *Hub) handleEnroll(s network.Stream) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), JWTVerificationTimeout)
 	defer cancel()
-	claims, token, err := h.parseAndVerifyJWT(ctx, req.Jwt, remotePeer)
+	claims, token, err := h.parseAndVerifyJWT(ctx, req.Jwt)
 	if err != nil {
 		logger.Errorw("JWT verification failed", "peer_id", remotePeer, "error", err)
 		samHubEnrollmentTotal.WithLabelValues("failed").Inc()
@@ -341,7 +341,7 @@ func (h *Hub) sendEnrollResponse(s network.Stream, biscuitToken []byte, errMsg s
 	}
 }
 
-func (h *Hub) parseAndVerifyJWT(ctx context.Context, jwtStr string, remotePeer peer.ID) (jwt.MapClaims, *oidc.IDToken, error) {
+func (h *Hub) parseAndVerifyJWT(ctx context.Context, jwtStr string) (jwt.MapClaims, *oidc.IDToken, error) {
 	jwtParser := jwt.Parser{}
 	jwtToken, _, err := jwtParser.ParseUnverified(jwtStr, jwt.MapClaims{})
 	if err != nil {
