@@ -575,6 +575,11 @@ func (n *SamNode) HandleAuthHandshake(s network.Stream) {
 }
 
 func (n *SamNode) verifyBiscuit(biscuitData []byte, remotePeer peer.ID) (*biscuit.Biscuit, error) {
+	b, err := biscuit.Unmarshal(biscuitData)
+	if err != nil {
+		return nil, fmt.Errorf("malformed biscuit: %w", err)
+	}
+
 	tokenHash := sha256.Sum256(biscuitData)
 	hashStr := hex.EncodeToString(tokenHash[:]) + ":" + remotePeer.String()
 
@@ -585,18 +590,9 @@ func (n *SamNode) verifyBiscuit(biscuitData []byte, remotePeer peer.ID) (*biscui
 
 		for _, tk := range keys {
 			if hex.EncodeToString(tk.Key) == pubKeyStr {
-				b, err := biscuit.Unmarshal(biscuitData)
-				if err != nil {
-					return nil, fmt.Errorf("malformed biscuit on cache hit: %w", err)
-				}
 				return b, nil
 			}
 		}
-	}
-
-	b, err := biscuit.Unmarshal(biscuitData)
-	if err != nil {
-		return nil, fmt.Errorf("malformed biscuit: %w", err)
 	}
 
 	n.keysMu.RLock()
