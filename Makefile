@@ -20,6 +20,15 @@ clean:
 test:
 	CGO_ENABLED=1 go test -v -race -count 1 ./...
 
+.PHONY: test-python test-python-container
+test-python:
+	python3 -m venv sam-mcp-python/.venv
+	./sam-mcp-python/.venv/bin/pip install -e ./sam-mcp-python[test]
+	./sam-mcp-python/.venv/bin/pytest sam-mcp-python/tests/unit
+
+test-python-container:
+	docker run --rm -v $(REPO_ROOT)/sam-mcp-python:/app -w /app python:3.12 bash -c "pip install -e .[test] && pytest tests/unit"
+
 e2e-test:
 	bats --verbose-run tests/e2e/
 
