@@ -28,7 +28,7 @@ metadata:
   name: sam-canary-${ENV_NAME}
   namespace: sam-canary-${ENV_NAME}
 spec:
-  replicas: 2
+  replicas: 3
   selector:
     matchLabels:
       app: sam-canary-${ENV_NAME}

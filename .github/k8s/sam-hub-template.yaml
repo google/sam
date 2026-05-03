@@ -25,7 +25,7 @@ metadata:
   name: sam-hub-${ENV_NAME}
   namespace: ${NAMESPACE}
 spec:
-  replicas: 1
+  replicas: 3
   selector:
     matchLabels:
       app: sam-hub-${ENV_NAME}
@@ -36,7 +36,7 @@ spec:
     spec:
       containers:
       - name: sam-hub
-        image: your-registry/sam-hub:${IMAGE_TAG}
+        image: ghcr.io/google/sam-hub:${IMAGE_TAG}
         ports:
         - containerPort: 4001
           protocol: TCP
