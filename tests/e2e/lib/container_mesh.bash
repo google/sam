@@ -46,6 +46,7 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
 
   mesh_setup_env() {
     mesh_cleanup_stale_resources
+    mesh_build_runtime_image
 
     MESH_PREFIX="mesh-${BATS_TEST_NUMBER}-$$-$(date +%s)"
     MESH_NETWORK="${MESH_PREFIX}-net"
@@ -232,8 +233,8 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
       --name "${name}" \
       --network "${MESH_NETWORK}" \
       --network-alias "sam-node-${idx}" \
-      "sam-node:local" \
-      run \
+      "${MESH_RUNTIME_IMAGE}" \
+      /usr/local/bin/sam-node run \
       ${flags} \
       --hub "/dns4/sam-hub/tcp/4002/p2p/${hub_peer_id}" \
       --client-id "sam-e2e" \

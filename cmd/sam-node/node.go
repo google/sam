@@ -15,13 +15,13 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"io"
-	"bufio"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -110,13 +110,13 @@ func NewSamNode(ctx context.Context, privKey crypto.PrivKey, hubPubKey ed25519.P
 	}
 
 	node := &SamNode{
-		Store:           store,
-		trustedKeys:     trustedKeys,
-		knownPeers:      make(map[string]bool),
-		receivedMsgs:    make(map[string][]string),
-		topics:          make(map[string]*pubsub.Topic),
-		services:        make(map[string]*ServiceManifest),
-		LocalPolicy:     localPolicy,
+		Store:        store,
+		trustedKeys:  trustedKeys,
+		knownPeers:   make(map[string]bool),
+		receivedMsgs: make(map[string][]string),
+		topics:       make(map[string]*pubsub.Topic),
+		services:     make(map[string]*ServiceManifest),
+		LocalPolicy:  localPolicy,
 	}
 
 	var err error
@@ -187,7 +187,7 @@ func NewSamNode(ctx context.Context, privKey crypto.PrivKey, hubPubKey ed25519.P
 	node.DHT = kdht
 
 	if err := kdht.Bootstrap(ctx); err != nil {
-		logger.Warnf("[DHT] Failed to bootstrap DHT: %v", err)
+		return nil, fmt.Errorf("failed to bootstrap DHT: %w", err)
 	}
 
 	// Bootstrap: Connect to the Hub
@@ -801,7 +801,7 @@ func (n *SamNode) RegisterService(ctx context.Context, req *api.RegisterServiceR
 	}
 
 	if err := n.DHT.Provide(ctx, c, true); err != nil {
-		return err
+		return fmt.Errorf("failed to provide service to DHT: %w", err)
 	}
 
 	var handler http.Handler
@@ -895,10 +895,10 @@ func (n *SamNode) DiscoverRemoteServices(ctx context.Context, serviceType api.Se
 
 		// Construct local proxy URL
 		// Format: http://localhost:<sam_port>/sam/{peer_id}/{service_type}/{service_name}
-		localURL := fmt.Sprintf("http://%s/sam/%s/%s/%s", 
-			n.BoundHTTPAddr, 
-			p.ID.String(), 
-			typeStr, 
+		localURL := fmt.Sprintf("http://%s/sam/%s/%s/%s",
+			n.BoundHTTPAddr,
+			p.ID.String(),
+			typeStr,
 			serviceName,
 		)
 

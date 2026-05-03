@@ -199,6 +199,7 @@ func handleRegisterService(node *SamNode, w http.ResponseWriter, r *http.Request
 	}
 
 	if err := node.RegisterService(r.Context(), &req); err != nil {
+		logger.Errorf("Failed to register service: %v", err)
 		http.Error(w, fmt.Sprintf("Failed to register service: %v", err), http.StatusInternalServerError)
 		return
 	}

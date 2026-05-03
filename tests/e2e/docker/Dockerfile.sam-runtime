@@ -1,5 +1,7 @@
 FROM alpine:3.20
 
+RUN apk add --no-cache busybox
+
 RUN addgroup -S sam && adduser -S -G sam sam
 
 COPY bin/sam-node /usr/local/bin/sam-node
