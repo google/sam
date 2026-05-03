@@ -40,13 +40,7 @@ func main() {
 		log.Fatal("Must specify -url")
 	}
 
-	var ctx context.Context
-	var cancel context.CancelFunc
-	if timeoutArgs != nil {
-		ctx, cancel = context.WithTimeout(context.Background(), time.Duration(*timeoutArgs)*time.Second)
-	} else {
-		ctx = context.Background()
-	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(*timeoutArgs)*time.Second)
 	defer cancel()
 
 	sigs := make(chan os.Signal, 1)
