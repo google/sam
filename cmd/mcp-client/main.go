@@ -30,9 +30,10 @@ import (
 
 func main() {
 	serverURL := flag.String("url", "", "MCP server URL (e.g. http://localhost:8080/)")
-	toolName := flag.String("tool", "get_mesh_info", "Tool to call")
+	toolName := flag.String("tool", "", "Tool to call")
 	toolArgs := flag.String("args", "{}", "JSON arguments for the tool")
-	timoutArgs := flag.Int("timeout", 10, "Timeout in seconds")
+	timeoutArgs := flag.Int("timeout", 10, "Timeout in seconds")
+	listTools := flag.Bool("list", false, "List available tools and exit")
 	flag.Parse()
 
 	if *serverURL == "" {
@@ -41,8 +42,8 @@ func main() {
 
 	var ctx context.Context
 	var cancel context.CancelFunc
-	if timoutArgs != nil {
-		ctx, cancel = context.WithTimeout(context.Background(), time.Duration(*timoutArgs)*time.Second)
+	if timeoutArgs != nil {
+		ctx, cancel = context.WithTimeout(context.Background(), time.Duration(*timeoutArgs)*time.Second)
 	} else {
 		ctx = context.Background()
 	}
@@ -72,6 +73,17 @@ func main() {
 			log.Printf("Failed to close session: %v", err)
 		}
 	}()
+
+	if *listTools || *toolName == "" {
+		tools, err := session.ListTools(ctx, &mcp.ListToolsParams{})
+		if err != nil {
+			log.Fatalf("ListTools failed: %v", err)
+		}
+		for _, t := range tools.Tools {
+			fmt.Printf("%s\t%s\n", t.Name, t.Description)
+		}
+		return
+	}
 
 	var args map[string]any
 	if *toolArgs != "" {
