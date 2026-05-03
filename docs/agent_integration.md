@@ -69,10 +69,10 @@ When you run the demo while a `sam-node` is running locally, you'll see output s
 ```
 Connecting to SAM Node at http://127.0.0.1:8080/mcp/events
 Discovered tools:
- - get_mesh_info: Retrieve information about the mesh...
- - call_remote_tool: Call an MCP tool on a remote agent...
+ - get_mesh_info: Get information about the mesh network
+ - call_remote_tool: Call an MCP tool on a remote agent
 
 Calling get_mesh_info tool...
 Result:
-{'mesh_name': 'e2e-mesh', 'connected_peers': ...}
+{'known_peers': [...], 'connected_peers': [...], 'dht_size': 1, 'hub_peer_id': '...'}
 ```
