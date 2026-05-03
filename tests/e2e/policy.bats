@@ -218,7 +218,7 @@ EOF"
     --bind-addr "0.0.0.0:8080" \
     --api-token "secret-token" \
     --mesh "e2e-mesh" \
-    --local-policy "/etc/sam/local_policy.yaml" >/dev/null
+    --config "/etc/sam/local_policy.yaml" >/dev/null
 
   MESH_CONTAINERS+=("${MESH_PREFIX}-node-1")
   mesh_wait_for_log "${MESH_PREFIX}-node-1" "Successfully enrolled" 20

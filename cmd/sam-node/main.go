@@ -39,7 +39,7 @@ const (
 	DefaultMeshName          = "public-mesh"
 	DefaultDiscoveryInterval = "2s"
 	DefaultHubURL            = "http://localhost:8080"
-	DefaultLocalPolicyFile   = "local_policy.yaml"
+	DefaultConfigFile   = "sam-node.yaml"
 
 	// Renewal timing defaults
 	DefaultRenewalFallback = 50 * time.Minute
@@ -62,7 +62,7 @@ var (
 	discoveryIntervalFlag string
 	enableRelayFlag       bool
 	logLevelFlag          string
-	localPolicyFile       string
+	configFile       string
 	keyGracePeriodFlag    time.Duration
 
 	apiTokenFlag string
@@ -104,9 +104,9 @@ func main() {
 				logger.Fatalf("Failed to open store: %v", err)
 			}
 
-			localPolicy, err := LoadLocalPolicy(localPolicyFile)
+			nodeConfig, err := LoadNodeConfig(configFile)
 			if err != nil {
-				logger.Fatalf("Failed to load local policy: %v", err)
+				logger.Fatalf("Failed to load node config: %v", err)
 			}
 			defer func() {
 				if err := store.Close(); err != nil {
@@ -167,7 +167,7 @@ func main() {
 					logger.Fatal("Hub public key not found in store and not provided. Cannot verify peers.")
 				}
 				priv := getOrGenerateKey(store)
-				node, err = NewSamNode(context.Background(), priv, hubPubKey, hubAddrs, store, meshFlag, discoveryIntervalFlag, listenAddrs, enableRelayFlag, localPolicy, keyGracePeriodFlag)
+				node, err = NewSamNode(context.Background(), priv, hubPubKey, hubAddrs, store, meshFlag, discoveryIntervalFlag, listenAddrs, enableRelayFlag, nodeConfig, keyGracePeriodFlag)
 				if err != nil {
 					logger.Fatalf("Failed to start mesh node: %v", err)
 				}
@@ -192,13 +192,13 @@ func main() {
 						if len(hubAddrs) > 0 {
 							initHubAddrs = hubAddrs
 						} else {
-							logger.Fatalf("Invalid hub address and no stored config: %v", err)
+							logger.Fatalf("Invalid hub address and no stored config: %v. You can use community maintained meshes like hub.sam-mesh.dev (Production) or bananas.sam-mesh.dev (Testnet)", err)
 						}
 					}
 				}
 
 				priv := getOrGenerateKey(store)
-				node, err = NewSamNode(context.Background(), priv, nil, initHubAddrs, store, meshFlag, discoveryIntervalFlag, listenAddrs, enableRelayFlag, localPolicy, keyGracePeriodFlag)
+				node, err = NewSamNode(context.Background(), priv, nil, initHubAddrs, store, meshFlag, discoveryIntervalFlag, listenAddrs, enableRelayFlag, nodeConfig, keyGracePeriodFlag)
 				if err != nil {
 					logger.Fatalf("Failed to initialize node for enrollment: %v", err)
 				}
@@ -246,9 +246,9 @@ func main() {
 				logger.Fatalf("Failed to open store: %v", err)
 			}
 
-			localPolicy, err := LoadLocalPolicy(localPolicyFile)
+			nodeConfig, err := LoadNodeConfig(configFile)
 			if err != nil {
-				logger.Fatalf("Failed to load local policy: %v", err)
+				logger.Fatalf("Failed to load node config: %v", err)
 			}
 			defer func() {
 				if err := store.Close(); err != nil {
@@ -288,7 +288,7 @@ func main() {
 			}
 
 			priv := getOrGenerateKey(store)
-			node, err := NewSamNode(context.Background(), priv, nil, initHubAddrs, store, meshFlag, discoveryIntervalFlag, listenAddrs, enableRelayFlag, localPolicy, keyGracePeriodFlag)
+			node, err := NewSamNode(context.Background(), priv, nil, initHubAddrs, store, meshFlag, discoveryIntervalFlag, listenAddrs, enableRelayFlag, nodeConfig, keyGracePeriodFlag)
 			if err != nil {
 				logger.Fatalf("Failed to initialize node for enrollment: %v", err)
 			}
@@ -320,7 +320,7 @@ func main() {
 	runCmd.Flags().StringVar(&tlsKeyFlag, "tls-key", "", "Path to TLS key for sidecar API")
 	runCmd.Flags().StringVar(&tlsCAFlag, "tls-ca", "", "Path to TLS CA for sidecar API mTLS")
 	rootCmd.PersistentFlags().StringVar(&hubAddr, "hub", DefaultHubURL, "Hub URL")
-	rootCmd.PersistentFlags().StringVar(&localPolicyFile, "local-policy", DefaultLocalPolicyFile, "Path to local_policy.yaml")
+	rootCmd.PersistentFlags().StringVar(&configFile, "config", DefaultConfigFile, "Path to sam-node.yaml configuration file")
 	rootCmd.PersistentFlags().StringVar(&tokenURLFlag, "token-url", "", "OIDC Token URL")
 
 	rootCmd.AddCommand(runCmd)

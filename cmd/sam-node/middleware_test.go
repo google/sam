@@ -279,7 +279,7 @@ attenuation:
 				t.Fatal(err)
 			}
 
-			var localPolicy *CompiledLocalPolicy
+			var localPolicy *NodeConfigComplete
 			if tt.localPolicyYAML != "" {
 				dir := t.TempDir()
 				policyFile := filepath.Join(dir, "local_policy.yaml")
@@ -287,7 +287,7 @@ attenuation:
 					t.Fatal(err)
 				}
 				var err error
-				localPolicy, err = LoadLocalPolicy(policyFile)
+				localPolicy, err = LoadNodeConfig(policyFile)
 				if err != nil {
 					t.Fatalf("failed to load local policy: %v", err)
 				}

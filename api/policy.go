@@ -20,10 +20,20 @@ type MCPPolicy struct {
 	AllowedTools []string `yaml:"allowed_tools"`
 }
 
-// LocalPolicy defines the optional attenuation rules for a specific SAM Node.
-type LocalPolicy struct {
-	Version     string      `yaml:"version"`
-	Attenuation Attenuation `yaml:"attenuation"`
+type ServiceConfig struct {
+	Type        string            `yaml:"type"` // e.g., "mcp", "inference"
+	Name        string            `yaml:"name"`
+	Description string            `yaml:"description"`
+	TargetURL   string            `yaml:"target_url,omitempty"`
+	Command     []string          `yaml:"command,omitempty"`
+	Env         map[string]string `yaml:"env,omitempty"`
+}
+
+// NodeConfig defines the optional attenuation rules and static services for a specific SAM Node.
+type NodeConfig struct {
+	Version     string          `yaml:"version"`
+	Attenuation Attenuation     `yaml:"attenuation"`
+	Services    []ServiceConfig `yaml:"services"`
 }
 
 type Attenuation struct {
