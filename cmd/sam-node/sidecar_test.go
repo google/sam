@@ -114,30 +114,30 @@ func TestHandleRegisterService(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer h.Close()
+	defer func() { _ = h.Close() }()
 	d, err := dht.New(context.Background(), h, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/sam"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer d.Close()
+	defer func() { _ = d.Close() }()
 
 	// Create a second host to populate routing table
 	h2, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer h2.Close()
+	defer func() { _ = h2.Close() }()
 	d2, err := dht.New(context.Background(), h2, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/sam"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer d2.Close()
+	defer func() { _ = d2.Close() }()
 
 	err = h.Connect(context.Background(), peer.AddrInfo{ID: h2.ID(), Addrs: h2.Addrs()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	
+
 	// Wait for DHT to recognize the peer
 	time.Sleep(100 * time.Millisecond)
 
