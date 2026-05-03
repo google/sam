@@ -149,7 +149,7 @@ jobs:
           export CANARY_NAMESPACE="sam-canary-${ENV_NAME}"
           export IMAGE_TAG="${{ env.IMAGE_TAG }}"
           
-          envsubst < .github/k8s/sam-canary-template.yaml | kubectl apply -f -
+          envsubst < .github/k8s/sam-node-template.yaml | kubectl apply -f -
           
           kubectl rollout status deployment/sam-canary-${ENV_NAME} -n ${CANARY_NAMESPACE} --timeout=120s || {
             echo "Canary Deployment failed! Rolling back..."
