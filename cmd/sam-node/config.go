@@ -11,17 +11,18 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
-type CompiledLocalPolicy struct {
+type NodeConfigComplete struct {
 	Policies []biscuit.Policy
 	Checks   []biscuit.Check
 	Rules    []biscuit.Rule
+	Services []api.ServiceConfig
 }
 
-// LoadLocalPolicy loads the local policy configuration from the specified path.
+// LoadNodeConfig loads the node configuration from the specified path.
 // If the file is missing, it returns an empty initialized config.
-func LoadLocalPolicy(path string) (*CompiledLocalPolicy, error) {
+func LoadNodeConfig(path string) (*NodeConfigComplete, error) {
 	if _, err := os.Stat(path); os.IsNotExist(err) {
-		return &CompiledLocalPolicy{}, nil
+		return &NodeConfigComplete{}, nil
 	}
 
 	data, err := os.ReadFile(path)
@@ -29,12 +30,14 @@ func LoadLocalPolicy(path string) (*CompiledLocalPolicy, error) {
 		return nil, err
 	}
 
-	var config api.LocalPolicy
+	var config api.NodeConfig
 	if err := yaml.Unmarshal(data, &config); err != nil {
 		return nil, err
 	}
 
-	compiled := &CompiledLocalPolicy{}
+	complete := &NodeConfigComplete{
+		Services: config.Services,
+	}
 
 	for _, pStr := range config.Attenuation.Policies {
 		trimmed := strings.TrimRight(strings.TrimSpace(pStr), ";")
@@ -42,7 +45,7 @@ func LoadLocalPolicy(path string) (*CompiledLocalPolicy, error) {
 		if err != nil {
 			return nil, fmt.Errorf("invalid local policy syntax %q: %w", pStr, err)
 		}
-		compiled.Policies = append(compiled.Policies, p)
+		complete.Policies = append(complete.Policies, p)
 	}
 
 	for _, cStr := range config.Attenuation.Checks {
@@ -51,7 +54,7 @@ func LoadLocalPolicy(path string) (*CompiledLocalPolicy, error) {
 		if err != nil {
 			return nil, fmt.Errorf("invalid local check syntax %q: %w", cStr, err)
 		}
-		compiled.Checks = append(compiled.Checks, c)
+		complete.Checks = append(complete.Checks, c)
 	}
 
 	for _, rStr := range config.Attenuation.Rules {
@@ -60,8 +63,8 @@ func LoadLocalPolicy(path string) (*CompiledLocalPolicy, error) {
 		if err != nil {
 			return nil, fmt.Errorf("invalid local rule syntax %q: %w", rStr, err)
 		}
-		compiled.Rules = append(compiled.Rules, r)
+		complete.Rules = append(complete.Rules, r)
 	}
 
-	return compiled, nil
+	return complete, nil
 }
