@@ -54,7 +54,7 @@ jobs:
       with:
         context: .
         file: Dockerfile.sam-hub
-        platforms: linux/amd64,linux/arm64
+        platforms: ${{ github.ref_type == 'tag' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
         push: true
         tags: ${{ steps.meta-hub.outputs.tags }}
         labels: ${{ steps.meta-hub.outputs.labels }}
@@ -76,7 +76,7 @@ jobs:
       with:
         context: .
         file: Dockerfile.sam-node
-        platforms: linux/amd64,linux/arm64
+        platforms: ${{ github.ref_type == 'tag' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
         push: true
         tags: ${{ steps.meta-node.outputs.tags }}
         labels: ${{ steps.meta-node.outputs.labels }}
