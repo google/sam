@@ -16,11 +16,7 @@ syntax = "proto3";
 package sam.v1;
 option go_package = "github.com/google/sam/api";
 
-message AuthEnvelope {
-  bytes biscuit = 1;
-  string version = 2;
-  bytes proof = 3;
-}
+
 
 message AuthFrame {
   bytes biscuit = 1;
@@ -31,45 +27,7 @@ message AuthResponse {
   string error = 2; // populated only if success is false
 }
 
-message HubConfig {
-  string public_key_hex = 1;
-  string mesh_id = 2;
-  repeated string bootstrap_nodes = 3;
-  int64 key_rotation_interval = 4;
-  int64 key_grace_period = 5;
-}
 
-message PeerProfile {
-  string email = 1;
-  repeated string groups = 2;
-}
-
-message PeerRegistry {
-  map<string, PeerProfile> peers = 1;
-}
-
-message ModelProperty {
-  string name = 1;
-  int32 context_window = 2;
-  string quantization = 3;
-}
-
-message AgentCard {
-  string peer_id = 1;
-  string name = 2;
-  repeated string skills = 3;
-  repeated ModelProperty models = 4;
-  repeated string mcp_tools = 5;
-  map<string, string> metadata = 6;
-  bytes signature = 7;
-}
-
-message RevocationMsg {
-  string target_peer_id = 1;
-  string reason = 2;
-  int64 timestamp = 3;
-  bytes signature = 4;
-}
 
 message MeshEvent {
   enum Type {

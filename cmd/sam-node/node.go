@@ -529,7 +529,7 @@ func (n *SamNode) HandleAuthHandshake(s network.Stream) {
 	}
 	defer reader.ReleaseMsg(msg)
 
-	var exchange api.AuthEnvelope
+	var exchange api.AuthFrame
 	if err := proto.Unmarshal(msg, &exchange); err != nil {
 		logger.Warnf("[AuthN] Invalid protobuf from %s", remotePeer)
 		return

@@ -496,7 +496,7 @@ func TestHandleAuthHandshakeCache(t *testing.T) {
 	}()
 
 	writer := msgio.NewVarintWriter(pw1)
-	envelope := &api.AuthEnvelope{Biscuit: tokenBytes}
+	envelope := &api.AuthFrame{Biscuit: tokenBytes}
 	envelopeBytes, _ := proto.Marshal(envelope)
 	if err := writer.WriteMsg(envelopeBytes); err != nil {
 		t.Fatal(err)

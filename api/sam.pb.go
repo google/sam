@@ -84,67 +84,7 @@ func (x MeshEvent_Type) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use MeshEvent_Type.Descriptor instead.
 func (MeshEvent_Type) EnumDescriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{9, 0}
-}
-
-type AuthEnvelope struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Biscuit       []byte                 `protobuf:"bytes,1,opt,name=biscuit,proto3" json:"biscuit,omitempty"`
-	Version       string                 `protobuf:"bytes,2,opt,name=version,proto3" json:"version,omitempty"`
-	Proof         []byte                 `protobuf:"bytes,3,opt,name=proof,proto3" json:"proof,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *AuthEnvelope) Reset() {
-	*x = AuthEnvelope{}
-	mi := &file_api_sam_proto_msgTypes[0]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *AuthEnvelope) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*AuthEnvelope) ProtoMessage() {}
-
-func (x *AuthEnvelope) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[0]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use AuthEnvelope.ProtoReflect.Descriptor instead.
-func (*AuthEnvelope) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{0}
-}
-
-func (x *AuthEnvelope) GetBiscuit() []byte {
-	if x != nil {
-		return x.Biscuit
-	}
-	return nil
-}
-
-func (x *AuthEnvelope) GetVersion() string {
-	if x != nil {
-		return x.Version
-	}
-	return ""
-}
-
-func (x *AuthEnvelope) GetProof() []byte {
-	if x != nil {
-		return x.Proof
-	}
-	return nil
+	return file_api_sam_proto_rawDescGZIP(), []int{2, 0}
 }
 
 type AuthFrame struct {
@@ -156,7 +96,7 @@ type AuthFrame struct {
 
 func (x *AuthFrame) Reset() {
 	*x = AuthFrame{}
-	mi := &file_api_sam_proto_msgTypes[1]
+	mi := &file_api_sam_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -168,7 +108,7 @@ func (x *AuthFrame) String() string {
 func (*AuthFrame) ProtoMessage() {}
 
 func (x *AuthFrame) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[1]
+	mi := &file_api_sam_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -181,7 +121,7 @@ func (x *AuthFrame) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AuthFrame.ProtoReflect.Descriptor instead.
 func (*AuthFrame) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{1}
+	return file_api_sam_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *AuthFrame) GetBiscuit() []byte {
@@ -201,7 +141,7 @@ type AuthResponse struct {
 
 func (x *AuthResponse) Reset() {
 	*x = AuthResponse{}
-	mi := &file_api_sam_proto_msgTypes[2]
+	mi := &file_api_sam_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -213,7 +153,7 @@ func (x *AuthResponse) String() string {
 func (*AuthResponse) ProtoMessage() {}
 
 func (x *AuthResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[2]
+	mi := &file_api_sam_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -226,7 +166,7 @@ func (x *AuthResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AuthResponse.ProtoReflect.Descriptor instead.
 func (*AuthResponse) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{2}
+	return file_api_sam_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *AuthResponse) GetSuccess() bool {
@@ -243,398 +183,6 @@ func (x *AuthResponse) GetError() string {
 	return ""
 }
 
-type HubConfig struct {
-	state               protoimpl.MessageState `protogen:"open.v1"`
-	PublicKeyHex        string                 `protobuf:"bytes,1,opt,name=public_key_hex,json=publicKeyHex,proto3" json:"public_key_hex,omitempty"`
-	MeshId              string                 `protobuf:"bytes,2,opt,name=mesh_id,json=meshId,proto3" json:"mesh_id,omitempty"`
-	BootstrapNodes      []string               `protobuf:"bytes,3,rep,name=bootstrap_nodes,json=bootstrapNodes,proto3" json:"bootstrap_nodes,omitempty"`
-	KeyRotationInterval int64                  `protobuf:"varint,4,opt,name=key_rotation_interval,json=keyRotationInterval,proto3" json:"key_rotation_interval,omitempty"`
-	KeyGracePeriod      int64                  `protobuf:"varint,5,opt,name=key_grace_period,json=keyGracePeriod,proto3" json:"key_grace_period,omitempty"`
-	unknownFields       protoimpl.UnknownFields
-	sizeCache           protoimpl.SizeCache
-}
-
-func (x *HubConfig) Reset() {
-	*x = HubConfig{}
-	mi := &file_api_sam_proto_msgTypes[3]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *HubConfig) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*HubConfig) ProtoMessage() {}
-
-func (x *HubConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[3]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use HubConfig.ProtoReflect.Descriptor instead.
-func (*HubConfig) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{3}
-}
-
-func (x *HubConfig) GetPublicKeyHex() string {
-	if x != nil {
-		return x.PublicKeyHex
-	}
-	return ""
-}
-
-func (x *HubConfig) GetMeshId() string {
-	if x != nil {
-		return x.MeshId
-	}
-	return ""
-}
-
-func (x *HubConfig) GetBootstrapNodes() []string {
-	if x != nil {
-		return x.BootstrapNodes
-	}
-	return nil
-}
-
-func (x *HubConfig) GetKeyRotationInterval() int64 {
-	if x != nil {
-		return x.KeyRotationInterval
-	}
-	return 0
-}
-
-func (x *HubConfig) GetKeyGracePeriod() int64 {
-	if x != nil {
-		return x.KeyGracePeriod
-	}
-	return 0
-}
-
-type PeerProfile struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Email         string                 `protobuf:"bytes,1,opt,name=email,proto3" json:"email,omitempty"`
-	Groups        []string               `protobuf:"bytes,2,rep,name=groups,proto3" json:"groups,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *PeerProfile) Reset() {
-	*x = PeerProfile{}
-	mi := &file_api_sam_proto_msgTypes[4]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *PeerProfile) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*PeerProfile) ProtoMessage() {}
-
-func (x *PeerProfile) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[4]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use PeerProfile.ProtoReflect.Descriptor instead.
-func (*PeerProfile) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{4}
-}
-
-func (x *PeerProfile) GetEmail() string {
-	if x != nil {
-		return x.Email
-	}
-	return ""
-}
-
-func (x *PeerProfile) GetGroups() []string {
-	if x != nil {
-		return x.Groups
-	}
-	return nil
-}
-
-type PeerRegistry struct {
-	state         protoimpl.MessageState  `protogen:"open.v1"`
-	Peers         map[string]*PeerProfile `protobuf:"bytes,1,rep,name=peers,proto3" json:"peers,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *PeerRegistry) Reset() {
-	*x = PeerRegistry{}
-	mi := &file_api_sam_proto_msgTypes[5]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *PeerRegistry) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*PeerRegistry) ProtoMessage() {}
-
-func (x *PeerRegistry) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[5]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use PeerRegistry.ProtoReflect.Descriptor instead.
-func (*PeerRegistry) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{5}
-}
-
-func (x *PeerRegistry) GetPeers() map[string]*PeerProfile {
-	if x != nil {
-		return x.Peers
-	}
-	return nil
-}
-
-type ModelProperty struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	ContextWindow int32                  `protobuf:"varint,2,opt,name=context_window,json=contextWindow,proto3" json:"context_window,omitempty"`
-	Quantization  string                 `protobuf:"bytes,3,opt,name=quantization,proto3" json:"quantization,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ModelProperty) Reset() {
-	*x = ModelProperty{}
-	mi := &file_api_sam_proto_msgTypes[6]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ModelProperty) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ModelProperty) ProtoMessage() {}
-
-func (x *ModelProperty) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[6]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ModelProperty.ProtoReflect.Descriptor instead.
-func (*ModelProperty) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{6}
-}
-
-func (x *ModelProperty) GetName() string {
-	if x != nil {
-		return x.Name
-	}
-	return ""
-}
-
-func (x *ModelProperty) GetContextWindow() int32 {
-	if x != nil {
-		return x.ContextWindow
-	}
-	return 0
-}
-
-func (x *ModelProperty) GetQuantization() string {
-	if x != nil {
-		return x.Quantization
-	}
-	return ""
-}
-
-type AgentCard struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	PeerId        string                 `protobuf:"bytes,1,opt,name=peer_id,json=peerId,proto3" json:"peer_id,omitempty"`
-	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
-	Skills        []string               `protobuf:"bytes,3,rep,name=skills,proto3" json:"skills,omitempty"`
-	Models        []*ModelProperty       `protobuf:"bytes,4,rep,name=models,proto3" json:"models,omitempty"`
-	McpTools      []string               `protobuf:"bytes,5,rep,name=mcp_tools,json=mcpTools,proto3" json:"mcp_tools,omitempty"`
-	Metadata      map[string]string      `protobuf:"bytes,6,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	Signature     []byte                 `protobuf:"bytes,7,opt,name=signature,proto3" json:"signature,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *AgentCard) Reset() {
-	*x = AgentCard{}
-	mi := &file_api_sam_proto_msgTypes[7]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *AgentCard) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*AgentCard) ProtoMessage() {}
-
-func (x *AgentCard) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[7]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use AgentCard.ProtoReflect.Descriptor instead.
-func (*AgentCard) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{7}
-}
-
-func (x *AgentCard) GetPeerId() string {
-	if x != nil {
-		return x.PeerId
-	}
-	return ""
-}
-
-func (x *AgentCard) GetName() string {
-	if x != nil {
-		return x.Name
-	}
-	return ""
-}
-
-func (x *AgentCard) GetSkills() []string {
-	if x != nil {
-		return x.Skills
-	}
-	return nil
-}
-
-func (x *AgentCard) GetModels() []*ModelProperty {
-	if x != nil {
-		return x.Models
-	}
-	return nil
-}
-
-func (x *AgentCard) GetMcpTools() []string {
-	if x != nil {
-		return x.McpTools
-	}
-	return nil
-}
-
-func (x *AgentCard) GetMetadata() map[string]string {
-	if x != nil {
-		return x.Metadata
-	}
-	return nil
-}
-
-func (x *AgentCard) GetSignature() []byte {
-	if x != nil {
-		return x.Signature
-	}
-	return nil
-}
-
-type RevocationMsg struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	TargetPeerId  string                 `protobuf:"bytes,1,opt,name=target_peer_id,json=targetPeerId,proto3" json:"target_peer_id,omitempty"`
-	Reason        string                 `protobuf:"bytes,2,opt,name=reason,proto3" json:"reason,omitempty"`
-	Timestamp     int64                  `protobuf:"varint,3,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
-	Signature     []byte                 `protobuf:"bytes,4,opt,name=signature,proto3" json:"signature,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *RevocationMsg) Reset() {
-	*x = RevocationMsg{}
-	mi := &file_api_sam_proto_msgTypes[8]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *RevocationMsg) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*RevocationMsg) ProtoMessage() {}
-
-func (x *RevocationMsg) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[8]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use RevocationMsg.ProtoReflect.Descriptor instead.
-func (*RevocationMsg) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{8}
-}
-
-func (x *RevocationMsg) GetTargetPeerId() string {
-	if x != nil {
-		return x.TargetPeerId
-	}
-	return ""
-}
-
-func (x *RevocationMsg) GetReason() string {
-	if x != nil {
-		return x.Reason
-	}
-	return ""
-}
-
-func (x *RevocationMsg) GetTimestamp() int64 {
-	if x != nil {
-		return x.Timestamp
-	}
-	return 0
-}
-
-func (x *RevocationMsg) GetSignature() []byte {
-	if x != nil {
-		return x.Signature
-	}
-	return nil
-}
-
 type MeshEvent struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Type          MeshEvent_Type         `protobuf:"varint,1,opt,name=type,proto3,enum=sam.v1.MeshEvent_Type" json:"type,omitempty"`
@@ -648,7 +196,7 @@ type MeshEvent struct {
 
 func (x *MeshEvent) Reset() {
 	*x = MeshEvent{}
-	mi := &file_api_sam_proto_msgTypes[9]
+	mi := &file_api_sam_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -660,7 +208,7 @@ func (x *MeshEvent) String() string {
 func (*MeshEvent) ProtoMessage() {}
 
 func (x *MeshEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[9]
+	mi := &file_api_sam_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -673,7 +221,7 @@ func (x *MeshEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MeshEvent.ProtoReflect.Descriptor instead.
 func (*MeshEvent) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{9}
+	return file_api_sam_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *MeshEvent) GetType() MeshEvent_Type {
@@ -721,7 +269,7 @@ type EnrollRequest struct {
 
 func (x *EnrollRequest) Reset() {
 	*x = EnrollRequest{}
-	mi := &file_api_sam_proto_msgTypes[10]
+	mi := &file_api_sam_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -733,7 +281,7 @@ func (x *EnrollRequest) String() string {
 func (*EnrollRequest) ProtoMessage() {}
 
 func (x *EnrollRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[10]
+	mi := &file_api_sam_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -746,7 +294,7 @@ func (x *EnrollRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EnrollRequest.ProtoReflect.Descriptor instead.
 func (*EnrollRequest) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{10}
+	return file_api_sam_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *EnrollRequest) GetJwt() string {
@@ -777,7 +325,7 @@ type EnrollResponse struct {
 
 func (x *EnrollResponse) Reset() {
 	*x = EnrollResponse{}
-	mi := &file_api_sam_proto_msgTypes[11]
+	mi := &file_api_sam_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -789,7 +337,7 @@ func (x *EnrollResponse) String() string {
 func (*EnrollResponse) ProtoMessage() {}
 
 func (x *EnrollResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[11]
+	mi := &file_api_sam_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -802,7 +350,7 @@ func (x *EnrollResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EnrollResponse.ProtoReflect.Descriptor instead.
 func (*EnrollResponse) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{11}
+	return file_api_sam_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *EnrollResponse) GetBiscuitToken() []byte {
@@ -851,51 +399,12 @@ var File_api_sam_proto protoreflect.FileDescriptor
 
 const file_api_sam_proto_rawDesc = "" +
 	"\n" +
-	"\rapi/sam.proto\x12\x06sam.v1\"X\n" +
-	"\fAuthEnvelope\x12\x18\n" +
-	"\abiscuit\x18\x01 \x01(\fR\abiscuit\x12\x18\n" +
-	"\aversion\x18\x02 \x01(\tR\aversion\x12\x14\n" +
-	"\x05proof\x18\x03 \x01(\fR\x05proof\"%\n" +
+	"\rapi/sam.proto\x12\x06sam.v1\"%\n" +
 	"\tAuthFrame\x12\x18\n" +
 	"\abiscuit\x18\x01 \x01(\fR\abiscuit\">\n" +
 	"\fAuthResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\"\xd1\x01\n" +
-	"\tHubConfig\x12$\n" +
-	"\x0epublic_key_hex\x18\x01 \x01(\tR\fpublicKeyHex\x12\x17\n" +
-	"\amesh_id\x18\x02 \x01(\tR\x06meshId\x12'\n" +
-	"\x0fbootstrap_nodes\x18\x03 \x03(\tR\x0ebootstrapNodes\x122\n" +
-	"\x15key_rotation_interval\x18\x04 \x01(\x03R\x13keyRotationInterval\x12(\n" +
-	"\x10key_grace_period\x18\x05 \x01(\x03R\x0ekeyGracePeriod\";\n" +
-	"\vPeerProfile\x12\x14\n" +
-	"\x05email\x18\x01 \x01(\tR\x05email\x12\x16\n" +
-	"\x06groups\x18\x02 \x03(\tR\x06groups\"\x94\x01\n" +
-	"\fPeerRegistry\x125\n" +
-	"\x05peers\x18\x01 \x03(\v2\x1f.sam.v1.PeerRegistry.PeersEntryR\x05peers\x1aM\n" +
-	"\n" +
-	"PeersEntry\x12\x10\n" +
-	"\x03key\x18\x01 \x01(\tR\x03key\x12)\n" +
-	"\x05value\x18\x02 \x01(\v2\x13.sam.v1.PeerProfileR\x05value:\x028\x01\"n\n" +
-	"\rModelProperty\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\x12%\n" +
-	"\x0econtext_window\x18\x02 \x01(\x05R\rcontextWindow\x12\"\n" +
-	"\fquantization\x18\x03 \x01(\tR\fquantization\"\xb4\x02\n" +
-	"\tAgentCard\x12\x17\n" +
-	"\apeer_id\x18\x01 \x01(\tR\x06peerId\x12\x12\n" +
-	"\x04name\x18\x02 \x01(\tR\x04name\x12\x16\n" +
-	"\x06skills\x18\x03 \x03(\tR\x06skills\x12-\n" +
-	"\x06models\x18\x04 \x03(\v2\x15.sam.v1.ModelPropertyR\x06models\x12\x1b\n" +
-	"\tmcp_tools\x18\x05 \x03(\tR\bmcpTools\x12;\n" +
-	"\bmetadata\x18\x06 \x03(\v2\x1f.sam.v1.AgentCard.MetadataEntryR\bmetadata\x12\x1c\n" +
-	"\tsignature\x18\a \x01(\fR\tsignature\x1a;\n" +
-	"\rMetadataEntry\x12\x10\n" +
-	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x89\x01\n" +
-	"\rRevocationMsg\x12$\n" +
-	"\x0etarget_peer_id\x18\x01 \x01(\tR\ftargetPeerId\x12\x16\n" +
-	"\x06reason\x18\x02 \x01(\tR\x06reason\x12\x1c\n" +
-	"\ttimestamp\x18\x03 \x01(\x03R\ttimestamp\x12\x1c\n" +
-	"\tsignature\x18\x04 \x01(\fR\tsignature\"\xec\x01\n" +
+	"\x05error\x18\x02 \x01(\tR\x05error\"\xec\x01\n" +
 	"\tMeshEvent\x12*\n" +
 	"\x04type\x18\x01 \x01(\x0e2\x16.sam.v1.MeshEvent.TypeR\x04type\x12\x17\n" +
 	"\apeer_id\x18\x02 \x01(\tR\x06peerId\x12\x1c\n" +
@@ -935,35 +444,22 @@ func file_api_sam_proto_rawDescGZIP() []byte {
 }
 
 var file_api_sam_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_api_sam_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
+var file_api_sam_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
 var file_api_sam_proto_goTypes = []any{
 	(MeshEvent_Type)(0),    // 0: sam.v1.MeshEvent.Type
-	(*AuthEnvelope)(nil),   // 1: sam.v1.AuthEnvelope
-	(*AuthFrame)(nil),      // 2: sam.v1.AuthFrame
-	(*AuthResponse)(nil),   // 3: sam.v1.AuthResponse
-	(*HubConfig)(nil),      // 4: sam.v1.HubConfig
-	(*PeerProfile)(nil),    // 5: sam.v1.PeerProfile
-	(*PeerRegistry)(nil),   // 6: sam.v1.PeerRegistry
-	(*ModelProperty)(nil),  // 7: sam.v1.ModelProperty
-	(*AgentCard)(nil),      // 8: sam.v1.AgentCard
-	(*RevocationMsg)(nil),  // 9: sam.v1.RevocationMsg
-	(*MeshEvent)(nil),      // 10: sam.v1.MeshEvent
-	(*EnrollRequest)(nil),  // 11: sam.v1.EnrollRequest
-	(*EnrollResponse)(nil), // 12: sam.v1.EnrollResponse
-	nil,                    // 13: sam.v1.PeerRegistry.PeersEntry
-	nil,                    // 14: sam.v1.AgentCard.MetadataEntry
+	(*AuthFrame)(nil),      // 1: sam.v1.AuthFrame
+	(*AuthResponse)(nil),   // 2: sam.v1.AuthResponse
+	(*MeshEvent)(nil),      // 3: sam.v1.MeshEvent
+	(*EnrollRequest)(nil),  // 4: sam.v1.EnrollRequest
+	(*EnrollResponse)(nil), // 5: sam.v1.EnrollResponse
 }
 var file_api_sam_proto_depIdxs = []int32{
-	13, // 0: sam.v1.PeerRegistry.peers:type_name -> sam.v1.PeerRegistry.PeersEntry
-	7,  // 1: sam.v1.AgentCard.models:type_name -> sam.v1.ModelProperty
-	14, // 2: sam.v1.AgentCard.metadata:type_name -> sam.v1.AgentCard.MetadataEntry
-	0,  // 3: sam.v1.MeshEvent.type:type_name -> sam.v1.MeshEvent.Type
-	5,  // 4: sam.v1.PeerRegistry.PeersEntry.value:type_name -> sam.v1.PeerProfile
-	5,  // [5:5] is the sub-list for method output_type
-	5,  // [5:5] is the sub-list for method input_type
-	5,  // [5:5] is the sub-list for extension type_name
-	5,  // [5:5] is the sub-list for extension extendee
-	0,  // [0:5] is the sub-list for field type_name
+	0, // 0: sam.v1.MeshEvent.type:type_name -> sam.v1.MeshEvent.Type
+	1, // [1:1] is the sub-list for method output_type
+	1, // [1:1] is the sub-list for method input_type
+	1, // [1:1] is the sub-list for extension type_name
+	1, // [1:1] is the sub-list for extension extendee
+	0, // [0:1] is the sub-list for field type_name
 }
 
 func init() { file_api_sam_proto_init() }
@@ -977,7 +473,7 @@ func file_api_sam_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_sam_proto_rawDesc), len(file_api_sam_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   14,
+			NumMessages:   5,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
