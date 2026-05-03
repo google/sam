@@ -40,8 +40,25 @@ spec:
         ports:
         - containerPort: 4001
           protocol: TCP
+          name: libp2p-tcp
         - containerPort: 4001
           protocol: UDP
+          name: libp2p-udp
+        - containerPort: 9090
+          protocol: TCP
+          name: metrics
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: metrics
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: metrics
+          initialDelaySeconds: 15
+          periodSeconds: 20
         args:
         - "--listen=/ip4/0.0.0.0/tcp/4001,/ip4/0.0.0.0/udp/4001/quic-v1"
         - "--external-multiaddr=${EXTERNAL_MULTIADDR}"
@@ -54,3 +71,17 @@ spec:
           limits:
             cpu: 500m
             memory: 512Mi
+---
+apiVersion: monitoring.googleapis.com/v1
+kind: PodMonitoring
+metadata:
+  name: sam-hub-monitor-${ENV_NAME}
+  namespace: ${NAMESPACE}
+spec:
+  selector:
+    matchLabels:
+      app: sam-hub-${ENV_NAME}
+  endpoints:
+  - port: metrics
+    interval: 30s
+    path: /metrics

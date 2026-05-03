@@ -21,13 +21,14 @@ import (
 	"os"
 	"sync/atomic"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 // startHTTPServer starts the HTTP/HTTPS server for metrics, healthz, and admin commands.
 func startHTTPServer(h *Hub, bindAddr string, adminToken string, tlsCertFile string, tlsKeyFile string, tlsCAFile string, isHubReady *atomic.Bool) {
 	mux := http.NewServeMux()
-	mux.Handle("/metrics", promhttp.Handler())
+	mux.Handle("/metrics", promhttp.HandlerFor(prometheus.DefaultGatherer, promhttp.HandlerOpts{}))
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		if isHubReady.Load() {
 			w.WriteHeader(http.StatusOK)
