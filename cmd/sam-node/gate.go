@@ -87,11 +87,25 @@ func (n *SamNode) HandleMCPStream(s network.Stream) {
 		Version: "0.1.0",
 	}, nil)
 
-	// Add the send_message tool.
+	// Sender identity is taken from the authenticated libp2p peer, not from
+	// caller-supplied arguments — it cannot be spoofed.
+	senderPeer := s.Conn().RemotePeer()
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "send_message",
-		Description: "Send a message to another agent in the mesh",
-	}, handleSendMessage)
+		Name:        "put_message",
+		Description: "Place a message in this node's inbox",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, params struct {
+		Message string `json:"message" jsonschema:"The message content"`
+	}) (*mcp.CallToolResult, any, error) {
+		n.mu.Lock()
+		key := senderPeer.String()
+		n.receivedDirectMsgs[key] = append(n.receivedDirectMsgs[key], params.Message)
+		n.mu.Unlock()
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{Text: "stored"},
+			},
+		}, nil, nil
+	})
 
 	// Add the get_mesh_info tool.
 	mcp.AddTool(server, &mcp.Tool{
@@ -171,12 +185,7 @@ func (t *StreamTransport) Read(ctx context.Context) (jsonrpc.Message, error) {
 		return nil, err
 	}
 	defer t.r.ReleaseMsg(msg)
-
-	var jsonRpcMsg jsonrpc.Message
-	if err := json.Unmarshal(msg, &jsonRpcMsg); err != nil {
-		return nil, err
-	}
-	return jsonRpcMsg, nil
+	return jsonrpc.DecodeMessage(msg)
 }
 
 // Close closes the stream.
@@ -198,7 +207,7 @@ func (t *StreamTransport) SessionID() string {
 
 // Write writes a message to the stream.
 func (t *StreamTransport) Write(ctx context.Context, msg jsonrpc.Message) error {
-	data, err := json.Marshal(msg)
+	data, err := jsonrpc.EncodeMessage(msg)
 	if err != nil {
 		return err
 	}

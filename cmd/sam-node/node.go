@@ -88,9 +88,10 @@ type SamNode struct {
 	PubSub            *pubsub.PubSub
 	Store             *Store
 	HubPeerID         peer.ID
-	knownPeers        map[string]bool
-	receivedMsgs      map[string][]string
-	topics            map[string]*pubsub.Topic
+	knownPeers         map[string]bool
+	receivedMsgs       map[string][]string
+	receivedDirectMsgs map[string][]string
+	topics             map[string]*pubsub.Topic
 	mu                sync.Mutex
 	LocalPolicy       *NodeConfigComplete
 	revokedPeers      *lru.Cache[string, int64]
@@ -111,13 +112,14 @@ func NewSamNode(ctx context.Context, privKey crypto.PrivKey, hubPubKey ed25519.P
 	}
 
 	node := &SamNode{
-		Store:        store,
-		trustedKeys:  trustedKeys,
-		knownPeers:   make(map[string]bool),
-		receivedMsgs: make(map[string][]string),
-		topics:       make(map[string]*pubsub.Topic),
-		services:     make(map[string]*ServiceManifest),
-		LocalPolicy:  nodeConfig,
+		Store:              store,
+		trustedKeys:        trustedKeys,
+		knownPeers:         make(map[string]bool),
+		receivedMsgs:       make(map[string][]string),
+		receivedDirectMsgs: make(map[string][]string),
+		topics:             make(map[string]*pubsub.Topic),
+		services:           make(map[string]*ServiceManifest),
+		LocalPolicy:        nodeConfig,
 	}
 
 	var err error

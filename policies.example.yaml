@@ -1,0 +1,13 @@
+version: "1"
+
+# Hub adds these facts to a peer's biscuit. JWTs without a "roles" claim
+# get the "default" role.
+roles:
+  default:
+    mcp:
+      # libp2p protocol IDs the peer is allowed to use.
+      allowed_tools:
+        - "/sam/mcp/1.0.0"
+    network:
+      # Hosts the egress proxy will let the peer reach.
+      allowed_targets: []

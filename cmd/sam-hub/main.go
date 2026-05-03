@@ -418,6 +418,10 @@ func (h *Hub) mintBiscuitToken(claims jwt.MapClaims, token *oidc.IDToken, remote
 			}
 		}
 	}
+	// JWTs without a "roles" claim get the "default" role.
+	if len(roles) == 0 {
+		roles = []string{"default"}
+	}
 
 	builder := biscuit.NewBuilder(h.KeyRing.GetCurrentKey())
 

@@ -29,23 +29,6 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// SendMessageParams defines the parameters for the send_message tool.
-type SendMessageParams struct {
-	PeerID  string `json:"peer_id" jsonschema:"The Peer ID of the target agent"`
-	Message string `json:"message" jsonschema:"The message content"`
-}
-
-// handleSendMessage implements the send_message tool.
-func handleSendMessage(ctx context.Context, req *mcp.CallToolRequest, params SendMessageParams) (*mcp.CallToolResult, any, error) {
-	response := fmt.Sprintf("Simulated sending message to %s: %s", params.PeerID, params.Message)
-
-	return &mcp.CallToolResult{
-		Content: []mcp.Content{
-			&mcp.TextContent{Text: response},
-		},
-	}, nil, nil
-}
-
 // NewMCPHandler creates a new HTTP handler for the MCP server using the official SDK.
 func NewMCPHandler(node *SamNode) http.Handler {
 	// Create an MCP server.
@@ -54,11 +37,63 @@ func NewMCPHandler(node *SamNode) http.Handler {
 		Version: "0.1.0",
 	}, nil)
 
-	// Add the send_message tool.
+	// send_message dispatches to the target's put_message tool over libp2p MCP.
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "send_message",
 		Description: "Send a message to another agent in the mesh",
-	}, handleSendMessage)
+	}, func(ctx context.Context, req *mcp.CallToolRequest, params struct {
+		PeerID  string `json:"peer_id" jsonschema:"The Peer ID of the target agent"`
+		Message string `json:"message" jsonschema:"The message content"`
+	}) (*mcp.CallToolResult, any, error) {
+		targetPeer, err := peer.Decode(params.PeerID)
+		if err != nil {
+			return nil, nil, err
+		}
+		res, err := node.CallMCPTool(ctx, targetPeer, "put_message", map[string]any{
+			"message": params.Message,
+		})
+		return res, nil, err
+	})
+
+	// Add the poll_direct_messages tool. Drains the inbox of messages received
+	// from other agents and returns them as a flat JSON list of {from, message}.
+	mcp.AddTool(mcpServer, &mcp.Tool{
+		Name:        "poll_direct_messages",
+		Description: "Poll for direct messages from other agents (drains the inbox)",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, params struct {
+		PeerID string `json:"peer_id,omitempty" jsonschema:"Optional sender peer ID filter; if empty returns all"`
+	}) (*mcp.CallToolResult, any, error) {
+		type entry struct {
+			From    string `json:"from"`
+			Message string `json:"message"`
+		}
+		var out []entry
+		node.mu.Lock()
+		if params.PeerID != "" {
+			for _, m := range node.receivedDirectMsgs[params.PeerID] {
+				out = append(out, entry{From: params.PeerID, Message: m})
+			}
+			delete(node.receivedDirectMsgs, params.PeerID)
+		} else {
+			for from, msgs := range node.receivedDirectMsgs {
+				for _, m := range msgs {
+					out = append(out, entry{From: from, Message: m})
+				}
+			}
+			node.receivedDirectMsgs = make(map[string][]string)
+		}
+		node.mu.Unlock()
+
+		data, err := json.Marshal(out)
+		if err != nil {
+			return nil, nil, err
+		}
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{Text: string(data)},
+			},
+		}, nil, nil
+	})
 
 	// Add list_local_services tool
 	mcp.AddTool(mcpServer, &mcp.Tool{
@@ -360,13 +395,9 @@ func (n *SamNode) callMCPToolOnce(ctx context.Context, targetPeer peer.ID, toolN
 	}
 
 	callParams := &mcp.CallToolParams{
-		Name: toolName,
+		Name:      toolName,
+		Arguments: params,
 	}
-	paramsBytes, err := json.Marshal(params)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal params for tool %s: %w", toolName, err)
-	}
-	callParams.Arguments = paramsBytes // Assume it takes bytes or raw message!
 
 	res, err := session.CallTool(ctx, callParams)
 	if err != nil {

@@ -28,6 +28,9 @@ go.work.sum
 # env file
 .env
 
+# Local hub policy (copy from policies.example.yaml)
+policies.yaml
+
 # Editor/IDE
 # .idea/
 # .vscode/
