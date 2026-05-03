@@ -445,7 +445,7 @@ func TestVerifyEvent(t *testing.T) {
 	}
 }
 
-func TestHandleAuthHandshakeCache(t *testing.T) {
+func TestVerifyBiscuitCache(t *testing.T) {
 	pub, priv, err := ed25519.GenerateKey(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -474,39 +474,15 @@ func TestHandleAuthHandshakeCache(t *testing.T) {
 
 	cache, _ := lru.New[string, string](10)
 
-	dir := t.TempDir()
-	store, err := NewStore(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = store.Close() }()
-
 	node := &SamNode{
 		trustedKeys:       []TrustedKey{{Key: pub, ReceivedAt: time.Now()}},
 		verificationCache: cache,
-		Store:             store,
 	}
 
-	pr1, pw1 := io.Pipe()
-
-	serverStream := &mockStream{r: pr1, w: io.Discard, protocol: api.AuthProtocolID, conn: &mockConn{remotePeer: dummyPeer}}
-
-	go func() {
-		node.HandleAuthHandshake(serverStream)
-	}()
-
-	writer := msgio.NewVarintWriter(pw1)
-	envelope := &api.AuthFrame{Biscuit: tokenBytes}
-	envelopeBytes, _ := proto.Marshal(envelope)
-	if err := writer.WriteMsg(envelopeBytes); err != nil {
-		t.Fatal(err)
-	}
-
-	time.Sleep(1 * time.Second)
-
-	_, err = store.GetVerifiedIdentity(dummyPeer)
+	// Case 1: Fresh verification (uncached)
+	_, err = node.verifyBiscuit(tokenBytes, dummyPeer)
 	if err != nil {
-		t.Fatalf("Expected identity to be saved, got err: %v", err)
+		t.Fatalf("Expected verifyBiscuit to succeed, got err: %v", err)
 	}
 
 	tokenHash := sha256.Sum256(tokenBytes)
@@ -516,35 +492,16 @@ func TestHandleAuthHandshakeCache(t *testing.T) {
 		t.Fatal("Expected token to be in verification cache with correct key")
 	}
 
-	// Now corrupt keys and try again.
+	// Case 2: Key rotation - corrupt keys and try again.
+	// Even if the token is in the cache, it should fail if the key that verified it is no longer trusted.
 	node.keysMu.Lock()
 	invalidKey := make([]byte, ed25519.PublicKeySize)
 	copy(invalidKey, []byte("invalid-key"))
 	node.trustedKeys = []TrustedKey{{Key: invalidKey, ReceivedAt: time.Now()}}
 	node.keysMu.Unlock()
 
-	dir2 := t.TempDir()
-	store2, _ := NewStore(dir2)
-	defer func() { _ = store2.Close() }()
-
-	node.Store = store2
-
-	pr5, pw5 := io.Pipe()
-	serverStream3 := &mockStream{r: pr5, w: io.Discard, protocol: api.AuthProtocolID, conn: &mockConn{remotePeer: dummyPeer}}
-
-	go func() {
-		node.HandleAuthHandshake(serverStream3)
-	}()
-
-	writer3 := msgio.NewVarintWriter(pw5)
-	if err := writer3.WriteMsg(envelopeBytes); err != nil {
-		t.Fatal(err)
-	}
-
-	time.Sleep(1 * time.Second)
-
-	_, err = store2.GetVerifiedIdentity(dummyPeer)
+	_, err = node.verifyBiscuit(tokenBytes, dummyPeer)
 	if err == nil {
-		t.Fatal("Expected identity to NOT be saved via cache hit with invalid key")
+		t.Fatal("Expected verifyBiscuit to FAIL after key rotation, but it succeeded")
 	}
 }

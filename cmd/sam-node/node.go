@@ -551,27 +551,7 @@ func (n *SamNode) HandleAuthHandshake(s network.Stream) {
 		return
 	}
 
-	// Query for the standard facts we mapped in the Hub
-	// user_id, user_email, group, mesh_id
-	// Note: We use the authorizer to extract these values from the Datalog state
-	identity := VerifiedIdentity{
-		RawBiscuit: exchange.Biscuit,
-		// In a full implementation, you would use authorizer.Query()
-		// to extract specific strings like user_id and group.
-		NodeID:    remotePeer.String(), // Placeholder for Datalog query result
-		UserID:    "extracted_id",      // Placeholder for Datalog query result
-		UserEmail: "extracted_email",   // Placeholder for Datalog query result
-		MeshID:    "extracted_mesh",    // Placeholder for Datalog query result
-	}
-
-	// 5. Save to the persistent session cache (BoltDB)
-	// Once saved here, the ConnectionGater and Middleware will "recognize" this peer.
-	if err := n.Store.SaveVerifiedIdentity(remotePeer, identity); err != nil {
-		logger.Errorf("[AuthN] Store error for %s: %v", remotePeer, err)
-		return
-	}
-
-	logger.Infof("[AuthN] Successfully authenticated peer %s (%s)", remotePeer, identity.UserEmail)
+	logger.Infof("[AuthN] Successfully authenticated peer %s", remotePeer)
 }
 
 func (n *SamNode) verifyBiscuit(biscuitData []byte, remotePeer peer.ID) (*biscuit.Biscuit, error) {

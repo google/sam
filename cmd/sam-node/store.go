@@ -20,8 +20,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"math/rand"
-
 	"github.com/libp2p/go-libp2p/core/peer"
 	"go.etcd.io/bbolt"
 )
@@ -58,9 +56,6 @@ func NewStore(dir string) (*Store, error) {
 
 	err = db.Update(func(tx *bbolt.Tx) error {
 		if _, err := tx.CreateBucketIfNotExists([]byte(bucketIdentity)); err != nil {
-			return err
-		}
-		if _, err := tx.CreateBucketIfNotExists([]byte(bucketVerifiedPeers)); err != nil {
 			return err
 		}
 		if _, err := tx.CreateBucketIfNotExists([]byte(bucketBannedPeers)); err != nil {
@@ -165,18 +160,10 @@ func (s *Store) Close() error {
 }
 
 const (
-	bucketVerifiedPeers = "verified_peers"
 	bucketBannedPeers   = "banned_peers"
 )
 
-// VerifiedIdentity is the "Visitor Badge" saved after Layer 3
-type VerifiedIdentity struct {
-	NodeID     string `json:"node"`
-	UserID     string `json:"user"`
-	UserEmail  string `json:"email"`
-	MeshID     string `json:"namespace"`
-	RawBiscuit []byte `json:"raw_biscuit"`
-}
+
 
 // IsBanned checks local store to see if this peer is banned.
 func (s *Store) IsBanned(p peer.ID) bool {
@@ -194,50 +181,4 @@ func (s *Store) IsBanned(p peer.ID) bool {
 	return banned
 }
 
-func (s *Store) SaveVerifiedIdentity(p peer.ID, identity VerifiedIdentity) error {
-	return s.db.Update(func(tx *bbolt.Tx) error {
-		b := tx.Bucket([]byte(bucketVerifiedPeers))
-		if b == nil {
-			var err error
-			b, err = tx.CreateBucketIfNotExists([]byte(bucketVerifiedPeers))
-			if err != nil {
-				return err
-			}
-		}
-		// Enforce bound
-		keyN := b.Stats().KeyN
-		if keyN >= 10000 {
-			// Delete a random entry to be fair
-			randIdx := rand.Intn(keyN)
-			c := b.Cursor()
-			k, _ := c.First()
-			for i := 0; i < randIdx && k != nil; i++ {
-				k, _ = c.Next()
-			}
-			if k != nil {
-				if err := b.Delete(k); err != nil {
-					return err
-				}
-			}
-		}
 
-		data, _ := json.Marshal(identity)
-		return b.Put([]byte(p.String()), data)
-	})
-}
-
-func (s *Store) GetVerifiedIdentity(p peer.ID) (*VerifiedIdentity, error) {
-	var identity VerifiedIdentity
-	err := s.db.View(func(tx *bbolt.Tx) error {
-		b := tx.Bucket([]byte(bucketVerifiedPeers))
-		if b == nil {
-			return fmt.Errorf("peer auth store is not initialized")
-		}
-		data := b.Get([]byte(p.String()))
-		if data == nil {
-			return fmt.Errorf("peer not authenticated")
-		}
-		return json.Unmarshal(data, &identity)
-	})
-	return &identity, err
-}
