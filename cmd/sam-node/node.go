@@ -710,6 +710,10 @@ func (b *StdioBridge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		b.clients[ch] = true
 		b.mu.Unlock()
 
+		// Flush headers immediately to establish the stream
+		w.WriteHeader(http.StatusOK)
+		flusher.Flush()
+
 		defer func() {
 			b.mu.Lock()
 			delete(b.clients, ch)
