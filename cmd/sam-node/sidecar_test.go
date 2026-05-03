@@ -16,10 +16,16 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
+
+	"github.com/libp2p/go-libp2p"
+	dht "github.com/libp2p/go-libp2p-kad-dht"
+	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 func TestWithAuth(t *testing.T) {
@@ -69,6 +75,20 @@ func TestWithAuth(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("Empty token configured", func(t *testing.T) {
+		handlerEmpty := withAuth("", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+		req := httptest.NewRequest("GET", "/any", nil)
+		req.Header.Set("Authorization", "Bearer anything")
+		rr := httptest.NewRecorder()
+		handlerEmpty.ServeHTTP(rr, req)
+
+		if rr.Code != http.StatusOK {
+			t.Errorf("expected status %d, got %d", http.StatusOK, rr.Code)
+		}
+	})
 }
 
 func TestPublicEndpoints(t *testing.T) {
@@ -90,8 +110,40 @@ func TestPublicEndpoints(t *testing.T) {
 }
 
 func TestHandleRegisterService(t *testing.T) {
+	h, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+	d, err := dht.New(context.Background(), h, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/sam"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+
+	// Create a second host to populate routing table
+	h2, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h2.Close()
+	d2, err := dht.New(context.Background(), h2, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/sam"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d2.Close()
+
+	err = h.Connect(context.Background(), peer.AddrInfo{ID: h2.ID(), Addrs: h2.Addrs()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	
+	// Wait for DHT to recognize the peer
+	time.Sleep(100 * time.Millisecond)
+
 	node := &SamNode{
 		services: make(map[string]bool),
+		DHT:      d,
 	}
 
 	reqBody := ServiceRequest{ServiceName: "test-service"}
@@ -103,7 +155,7 @@ func TestHandleRegisterService(t *testing.T) {
 	handleRegisterService(node, rr, req)
 
 	if rr.Code != http.StatusOK {
-		t.Errorf("expected status OK, got %d", rr.Code)
+		t.Errorf("expected status OK, got %d, body: %s", rr.Code, rr.Body.String())
 	}
 
 	if !node.IsServiceRegistered("test-service") {

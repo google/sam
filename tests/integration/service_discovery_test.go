@@ -35,8 +35,6 @@ func TestServiceDiscovery(t *testing.T) {
 	homeB := t.TempDir()
 
 	apiToken := "secret-token"
-	apiAddrA := "127.0.0.1:8091"
-	apiAddrB := "127.0.0.1:8092"
 
 	// Start Node A
 	t.Log("Starting Node A...")
@@ -44,7 +42,7 @@ func TestServiceDiscovery(t *testing.T) {
 		"--listen", "/ip4/127.0.0.1/udp/0/quic-v1",
 		"--listen", "/ip4/127.0.0.1/tcp/0",
 		"--discovery-interval", "100ms",
-		"--bind-addr", apiAddrA,
+		"--bind-addr", "127.0.0.1:0",
 		"--api-token", apiToken,
 	)
 
@@ -54,26 +52,30 @@ func TestServiceDiscovery(t *testing.T) {
 		"--listen", "/ip4/127.0.0.1/udp/0/quic-v1",
 		"--listen", "/ip4/127.0.0.1/tcp/0",
 		"--discovery-interval", "100ms",
-		"--bind-addr", apiAddrB,
+		"--bind-addr", "127.0.0.1:0",
 		"--api-token", apiToken,
 	)
 
+	// Resolve actual addresses from logs
+	actualApiAddrA := waitForMCPAddr(t, filepath.Join(homeA, "node.log"))
+	actualApiAddrB := waitForMCPAddr(t, filepath.Join(homeB, "node.log"))
+
 	// Wait for nodes to start sidecar API
-	waitForAPI(t, apiAddrA)
-	waitForAPI(t, apiAddrB)
+	waitForAPI(t, actualApiAddrA)
+	waitForAPI(t, actualApiAddrB)
 
 	addrA := waitForPeerInfoInLog(t, filepath.Join(homeA, "node.log"))
 
 	// Connect Node B to Node A (to ensure they are in same network)
 	// We use the multiplexed HTTP address for MCP calls too!
-	callMCP(t, apiAddrB, "connect_peer", map[string]any{"peer_addr": addrA})
+	callMCP(t, actualApiAddrB, "connect_peer", map[string]any{"peer_addr": addrA})
 
 	// Wait for DHT to have peers on Node A
 	t.Log("Waiting for DHT to have peers on Node A...")
 	deadline := time.Now().Add(10 * time.Second)
 	var dhtReady bool
 	for time.Now().Before(deadline) {
-		respData := callMCP(t, apiAddrA, "get_mesh_info", map[string]any{})
+		respData := callMCP(t, actualApiAddrA, "get_mesh_info", map[string]any{})
 		var data map[string]any
 		if err := json.Unmarshal([]byte(respData), &data); err == nil {
 			dhtSize, _ := data["dht_size"].(float64)
@@ -90,7 +92,7 @@ func TestServiceDiscovery(t *testing.T) {
 
 	// Agent A registers a service
 	serviceName := "mcp:github-tools"
-	registerService(t, apiAddrA, apiToken, serviceName)
+	registerService(t, actualApiAddrA, apiToken, serviceName)
 
 	// Wait for DHT propagation
 	t.Log("Waiting for DHT propagation...")
@@ -98,7 +100,7 @@ func TestServiceDiscovery(t *testing.T) {
 
 	// Agent B queries the DHT via Sidecar API
 	t.Log("Agent B discovering service...")
-	providers := discoverService(t, apiAddrB, apiToken, serviceName)
+	providers := discoverService(t, actualApiAddrB, apiToken, serviceName)
 
 	if len(providers) == 0 {
 		t.Fatalf("Agent B failed to discover any providers for %s", serviceName)
@@ -119,7 +121,7 @@ func TestServiceDiscovery(t *testing.T) {
 	}
 
 	// Agent A unregisters the service
-	unregisterService(t, apiAddrA, apiToken, serviceName)
+	unregisterService(t, actualApiAddrA, apiToken, serviceName)
 
 	t.Log("Service discovery test passed.")
 }

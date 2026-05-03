@@ -59,8 +59,14 @@ func startSidecarServer(node *SamNode, addr, token, certFile, keyFile, caFile st
 
 	actualAddr := listener.Addr().String()
 
+	if (certFile != "") != (keyFile != "") {
+		logger.Errorf("Both --tls-cert and --tls-key must be provided to enable TLS")
+		return
+	}
+
 	if certFile != "" && keyFile != "" {
 		tlsConfig := &tls.Config{}
+		isMTLS := false
 		if caFile != "" {
 			caCert, err := os.ReadFile(caFile)
 			if err != nil {
@@ -71,6 +77,12 @@ func startSidecarServer(node *SamNode, addr, token, certFile, keyFile, caFile st
 			caCertPool.AppendCertsFromPEM(caCert)
 			tlsConfig.ClientCAs = caCertPool
 			tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
+			isMTLS = true
+		}
+
+		if !isMTLS && token == "" {
+			logger.Errorf("Token is mandatory when not using mTLS")
+			return
 		}
 
 		server.TLSConfig = tlsConfig
@@ -81,6 +93,10 @@ func startSidecarServer(node *SamNode, addr, token, certFile, keyFile, caFile st
 			}
 		}()
 	} else {
+		if token == "" {
+			logger.Errorf("Token is mandatory when not using mTLS")
+			return
+		}
 		logger.Infof("Starting MCP server on TCP address %s", actualAddr)
 		go func() {
 			if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
@@ -107,6 +123,8 @@ func handleReadyz(w http.ResponseWriter, r *http.Request) {
 func withAuth(token string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if token == "" {
+			// If token is empty, we assume mTLS is handling authentication.
+			// startSidecarServer enforces that token is present if mTLS is not used.
 			next.ServeHTTP(w, r)
 			return
 		}

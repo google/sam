@@ -16,12 +16,12 @@ package main
 
 import (
 	"context"
-	"os"
-	"strings"
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"os"
+	"strings"
 	"sync"
 
 	"time"
@@ -30,6 +30,7 @@ import (
 	"github.com/biscuit-auth/biscuit-go/v2/parser"
 	"github.com/google/sam/api"
 	lru "github.com/hashicorp/golang-lru/v2"
+	"github.com/ipfs/go-cid"
 	"github.com/libp2p/go-libp2p"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
@@ -45,9 +46,8 @@ import (
 	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
 	"github.com/libp2p/go-msgio"
 	"github.com/multiformats/go-multiaddr"
-	"google.golang.org/protobuf/proto"
-	"github.com/ipfs/go-cid"
 	"github.com/multiformats/go-multihash"
+	"google.golang.org/protobuf/proto"
 )
 
 const (
@@ -619,20 +619,24 @@ func serviceNameToCID(name string) (cid.Cid, error) {
 }
 
 func (n *SamNode) RegisterService(ctx context.Context, serviceName string) error {
-	n.servicesMu.Lock()
-	n.services[serviceName] = true
-	n.servicesMu.Unlock()
-
-	// Announce to DHT
 	c, err := serviceNameToCID(serviceName)
 	if err != nil {
 		return err
 	}
 
-	logger.Infof("[ServiceRegistry] Registering service %s (CID: %s)", serviceName, c)
-	if n.DHT != nil {
-		return n.DHT.Provide(ctx, c, true)
+	if n.DHT == nil {
+		return fmt.Errorf("DHT not initialized")
 	}
+
+	if err := n.DHT.Provide(ctx, c, true); err != nil {
+		return err
+	}
+
+	n.servicesMu.Lock()
+	n.services[serviceName] = true
+	n.servicesMu.Unlock()
+
+	logger.Infof("[ServiceRegistry] Registering service %s (CID: %s)", serviceName, c)
 	return nil
 }
 
@@ -656,6 +660,10 @@ func (n *SamNode) FindProviders(ctx context.Context, serviceName string) ([]peer
 	c, err := serviceNameToCID(serviceName)
 	if err != nil {
 		return nil, err
+	}
+
+	if n.DHT == nil {
+		return nil, fmt.Errorf("DHT not initialized")
 	}
 
 	providers := n.DHT.FindProvidersAsync(ctx, c, 20)

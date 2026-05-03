@@ -242,6 +242,7 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
       --listen "/ip4/0.0.0.0/udp/5001/quic-v1" \
       --listen "/ip4/0.0.0.0/tcp/5002" \
       --bind-addr "0.0.0.0:8080" \
+      --api-token "secret-token" \
       --mesh "e2e-mesh" >/dev/null
 
     MESH_CONTAINERS+=("${name}")
