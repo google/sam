@@ -47,6 +47,18 @@ spec:
         - containerPort: 9090
           protocol: TCP
           name: metrics
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: metrics
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: metrics
+          initialDelaySeconds: 15
+          periodSeconds: 20
         args:
         - "--listen=/ip4/0.0.0.0/tcp/4001,/ip4/0.0.0.0/udp/4001/quic-v1"
         - "--external-multiaddr=${EXTERNAL_MULTIADDR}"
