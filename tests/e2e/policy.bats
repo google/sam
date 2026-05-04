@@ -188,6 +188,7 @@ EOF"
     "sam-hub:local" \
     --issuer "http://mock-oidc:18080" \
     --client-id "sam-e2e" \
+    --allowed-audiences "sam-e2e" \
     --key "${key}" \
     --listen "/ip4/0.0.0.0/udp/4001/quic-v1" \
     --listen "/ip4/0.0.0.0/tcp/4002" \
