@@ -240,7 +240,7 @@ EOF"
   
   for ((i=0; i<30; i++)); do
     local output
-    output="$(docker run --rm --network "${MESH_NETWORK}" -v "$(pwd)/bin/mcp-client:/mcp-client" python:3.12 /mcp-client -url "http://sam-node-2:8080/mcp/events" 2>/dev/null)"
+    output="$(docker run --rm --network "${MESH_NETWORK}" -v "$(pwd)/bin/mcp-client:/mcp-client" python:3.12 /mcp-client -url "http://sam-node-2:8080/mcp/events" -tool "get_mesh_info" 2>/dev/null)"
     TARGET_PEER_ID=$(echo "${output}" | grep -oE '12D3Koo[a-zA-Z0-9]+' | grep -v "${hub_id}" | grep -v "${node2_id}" | head -n 1)
     if [[ -n "${TARGET_PEER_ID}" ]]; then
       break
