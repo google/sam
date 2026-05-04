@@ -166,7 +166,10 @@ jobs:
           export EXTERNAL_MULTIADDR="${{ vars.EXTERNAL_MULTIADDR }}"
           export NAMESPACE="sam-${ENV_NAME}"
           export IMAGE_TAG="${{ env.IMAGE_TAG }}"
-          
+          export GCP_PROJECT_ID="${{ vars.GCP_PROJECT_ID }}"
+          export CLUSTER_REGION="${{ vars.CLUSTER_REGION }}"
+          export CLUSTER_NAME="${{ vars.CLUSTER_NAME }}"
+
           envsubst < .github/k8s/sam-hub-template.yaml | kubectl apply -f -
           
           kubectl rollout status deployment/sam-hub-${ENV_NAME} -n ${NAMESPACE} --timeout=120s || {
