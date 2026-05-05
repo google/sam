@@ -58,6 +58,7 @@ class Handler(BaseHTTPRequestHandler):
                 'issuer': 'http://mock-oidc:18080',
                 'authorization_endpoint': 'http://mock-oidc:18080/auth',
                 'token_endpoint': 'http://mock-oidc:18080/token',
+                'device_authorization_endpoint': 'http://mock-oidc:18080/device/code',
                 'jwks_uri': 'http://mock-oidc:18080/keys'
             }
             data = json.dumps(body).encode('utf-8')
@@ -80,10 +81,25 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(b'ok')
 
     def do_POST(self):
+        if self.path == '/device/code':
+            body = {
+                'device_code': 'dev_code_123',
+                'user_code': 'ABCD-1234',
+                'verification_uri': 'http://example.com/verify',
+                'expires_in': 60,
+                'interval': 1
+            }
+            data = json.dumps(body).encode('utf-8')
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
         if self.path == '/token':
             payload = {
                 'iss': 'http://mock-oidc:18080',
-                'aud': 'sam-e2e',
+                'aud': 'sam-mesh-audience',
                 'sub': 'test-user',
                 'exp': int(time.time()) + 3600,
                 'roles': ['admin', 'user']
@@ -91,6 +107,7 @@ class Handler(BaseHTTPRequestHandler):
             token = jwt.encode(payload, PRIVATE_KEY, algorithm='RS256', headers={'kid': 'test-key-id'})
             body = {
                 'access_token': token,
+                'id_token': token,
                 'token_type': 'Bearer',
                 'expires_in': 3600
             }

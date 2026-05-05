@@ -60,7 +60,7 @@ teardown() {
     -v "${data_vol}:/root/.config/sam-mesh" \
     -i \
     "sam-node:local" \
-    login --hub "/dns4/sam-hub/tcp/4002/p2p/${hub_peer_id}" --token-url "http://mock-oidc:18080/token"
+    login --hub "/dns4/sam-hub/tcp/4002/p2p/${hub_peer_id}" --token-url "http://mock-oidc:18080/token" --device-auth-url "http://mock-oidc:18080/device/code"
     
   # Now run the node with the stored identity
   docker run -d \

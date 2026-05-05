@@ -14,7 +14,7 @@ The documentation here is intentionally small and aligned with what is implement
 3. Persist identity in local node store
 4. Run long-lived hub and node processes
 5. Run local and containerized BATS tests
-6. Expose local tools and mesh info via MCP server on a Unix socket
+6. Expose local tools and mesh info via MCP server over HTTP SSE
 7. Automated peer discovery via DHT and GossipSub events
 
 ## Start Here

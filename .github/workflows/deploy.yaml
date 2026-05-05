@@ -54,7 +54,7 @@ jobs:
       with:
         context: .
         file: Dockerfile.sam-hub
-        platforms: linux/amd64,linux/arm64
+        platforms: ${{ github.ref_type == 'tag' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
         push: true
         tags: ${{ steps.meta-hub.outputs.tags }}
         labels: ${{ steps.meta-hub.outputs.labels }}
@@ -76,7 +76,7 @@ jobs:
       with:
         context: .
         file: Dockerfile.sam-node
-        platforms: linux/amd64,linux/arm64
+        platforms: ${{ github.ref_type == 'tag' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
         push: true
         tags: ${{ steps.meta-node.outputs.tags }}
         labels: ${{ steps.meta-node.outputs.labels }}
@@ -121,8 +121,41 @@ jobs:
           export NAMESPACE="sam-${ENV_NAME}"
           export CANARY_NAMESPACE="sam-canary-${ENV_NAME}"
           
+          kubectl create namespace dex --dry-run=client -o yaml | kubectl apply -f -
           kubectl create namespace ${NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -
           kubectl create namespace ${CANARY_NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Provision Dex Secrets
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GITHUB_CLIENT_ID: ${{ secrets.GHUB_CLIENT_ID }}
+          GITHUB_CLIENT_SECRET: ${{ secrets.GHUB_CLIENT_SECRET }}
+          CLI_OAUTH_SECRET: ${{ secrets.CLI_OAUTH_SECRET }}
+        run: |
+          # Declaratively apply secrets without writing them to disk
+          kubectl create secret generic dex-secrets \
+            --namespace=dex \
+            --from-literal=google-client-id="${GOOGLE_CLIENT_ID}" \
+            --from-literal=google-client-secret="${GOOGLE_CLIENT_SECRET}" \
+            --from-literal=github-client-id="${GITHUB_CLIENT_ID}" \
+            --from-literal=github-client-secret="${GITHUB_CLIENT_SECRET}" \
+            --from-literal=cli-oauth-secret="${CLI_OAUTH_SECRET}" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Deploy Dex Resources
+        run: |
+          # Apply the Dex manifests
+          kubectl apply -f .github/k8s/dex-config.yaml
+          kubectl apply -f .github/k8s/dex-deployment.yaml
+
+          # Force a restart to pick up any changes to the secrets, and wait for readiness
+          kubectl rollout restart deployment/dex -n dex
+          kubectl rollout status deployment/dex -n dex --timeout=120s || {
+            echo "Dex Deployment failed! Rolling back..."
+            kubectl rollout undo deployment/dex -n dex
+            exit 1
+          }
 
       - name: Deploy Hub
         run: |
@@ -133,7 +166,10 @@ jobs:
           export EXTERNAL_MULTIADDR="${{ vars.EXTERNAL_MULTIADDR }}"
           export NAMESPACE="sam-${ENV_NAME}"
           export IMAGE_TAG="${{ env.IMAGE_TAG }}"
-          
+          export GCP_PROJECT_ID="${{ vars.GCP_PROJECT_ID }}"
+          export CLUSTER_REGION="${{ vars.CLUSTER_REGION }}"
+          export CLUSTER_NAME="${{ vars.CLUSTER_NAME }}"
+
           envsubst < .github/k8s/sam-hub-template.yaml | kubectl apply -f -
           
           kubectl rollout status deployment/sam-hub-${ENV_NAME} -n ${NAMESPACE} --timeout=120s || {
@@ -149,7 +185,7 @@ jobs:
           export CANARY_NAMESPACE="sam-canary-${ENV_NAME}"
           export IMAGE_TAG="${{ env.IMAGE_TAG }}"
           
-          envsubst < .github/k8s/sam-canary-template.yaml | kubectl apply -f -
+          envsubst < .github/k8s/sam-node-template.yaml | kubectl apply -f -
           
           kubectl rollout status deployment/sam-canary-${ENV_NAME} -n ${CANARY_NAMESPACE} --timeout=120s || {
             echo "Canary Deployment failed! Rolling back..."

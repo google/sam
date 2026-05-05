@@ -55,14 +55,14 @@ Or pass a token directly:
 
 ## Local MCP Server
 
-Each `sam-node` exposes a Model Context Protocol (MCP) server over a Unix domain socket to allow local processes to discover the capabilities of the local agent and get information from the mesh.
+Each `sam-node` exposes a Model Context Protocol (MCP) server over HTTP Server-Sent Events (SSE) to allow local processes to discover the capabilities of the local agent and get information from the mesh.
 
-By default, the socket listens at `<datadir>/mcp.sock`. You can change this with the `--mcp-socket` flag.
+By default, the server listens at `127.0.0.1:8080`. You can change this with the `--bind-addr` flag.
 
 To query the mesh info via the MCP server, you can use the `mcp-client` tool provided in the repository:
 
 ```bash
-./bin/mcp-client -socket /path/to/mcp.sock
+./bin/mcp-client -url http://127.0.0.1:8080/mcp/events
 ```
 
 ## Testing

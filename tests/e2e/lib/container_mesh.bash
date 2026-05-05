@@ -121,7 +121,7 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
   mesh_get_node_count_via_mcp() {
     local idx="$1"
     local output
-    output="$(timeout 15s docker run --rm --network "${MESH_NETWORK}" -v "$(pwd)/bin/mcp-client:/mcp-client" python:3.12 /mcp-client -url "http://sam-node-${idx}:8080/mcp/events" 2>/dev/null)"
+    output="$(timeout 15s docker run --rm --network "${MESH_NETWORK}" -v "$(pwd)/bin/mcp-client:/mcp-client" python:3.12 /mcp-client -url "http://sam-node-${idx}:8080/mcp/events" -tool "get_mesh_info" 2>/dev/null)"
     echo "${output}" | jq '.known_peers | length'
   }
 
@@ -132,7 +132,7 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
     local i
     for ((i=0; i<timeout_s; i++)); do
       local output
-      output="$(timeout 15s docker run --rm --network "${MESH_NETWORK}" -v "$(pwd)/bin/mcp-client:/mcp-client" python:3.12 /mcp-client -url "http://sam-node-${idx}:8080/mcp/events" 2>/dev/null)"
+      output="$(timeout 15s docker run --rm --network "${MESH_NETWORK}" -v "$(pwd)/bin/mcp-client:/mcp-client" python:3.12 /mcp-client -url "http://sam-node-${idx}:8080/mcp/events" -tool "get_mesh_info" 2>/dev/null)"
       echo "Node ${idx} get_mesh_info raw output: ${output}"
       local count
       count="$(echo "${output}" | jq '.known_peers | length')"
@@ -152,7 +152,7 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
     local i
     for ((i=0; i<timeout_s; i++)); do
       local output
-      output="$(timeout 15s docker run --rm --network "${MESH_NETWORK}" -v "$(pwd)/bin/mcp-client:/mcp-client" python:3.12 /mcp-client -url "http://sam-node-${idx}:8080/mcp/events" 2>/dev/null)"
+      output="$(timeout 15s docker run --rm --network "${MESH_NETWORK}" -v "$(pwd)/bin/mcp-client:/mcp-client" python:3.12 /mcp-client -url "http://sam-node-${idx}:8080/mcp/events" -tool "get_mesh_info" 2>/dev/null)"
       echo "[$(date +%T)] Node ${idx} get_mesh_info raw output: ${output}"
       local connected
       connected="$(echo "${output}" | jq -r --arg peer "$target_peer" '.connected_peers | index($peer) != null')"
@@ -172,7 +172,7 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
     local i
     for ((i=0; i<timeout_s; i++)); do
       local output
-      output="$(timeout 15s docker run --rm --network "${MESH_NETWORK}" -v "$(pwd)/bin/mcp-client:/mcp-client" python:3.12 /mcp-client -url "http://sam-node-${idx}:8080/mcp/events" 2>/dev/null)"
+      output="$(timeout 15s docker run --rm --network "${MESH_NETWORK}" -v "$(pwd)/bin/mcp-client:/mcp-client" python:3.12 /mcp-client -url "http://sam-node-${idx}:8080/mcp/events" -tool "get_mesh_info" 2>/dev/null)"
       echo "[$(date +%T)] Node ${idx} get_mesh_info raw output: ${output}"
       local connected
       connected="$(echo "${output}" | jq -r --arg peer "$target_peer" '.connected_peers | index($peer) != null')"
@@ -209,6 +209,7 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
       "sam-hub:local" \
       --issuer "http://mock-oidc:18080" \
       --client-id "sam-e2e" \
+      --allowed-audiences "sam-e2e,sam-mesh-audience" \
       --key "${key}" \
       --listen "/ip4/0.0.0.0/udp/4001/quic-v1" \
       --listen "/ip4/0.0.0.0/tcp/4002" \
@@ -240,7 +241,7 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
       /usr/local/bin/sam-node run \
       ${flags} \
       --hub "/dns4/sam-hub/tcp/4002/p2p/${hub_peer_id}" \
-      --client-id "sam-e2e" \
+      --client-id "sam-mesh-audience" \
       --client-secret "sam-e2e-secret" \
       --token-url "http://mock-oidc:18080/token" \
       --listen "/ip4/0.0.0.0/udp/5001/quic-v1" \

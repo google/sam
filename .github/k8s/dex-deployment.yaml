@@ -1,0 +1,170 @@
+# Create the Google-managed certificate
+# gcloud certificate-manager certificates create dex-cert \
+#   --domains="auth.sam-mesh.dev" --global
+
+# Create a Certificate Map
+# gcloud certificate-manager maps create dex-cert-map
+
+# Bind the certificate to the map for your domain
+# gcloud certificate-manager maps entries create dex-cert-map-entry \
+#   --map="dex-cert-map" \
+#   --hostname="auth.sam-mesh.dev" \
+#   --certificates="dex-cert"
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: dex
+  namespace: dex
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dex
+  namespace: dex
+  labels:
+    app: dex
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: dex
+  template:
+    metadata:
+      labels:
+        app: dex
+    spec:
+      serviceAccountName: dex
+      containers:
+      - image: ghcr.io/dexidp/dex:v2.38.0
+        name: dex
+        command: ["/usr/local/bin/dex", "serve", "/etc/dex/cfg/config.yaml"]
+        ports:
+        - name: http
+          containerPort: 5556
+        volumeMounts:
+        - name: config
+          mountPath: /etc/dex/cfg
+        env:
+        # Dynamically pulls the values injected by your GitHub Actions pipeline
+        - name: GOOGLE_CLIENT_ID
+          valueFrom:
+            secretKeyRef:
+              name: dex-secrets
+              key: google-client-id
+        - name: GOOGLE_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: dex-secrets
+              key: google-client-secret
+        - name: GITHUB_CLIENT_ID
+          valueFrom:
+            secretKeyRef:
+              name: dex-secrets
+              key: github-client-id
+        - name: GITHUB_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: dex-secrets
+              key: github-client-secret
+        - name: CLI_OAUTH_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: dex-secrets
+              key: cli-oauth-secret
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 5556
+            scheme: HTTP
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
+      volumes:
+      - name: config
+        configMap:
+          name: dex
+          items:
+          - key: config.yaml
+            path: config.yaml
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dex
+  namespace: dex
+spec:
+  ports:
+  - name: dex
+    port: 5556
+    protocol: TCP
+    targetPort: 5556
+  selector:
+    app: dex
+---
+apiVersion: networking.gke.io/v1
+kind: HealthCheckPolicy
+metadata:
+  name: dex-healthcheck
+  namespace: dex
+spec:
+  default:
+    checkIntervalSec: 15
+    timeoutSec: 5
+    healthyThreshold: 1
+    unhealthyThreshold: 2
+    config:
+      type: HTTP
+      httpHealthCheck:
+        requestPath: /healthz
+  targetRef:
+    group: ""
+    kind: Service
+    name: dex
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: external-http-gateway
+  namespace: dex
+  annotations:
+    # Attach the Certificate Map
+    networking.gke.io/certmap: dex-cert-map
+spec:
+  # This provisions a Global External Application Load Balancer
+  gatewayClassName: gke-l7-global-external-managed
+  addresses:
+  - type: NamedAddress
+    value: auth-sam-mash # reserved static IP name
+  listeners:
+  - name: https
+    protocol: HTTPS
+    port: 443
+    allowedRoutes:
+      namespaces:
+        from: Same
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: dex-route
+  namespace: dex
+spec:
+  parentRefs:
+  - name: external-http-gateway
+  hostnames:
+  - "auth.sam-mesh.dev"
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /
+    backendRefs:
+    - name: dex
+      port: 5556

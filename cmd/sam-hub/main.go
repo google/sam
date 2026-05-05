@@ -95,23 +95,25 @@ var (
 	tlsKeyFile            string
 	tlsCAFile             string
 	externalMultiaddrs    []string
+	allowedAudiencesFlag  string
 )
 
 var logger = golog.Logger("sam-hub")
 
 // Hub handles identity bridging and network discovery
 type Hub struct {
-	Host          host.Host
-	DHT           *dht.IpfsDHT
-	Providers     map[string]*oidc.Provider
-	KeyRing       *KeyRing
-	MeshID        string
-	PubSub        *pubsub.PubSub
-	EventTopic    *pubsub.Topic
-	gater         *hubConnGate
-	Policy        *api.PolicyConfig
-	limiter       *rate.Limiter
-	ExternalAddrs []string
+	Host             host.Host
+	DHT              *dht.IpfsDHT
+	Providers        map[string]*oidc.Provider
+	KeyRing          *KeyRing
+	MeshID           string
+	PubSub           *pubsub.PubSub
+	EventTopic       *pubsub.Topic
+	gater            *hubConnGate
+	Policy           *api.PolicyConfig
+	limiter          *rate.Limiter
+	ExternalAddrs    []string
+	AllowedAudiences []string
 }
 
 // NewHub starts a host supporting both QUIC and TCP (with TLS 1.3)
@@ -189,16 +191,28 @@ func NewHub(ctx context.Context, policy *api.PolicyConfig) (*Hub, error) {
 		return nil, fmt.Errorf("failed to create keyring: %w", err)
 	}
 
+	var auds []string
+	for _, aud := range strings.Split(allowedAudiencesFlag, ",") {
+		aud = strings.TrimSpace(aud)
+		if aud != "" {
+			auds = append(auds, aud)
+		}
+	}
+	if len(auds) == 0 {
+		auds = []string{api.DefaultAudience}
+	}
+
 	hub := &Hub{
-		Host:          h,
-		DHT:           kadDHT,
-		gater:         gater,
-		Providers:     providers,
-		KeyRing:       kr,
-		MeshID:        meshName,
-		Policy:        policy,
-		limiter:       rate.NewLimiter(rate.Limit(EnrollRateLimit), EnrollBurst),
-		ExternalAddrs: externalMultiaddrs,
+		Host:             h,
+		DHT:              kadDHT,
+		gater:            gater,
+		Providers:        providers,
+		KeyRing:          kr,
+		MeshID:           meshName,
+		Policy:           policy,
+		limiter:          rate.NewLimiter(rate.Limit(EnrollRateLimit), EnrollBurst),
+		ExternalAddrs:    externalMultiaddrs,
+		AllowedAudiences: auds,
 	}
 
 	h.Network().Notify(&notifier{hub: hub})
@@ -255,7 +269,7 @@ func (h *Hub) handleEnroll(s network.Stream) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), JWTVerificationTimeout)
 	defer cancel()
-	claims, token, err := h.parseAndVerifyJWT(ctx, req.Jwt)
+	claims, token, err := h.parseAndVerifyJWT(ctx, req.Jwt, h.AllowedAudiences)
 	if err != nil {
 		logger.Errorw("JWT verification failed", "peer_id", remotePeer, "error", err)
 		samHubEnrollmentTotal.WithLabelValues("failed").Inc()
@@ -359,18 +373,26 @@ func (h *Hub) sendEnrollResponse(s network.Stream, biscuitToken []byte, errMsg s
 	}
 }
 
-func (h *Hub) parseAndVerifyJWT(ctx context.Context, jwtStr string) (jwt.MapClaims, *oidc.IDToken, error) {
+func (h *Hub) parseAndVerifyJWT(ctx context.Context, jwtStr string, allowedAudiences []string) (jwt.MapClaims, *oidc.IDToken, error) {
 	jwtParser := jwt.Parser{}
 	jwtToken, _, err := jwtParser.ParseUnverified(jwtStr, jwt.MapClaims{})
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to parse JWT: %w", err)
 	}
+
+	// 1. Defend against downgrade attacks immediately
+	alg, ok := jwtToken.Header["alg"].(string)
+	if !ok || alg == "" || strings.ToLower(alg) == "none" {
+		return nil, nil, fmt.Errorf("invalid or missing alg header")
+	}
+
 	claims, ok := jwtToken.Claims.(jwt.MapClaims)
 	if !ok {
 		return nil, nil, fmt.Errorf("invalid JWT claims")
 	}
 	iss, _ := claims["iss"].(string)
 
+	// 2. Extract the audience
 	var aud string
 	switch a := claims["aud"].(type) {
 	case string:
@@ -385,25 +407,33 @@ func (h *Hub) parseAndVerifyJWT(ctx context.Context, jwtStr string) (jwt.MapClai
 		return nil, nil, fmt.Errorf("missing aud claim")
 	}
 
-	alg, ok := jwtToken.Header["alg"].(string)
-	if !ok || alg == "" {
-		return nil, nil, fmt.Errorf("missing alg header")
+	// 3. Verify the audience matches one of your expected tenants/platforms
+	validAudience := false
+	for _, allowed := range allowedAudiences {
+		if aud == allowed {
+			validAudience = true
+			break
+		}
+	}
+	if !validAudience {
+		return nil, nil, fmt.Errorf("untrusted audience: %s", aud)
 	}
 
+	// 4. Route to the correct provider
 	provider, ok := h.Providers[iss]
 	if !ok {
 		return nil, nil, fmt.Errorf("unknown issuer: %s", iss)
 	}
 
-	verifier := provider.Verifier(&oidc.Config{ClientID: clientID})
+	// 5. Verify cryptographic signature, bypassing the strict single-clientID check
+	// because we already validated the audience against our allowed list above.
+	verifier := provider.Verifier(&oidc.Config{
+		SkipClientIDCheck: true,
+	})
 
 	token, err := verifier.Verify(ctx, jwtStr)
 	if err != nil {
 		return nil, nil, fmt.Errorf("JWT validation failed: %w", err)
-	}
-
-	if alg == "none" {
-		return nil, nil, fmt.Errorf("invalid alg claim")
 	}
 
 	return claims, token, nil
@@ -672,6 +702,7 @@ func main() {
 	rootCmd.Flags().StringSliceVar(&listenAddrs, "listen", []string{"/ip4/0.0.0.0/udp/8080/quic-v1", "/ip4/0.0.0.0/tcp/8080"}, "libp2p Listen Addrs")
 	rootCmd.Flags().StringSliceVar(&externalMultiaddrs, "external-multiaddr", []string{}, "External multiaddrs to announce")
 	rootCmd.Flags().StringVar(&meshName, "mesh", DefaultMeshName, "Mesh federation name")
+	rootCmd.Flags().StringVar(&allowedAudiencesFlag, "allowed-audiences", api.DefaultAudience, "Comma-separated list of allowed OIDC audiences")
 	rootCmd.Flags().BoolVar(&insecureSkipTLSVerify, "insecure-skip-tls-verify", false, "Skip TLS verification for OIDC issuers")
 	rootCmd.Flags().StringVar(&logLevel, "log-level", "info", "Log level (debug, info, warn, error)")
 	rootCmd.Flags().StringVar(&policyFile, "policy-file", DefaultPolicyFile, "Path to policies.yaml")

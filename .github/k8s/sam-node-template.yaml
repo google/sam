@@ -22,13 +22,19 @@ data:
         # We call the injected busybox binary explicitly
         command: ["/shared/busybox", "sh", "-c", "while read line; do echo '{\"jsonrpc\": \"2.0\", \"id\": 1, \"result\": {\"status\": \"canary-alive\"}}'; done"]
 ---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: sam-node-sa
+  namespace: sam-canary-${ENV_NAME}
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: sam-canary-${ENV_NAME}
   namespace: sam-canary-${ENV_NAME}
 spec:
-  replicas: 2
+  replicas: 3
   selector:
     matchLabels:
       app: sam-canary-${ENV_NAME}
@@ -37,6 +43,7 @@ spec:
       labels:
         app: sam-canary-${ENV_NAME}
     spec:
+      serviceAccountName: sam-node-sa
       # 1. The Init Container: Copies busybox to the shared volume
       initContainers:
       - name: inject-busybox
@@ -54,6 +61,7 @@ spec:
           - "run"
           - "--config=/etc/sam/sam-node.yaml"
           - "--hub=/dns4/sam-hub-${ENV_NAME}.sam-${ENV_NAME}.svc.cluster.local/udp/4001/quic-v1"
+          - "--jwt-path=/var/run/secrets/tokens/sam-token"
         ports:
         - containerPort: 8080
         resources:
@@ -68,6 +76,9 @@ spec:
           mountPath: /etc/sam
         - name: shared-bin
           mountPath: /shared
+        - name: sam-token
+          mountPath: /var/run/secrets/tokens
+          readOnly: true
           
       # 3. The Dummy MCP Backend Sidecar
       - name: mock-mcp-server
@@ -83,3 +94,10 @@ spec:
           name: sam-canary-config-${ENV_NAME}
       - name: shared-bin
         emptyDir: {}
+      - name: sam-token
+        projected:
+          sources:
+          - serviceAccountToken:
+              path: sam-token
+              expirationSeconds: 3600
+              audience: "sam-hub-audience"

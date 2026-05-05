@@ -25,7 +25,7 @@ metadata:
   name: sam-hub-${ENV_NAME}
   namespace: ${NAMESPACE}
 spec:
-  replicas: 1
+  replicas: 3
   selector:
     matchLabels:
       app: sam-hub-${ENV_NAME}
@@ -36,17 +36,36 @@ spec:
     spec:
       containers:
       - name: sam-hub
-        image: your-registry/sam-hub:${IMAGE_TAG}
+        image: ghcr.io/google/sam-hub:${IMAGE_TAG}
         ports:
         - containerPort: 4001
           protocol: TCP
+          name: libp2p-tcp
         - containerPort: 4001
           protocol: UDP
+          name: libp2p-udp
+        - containerPort: 9090
+          protocol: TCP
+          name: metrics
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: metrics
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: metrics
+          initialDelaySeconds: 15
+          periodSeconds: 20
         args:
         - "--listen=/ip4/0.0.0.0/tcp/4001,/ip4/0.0.0.0/udp/4001/quic-v1"
         - "--external-multiaddr=${EXTERNAL_MULTIADDR}"
-        
-        # Critical for multi-tenant clusters: prevent testnet from starving prod
+        # 1. Trust Dex for humans/Google/GitHub. 2. Trust GKE for internal Canaries.
+        - "--issuer=https://auth.sam-mesh.dev,https://container.googleapis.com/v1/projects/${GCP_PROJECT_ID}/locations/${CLUSTER_REGION}/clusters/${CLUSTER_NAME}"
+        # 1. Dex CLI client ID. 2. Canary projected volume audience.
+        - "--allowed-audiences=sam-mesh-audience,sam-hub-audience"
         resources:
           requests:
             cpu: 100m
@@ -54,3 +73,17 @@ spec:
           limits:
             cpu: 500m
             memory: 512Mi
+---
+apiVersion: monitoring.googleapis.com/v1
+kind: PodMonitoring
+metadata:
+  name: sam-hub-monitor-${ENV_NAME}
+  namespace: ${NAMESPACE}
+spec:
+  selector:
+    matchLabels:
+      app: sam-hub-${ENV_NAME}
+  endpoints:
+  - port: metrics
+    interval: 30s
+    path: /metrics

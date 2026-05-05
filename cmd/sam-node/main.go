@@ -39,7 +39,7 @@ const (
 	DefaultMeshName          = "public-mesh"
 	DefaultDiscoveryInterval = "2s"
 	DefaultHubURL            = "http://localhost:8080"
-	DefaultConfigFile   = "sam-node.yaml"
+	DefaultConfigFile        = "sam-node.yaml"
 
 	// Renewal timing defaults
 	DefaultRenewalFallback = 50 * time.Minute
@@ -56,13 +56,15 @@ var (
 	clientIDFlag          string
 	clientSecretFlag      string
 	tokenURLFlag          string
+	deviceAuthURLFlag     string
+	audienceFlag          string
 	hubPublicKeyFlag      string
 	bindAddrFlag          string
 	meshFlag              string
 	discoveryIntervalFlag string
 	enableRelayFlag       bool
 	logLevelFlag          string
-	configFile       string
+	configFile            string
 	keyGracePeriodFlag    time.Duration
 
 	apiTokenFlag string
@@ -161,7 +163,7 @@ func main() {
 				if len(token) == 0 {
 					logger.Fatal("No JWT or stored identity found. Cannot authenticate.")
 				}
-				fmt.Println("Using stored identity.")
+				logger.Infoln("Using stored identity.")
 
 				if len(hubPubKey) == 0 {
 					logger.Fatal("Hub public key not found in store and not provided. Cannot verify peers.")
@@ -172,6 +174,7 @@ func main() {
 					logger.Fatalf("Failed to start mesh node: %v", err)
 				}
 			} else {
+				// We have a new JWT (from flag or interactive login), need to enroll
 				var initHubAddrs []multiaddr.Multiaddr
 				ma, err := multiaddr.NewMultiaddr(hubAddr)
 				if err == nil {
@@ -256,12 +259,20 @@ func main() {
 				}
 			}()
 
-			if tokenURLFlag == "" {
-				logger.Fatal("--token-url is required for login")
-			}
-
 			dummyNode := &SamNode{Store: store}
-			jwtStr, err := dummyNode.InteractiveLogin(ctx, tokenURLFlag)
+			deviceAuthURL := deviceAuthURLFlag
+			if deviceAuthURL == "" {
+				deviceAuthURL = "https://oauth2.googleapis.com/device/code"
+			}
+			tokenURL := tokenURLFlag
+			if tokenURL == "" {
+				tokenURL = "https://oauth2.googleapis.com/token"
+			}
+			clientID := clientIDFlag
+			if clientID == "" {
+				clientID = api.DefaultAudience
+			}
+			jwtStr, err := dummyNode.InteractiveLogin(ctx, deviceAuthURL, tokenURL, clientID, audienceFlag)
 			if err != nil {
 				logger.Fatalf("Failed to get token: %v", err)
 			}
@@ -322,6 +333,8 @@ func main() {
 	rootCmd.PersistentFlags().StringVar(&hubAddr, "hub", DefaultHubURL, "Hub URL")
 	rootCmd.PersistentFlags().StringVar(&configFile, "config", DefaultConfigFile, "Path to sam-node.yaml configuration file")
 	rootCmd.PersistentFlags().StringVar(&tokenURLFlag, "token-url", "", "OIDC Token URL")
+	rootCmd.PersistentFlags().StringVar(&deviceAuthURLFlag, "device-auth-url", "", "OIDC Device Authorization URL")
+	rootCmd.PersistentFlags().StringVar(&audienceFlag, "audience", api.DefaultAudience, "OIDC Audience")
 
 	rootCmd.AddCommand(runCmd)
 	rootCmd.AddCommand(loginCmd)

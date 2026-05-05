@@ -16,6 +16,9 @@ package integration_test
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -32,19 +35,43 @@ func TestSamNodeLogin(t *testing.T) {
 		"XDG_CONFIG_HOME="+filepath.Join(tmpHome, ".config"),
 	)
 
-	// We simulate the user pasting the token followed by a newline.
-	stdin := "test-jwt-token\n"
+	// Mock OIDC server for device flow
+	mux := http.NewServeMux()
+	mux.HandleFunc("/device/code", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
+			"device_code":      "dev_code_123",
+			"user_code":        "ABCD-1234",
+			"verification_uri": "http://example.com/verify",
+			"expires_in":       60,
+			"interval":         1,
+		}); err != nil {
+			t.Errorf("Failed to encode response: %v", err)
+		}
+	})
+	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(map[string]string{
+			"access_token": "test-jwt-token",
+			"id_token":     "test-jwt-token",
+		}); err != nil {
+			t.Errorf("Failed to encode response: %v", err)
+		}
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
 
 	stdout, stderr, err := runCommand(
 		t,
 		repoRoot(t),
 		5*time.Second,
 		env,
-		stdin,
+		"", // No stdin needed
 		nodeBin,
 		"login",
 		"--hub", hubAddr,
-		"--token-url", "http://example.com/token",
+		"--token-url", server.URL+"/token",
+		"--device-auth-url", server.URL+"/device/code",
 	)
 	if err != nil {
 		t.Fatalf("login command failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)

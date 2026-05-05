@@ -21,6 +21,8 @@ const MCPProtocolID protocol.ID = "/sam/mcp/1.0.0"
 const GossipEvents = "/sam/mesh/events/v1"
 const AuthProtocolID protocol.ID = "/sam/auth/1.0.0"
 
+const DefaultAudience = "sam-mesh-audience"
+
 // Biscuit fact names
 const (
 	FactExpiration    = "expiration"

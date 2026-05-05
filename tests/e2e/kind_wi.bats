@@ -88,7 +88,7 @@ metadata:
   name: sam-hub-config
 data:
   SAM_OIDC_ISSUER: "${issuer}"
-  SAM_OIDC_ID: "sam-hub-audience"
+  SAM_OIDC_ID: "sam-mesh-audience"
   SAM_HUB_KEY: "0000000000000000000000000000000000000000000000000000000000000000"
 ---
 apiVersion: apps/v1
@@ -190,7 +190,7 @@ spec:
           - serviceAccountToken:
               path: sam-token
               expirationSeconds: 3600
-              audience: "sam-hub-audience"
+              audience: "sam-mesh-audience"
 EOF
 
   # Wait for Node to be ready

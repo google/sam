@@ -1,0 +1,53 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dex
+  namespace: dex
+data:
+  config.yaml: |
+    # The public URL where Dex is accessible
+    issuer: https://auth.sam-mesh.dev
+
+    storage:
+      type: kubernetes
+      config:
+        inCluster: true
+
+    web:
+      # Serve plain HTTP locally; the GKE Ingress handles HTTPS termination
+      http: 0.0.0.0:5556
+
+    oauth2:
+      # Explicitly enable the Device Flow for headless CLI usage
+      grantTypes:
+        - "authorization_code"
+        - "refresh_token"
+        - "urn:ietf:params:oauth:grant-type:device_code"
+      skipApprovalScreen: true
+
+    connectors:
+    - type: google
+      id: google
+      name: Google
+      config:
+        clientID: $GOOGLE_CLIENT_ID
+        clientSecret: $GOOGLE_CLIENT_SECRET
+        redirectURI: https://auth.sam-mesh.dev/callback
+
+    - type: github
+      id: github
+      name: GitHub
+      config:
+        clientID: $GITHUB_CLIENT_ID
+        clientSecret: $GITHUB_CLIENT_SECRET
+        redirectURI: https://auth.sam-mesh.dev/callback
+
+    staticClients:
+    # This ID becomes the 'aud' claim in the JWT consumed by sam-hub
+    - id: sam-mesh-audience
+      name: 'SAM Mesh CLI'
+      secret: $CLI_OAUTH_SECRET
+      public: true # Allows PKCE flow for CLIs without exposing the secret
+      redirectURIs:
+      - 'http://127.0.0.1:8080/callback'
+      - 'http://localhost:8080/callback'

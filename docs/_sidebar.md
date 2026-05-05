@@ -1,5 +1,6 @@
 - [Overview](#/README.md)
 - [Quick Start](#/quickstart.md)
+- [Agent Integration](#/agent_integration.md)
 - [CLI Reference](#/cli/reference.md)
 - [Testing](#/testing.md)
 - [License](https://github.com/aojea/sam/blob/main/LICENSE)
