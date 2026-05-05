@@ -418,7 +418,9 @@ func (n *SamNode) Enroll(ctx context.Context, jwt string) error {
 	}
 	httpReq.Header.Set("Content-Type", "application/x-protobuf")
 
-	client := &http.Client{}
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+	}
 	resp, err := client.Do(httpReq)
 	if err != nil {
 		return fmt.Errorf("HTTP request failed: %v", err)
