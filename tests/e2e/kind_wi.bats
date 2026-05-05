@@ -183,6 +183,8 @@ spec:
         - "http://sam-hub:9090"
         - "--jwt-path"
         - "/var/run/secrets/tokens/sam-token"
+        - "--api-token"
+        - "secret-token"
         volumeMounts:
         - name: sam-token
           mountPath: /var/run/secrets/tokens

@@ -23,7 +23,7 @@ teardown() {
 
 @test "sam-node run with stored identity reaches online state" {
   log_file="$TEST_TMPDIR/run.log"
-  "$SAM_NODE_BINARY" run --listen /ip4/127.0.0.1/udp/0/quic-v1 --listen /ip4/127.0.0.1/tcp/0 >"$log_file" 2>&1 &
+  "$SAM_NODE_BINARY" run --listen /ip4/127.0.0.1/udp/0/quic-v1 --listen /ip4/127.0.0.1/tcp/0 --api-token "dummy-token" --bind-addr "127.0.0.1:0" >"$log_file" 2>&1 &
   pid=$!
 
   online=""
@@ -37,6 +37,11 @@ teardown() {
 
   kill "$pid" >/dev/null 2>&1 || true
   wait "$pid" >/dev/null 2>&1 || true
+
+  if [[ "$online" != "yes" ]]; then
+    echo "Test failed. Node logs:"
+    cat "$log_file"
+  fi
 
   [[ "$online" == "yes" ]]
 }

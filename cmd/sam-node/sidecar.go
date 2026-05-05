@@ -31,7 +31,7 @@ import (
 	libp2phttp "github.com/libp2p/go-libp2p-http"
 )
 
-func startSidecarServer(node *SamNode, addr, token, certFile, keyFile, caFile string) {
+func startSidecarServer(node *SamNode, addr, token, certFile, keyFile, caFile string) error {
 	mux := http.NewServeMux()
 
 	// Public endpoints
@@ -62,16 +62,14 @@ func startSidecarServer(node *SamNode, addr, token, certFile, keyFile, caFile st
 
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
-		logger.Errorf("Failed to listen on %s: %v", addr, err)
-		return
+		return fmt.Errorf("failed to listen on %s: %w", addr, err)
 	}
 
 	actualAddr := listener.Addr().String()
 	node.BoundHTTPAddr = actualAddr
 
 	if (certFile != "") != (keyFile != "") {
-		logger.Errorf("Both --tls-cert and --tls-key must be provided to enable TLS")
-		return
+		return fmt.Errorf("both --tls-cert and --tls-key must be provided to enable TLS")
 	}
 
 	if certFile != "" && keyFile != "" {
@@ -80,8 +78,7 @@ func startSidecarServer(node *SamNode, addr, token, certFile, keyFile, caFile st
 		if caFile != "" {
 			caCert, err := os.ReadFile(caFile)
 			if err != nil {
-				logger.Errorf("Failed to read CA cert: %v", err)
-				return
+				return fmt.Errorf("failed to read CA cert: %w", err)
 			}
 			caCertPool := x509.NewCertPool()
 			caCertPool.AppendCertsFromPEM(caCert)
@@ -91,8 +88,7 @@ func startSidecarServer(node *SamNode, addr, token, certFile, keyFile, caFile st
 		}
 
 		if !isMTLS && token == "" {
-			logger.Errorf("Token is mandatory when not using mTLS")
-			return
+			return fmt.Errorf("token is mandatory when not using mTLS")
 		}
 
 		server.TLSConfig = tlsConfig
@@ -104,8 +100,7 @@ func startSidecarServer(node *SamNode, addr, token, certFile, keyFile, caFile st
 		}()
 	} else {
 		if token == "" {
-			logger.Errorf("Token is mandatory when not using mTLS")
-			return
+			return fmt.Errorf("token is mandatory when not using mTLS")
 		}
 		logger.Infof("Starting MCP server on TCP address %s", actualAddr)
 		go func() {
@@ -114,6 +109,7 @@ func startSidecarServer(node *SamNode, addr, token, certFile, keyFile, caFile st
 			}
 		}()
 	}
+	return nil
 }
 
 func handleHealthz(w http.ResponseWriter, r *http.Request) {

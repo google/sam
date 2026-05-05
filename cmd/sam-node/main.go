@@ -230,7 +230,7 @@ func main() {
 			// Register static services from config
 			if nodeConfig != nil && len(nodeConfig.Services) > 0 {
 				if err := node.RegisterStaticServices(context.Background(), nodeConfig.Services); err != nil {
-					logger.Errorf("Failed to register static services: %v", err)
+					logger.Fatalf("Failed to register static services: %v", err)
 				}
 			}
 
@@ -240,7 +240,9 @@ func main() {
 			node.Host.SetStreamHandler(api.AuthProtocolID, node.HandleAuthHandshake)
 
 			// Start Sidecar API Server (multiplexed with MCP)
-			startSidecarServer(node, bindAddrFlag, apiTokenFlag, tlsCertFlag, tlsKeyFlag, tlsCAFlag)
+			if err := startSidecarServer(node, bindAddrFlag, apiTokenFlag, tlsCertFlag, tlsKeyFlag, tlsCAFlag); err != nil {
+				logger.Fatalf("Failed to start sidecar server: %v", err)
+			}
 
 			fmt.Printf("SAM Node Online.\nPeerID: %s\nListening on: %v\n", node.Host.ID(), node.Host.Addrs())
 

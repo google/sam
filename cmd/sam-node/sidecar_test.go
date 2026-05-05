@@ -18,9 +18,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"google.golang.org/protobuf/encoding/protojson"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -28,6 +28,7 @@ import (
 	"github.com/libp2p/go-libp2p"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"google.golang.org/protobuf/encoding/protojson"
 )
 
 func TestWithAuth(t *testing.T) {
@@ -342,5 +343,26 @@ func TestHandleRegisterService_Validation(t *testing.T) {
 				t.Errorf("expected status %d, got %d, body: %s", tt.expectedStatus, rr.Code, rr.Body.String())
 			}
 		})
+	}
+}
+
+func TestStartSidecarServer_TokenMandatory(t *testing.T) {
+	node := &SamNode{}
+	
+	// Test case: No token, no TLS
+	err := startSidecarServer(node, "127.0.0.1:0", "", "", "", "")
+	if err == nil {
+		t.Fatal("Expected startSidecarServer to fail without token and TLS, but it succeeded")
+	}
+	if !strings.Contains(err.Error(), "token is mandatory when not using mTLS") {
+		t.Fatalf("Expected error to contain 'token is mandatory when not using mTLS', got: %v", err)
+	}
+
+	// Test case: Token provided, should not fail immediately
+	err = startSidecarServer(node, "127.0.0.1:0", "some-token", "", "", "")
+	if err != nil {
+		if strings.Contains(err.Error(), "token is mandatory when not using mTLS") {
+			t.Fatalf("Did not expect 'token is mandatory' error when token is provided, got: %v", err)
+		}
 	}
 }

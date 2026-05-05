@@ -111,7 +111,8 @@ teardown() {
     "sam-node:local" \
     run \
     --hub "http://sam-hub:9090" \
-    --jwt-path "/var/run/secrets/tokens/sa-token"
+    --jwt-path "/var/run/secrets/tokens/sa-token" \
+    --api-token "secret-token"
 
   mesh_wait_for_log "${node_name}" "SAM Node Online" 20
   

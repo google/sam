@@ -139,3 +139,61 @@ func TestStaticServiceRegistrationRequiresConnection(t *testing.T) {
 		t.Fatalf("Expected RegisterStaticServices to succeed after enrollment, but failed: %v", err)
 	}
 }
+
+func TestStaticServiceRegistrationCommandFailure(t *testing.T) {
+	// 1. Setup mock hub
+	_, hubURL := startMockLibp2pHub(t)
+
+	// 2. Create temp store
+	tmpDir := t.TempDir()
+	store, err := NewStore(tmpDir)
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+
+	// 3. Create dummy keys
+	priv, _, err := crypto.GenerateEd25519Key(rand.Reader)
+	if err != nil {
+		t.Fatalf("failed to generate libp2p key: %v", err)
+	}
+
+	// 4. Create Node with empty hub addrs initially
+	node, err := NewSamNode(context.Background(), priv, nil, []multiaddr.Multiaddr{}, store, "test-mesh", "100ms", []string{"/ip4/127.0.0.1/tcp/0"}, false, nil, 24*time.Hour)
+	if err != nil {
+		t.Fatalf("failed to create node: %v", err)
+	}
+	defer func() {
+		if err := node.Host.Close(); err != nil {
+			t.Errorf("failed to close node host: %v", err)
+		}
+	}()
+
+	// 5. Enroll and connect to hub (which sets up DHT and hub connection)
+	oldHubAddr := hubAddr
+	hubAddr = hubURL
+	defer func() { hubAddr = oldHubAddr }()
+
+	ctx := context.Background()
+	err = node.Enroll(ctx, "dummy-jwt")
+	if err != nil {
+		t.Fatalf("failed to enroll: %v", err)
+	}
+
+	// 6. Try to register a service with a non-existent command
+	services := []api.ServiceConfig{
+		{
+			Type:        "mcp",
+			Name:        "test-stdio-fail",
+			Description: "Test Stdio Failure",
+			Command:     []string{"/non-existent/binary"},
+		},
+	}
+
+	err = node.RegisterStaticServices(ctx, services)
+	if err == nil {
+		t.Fatal("Expected RegisterStaticServices to fail with non-existent command, but it succeeded")
+	}
+	if !strings.Contains(err.Error(), "failed to create stdio bridge") {
+		t.Fatalf("Expected error to contain 'failed to create stdio bridge', got: %v", err)
+	}
+}
