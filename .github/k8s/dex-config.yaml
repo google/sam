@@ -51,3 +51,5 @@ data:
       redirectURIs:
       - 'http://127.0.0.1:8080/callback'
       - 'http://localhost:8080/callback'
+      - 'https://auth.sam-mesh.dev/device/callback'
+      - '/device/callback'
