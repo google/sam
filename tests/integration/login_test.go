@@ -37,6 +37,16 @@ func TestSamNodeLogin(t *testing.T) {
 
 	// Mock OIDC server for device flow
 	mux := http.NewServeMux()
+	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
+			"issuer":                        "http://" + r.Host,
+			"token_endpoint":                "http://" + r.Host + "/token",
+			"device_authorization_endpoint": "http://" + r.Host + "/device/code",
+		}); err != nil {
+			t.Errorf("Failed to encode response: %v", err)
+		}
+	})
 	mux.HandleFunc("/device/code", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(map[string]interface{}{
@@ -70,8 +80,7 @@ func TestSamNodeLogin(t *testing.T) {
 		nodeBin,
 		"login",
 		"--hub", hubAddr,
-		"--token-url", server.URL+"/token",
-		"--device-auth-url", server.URL+"/device/code",
+		"--oidc-issuer", server.URL,
 	)
 	if err != nil {
 		t.Fatalf("login command failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)

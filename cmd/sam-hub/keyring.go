@@ -192,6 +192,18 @@ func (kr *KeyRing) GetAllValidKeys() []ed25519.PrivateKey {
 	return keys
 }
 
+// GetAllValidPublicKeys returns all public keys that are still valid.
+func (kr *KeyRing) GetAllValidPublicKeys() []ed25519.PublicKey {
+	kr.mu.RLock()
+	defer kr.mu.RUnlock()
+
+	keys := []ed25519.PublicKey{ed25519.PublicKey(kr.Current.Public)}
+	for _, kp := range kr.Previous {
+		keys = append(keys, ed25519.PublicKey(kp.Public))
+	}
+	return keys
+}
+
 // Close closes the BoltDB database.
 func (kr *KeyRing) Close() error {
 	return kr.db.Close()

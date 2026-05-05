@@ -149,10 +149,15 @@ func (n *SamNode) WithBiscuitAuth(next network.StreamHandler) network.StreamHand
 			var jwtStr string
 			var err error
 
-			if tokenURLFlag != "" {
-				jwtStr, err = n.FetchJWT(context.Background(), tokenURLFlag, clientIDFlag, clientSecretFlag)
+			if oidcIssuerFlag != "" {
+				tokenURL, err := n.DiscoverTokenURL(context.Background(), oidcIssuerFlag)
 				if err != nil {
-					logger.Errorf("[Auth] Failed to fetch JWT for fallback: %v", err)
+					logger.Errorf("[Auth] Failed to discover OIDC endpoints for fallback: %v", err)
+				} else {
+					jwtStr, err = n.FetchJWT(context.Background(), tokenURL, clientIDFlag, clientSecretFlag)
+					if err != nil {
+						logger.Errorf("[Auth] Failed to fetch JWT for fallback: %v", err)
+					}
 				}
 			} else if jwtPathFlag != "" {
 				data, err := os.ReadFile(jwtPathFlag)

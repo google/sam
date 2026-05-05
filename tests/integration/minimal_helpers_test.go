@@ -18,7 +18,9 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -28,9 +30,7 @@ import (
 	"github.com/google/sam/api"
 	"github.com/libp2p/go-libp2p"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
-	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/libp2p/go-msgio"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -104,8 +104,24 @@ func startMockHub(t *testing.T, pubKeys ...[]byte) (peer.ID, string) {
 	}
 
 	var callCount int
-	h.SetStreamHandler(api.EnrollProtocolID, func(s network.Stream) {
-		defer func() { _ = s.Close() }()
+
+	// Start HTTP server for enrollment
+	mux := http.NewServeMux()
+	mux.HandleFunc("/register", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "Failed to read body", http.StatusBadRequest)
+			return
+		}
+		var req api.EnrollRequest
+		if err := proto.Unmarshal(body, &req); err != nil {
+			http.Error(w, "Invalid request format", http.StatusBadRequest)
+			return
+		}
 
 		var pubKey []byte
 		if len(pubKeys) == 0 {
@@ -120,28 +136,29 @@ func startMockHub(t *testing.T, pubKeys ...[]byte) (peer.ID, string) {
 			}
 		}
 
-		// The following constants are mock values used for testing.
-		// 'mock-biscuit-token' is a dummy token string.
 		resp := &api.EnrollResponse{
 			BiscuitToken: []byte("mock-biscuit-token"),
 			HubPublicKey: pubKey,
 			HubAddresses: []string{h.Addrs()[0].String() + "/p2p/" + h.ID().String()},
+			KnownPeers:   []string{},
 		}
 		data, err := proto.Marshal(resp)
 		if err != nil {
-			fmt.Printf("Failed to marshal mock response: %v\n", err)
+			http.Error(w, "Failed to marshal response", http.StatusInternalServerError)
 			return
 		}
-		writer := msgio.NewVarintWriter(s)
-		if err := writer.WriteMsg(data); err != nil {
-			fmt.Printf("Failed to write mock response: %v\n", err)
-		}
+		w.Header().Set("Content-Type", "application/x-protobuf")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(data)
 	})
 
+	httpServer := httptest.NewServer(mux)
+
 	t.Cleanup(func() {
+		httpServer.Close()
 		_ = kdht.Close()
 		_ = h.Close()
 	})
 
-	return h.ID(), h.Addrs()[0].String() + "/p2p/" + h.ID().String()
+	return h.ID(), httpServer.URL
 }

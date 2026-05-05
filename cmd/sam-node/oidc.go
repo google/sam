@@ -24,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2/clientcredentials"
 )
 
@@ -177,4 +178,38 @@ func (n *SamNode) InteractiveLogin(ctx context.Context, deviceAuthURL, tokenURL,
 			}
 		}
 	}
+}
+
+// DiscoverTokenURL discovers the token URL from the OIDC issuer.
+func (n *SamNode) DiscoverTokenURL(ctx context.Context, issuerURL string) (string, error) {
+	provider, err := oidc.NewProvider(ctx, issuerURL)
+	if err != nil {
+		return "", fmt.Errorf("failed to create OIDC provider: %w", err)
+	}
+	var claims struct {
+		TokenURL string `json:"token_endpoint"`
+	}
+	if err := provider.Claims(&claims); err != nil {
+		return "", fmt.Errorf("failed to extract claims: %w", err)
+	}
+	if claims.TokenURL == "" {
+		return "", fmt.Errorf("token_endpoint not found in discovery document")
+	}
+	return claims.TokenURL, nil
+}
+
+// DiscoverEndpoints discovers both token and device auth endpoints.
+func (n *SamNode) DiscoverEndpoints(ctx context.Context, issuerURL string) (tokenURL, deviceURL string, err error) {
+	provider, err := oidc.NewProvider(ctx, issuerURL)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to create OIDC provider: %w", err)
+	}
+	var claims struct {
+		TokenURL  string `json:"token_endpoint"`
+		DeviceURL string `json:"device_authorization_endpoint"`
+	}
+	if err := provider.Claims(&claims); err != nil {
+		return "", "", fmt.Errorf("failed to extract claims: %w", err)
+	}
+	return claims.TokenURL, claims.DeviceURL, nil
 }

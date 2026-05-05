@@ -15,11 +15,14 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"strings"
@@ -29,7 +32,6 @@ import (
 	"github.com/google/sam/api"
 	golog "github.com/ipfs/go-log/v2"
 	"github.com/libp2p/go-libp2p/core/crypto"
-	"github.com/libp2p/go-msgio"
 	"github.com/multiformats/go-multiaddr"
 	"github.com/spf13/cobra"
 	"google.golang.org/protobuf/proto"
@@ -55,7 +57,7 @@ var (
 	jwtPathFlag           string
 	clientIDFlag          string
 	clientSecretFlag      string
-	tokenURLFlag          string
+	oidcIssuerFlag        string
 	deviceAuthURLFlag     string
 	audienceFlag          string
 	hubPublicKeyFlag      string
@@ -148,11 +150,15 @@ func main() {
 					logger.Fatalf("Failed to read JWT file: %v", err)
 				}
 				jwtStr = strings.TrimSpace(string(data))
-			} else if tokenURLFlag != "" {
-				logger.Info("Fetching JWT via OIDC Client Credentials...")
+			} else if oidcIssuerFlag != "" {
+				logger.Info("Discovering OIDC endpoints...")
 				dummyNode := &SamNode{}
-				var err error
-				jwtStr, err = dummyNode.FetchJWT(context.Background(), tokenURLFlag, clientIDFlag, clientSecretFlag)
+				tokenURL, err := dummyNode.DiscoverTokenURL(context.Background(), oidcIssuerFlag)
+				if err != nil {
+					logger.Fatalf("Failed to discover OIDC endpoints: %v", err)
+				}
+				logger.Info("Fetching JWT via OIDC Client Credentials...")
+				jwtStr, err = dummyNode.FetchJWT(context.Background(), tokenURL, clientIDFlag, clientSecretFlag)
 				if err != nil {
 					logger.Fatalf("Failed to fetch JWT: %v", err)
 				}
@@ -176,26 +182,28 @@ func main() {
 			} else {
 				// We have a new JWT (from flag or interactive login), need to enroll
 				var initHubAddrs []multiaddr.Multiaddr
-				ma, err := multiaddr.NewMultiaddr(hubAddr)
-				if err == nil {
-					initHubAddrs = []multiaddr.Multiaddr{ma}
-				} else {
-					// Try parsing as host:port
-					host, port, err := net.SplitHostPort(hubAddr)
+				if !strings.HasPrefix(hubAddr, "http://") && !strings.HasPrefix(hubAddr, "https://") {
+					ma, err := multiaddr.NewMultiaddr(hubAddr)
 					if err == nil {
-						ip := net.ParseIP(host)
-						var maddr multiaddr.Multiaddr
-						if ip != nil {
-							maddr, _ = multiaddr.NewMultiaddr(fmt.Sprintf("/ip4/%s/tcp/%s", host, port))
-						} else {
-							maddr, _ = multiaddr.NewMultiaddr(fmt.Sprintf("/dns4/%s/tcp/%s", host, port))
-						}
-						initHubAddrs = []multiaddr.Multiaddr{maddr}
+						initHubAddrs = []multiaddr.Multiaddr{ma}
 					} else {
-						if len(hubAddrs) > 0 {
-							initHubAddrs = hubAddrs
+						// Try parsing as host:port
+						host, port, err := net.SplitHostPort(hubAddr)
+						if err == nil {
+							ip := net.ParseIP(host)
+							var maddr multiaddr.Multiaddr
+							if ip != nil {
+								maddr, _ = multiaddr.NewMultiaddr(fmt.Sprintf("/ip4/%s/tcp/%s", host, port))
+							} else {
+								maddr, _ = multiaddr.NewMultiaddr(fmt.Sprintf("/dns4/%s/tcp/%s", host, port))
+							}
+							initHubAddrs = []multiaddr.Multiaddr{maddr}
 						} else {
-							logger.Fatalf("Invalid hub address and no stored config: %v. You can use community maintained meshes like hub.sam-mesh.dev (Production) or bananas.sam-mesh.dev (Testnet)", err)
+							if len(hubAddrs) > 0 {
+								initHubAddrs = hubAddrs
+							} else {
+								logger.Fatalf("Invalid hub address and no stored config: %v. You can use community maintained meshes like hub.sam-mesh.dev (Production) or bananas.sam-mesh.dev (Testnet)", err)
+							}
 						}
 					}
 				}
@@ -220,7 +228,7 @@ func main() {
 			}
 
 			// Start renewal loop
-			node.StartRenewalLoop(ctx, tokenURLFlag, clientIDFlag, clientSecretFlag, jwtPathFlag)
+			node.StartRenewalLoop(ctx, oidcIssuerFlag, clientIDFlag, clientSecretFlag, jwtPathFlag)
 
 			node.Host.SetStreamHandler(api.AuthProtocolID, node.HandleAuthHandshake)
 
@@ -261,10 +269,20 @@ func main() {
 
 			dummyNode := &SamNode{Store: store}
 			deviceAuthURL := deviceAuthURLFlag
+			tokenURL := ""
+
+			if oidcIssuerFlag != "" {
+				logger.Info("Discovering OIDC endpoints...")
+				var err error
+				tokenURL, deviceAuthURL, err = dummyNode.DiscoverEndpoints(context.Background(), oidcIssuerFlag)
+				if err != nil {
+					logger.Fatalf("Failed to discover OIDC endpoints: %v", err)
+				}
+			}
+
 			if deviceAuthURL == "" {
 				deviceAuthURL = "https://oauth2.googleapis.com/device/code"
 			}
-			tokenURL := tokenURLFlag
 			if tokenURL == "" {
 				tokenURL = "https://oauth2.googleapis.com/token"
 			}
@@ -279,22 +297,24 @@ func main() {
 
 			// Connect to Hub and Enroll
 			var initHubAddrs []multiaddr.Multiaddr
-			ma, err := multiaddr.NewMultiaddr(hubAddr)
-			if err == nil {
-				initHubAddrs = []multiaddr.Multiaddr{ma}
-			} else {
-				host, port, err := net.SplitHostPort(hubAddr)
+			if !strings.HasPrefix(hubAddr, "http://") && !strings.HasPrefix(hubAddr, "https://") {
+				ma, err := multiaddr.NewMultiaddr(hubAddr)
 				if err == nil {
-					ip := net.ParseIP(host)
-					var maddr multiaddr.Multiaddr
-					if ip != nil {
-						maddr, _ = multiaddr.NewMultiaddr(fmt.Sprintf("/ip4/%s/tcp/%s", host, port))
-					} else {
-						maddr, _ = multiaddr.NewMultiaddr(fmt.Sprintf("/dns4/%s/tcp/%s", host, port))
-					}
-					initHubAddrs = []multiaddr.Multiaddr{maddr}
+					initHubAddrs = []multiaddr.Multiaddr{ma}
 				} else {
-					logger.Fatalf("Invalid hub address: %v", err)
+					host, port, err := net.SplitHostPort(hubAddr)
+					if err == nil {
+						ip := net.ParseIP(host)
+						var maddr multiaddr.Multiaddr
+						if ip != nil {
+							maddr, _ = multiaddr.NewMultiaddr(fmt.Sprintf("/ip4/%s/tcp/%s", host, port))
+						} else {
+							maddr, _ = multiaddr.NewMultiaddr(fmt.Sprintf("/dns4/%s/tcp/%s", host, port))
+						}
+						initHubAddrs = []multiaddr.Multiaddr{maddr}
+					} else {
+						logger.Fatalf("Invalid hub address: %v", err)
+					}
 				}
 			}
 
@@ -332,7 +352,7 @@ func main() {
 	runCmd.Flags().StringVar(&tlsCAFlag, "tls-ca", "", "Path to TLS CA for sidecar API mTLS")
 	rootCmd.PersistentFlags().StringVar(&hubAddr, "hub", DefaultHubURL, "Hub URL")
 	rootCmd.PersistentFlags().StringVar(&configFile, "config", DefaultConfigFile, "Path to sam-node.yaml configuration file")
-	rootCmd.PersistentFlags().StringVar(&tokenURLFlag, "token-url", "", "OIDC Token URL")
+	rootCmd.PersistentFlags().StringVar(&oidcIssuerFlag, "oidc-issuer", "", "OIDC Issuer URL")
 	rootCmd.PersistentFlags().StringVar(&deviceAuthURLFlag, "device-auth-url", "", "OIDC Device Authorization URL")
 	rootCmd.PersistentFlags().StringVar(&audienceFlag, "audience", api.DefaultAudience, "OIDC Audience")
 
@@ -377,16 +397,6 @@ func getOrGenerateKey(s *Store) crypto.PrivKey {
 	return priv
 }
 func (n *SamNode) Enroll(ctx context.Context, jwt string) error {
-	if n.HubPeerID == "" {
-		return fmt.Errorf("not connected to any hub")
-	}
-
-	s, err := n.Host.NewStream(ctx, n.HubPeerID, api.EnrollProtocolID)
-	if err != nil {
-		return fmt.Errorf("failed to open enroll stream: %v", err)
-	}
-	defer func() { _ = s.Close() }()
-
 	req := &api.EnrollRequest{
 		Jwt:    jwt,
 		PeerId: n.Host.ID().String(),
@@ -396,55 +406,92 @@ func (n *SamNode) Enroll(ctx context.Context, jwt string) error {
 		return fmt.Errorf("failed to marshal enroll request: %v", err)
 	}
 
-	writer := msgio.NewVarintWriter(s)
-	if err := writer.WriteMsg(data); err != nil {
-		return fmt.Errorf("failed to write enroll request: %v", err)
+	if !strings.HasPrefix(hubAddr, "http://") && !strings.HasPrefix(hubAddr, "https://") {
+		return fmt.Errorf("hub address must be an HTTP or HTTPS URL for enrollment: %s", hubAddr)
 	}
+	url := hubAddr + "/register"
+	logger.Infof("Enrolling via HTTP at %s", url)
 
-	reader := msgio.NewVarintReaderSize(s, 1024*64)
-	respMsg, err := reader.ReadMsg()
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(data))
 	if err != nil {
-		return fmt.Errorf("failed to read enroll response: %v", err)
+		return fmt.Errorf("failed to create HTTP request: %v", err)
 	}
-	defer reader.ReleaseMsg(respMsg)
+	httpReq.Header.Set("Content-Type", "application/x-protobuf")
 
-	var resp api.EnrollResponse
-	if err := proto.Unmarshal(respMsg, &resp); err != nil {
-		return fmt.Errorf("failed to unmarshal enroll response: %v", err)
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+	}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return fmt.Errorf("HTTP request failed: %v", err)
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			logger.Errorf("failed to close response body: %v", err)
+		}
+	}()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("enrollment failed with status %s: %s", resp.Status, string(body))
 	}
 
-	if resp.ErrorMessage != "" {
-		return fmt.Errorf("enrollment failed: %s", resp.ErrorMessage)
+	respData, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read response body: %v", err)
 	}
 
-	if len(resp.BiscuitToken) == 0 {
+	var enrollResp api.EnrollResponse
+	if err := proto.Unmarshal(respData, &enrollResp); err != nil {
+		return fmt.Errorf("failed to unmarshal response: %v", err)
+	}
+
+	if enrollResp.ErrorMessage != "" {
+		return fmt.Errorf("enrollment failed: %s", enrollResp.ErrorMessage)
+	}
+
+	if len(enrollResp.BiscuitToken) == 0 {
 		return fmt.Errorf("received empty biscuit token")
 	}
 
-	if err := n.Store.SaveIdentity(resp.BiscuitToken); err != nil {
+	if err := n.Store.SaveIdentity(enrollResp.BiscuitToken); err != nil {
 		return fmt.Errorf("failed to save identity: %v", err)
 	}
 
-	if err := n.Store.SaveIdentityExpiration(resp.Expiration); err != nil {
+	if err := n.Store.SaveIdentityExpiration(enrollResp.Expiration); err != nil {
 		return fmt.Errorf("failed to save identity expiration: %v", err)
 	}
 
-	if err := n.Store.SaveHubConfig(resp.HubPublicKey, resp.HubAddresses); err != nil {
+	if err := n.Store.SaveHubConfig(enrollResp.HubPublicKey, enrollResp.HubAddresses); err != nil {
 		return fmt.Errorf("failed to save hub config: %v", err)
 	}
 
 	n.keysMu.Lock()
-	n.trustedKeys = append(n.trustedKeys, TrustedKey{Key: ed25519.PublicKey(resp.HubPublicKey), ReceivedAt: time.Now()})
+	n.trustedKeys = append(n.trustedKeys, TrustedKey{Key: ed25519.PublicKey(enrollResp.HubPublicKey), ReceivedAt: time.Now()})
 	n.keysMu.Unlock()
 
 	// Add known peers from response
 	n.mu.Lock()
-	for _, p := range resp.KnownPeers {
+	for _, p := range enrollResp.KnownPeers {
 		n.knownPeers[p] = true
 		fmt.Printf("[Enroll] Added known peer from hub: %s\n", p)
 	}
 	n.mu.Unlock()
 
-	fmt.Println("Successfully enrolled and stored identity and hub config.")
+	// Connect and Auth to hub after enrollment to join the mesh
+	for _, addrStr := range enrollResp.HubAddresses {
+		addr, err := multiaddr.NewMultiaddr(addrStr)
+		if err != nil {
+			logger.Warnf("Failed to parse hub address from response: %v", err)
+			continue
+		}
+		if err := n.ConnectAndAuthWithHub(ctx, addr); err != nil {
+			logger.Warnf("Failed to connect and auth with hub after enrollment: %v", err)
+		} else {
+			break
+		}
+	}
+
+	fmt.Println("Successfully enrolled via HTTP and stored identity and hub config.")
 	return nil
 }

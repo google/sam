@@ -38,6 +38,7 @@ teardown() {
     --key "${key}" \
     --listen "/ip4/0.0.0.0/udp/4001/quic-v1" \
     --listen "/ip4/0.0.0.0/tcp/4002" \
+    --external-multiaddr "/dns4/sam-hub/tcp/4002" \
     --mesh "e2e-mesh" \
     --key-rotation-interval 5s >/dev/null
 

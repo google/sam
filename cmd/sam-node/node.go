@@ -191,32 +191,11 @@ func NewSamNode(ctx context.Context, privKey crypto.PrivKey, hubPubKey ed25519.P
 		return nil, fmt.Errorf("failed to bootstrap DHT: %w", err)
 	}
 
-	// Bootstrap: Connect to the Hub
+	// Bootstrap: Connect and Auth to the Hub
 	for _, addr := range hubAddrs {
-		addrInfo, err := peer.AddrInfoFromP2pAddr(addr)
-		if err != nil || addrInfo == nil {
-			// Try to connect without Peer ID in address
-			addrInfo = &peer.AddrInfo{
-				Addrs: []multiaddr.Multiaddr{addr},
-			}
-			logger.Warn("[AuthN] Connecting to hub without Peer ID verification in address.")
-		}
-		if err := h.Connect(ctx, *addrInfo); err != nil {
-			logger.Warnf("[AuthN] Failed to bootstrap to hub %s: %v", addr, err)
+		if err := node.ConnectAndAuthWithHub(ctx, addr); err != nil {
+			logger.Warnf("[AuthN] Failed to bootstrap and auth with hub %s: %v", addr, err)
 		} else {
-			if addrInfo.ID == "" {
-				// Discover Peer ID from connection
-				for _, c := range h.Network().Conns() {
-					if c.RemoteMultiaddr().Equal(addr) {
-						node.HubPeerID = c.RemotePeer()
-						logger.Infof("[AuthN] Connected to hub (discovered PeerID): %s", node.HubPeerID)
-						break
-					}
-				}
-			} else {
-				node.HubPeerID = addrInfo.ID
-				logger.Infof("[AuthN] Connected to hub: %s", addrInfo.ID)
-			}
 			break
 		}
 	}
@@ -301,7 +280,70 @@ func NewSamNode(ctx context.Context, privKey crypto.PrivKey, hubPubKey ed25519.P
 	return node, nil
 }
 
-func (n *SamNode) StartRenewalLoop(ctx context.Context, tokenURL, clientID, clientSecret, jwtPath string) {
+func (n *SamNode) ConnectAndAuthWithHub(ctx context.Context, addr multiaddr.Multiaddr) error {
+	addrInfo, err := peer.AddrInfoFromP2pAddr(addr)
+	if err != nil {
+		return fmt.Errorf("failed to get AddrInfo from multiaddr: %w", err)
+	}
+
+	if err := n.Host.Connect(ctx, *addrInfo); err != nil {
+		return fmt.Errorf("failed to connect to hub %s: %w", addr, err)
+	}
+
+	n.HubPeerID = addrInfo.ID
+	logger.Infof("[AuthN] Connected to hub: %s", addrInfo.ID)
+
+	// Load biscuit from store
+	biscuitBytes, err := n.Store.LoadIdentity()
+	if err != nil {
+		return fmt.Errorf("failed to load identity from store: %w", err)
+	}
+	if len(biscuitBytes) == 0 {
+		return fmt.Errorf("no identity biscuit found in store")
+	}
+
+	// Open auth stream
+	s, err := n.Host.NewStream(ctx, addrInfo.ID, api.AuthProtocolID)
+	if err != nil {
+		return fmt.Errorf("failed to open auth stream to hub: %w", err)
+	}
+	defer func() {
+		if err := s.Close(); err != nil {
+			logger.Errorf("failed to close stream: %v", err)
+		}
+	}()
+
+	writer := msgio.NewVarintWriter(s)
+	authFrame := &api.AuthFrame{Biscuit: biscuitBytes}
+	data, err := proto.Marshal(authFrame)
+	if err != nil {
+		return fmt.Errorf("failed to marshal auth frame: %w", err)
+	}
+	if err := writer.WriteMsg(data); err != nil {
+		return fmt.Errorf("failed to write auth frame: %w", err)
+	}
+
+	reader := msgio.NewVarintReaderSize(s, 1024*64)
+	respMsg, err := reader.ReadMsg()
+	if err != nil {
+		return fmt.Errorf("failed to read auth response: %w", err)
+	}
+	defer reader.ReleaseMsg(respMsg)
+
+	var resp api.AuthResponse
+	if err := proto.Unmarshal(respMsg, &resp); err != nil {
+		return fmt.Errorf("failed to unmarshal auth response: %w", err)
+	}
+
+	if !resp.Success {
+		return fmt.Errorf("auth failed: %s", resp.Error)
+	}
+
+	logger.Infof("[AuthN] Successfully authenticated with hub via libp2p")
+	return nil
+}
+
+func (n *SamNode) StartRenewalLoop(ctx context.Context, issuerURL, clientID, clientSecret, jwtPath string) {
 	go func() {
 		for {
 			var renewAfter = DefaultRenewalFallback // Default fallback
@@ -329,8 +371,12 @@ func (n *SamNode) StartRenewalLoop(ctx context.Context, tokenURL, clientID, clie
 			case <-timer.C:
 				fmt.Println("Renewing enrollment...")
 				var newJWT string
-				if tokenURL != "" {
-					var err error
+				if issuerURL != "" {
+					tokenURL, err := n.DiscoverTokenURL(ctx, issuerURL)
+					if err != nil {
+						fmt.Printf("Failed to discover OIDC endpoints for renewal: %v\n", err)
+						continue
+					}
 					newJWT, err = n.FetchJWT(ctx, tokenURL, clientID, clientSecret)
 					if err != nil {
 						fmt.Printf("Failed to fetch JWT for renewal: %v\n", err)

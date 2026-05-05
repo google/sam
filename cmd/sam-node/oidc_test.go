@@ -92,3 +92,35 @@ func TestInteractiveLogin(t *testing.T) {
 		t.Errorf("Expected token 'id_token_abc', got '%s'", res.token)
 	}
 }
+
+func TestDiscoverEndpoints(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
+			"issuer":                        "http://" + r.Host,
+			"token_endpoint":                "http://" + r.Host + "/token",
+			"device_authorization_endpoint": "http://" + r.Host + "/device/code",
+		}); err != nil {
+			t.Errorf("Failed to encode response: %v", err)
+		}
+	})
+
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	node := &SamNode{}
+	ctx := context.Background()
+
+	tokenURL, deviceURL, err := node.DiscoverEndpoints(ctx, server.URL)
+	if err != nil {
+		t.Fatalf("DiscoverEndpoints failed: %v", err)
+	}
+
+	if tokenURL != server.URL+"/token" {
+		t.Errorf("Expected tokenURL %s, got %s", server.URL+"/token", tokenURL)
+	}
+	if deviceURL != server.URL+"/device/code" {
+		t.Errorf("Expected deviceURL %s, got %s", server.URL+"/device/code", deviceURL)
+	}
+}

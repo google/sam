@@ -38,7 +38,7 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
   }
 
   mesh_build_runtime_image() {
-    docker build \
+    docker build --no-cache \
       -f tests/e2e/docker/Dockerfile.sam-runtime \
       -t "${MESH_RUNTIME_IMAGE}" \
       . >/dev/null
@@ -47,9 +47,7 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
   mesh_setup_env() {
     mesh_cleanup_stale_resources
     
-    if ! docker image inspect "${MESH_RUNTIME_IMAGE}" >/dev/null 2>&1; then
-      mesh_build_runtime_image
-    fi
+    mesh_build_runtime_image
 
     MESH_PREFIX="mesh-${BATS_TEST_NUMBER}-$$-$(date +%s)"
     MESH_NETWORK="${MESH_PREFIX}-net"
@@ -213,6 +211,7 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
       --key "${key}" \
       --listen "/ip4/0.0.0.0/udp/4001/quic-v1" \
       --listen "/ip4/0.0.0.0/tcp/4002" \
+      --external-multiaddr "/dns4/sam-hub/tcp/4002" \
       --mesh "e2e-mesh" >/dev/null
 
     MESH_CONTAINERS+=("${name}")
@@ -240,10 +239,10 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
       "${MESH_RUNTIME_IMAGE}" \
       /usr/local/bin/sam-node run \
       ${flags} \
-      --hub "/dns4/sam-hub/tcp/4002/p2p/${hub_peer_id}" \
+      --hub "http://sam-hub:9090" \
       --client-id "sam-mesh-audience" \
       --client-secret "sam-e2e-secret" \
-      --token-url "http://mock-oidc:18080/token" \
+      --oidc-issuer "http://mock-oidc:18080" \
       --listen "/ip4/0.0.0.0/udp/5001/quic-v1" \
       --listen "/ip4/0.0.0.0/tcp/5002" \
       --bind-addr "0.0.0.0:8080" \

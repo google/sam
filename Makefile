@@ -67,7 +67,7 @@ docker-build-hub:
 	docker build -t sam-hub:local -f Dockerfile.sam-hub .
 
 docker-build-node:
-	docker build -t sam-node:local -f Dockerfile.sam-node .
+	docker build --no-cache -t sam-node:local -f Dockerfile.sam-node .
 
 docker-build-mock-oidc:
 	docker build -t sam-mock-oidc:local -f tests/e2e/docker/Dockerfile.mock-oidc .

@@ -127,8 +127,12 @@ metadata:
 spec:
   type: ClusterIP
   ports:
-  - port: 4002
+  - name: p2p
+    port: 4002
     targetPort: 4002
+  - name: http
+    port: 9090
+    targetPort: 9090
   selector:
     app: sam-hub
 EOF
@@ -176,7 +180,7 @@ spec:
         command: ["/sam-node", "run"]
         args:
         - "--hub"
-        - "/dns4/sam-hub/tcp/4002/p2p/${hub_peer_id}"
+        - "http://sam-hub:9090"
         - "--jwt-path"
         - "/var/run/secrets/tokens/sam-token"
         volumeMounts:

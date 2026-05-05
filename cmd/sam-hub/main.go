@@ -135,8 +135,9 @@ func NewHub(ctx context.Context, policy *api.PolicyConfig) (*Hub, error) {
 		libp2p.Security(libp2ptls.ID, libp2ptls.New),
 		libp2p.EnableRelayService(),
 		libp2p.ConnectionGater(gater),
-		libp2p.EnableNATService(),
 		libp2p.ConnectionManager(cm),
+		libp2p.EnableAutoNATv2(),
+		libp2p.EnableNATService(),
 	)
 	if err != nil {
 		return nil, err
@@ -167,7 +168,10 @@ func NewHub(ctx context.Context, policy *api.PolicyConfig) (*Hub, error) {
 			tr := &http.Transport{
 				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 			}
-			client := &http.Client{Transport: tr}
+			client := &http.Client{
+				Timeout:   30 * time.Second,
+				Transport: tr,
+			}
 			providerCtx = oidc.ClientContext(ctx, client)
 		}
 		provider, err := oidc.NewProvider(providerCtx, iss)
@@ -229,89 +233,53 @@ func NewHub(ctx context.Context, policy *api.PolicyConfig) (*Hub, error) {
 	return hub, nil
 }
 
-func (h *Hub) handleEnroll(s network.Stream) {
+func (h *Hub) handleAuthHandshake(s network.Stream) {
 	defer func() {
-		_ = s.Close()
+		if err := s.Close(); err != nil {
+			logger.Errorf("[AuthN] Failed to close auth stream: %v", err)
+		}
 	}()
 	remotePeer := s.Conn().RemotePeer()
-
-	if !h.limiter.Allow() {
-		logger.Warnw("Rate limit exceeded during enrollment", "peer_id", remotePeer)
-		samHubEnrollmentTotal.WithLabelValues("failed").Inc()
-		_ = s.Reset()
-		return
-	}
-
-	logger.Infow("New enrollment request", "peer_id", remotePeer)
 
 	reader := msgio.NewVarintReaderSize(s, 1024*64)
 	msg, err := reader.ReadMsg()
 	if err != nil {
-		logger.Errorw("Failed to read enrollment message", "peer_id", remotePeer, "error", err)
-		samHubEnrollmentTotal.WithLabelValues("failed").Inc()
+		logger.Errorf("[AuthN] Failed to read handshake from %s: %v", remotePeer, err)
 		return
 	}
 	defer reader.ReleaseMsg(msg)
 
-	var req api.EnrollRequest
-	if err := proto.Unmarshal(msg, &req); err != nil {
-		logger.Errorw("Failed to unmarshal enrollment request", "peer_id", remotePeer, "error", err)
-		samHubEnrollmentTotal.WithLabelValues("failed").Inc()
+	var exchange api.AuthFrame
+	if err := proto.Unmarshal(msg, &exchange); err != nil {
+		logger.Warnf("[AuthN] Invalid protobuf from %s", remotePeer)
 		return
 	}
 
-	if req.PeerId != remotePeer.String() {
-		logger.Warnw("Peer ID mismatch in enrollment", "peer_id", remotePeer, "requested_peer_id", req.PeerId)
-		samHubEnrollmentTotal.WithLabelValues("failed").Inc()
-		h.sendEnrollResponse(s, nil, "Peer ID mismatch", 0, nil, nil)
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), JWTVerificationTimeout)
-	defer cancel()
-	claims, token, err := h.parseAndVerifyJWT(ctx, req.Jwt, h.AllowedAudiences)
+	b, err := h.verifyBiscuit(exchange.Biscuit, remotePeer)
 	if err != nil {
-		logger.Errorw("JWT verification failed", "peer_id", remotePeer, "error", err)
-		samHubEnrollmentTotal.WithLabelValues("failed").Inc()
-		h.sendEnrollResponse(s, nil, err.Error(), 0, nil, nil)
+		logger.Warnf("[AuthN] Authorization failed for %s: %v", remotePeer, err)
 		return
 	}
 
-	biscuitData, err := h.mintBiscuitToken(claims, token, remotePeer)
-	if err != nil {
-		logger.Errorw("Biscuit minting failed", "peer_id", remotePeer, "error", err)
-		samHubEnrollmentTotal.WithLabelValues("failed").Inc()
-		h.sendEnrollResponse(s, nil, "Failed to mint biscuit", 0, nil, nil)
+	// Enforce hardware binding: token must include node(<remotePeerID>)
+	boundFact := biscuit.Fact{Predicate: biscuit.Predicate{
+		Name: "node",
+		IDs:  []biscuit.Term{biscuit.String(remotePeer.String())},
+	}}
+	if _, err := b.GetBlockID(boundFact); err != nil {
+		logger.Warnf("[AuthN] Token is not bound to peer %s", remotePeer)
 		return
 	}
 
+	logger.Infof("[AuthN] Successfully authenticated peer %s", remotePeer)
+
+	// Update active nodes gauge and gater state
 	h.gater.mu.Lock()
-	// Update active nodes gauge if this is a new node
 	if !h.gater.authenticated[remotePeer] {
 		samHubActiveNodes.Inc()
 	}
 	h.gater.authenticated[remotePeer] = true
-	delete(h.gater.pending, remotePeer)
-
-	// Collect authenticated peers
-	var authPeers []peer.ID
-	for p := range h.gater.authenticated {
-		authPeers = append(authPeers, p)
-	}
 	h.gater.mu.Unlock()
-
-	var knownPeers []string
-	for _, p := range authPeers {
-		knownPeers = append(knownPeers, p.String())
-	}
-
-	policies := []string{
-		`allow if operation($op)`,
-	}
-
-	h.sendEnrollResponse(s, biscuitData, "", token.Expiry.Unix(), knownPeers, policies)
-	logger.Infow("Successfully enrolled peer", "peer_id", remotePeer)
-	samHubEnrollmentTotal.WithLabelValues("success").Inc()
 
 	// Publish JOIN event
 	event := &api.MeshEvent{
@@ -334,43 +302,46 @@ func (h *Hub) handleEnroll(s network.Stream) {
 			}
 		}
 	}
+
+	// Send ACK back to client
+	writer := msgio.NewVarintWriter(s)
+	resp := &api.AuthResponse{Success: true}
+	respBytes, _ := proto.Marshal(resp)
+	if err := writer.WriteMsg(respBytes); err != nil {
+		logger.Errorf("[AuthN] Failed to write ACK to %s: %v", remotePeer, err)
+	}
 }
 
-func (h *Hub) sendEnrollResponse(s network.Stream, biscuitToken []byte, errMsg string, expiration int64, knownPeers []string, policies []string) {
-	var hubAddrs []string
-	if len(h.ExternalAddrs) > 0 {
-		for _, addr := range h.ExternalAddrs {
-			fullAddr := addr
-			if !strings.Contains(addr, "/p2p/") {
-				fullAddr = addr + "/p2p/" + h.Host.ID().String()
-			}
-			hubAddrs = append(hubAddrs, fullAddr)
-		}
-	} else {
-		for _, addr := range h.Host.Addrs() {
-			hubAddrs = append(hubAddrs, addr.String()+"/p2p/"+h.Host.ID().String())
-		}
-	}
-
-	pubKey := h.KeyRing.GetCurrentPublicKey()
-
-	resp := &api.EnrollResponse{
-		BiscuitToken: biscuitToken,
-		ErrorMessage: errMsg,
-		HubPublicKey: pubKey,
-		HubAddresses: hubAddrs,
-		Expiration:   expiration,
-		KnownPeers:   knownPeers,
-	}
-	data, err := proto.Marshal(resp)
+func (h *Hub) verifyBiscuit(biscuitData []byte, remotePeer peer.ID) (*biscuit.Biscuit, error) {
+	b, err := biscuit.Unmarshal(biscuitData)
 	if err != nil {
-		logger.Errorf("[Enroll] Failed to marshal response: %v", err)
-		return
+		return nil, fmt.Errorf("malformed biscuit: %w", err)
 	}
-	writer := msgio.NewVarintWriter(s)
-	if err := writer.WriteMsg(data); err != nil {
-		logger.Errorf("[Enroll] Failed to write response: %v", err)
+
+	keys := h.KeyRing.GetAllValidPublicKeys()
+	var lastErr error
+	for _, pubKey := range keys {
+		authorizer, err := b.Authorizer(pubKey)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		rule, err := parser.FromStringPolicy("allow if true")
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		authorizer.AddPolicy(rule)
+
+		if err := authorizer.Authorize(); err == nil {
+			return b, nil
+		} else {
+			lastErr = err
+		}
 	}
+
+	return nil, fmt.Errorf("no valid key found for verification: %v", lastErr)
 }
 
 func (h *Hub) parseAndVerifyJWT(ctx context.Context, jwtStr string, allowedAudiences []string) (jwt.MapClaims, *oidc.IDToken, error) {
@@ -538,31 +509,6 @@ func (h *Hub) mintBiscuitToken(claims jwt.MapClaims, token *oidc.IDToken, remote
 
 // startWatchdog periodically checks for peers that have connected but not completed OIDC
 // authentication within the grace period, and evicts them from the network.
-func (h *Hub) startWatchdog(ctx context.Context) {
-	go func() {
-		ticker := time.NewTicker(10 * time.Second)
-		defer ticker.Stop()
-		for range ticker.C {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-			}
-			h.gater.mu.Lock()
-			now := time.Now()
-			for pID, connectedAt := range h.gater.pending {
-				if now.Sub(connectedAt) > GracePeriod {
-					logger.Warnf("[Security] Evicting unauthenticated peer: %s", pID)
-					if err := h.Host.Network().ClosePeer(pID); err != nil {
-						logger.Errorf("[Security] Closing unauthenticated peer %s: %v", pID, err)
-					}
-					delete(h.gater.pending, pID)
-				}
-			}
-			h.gater.mu.Unlock()
-		}
-	}()
-}
 
 func (h *Hub) startRotation(ctx context.Context) {
 	if keyRotationInterval <= 0 {
@@ -672,13 +618,10 @@ func main() {
 			if err != nil {
 				logger.Fatal(err)
 			}
-			h.Host.SetStreamHandler(api.EnrollProtocolID, h.handleEnroll)
+			h.Host.SetStreamHandler(api.AuthProtocolID, h.handleAuthHandshake)
 
 			// Start key rotation if enabled
 			h.startRotation(ctx)
-
-			// Watchdog: Expel peers that connect but never finish authentication
-			h.startWatchdog(ctx)
 
 			startHTTPServer(h, bindAddress, adminToken, tlsCertFile, tlsKeyFile, tlsCAFile, &isHubReady)
 
@@ -757,6 +700,7 @@ func main() {
 			}
 
 			client := &http.Client{
+				Timeout: 30 * time.Second,
 				Transport: &http.Transport{
 					TLSClientConfig: tlsConfig,
 				},
