@@ -149,6 +149,13 @@ func handleRegisterHTTP(h *Hub) http.HandlerFunc {
 			return
 		}
 
+		h.gater.mu.Lock()
+		if !h.gater.authenticated[pID] {
+			samHubActiveNodes.Inc()
+		}
+		h.gater.authenticated[pID] = true
+		h.gater.mu.Unlock()
+
 		var authPeers []peer.ID
 		h.gater.mu.Lock()
 		for p := range h.gater.authenticated {

@@ -69,7 +69,7 @@ teardown() {
     -v "${data_vol}:/root/.config/sam-mesh" \
     "sam-node:local" \
     run \
-    --hub "/dns4/sam-hub/tcp/4002/p2p/${hub_peer_id}"
+    --hub "http://sam-hub:9090"
 
   mesh_wait_for_log "${node_name}" "Using stored identity." 20
   
@@ -110,7 +110,7 @@ teardown() {
     -v "${token_vol}:/var/run/secrets/tokens" \
     "sam-node:local" \
     run \
-    --hub "/dns4/sam-hub/tcp/4002/p2p/${hub_peer_id}" \
+    --hub "http://sam-hub:9090" \
     --jwt-path "/var/run/secrets/tokens/sa-token"
 
   mesh_wait_for_log "${node_name}" "SAM Node Online" 20
