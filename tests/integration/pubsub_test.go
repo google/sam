@@ -28,7 +28,7 @@ import (
 
 func TestPubSubTools(t *testing.T) {
 	nodeBin := buildBinary(t, "./cmd/sam-node")
-	_, hubAddr := startMockLibp2pHub(t)
+	_, hubAddr := startMockHub(t)
 	tmpHome1, err := os.MkdirTemp("", "pubsub-test-1")
 	if err != nil {
 		t.Fatal(err)

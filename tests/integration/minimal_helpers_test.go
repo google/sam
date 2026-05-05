@@ -90,7 +90,7 @@ func runCommand(
 	return stdout.String(), stderr.String(), err
 }
 
-func startMockLibp2pHub(t *testing.T) (peer.ID, string) {
+func startMockHub(t *testing.T, pubKeys ...[]byte) (peer.ID, string) {
 	t.Helper()
 
 	h, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
@@ -103,15 +103,28 @@ func startMockLibp2pHub(t *testing.T) (peer.ID, string) {
 		t.Fatalf("failed to create DHT on mock hub: %v", err)
 	}
 
+	var callCount int
 	h.SetStreamHandler(api.EnrollProtocolID, func(s network.Stream) {
 		defer func() { _ = s.Close() }()
 
+		var pubKey []byte
+		if len(pubKeys) == 0 {
+			pubKey = []byte("mock-hub-pub-key")
+		} else {
+			callCount++
+			idx := callCount - 1
+			if idx < len(pubKeys) {
+				pubKey = pubKeys[idx]
+			} else {
+				pubKey = pubKeys[len(pubKeys)-1]
+			}
+		}
+
 		// The following constants are mock values used for testing.
 		// 'mock-biscuit-token' is a dummy token string.
-		// 'mock-hub-pub-key' is a dummy public key string.
 		resp := &api.EnrollResponse{
 			BiscuitToken: []byte("mock-biscuit-token"),
-			HubPublicKey: []byte("mock-hub-pub-key"),
+			HubPublicKey: pubKey,
 			HubAddresses: []string{h.Addrs()[0].String() + "/p2p/" + h.ID().String()},
 		}
 		data, err := proto.Marshal(resp)

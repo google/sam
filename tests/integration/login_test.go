@@ -25,7 +25,7 @@ import (
 
 func TestSamNodeLogin(t *testing.T) {
 	nodeBin := buildBinary(t, "./cmd/sam-node")
-	_, hubAddr := startMockLibp2pHub(t)
+	_, hubAddr := startMockHub(t)
 	tmpHome := t.TempDir()
 	env := append(os.Environ(),
 		"HOME="+tmpHome,

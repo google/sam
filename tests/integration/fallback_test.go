@@ -31,9 +31,7 @@ import (
 	"github.com/biscuit-auth/biscuit-go/v2/parser"
 	"github.com/google/sam/api"
 	"github.com/libp2p/go-libp2p"
-	dht "github.com/libp2p/go-libp2p-kad-dht"
 	"github.com/libp2p/go-libp2p/core/crypto"
-	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-msgio"
 	"github.com/multiformats/go-multiaddr"
@@ -99,7 +97,7 @@ func TestFallbackReEnrollment(t *testing.T) {
 	tokenBytes, _ := b.Serialize()
 
 	// 4. Start Mock Hub with dynamic key response
-	_, hubAddr := startMockHubDynamic(t, pubA, pubB)
+	_, hubAddr := startMockHub(t, pubA, pubB)
 
 	tmpHome := t.TempDir()
 	env := append(os.Environ(),
@@ -247,48 +245,6 @@ func TestFallbackReEnrollment(t *testing.T) {
 	}
 }
 
-func startMockHubDynamic(t *testing.T, pubA, pubB ed25519.PublicKey) (peer.ID, string) {
-	t.Helper()
-
-	h, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
-	if err != nil {
-		t.Fatalf("failed to create mock libp2p host: %v", err)
-	}
-
-	kdht, err := dht.New(context.Background(), h, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/sam"))
-	if err != nil {
-		t.Fatalf("failed to create DHT on mock hub: %v", err)
-	}
-
-	var callCount int
-	h.SetStreamHandler(api.EnrollProtocolID, func(s network.Stream) {
-		defer func() { _ = s.Close() }()
-		callCount++
-
-		var pub []byte
-		if callCount == 1 {
-			pub = pubA
-		} else {
-			pub = pubB
-		}
-
-		resp := &api.EnrollResponse{
-			BiscuitToken: []byte("mock-biscuit-token"),
-			HubPublicKey: pub,
-			HubAddresses: []string{h.Addrs()[0].String() + "/p2p/" + h.ID().String()},
-		}
-		data, _ := proto.Marshal(resp)
-		writer := msgio.NewVarintWriter(s)
-		_ = writer.WriteMsg(data)
-	})
-
-	t.Cleanup(func() {
-		_ = kdht.Close()
-		_ = h.Close()
-	})
-
-	return h.ID(), h.Addrs()[0].String() + "/p2p/" + h.ID().String()
-}
 
 type safeBuffer struct {
 	mu  sync.Mutex

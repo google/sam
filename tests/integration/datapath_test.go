@@ -32,7 +32,7 @@ import (
 
 func TestIntegrationStdioDatapath(t *testing.T) {
 	nodeBin := buildBinary(t, "./cmd/sam-node")
-	_, hubAddr := startMockLibp2pHub(t)
+	_, hubAddr := startMockHub(t)
 
 	homeA := t.TempDir()
 	homeB := t.TempDir()
@@ -173,7 +173,7 @@ func TestIntegrationStdioDatapath(t *testing.T) {
 
 func TestIntegrationHTTPDatapath(t *testing.T) {
 	nodeBin := buildBinary(t, "./cmd/sam-node")
-	_, hubAddr := startMockLibp2pHub(t)
+	_, hubAddr := startMockHub(t)
 
 	homeA := t.TempDir()
 	homeB := t.TempDir()
