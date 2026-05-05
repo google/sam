@@ -32,7 +32,6 @@ import (
 	"github.com/google/sam/api"
 	golog "github.com/ipfs/go-log/v2"
 	"github.com/libp2p/go-libp2p/core/crypto"
-	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
 	"github.com/spf13/cobra"
 	"google.golang.org/protobuf/proto"
@@ -477,23 +476,16 @@ func (n *SamNode) Enroll(ctx context.Context, jwt string) error {
 	}
 	n.mu.Unlock()
 
-	// Connect to hub after enrollment to join the mesh
+	// Connect and Auth to hub after enrollment to join the mesh
 	for _, addrStr := range enrollResp.HubAddresses {
 		addr, err := multiaddr.NewMultiaddr(addrStr)
 		if err != nil {
 			logger.Warnf("Failed to parse hub address from response: %v", err)
 			continue
 		}
-		addrInfo, err := peer.AddrInfoFromP2pAddr(addr)
-		if err != nil {
-			logger.Warnf("Failed to get AddrInfo from hub address: %v", err)
-			continue
-		}
-		if err := n.Host.Connect(ctx, *addrInfo); err != nil {
-			logger.Warnf("Failed to connect to hub after enrollment: %v", err)
+		if err := n.ConnectAndAuthWithHub(ctx, addr); err != nil {
+			logger.Warnf("Failed to connect and auth with hub after enrollment: %v", err)
 		} else {
-			logger.Infof("Successfully connected to hub via libp2p after enrollment")
-			n.HubPeerID = addrInfo.ID
 			break
 		}
 	}

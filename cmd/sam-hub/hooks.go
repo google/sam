@@ -34,13 +34,11 @@ var _ connmgr.ConnectionGater = (*hubConnGate)(nil)
 type hubConnGate struct {
 	mu            sync.RWMutex
 	authenticated map[peer.ID]bool
-	pending       map[peer.ID]time.Time
 }
 
 func newHubConnGate() *hubConnGate {
 	return &hubConnGate{
 		authenticated: make(map[peer.ID]bool),
-		pending:       make(map[peer.ID]time.Time),
 	}
 }
 
@@ -50,11 +48,6 @@ func (g *hubConnGate) InterceptAddrDial(p peer.ID, m multiaddr.Multiaddr) bool {
 func (g *hubConnGate) InterceptAccept(c network.ConnMultiaddrs) bool           { return true }
 
 func (g *hubConnGate) InterceptSecured(dir network.Direction, p peer.ID, mas network.ConnMultiaddrs) bool {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	if !g.authenticated[p] {
-		g.pending[p] = time.Now()
-	}
 	return true
 }
 
@@ -78,7 +71,6 @@ func (n *notifier) Disconnected(_ network.Network, c network.Conn) {
 	n.hub.gater.mu.Lock()
 	wasAuth := n.hub.gater.authenticated[p]
 	delete(n.hub.gater.authenticated, p)
-	delete(n.hub.gater.pending, p)
 	n.hub.gater.mu.Unlock()
 	
 	logger.Infow("Peer disconnected", "peer_id", p, "was_authenticated", wasAuth)
