@@ -17,6 +17,10 @@ spec:
       targetPort: 4001
       protocol: UDP
       name: libp2p-udp
+    - port: 80
+      targetPort: 9090
+      protocol: TCP
+      name: register-http
   selector:
     app: sam-hub-${ENV_NAME}
 ---

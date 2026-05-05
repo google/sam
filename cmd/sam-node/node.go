@@ -240,6 +240,28 @@ func NewSamNode(ctx context.Context, privKey crypto.PrivKey, hubPubKey ed25519.P
 }
 
 func (n *SamNode) RegisterStaticServices(ctx context.Context, services []api.ServiceConfig) error {
+	// Wait for DHT to be ready (size > 0)
+	// This avoids failure if we try to register immediately after enrollment
+	// before the DHT has discovered peers.
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	
+	timeout := time.After(10 * time.Second) // 10 seconds timeout for DHT readiness
+	
+dhtLoop:
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timeout:
+			return fmt.Errorf("timeout waiting for DHT to be ready before registering static services")
+		case <-ticker.C:
+			if n.DHT.RoutingTable().Size() > 0 {
+				break dhtLoop
+			}
+		}
+	}
+
 	var errs []error
 	for _, sCfg := range services {
 		sType, err := parseServiceType(sCfg.Type)

@@ -119,8 +119,8 @@ func TestStaticServiceRegistrationRequiresConnection(t *testing.T) {
 	if err == nil {
 		t.Fatal("Expected RegisterStaticServices to fail before connecting to hub, but it succeeded")
 	}
-	if !strings.Contains(err.Error(), "failed to find any peer in table") {
-		t.Fatalf("Expected error to contain 'failed to find any peer in table', got: %v", err)
+	if !strings.Contains(err.Error(), "timeout waiting for DHT to be ready") {
+		t.Fatalf("Expected error to contain 'timeout waiting for DHT to be ready', got: %v", err)
 	}
 
 	// 6. Now enroll and connect to hub (which sets up DHT and hub connection)
