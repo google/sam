@@ -75,7 +75,7 @@ teardown() {
   # Explicitly connect Node 1 to Node 2
   echo "[$(date +%T)] Explicitly connecting Node 1 to Node 2"
   local node2_addr="/dns4/sam-node-2/tcp/5002/p2p/${node2_peer_id}"
-  run docker run --rm --network "${MESH_NETWORK}" -v "$(pwd)/bin/mcp-client:/mcp-client" python:3.12 /mcp-client -url "http://sam-node-1:8080/mcp/events" -tool "connect_peer" -args "{\"peer_addr\":\"${node2_addr}\"}"
+  run docker run --rm --network "${MESH_NETWORK}" "${MESH_RUNTIME_IMAGE}" mcp-client -url "http://sam-node-1:8080/mcp/events" -tool "connect_peer" -args "{\"peer_addr\":\"${node2_addr}\"}"
   [[ "$status" -eq 0 ]]
 
   # Verify Node 1 connects to Node 2
@@ -117,7 +117,7 @@ teardown() {
   # Verify Node 1 cannot reconnect to Node 2
   echo "[$(date +%T)] Attempting to reconnect (should fail)"
   local node2_addr="/dns4/sam-node-2/tcp/5002/p2p/${node2_peer_id}"
-  run docker run --rm --network "${MESH_NETWORK}" -v "$(pwd)/bin/mcp-client:/mcp-client" python:3.12 /mcp-client -url "http://sam-node-1:8080/mcp/events" -tool "connect_peer" -args "{\"peer_addr\":\"${node2_addr}\"}"
+  run docker run --rm --network "${MESH_NETWORK}" "${MESH_RUNTIME_IMAGE}" mcp-client -url "http://sam-node-1:8080/mcp/events" -tool "connect_peer" -args "{\"peer_addr\":\"${node2_addr}\"}"
   echo "Reconnect output: $output"
   [[ "$output" == *"gater disallows connection"* ]]
 }

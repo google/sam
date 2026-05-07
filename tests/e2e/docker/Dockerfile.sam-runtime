@@ -1,12 +1,29 @@
+# syntax=docker/dockerfile:1.7
+
+# Build container: compiles the Go binaries via `make build`.
+FROM golang:1.25-alpine AS build
+
+WORKDIR /src
+RUN apk add --no-cache git make
+
+COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
+
+COPY . .
+
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    make build
+
+# Final container: minimal alpine runtime hosting the built binaries.
 FROM alpine:3.20
 
 RUN apk add --no-cache busybox
 
 RUN addgroup -S sam && adduser -S -G sam sam
 
-COPY bin/sam-node /usr/local/bin/sam-node
-COPY bin/sam-hub /usr/local/bin/sam-hub
-RUN chmod +x /usr/local/bin/sam-node /usr/local/bin/sam-hub
+COPY --from=build /src/bin/ /usr/local/bin/
 
 USER sam
 WORKDIR /home/sam

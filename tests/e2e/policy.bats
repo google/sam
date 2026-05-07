@@ -131,7 +131,7 @@ mesh_call_remote_tool() {
   
   local args="{\"peer_id\":\"${target_peer_id}\",\"tool_name\":\"${tool_name}\",\"arguments\":\"{}\"}"
   
-  docker run --rm --network "${MESH_NETWORK}" -v "$(pwd)/bin/mcp-client:/mcp-client" python:3.12 /mcp-client -url "http://sam-node-${caller_idx}:8080/mcp/events" -tool "call_remote_tool" -args "${args}"
+  docker run --rm --network "${MESH_NETWORK}" "${MESH_RUNTIME_IMAGE}" mcp-client -url "http://sam-node-${caller_idx}:8080/mcp/events" -tool "call_remote_tool" -args "${args}"
 }
 
 setup() {
@@ -240,7 +240,7 @@ EOF"
   
   for ((i=0; i<40; i++)); do
     local output
-    output="$(docker run --rm --network "${MESH_NETWORK}" -v "$(pwd)/bin/mcp-client:/mcp-client" python:3.12 /mcp-client -url "http://sam-node-2:8080/mcp/events" -tool "get_mesh_info" 2>/dev/null)"
+    output="$(docker run --rm --network "${MESH_NETWORK}" "${MESH_RUNTIME_IMAGE}" mcp-client -url "http://sam-node-2:8080/mcp/events" -tool "get_mesh_info" 2>/dev/null)"
     TARGET_PEER_ID=$(echo "${output}" | grep -oE '12D3Koo[a-zA-Z0-9]+' | grep -v "${hub_id}" | grep -v "${node2_id}" | head -n 1)
     if [[ -n "${TARGET_PEER_ID}" ]]; then
       break
@@ -258,7 +258,7 @@ EOF"
 
   # Explicitly connect Node 2 to Node 1 to avoid "no addresses" error
   local node1_addr="/dns4/sam-node-1/tcp/5002/p2p/${TARGET_PEER_ID}"
-  docker run --rm --network "${MESH_NETWORK}" -v "$(pwd)/bin/mcp-client:/mcp-client" python:3.12 /mcp-client -url "http://sam-node-2:8080/mcp/events" -tool "connect_peer" -args "{\"peer_addr\":\"${node1_addr}\"}" >/dev/null
+  docker run --rm --network "${MESH_NETWORK}" "${MESH_RUNTIME_IMAGE}" mcp-client -url "http://sam-node-2:8080/mcp/events" -tool "connect_peer" -args "{\"peer_addr\":\"${node1_addr}\"}" >/dev/null
 }
 
 teardown() {
