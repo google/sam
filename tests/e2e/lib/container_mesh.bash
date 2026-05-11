@@ -224,18 +224,29 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
     echo "Extracted Hub PeerID: ${peer_id}"
   }
 
+  # Optional 3rd arg: host-relative path to a sam-node config yaml.
+  # When set, mounted into the container and passed via --config.
   mesh_start_node() {
     local idx="$1"
     local flags="${2:-}"
+    local config_path="${3:-}"
     local name="${MESH_PREFIX}-node-${idx}"
 
     local hub_peer_id
     hub_peer_id=$(cat "/tmp/${MESH_PREFIX}-hub-peer-id")
 
+    local mount_args=()
+    local config_args=()
+    if [[ -n "${config_path}" ]]; then
+      mount_args+=(-v "$(pwd)/${config_path}:/etc/sam/node-config.yaml:ro")
+      config_args+=(--config /etc/sam/node-config.yaml)
+    fi
+
     docker run -d \
       --name "${name}" \
       --network "${MESH_NETWORK}" \
       --network-alias "sam-node-${idx}" \
+      "${mount_args[@]}" \
       "${MESH_RUNTIME_IMAGE}" \
       /usr/local/bin/sam-node run \
       ${flags} \
@@ -247,7 +258,8 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
       --listen "/ip4/0.0.0.0/tcp/5002" \
       --bind-addr "0.0.0.0:8080" \
       --api-token "secret-token" \
-      --mesh "e2e-mesh" >/dev/null
+      --mesh "e2e-mesh" \
+      "${config_args[@]}" >/dev/null
 
     MESH_CONTAINERS+=("${name}")
   }

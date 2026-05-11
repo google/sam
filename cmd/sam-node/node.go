@@ -230,7 +230,6 @@ func NewSamNode(ctx context.Context, privKey crypto.PrivKey, hubPubKey ed25519.P
 
 	// Register static services from config
 
-
 	// Start Ingress HTTP Server
 	if err := node.StartIngressServer(ctx); err != nil {
 		return nil, fmt.Errorf("failed to start ingress server: %w", err)
@@ -245,9 +244,9 @@ func (n *SamNode) RegisterStaticServices(ctx context.Context, services []api.Ser
 	// before the DHT has discovered peers.
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
-	
+
 	timeout := time.After(10 * time.Second) // 10 seconds timeout for DHT readiness
-	
+
 dhtLoop:
 	for {
 		select {
@@ -769,17 +768,30 @@ func parseServiceType(s string) (api.ServiceType, error) {
 	}
 }
 
-func serviceNameToCID(serviceType api.ServiceType, serviceName string) (cid.Cid, error) {
-	typeStr, err := serviceTypeToString(serviceType)
-	if err != nil {
-		return cid.Undef, err
-	}
-	serviceKey := fmt.Sprintf("sam:service:%s:%s", typeStr, serviceName)
-	hash, err := multihash.Sum([]byte(serviceKey), multihash.SHA2_256, -1)
+// serviceKeyToCID hashes "sam:service[:part]..." into a DHT rendezvous CID.
+func serviceKeyToCID(parts ...string) (cid.Cid, error) {
+	srvKey := strings.Join(append([]string{"sam:service"}, parts...), ":")
+	hash, err := multihash.Sum([]byte(srvKey), multihash.SHA2_256, -1)
 	if err != nil {
 		return cid.Undef, err
 	}
 	return cid.NewCidV1(cid.Raw, hash), nil
+}
+
+func serviceNameToCID(serviceType api.ServiceType, serviceName string) (cid.Cid, error) {
+	srvTypeStr, err := serviceTypeToString(serviceType)
+	if err != nil {
+		return cid.Undef, err
+	}
+	return serviceKeyToCID(srvTypeStr, serviceName)
+}
+
+func serviceTypeToCID(serviceType api.ServiceType) (cid.Cid, error) {
+	srvTypeStr, err := serviceTypeToString(serviceType)
+	if err != nil {
+		return cid.Undef, err
+	}
+	return serviceKeyToCID(srvTypeStr)
 }
 
 type StdioBridge struct {
@@ -907,7 +919,11 @@ func (n *SamNode) RegisterService(ctx context.Context, req *api.RegisterServiceR
 	if info.Type == api.ServiceType_SERVICE_TYPE_UNSPECIFIED {
 		return fmt.Errorf("cannot register service with unspecified type")
 	}
-	c, err := serviceNameToCID(info.Type, info.Name)
+	srvNameCID, err := serviceNameToCID(info.Type, info.Name)
+	if err != nil {
+		return err
+	}
+	srvTypeCID, err := serviceTypeToCID(info.Type)
 	if err != nil {
 		return err
 	}
@@ -916,8 +932,12 @@ func (n *SamNode) RegisterService(ctx context.Context, req *api.RegisterServiceR
 		return fmt.Errorf("DHT not initialized")
 	}
 
-	if err := n.DHT.Provide(ctx, c, true); err != nil {
+	if err := n.DHT.Provide(ctx, srvNameCID, true); err != nil {
 		return fmt.Errorf("failed to provide service to DHT: %w", err)
+	}
+	// Per-type rendezvous record so type-only discovery finds this peer.
+	if err := n.DHT.Provide(ctx, srvTypeCID, true); err != nil {
+		return fmt.Errorf("failed to provide service type to DHT: %w", err)
 	}
 
 	var handler http.Handler
@@ -947,7 +967,7 @@ func (n *SamNode) RegisterService(ctx context.Context, req *api.RegisterServiceR
 	}
 	n.servicesMu.Unlock()
 
-	logger.Infof("[ServiceRegistry] Registering service %s/%s (CID: %s)", info.Type, info.Name, c)
+	logger.Infof("[ServiceRegistry] Registering service %s/%s (name CID: %s, type CID: %s)", info.Type, info.Name, srvNameCID, srvTypeCID)
 	return nil
 }
 
@@ -974,65 +994,154 @@ func (n *SamNode) IsServiceRegistered(serviceName string) bool {
 	return ok
 }
 
-func (n *SamNode) FindProviders(ctx context.Context, serviceType api.ServiceType, serviceName string) ([]peer.AddrInfo, error) {
+// Bound DHT lookups and per-peer catalog fan-out so a partially
+// reachable mesh can't wedge a discovery call indefinitely.
+const (
+	dhtLookupTimeout       = 5 * time.Second
+	discoveryFanoutTimeout = 5 * time.Second
+)
+
+// findProvidersByCID is the shared DHT-lookup primitive; bounds the
+// lookup so FindProvidersAsync's channel is guaranteed to close.
+func (n *SamNode) findProvidersByCID(ctx context.Context, c cid.Cid) ([]peer.AddrInfo, error) {
+	if n.DHT == nil {
+		return nil, fmt.Errorf("DHT not initialized")
+	}
+	lookupCtx, cancel := context.WithTimeout(ctx, dhtLookupTimeout)
+	defer cancel()
+	// FindProvidersAsync can emit the same peer multiple times when the
+	// DHT walk converges from different paths; dedupe so downstream
+	// fan-out (e.g. discoverServicesByType) doesn't double-fetch.
+	providersMap := make(map[peer.ID]peer.AddrInfo)
+	for p := range n.DHT.FindProvidersAsync(lookupCtx, c, 20) {
+		providersMap[p.ID] = p
+	}
+	providers := make([]peer.AddrInfo, 0, len(providersMap))
+	for _, p := range providersMap {
+		providers = append(providers, p)
+	}
+	return providers, nil
+}
+
+// FindProvidersByName returns peers hosting a specific {type, name} service.
+func (n *SamNode) FindProvidersByName(ctx context.Context, serviceType api.ServiceType, serviceName string) ([]peer.AddrInfo, error) {
 	c, err := serviceNameToCID(serviceType, serviceName)
 	if err != nil {
 		return nil, err
 	}
-
-	if n.DHT == nil {
-		return nil, fmt.Errorf("DHT not initialized")
-	}
-
-	providers := n.DHT.FindProvidersAsync(ctx, c, 20)
-	var providerInfos []peer.AddrInfo
-	for p := range providers {
-		providerInfos = append(providerInfos, p)
-	}
-	return providerInfos, nil
+	return n.findProvidersByCID(ctx, c)
 }
 
-func (n *SamNode) DiscoverRemoteServices(ctx context.Context, serviceType api.ServiceType, serviceName string) ([]*api.DiscoveredProvider, error) {
-	providers, err := n.FindProviders(ctx, serviceType, serviceName)
+// FindProvidersByType returns peers hosting at least one service of the given type.
+func (n *SamNode) FindProvidersByType(ctx context.Context, serviceType api.ServiceType) ([]peer.AddrInfo, error) {
+	c, err := serviceTypeToCID(serviceType)
 	if err != nil {
 		return nil, err
 	}
+	return n.findProvidersByCID(ctx, c)
+}
 
+// localProxyURL builds the loopback URL clients use to reach a remote service.
+func (n *SamNode) localProxyURL(peerID peer.ID, typeStr, serviceName string) string {
+	return fmt.Sprintf("http://%s/sam/%s/%s/%s",
+		n.BoundHTTPAddr, peerID.String(), typeStr, serviceName)
+}
+
+// DiscoverRemoteServices dispatches to the named or type-only path
+// based on whether serviceName is provided.
+func (n *SamNode) DiscoverRemoteServices(ctx context.Context, serviceType api.ServiceType, serviceName string) ([]*api.DiscoveredProvider, error) {
 	typeStr, err := serviceTypeToString(serviceType)
 	if err != nil {
 		return nil, err
 	}
+	if serviceName == "" {
+		return n.discoverServicesByType(ctx, serviceType, typeStr)
+	}
+	return n.discoverServicesByName(ctx, serviceType, typeStr, serviceName)
+}
 
-	var discovered []*api.DiscoveredProvider
-	for _, p := range providers {
+// discoverServicesByName: targeted DHT lookup, no fan-out.
+func (n *SamNode) discoverServicesByName(ctx context.Context, serviceType api.ServiceType, typeStr, serviceName string) ([]*api.DiscoveredProvider, error) {
+	peers, err := n.FindProvidersByName(ctx, serviceType, serviceName)
+	if err != nil {
+		return nil, err
+	}
+	discovered := []*api.DiscoveredProvider{}
+	for _, p := range peers {
 		if p.ID == n.Host.ID() {
 			continue
 		}
-
-		// Construct local proxy URL
-		// Format: http://localhost:<sam_port>/sam/{peer_id}/{service_type}/{service_name}
-		localURL := fmt.Sprintf("http://%s/sam/%s/%s/%s",
-			n.BoundHTTPAddr,
-			p.ID.String(),
-			typeStr,
-			serviceName,
-		)
-
 		discovered = append(discovered, &api.DiscoveredProvider{
 			PeerId:        p.ID.String(),
-			LocalProxyUrl: localURL,
+			LocalProxyUrl: n.localProxyURL(p.ID, typeStr, serviceName),
+			SrvName:       serviceName,
 		})
 	}
-
 	return discovered, nil
 }
 
-func (n *SamNode) ListLocalServices() []*api.ServiceInfo {
+// discoverServicesByType: rendezvous lookup → parallel list_local_services
+// fan-out → flat catalog. Failed peers are dropped with a log line.
+func (n *SamNode) discoverServicesByType(ctx context.Context, serviceType api.ServiceType, typeStr string) ([]*api.DiscoveredProvider, error) {
+	peers, err := n.FindProvidersByType(ctx, serviceType)
+	if err != nil {
+		return nil, err
+	}
+
+	fanoutCtx, cancel := context.WithTimeout(ctx, discoveryFanoutTimeout)
+	defer cancel()
+
+	type peerCatalog struct {
+		peerID   peer.ID
+		services []*api.ServiceInfo
+	}
+	results := make(chan peerCatalog, len(peers))
+	var wg sync.WaitGroup
+	for _, p := range peers {
+		if p.ID == n.Host.ID() {
+			continue
+		}
+		wg.Add(1)
+		go func(peerID peer.ID) {
+			defer wg.Done()
+			services, err := n.fetchRemoteServiceCatalog(fanoutCtx, peerID, typeStr)
+			if err != nil {
+				logger.Warnf("[Discovery] catalog fetch from %s failed: %v", peerID, err)
+				return
+			}
+			results <- peerCatalog{peerID: peerID, services: services}
+		}(p.ID)
+	}
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	discovered := []*api.DiscoveredProvider{}
+	for r := range results {
+		for _, info := range r.services {
+			discovered = append(discovered, &api.DiscoveredProvider{
+				PeerId:         r.peerID.String(),
+				LocalProxyUrl:  n.localProxyURL(r.peerID, typeStr, info.Name),
+				SrvName:        info.Name,
+				SrvDescription: info.Description,
+			})
+		}
+	}
+	return discovered, nil
+}
+
+// ListLocalServices returns services registered on this node. If
+// typeFilter is SERVICE_TYPE_UNSPECIFIED, all services are returned.
+func (n *SamNode) ListLocalServices(typeFilter api.ServiceType) []*api.ServiceInfo {
 	n.servicesMu.RLock()
 	defer n.servicesMu.RUnlock()
 
-	var services []*api.ServiceInfo
+	services := []*api.ServiceInfo{}
 	for _, manifest := range n.services {
+		if typeFilter != api.ServiceType_SERVICE_TYPE_UNSPECIFIED && manifest.Info.Type != typeFilter {
+			continue
+		}
 		services = append(services, manifest.Info)
 	}
 	return services

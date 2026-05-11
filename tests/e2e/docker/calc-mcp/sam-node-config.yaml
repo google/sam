@@ -1,0 +1,11 @@
+version: "v1alpha1"
+attenuation:
+  # Receiver-side: allow MCP only when the caller's biscuit was minted by
+  # our hub for some peer (zero-trust narrow than "any valid OIDC token").
+  policies:
+    - 'allow if operation("/sam/mcp/1.0.0"), node($peer)'
+services:
+  - type: "mcp"
+    name: "calculator"
+    description: "Simple math operations"
+    target_url: "http://calc-mcp:7777"

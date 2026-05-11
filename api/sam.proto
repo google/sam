@@ -85,5 +85,7 @@ message RegisterServiceRequest {
 
 message DiscoveredProvider {
   string peer_id = 1;
-  string local_proxy_url = 2; 
+  string local_proxy_url = 2;
+  string srv_name = 3;
+  string srv_description = 4;
 }

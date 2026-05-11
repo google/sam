@@ -650,11 +650,13 @@ func (*RegisterServiceRequest_TargetUrl) isRegisterServiceRequest_Backend() {}
 func (*RegisterServiceRequest_Command) isRegisterServiceRequest_Backend() {}
 
 type DiscoveredProvider struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	PeerId        string                 `protobuf:"bytes,1,opt,name=peer_id,json=peerId,proto3" json:"peer_id,omitempty"`
-	LocalProxyUrl string                 `protobuf:"bytes,2,opt,name=local_proxy_url,json=localProxyUrl,proto3" json:"local_proxy_url,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	PeerId         string                 `protobuf:"bytes,1,opt,name=peer_id,json=peerId,proto3" json:"peer_id,omitempty"`
+	LocalProxyUrl  string                 `protobuf:"bytes,2,opt,name=local_proxy_url,json=localProxyUrl,proto3" json:"local_proxy_url,omitempty"`
+	SrvName        string                 `protobuf:"bytes,3,opt,name=srv_name,json=srvName,proto3" json:"srv_name,omitempty"`
+	SrvDescription string                 `protobuf:"bytes,4,opt,name=srv_description,json=srvDescription,proto3" json:"srv_description,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *DiscoveredProvider) Reset() {
@@ -697,6 +699,20 @@ func (x *DiscoveredProvider) GetPeerId() string {
 func (x *DiscoveredProvider) GetLocalProxyUrl() string {
 	if x != nil {
 		return x.LocalProxyUrl
+	}
+	return ""
+}
+
+func (x *DiscoveredProvider) GetSrvName() string {
+	if x != nil {
+		return x.SrvName
+	}
+	return ""
+}
+
+func (x *DiscoveredProvider) GetSrvDescription() string {
+	if x != nil {
+		return x.SrvDescription
 	}
 	return ""
 }
@@ -751,10 +767,12 @@ const file_api_sam_proto_rawDesc = "" +
 	"\n" +
 	"target_url\x18\x02 \x01(\tH\x00R\ttargetUrl\x122\n" +
 	"\acommand\x18\x03 \x01(\v2\x16.sam.v1.CommandBackendH\x00R\acommandB\t\n" +
-	"\abackend\"U\n" +
+	"\abackend\"\x99\x01\n" +
 	"\x12DiscoveredProvider\x12\x17\n" +
 	"\apeer_id\x18\x01 \x01(\tR\x06peerId\x12&\n" +
-	"\x0flocal_proxy_url\x18\x02 \x01(\tR\rlocalProxyUrl*s\n" +
+	"\x0flocal_proxy_url\x18\x02 \x01(\tR\rlocalProxyUrl\x12\x19\n" +
+	"\bsrv_name\x18\x03 \x01(\tR\asrvName\x12'\n" +
+	"\x0fsrv_description\x18\x04 \x01(\tR\x0esrvDescription*s\n" +
 	"\vServiceType\x12\x1c\n" +
 	"\x18SERVICE_TYPE_UNSPECIFIED\x10\x00\x12\x14\n" +
 	"\x10SERVICE_TYPE_MCP\x10\x01\x12\x1a\n" +

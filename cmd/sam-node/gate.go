@@ -16,7 +16,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
 	"github.com/libp2p/go-libp2p/core/connmgr"
@@ -28,7 +27,6 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-
 )
 
 var _ connmgr.ConnectionGater = (*nodeConnGate)(nil)
@@ -91,48 +89,19 @@ func (n *SamNode) HandleMCPStream(s network.Stream) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "send_message",
 		Description: "Send a message to another agent in the mesh",
-	}, handleSendMessage)
+	}, n.handleSendMessage)
+
+	// Add list_local_services tool
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "list_local_services",
+		Description: "List services registered on the local node. Optionally filter by type.",
+	}, n.handleListLocalServices)
 
 	// Add the get_mesh_info tool.
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "get_mesh_info",
 		Description: "Get information about the mesh network",
-	}, func(ctx context.Context, req *mcp.CallToolRequest, params struct{}) (*mcp.CallToolResult, any, error) {
-		if n == nil {
-			return nil, nil, fmt.Errorf("node not initialized")
-		}
-		n.mu.Lock()
-		var knownPeers []string
-		for p := range n.knownPeers {
-			knownPeers = append(knownPeers, p)
-		}
-		n.mu.Unlock()
-
-		peers := n.Host.Network().Peers()
-		var connectedPeers []string
-		for _, p := range peers {
-			connectedPeers = append(connectedPeers, p.String())
-		}
-		dhtSize := n.DHT.RoutingTable().Size()
-
-		resData := map[string]any{
-			"known_peers":     knownPeers,
-			"connected_peers": connectedPeers,
-			"dht_size":        dhtSize,
-			"hub_peer_id":     n.HubPeerID.String(),
-		}
-		responseBytes, err := json.Marshal(resData)
-		if err != nil {
-			return nil, nil, err
-		}
-		response := string(responseBytes)
-
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				&mcp.TextContent{Text: response},
-			},
-		}, nil, nil
-	})
+	}, n.handleGetMeshInfo)
 
 	ctx := context.Background()
 	if err := server.Run(ctx, transport); err != nil {
@@ -172,11 +141,7 @@ func (t *StreamTransport) Read(ctx context.Context) (jsonrpc.Message, error) {
 	}
 	defer t.r.ReleaseMsg(msg)
 
-	var jsonRpcMsg jsonrpc.Message
-	if err := json.Unmarshal(msg, &jsonRpcMsg); err != nil {
-		return nil, err
-	}
-	return jsonRpcMsg, nil
+	return jsonrpc.DecodeMessage(msg)
 }
 
 // Close closes the stream.
@@ -194,11 +159,9 @@ func (t *StreamTransport) SessionID() string {
 	return t.s.Conn().RemotePeer().String()
 }
 
-
-
 // Write writes a message to the stream.
 func (t *StreamTransport) Write(ctx context.Context, msg jsonrpc.Message) error {
-	data, err := json.Marshal(msg)
+	data, err := jsonrpc.EncodeMessage(msg)
 	if err != nil {
 		return err
 	}

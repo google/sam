@@ -238,7 +238,7 @@ EOF"
   hub_id="$(cat "/tmp/${MESH_PREFIX}-hub-peer-id")"
   export TARGET_PEER_ID=""
   
-  for ((i=0; i<30; i++)); do
+  for ((i=0; i<40; i++)); do
     local output
     output="$(docker run --rm --network "${MESH_NETWORK}" -v "$(pwd)/bin/mcp-client:/mcp-client" python:3.12 /mcp-client -url "http://sam-node-2:8080/mcp/events" -tool "get_mesh_info" 2>/dev/null)"
     TARGET_PEER_ID=$(echo "${output}" | grep -oE '12D3Koo[a-zA-Z0-9]+' | grep -v "${hub_id}" | grep -v "${node2_id}" | head -n 1)

@@ -25,26 +25,8 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-msgio"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/multiformats/go-multiaddr"
 	"google.golang.org/protobuf/proto"
 )
-
-// SendMessageParams defines the parameters for the send_message tool.
-type SendMessageParams struct {
-	PeerID  string `json:"peer_id" jsonschema:"The Peer ID of the target agent"`
-	Message string `json:"message" jsonschema:"The message content"`
-}
-
-// handleSendMessage implements the send_message tool.
-func handleSendMessage(ctx context.Context, req *mcp.CallToolRequest, params SendMessageParams) (*mcp.CallToolResult, any, error) {
-	response := fmt.Sprintf("Simulated sending message to %s: %s", params.PeerID, params.Message)
-
-	return &mcp.CallToolResult{
-		Content: []mcp.Content{
-			&mcp.TextContent{Text: response},
-		},
-	}, nil, nil
-}
 
 // NewMCPHandler creates a new HTTP handler for the MCP server using the official SDK.
 func NewMCPHandler(node *SamNode) http.Handler {
@@ -58,213 +40,55 @@ func NewMCPHandler(node *SamNode) http.Handler {
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "send_message",
 		Description: "Send a message to another agent in the mesh",
-	}, handleSendMessage)
+	}, node.handleSendMessage)
 
 	// Add list_local_services tool
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "list_local_services",
-		Description: "List services registered on the local node",
-	}, func(ctx context.Context, req *mcp.CallToolRequest, params struct{}) (*mcp.CallToolResult, any, error) {
-		services := node.ListLocalServices()
-		respData, err := json.Marshal(services)
-		if err != nil {
-			return nil, nil, err
-		}
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				&mcp.TextContent{Text: string(respData)},
-			},
-		}, nil, nil
-	})
+		Description: "List services registered on the local node. Optionally filter by type.",
+	}, node.handleListLocalServices)
 
 	// Add discover_remote_services tool
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "discover_remote_services",
-		Description: "Discover remote services in the mesh",
-	}, func(ctx context.Context, req *mcp.CallToolRequest, params struct {
-		Type string `json:"type" jsonschema:"Service type (mcp, inference, a2a)"`
-		Name string `json:"name" jsonschema:"Service name"`
-	}) (*mcp.CallToolResult, any, error) {
-		serviceType, err := parseServiceType(params.Type)
-		if err != nil || serviceType == api.ServiceType_SERVICE_TYPE_UNSPECIFIED {
-			return nil, nil, fmt.Errorf("invalid or unspecified service type: %s", params.Type)
-		}
-		providers, err := node.DiscoverRemoteServices(ctx, serviceType, params.Name)
-		if err != nil {
-			return nil, nil, err
-		}
-		respData, err := json.Marshal(providers)
-		if err != nil {
-			return nil, nil, err
-		}
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				&mcp.TextContent{Text: string(respData)},
-			},
-		}, nil, nil
-	})
+		Description: "Discover remote services in the mesh. Provide only `type` to browse every reachable service of that type (returns name + description for each); add `name` to target a specific service.",
+	}, node.handleDiscoverRemoteServices)
 
 	// Add the mesh_pubsub_broadcast tool.
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "mesh_pubsub_broadcast",
 		Description: "Publish an event payload to a custom GossipSub topic",
-	}, func(ctx context.Context, req *mcp.CallToolRequest, params struct {
-		Topic   string `json:"topic" jsonschema:"GossipSub topic name"`
-		Payload string `json:"payload" jsonschema:"Payload to publish"`
-	}) (*mcp.CallToolResult, any, error) {
-		node.mu.Lock()
-		t, ok := node.topics[params.Topic]
-		var err error
-		if !ok {
-			t, err = node.PubSub.Join(params.Topic)
-			if err == nil {
-				node.topics[params.Topic] = t
-			}
-		}
-		node.mu.Unlock()
-		if err != nil {
-			return nil, nil, err
-		}
-		if err := t.Publish(ctx, []byte(params.Payload)); err != nil {
-			return nil, nil, err
-		}
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				&mcp.TextContent{Text: "Published"},
-			},
-		}, nil, nil
-	})
+	}, node.handleMeshPubsubBroadcast)
 
 	// Add the poll_messages tool.
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "poll_messages",
 		Description: "Poll for incoming messages on custom GossipSub topics",
-	}, func(ctx context.Context, req *mcp.CallToolRequest, params struct {
-		Topic string `json:"topic" jsonschema:"GossipSub topic name"`
-	}) (*mcp.CallToolResult, any, error) {
-		node.mu.Lock()
-		msgs := node.receivedMsgs[params.Topic]
-		delete(node.receivedMsgs, params.Topic) // Clear on read!
-		node.mu.Unlock()
-
-		response := fmt.Sprintf("Messages on topic %s: %v", params.Topic, msgs)
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				&mcp.TextContent{Text: response},
-			},
-		}, nil, nil
-	})
+	}, node.handlePollMessages)
 
 	// Add the subscribe_topic tool.
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "subscribe_topic",
 		Description: "Subscribe to a custom GossipSub topic",
-	}, func(ctx context.Context, req *mcp.CallToolRequest, params struct {
-		Topic string `json:"topic" jsonschema:"GossipSub topic name"`
-	}) (*mcp.CallToolResult, any, error) {
-		if err := node.subscribeToTopic(ctx, params.Topic); err != nil {
-			return nil, nil, err
-		}
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				&mcp.TextContent{Text: "Subscribed"},
-			},
-		}, nil, nil
-	})
+	}, node.handleSubscribeTopic)
 
 	// Add the get_mesh_info tool.
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "get_mesh_info",
 		Description: "Get information about the mesh network",
-	}, func(ctx context.Context, req *mcp.CallToolRequest, params struct{}) (*mcp.CallToolResult, any, error) {
-		if node == nil {
-			return nil, nil, fmt.Errorf("node not initialized")
-		}
-		node.mu.Lock()
-		var knownPeers []string
-		for p := range node.knownPeers {
-			knownPeers = append(knownPeers, p)
-		}
-		node.mu.Unlock()
-
-		peers := node.Host.Network().Peers()
-		var connectedPeers []string
-		for _, p := range peers {
-			connectedPeers = append(connectedPeers, p.String())
-		}
-		dhtSize := node.DHT.RoutingTable().Size()
-
-		resData := map[string]any{
-			"known_peers":     knownPeers,
-			"connected_peers": connectedPeers,
-			"dht_size":        dhtSize,
-			"hub_peer_id":     node.HubPeerID.String(),
-		}
-		responseBytes, err := json.Marshal(resData)
-		if err != nil {
-			return nil, nil, err
-		}
-		response := string(responseBytes)
-
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				&mcp.TextContent{Text: response},
-			},
-		}, nil, nil
-	})
+	}, node.handleGetMeshInfo)
 
 	// Add the call_remote_tool tool.
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "call_remote_tool",
 		Description: "Call an MCP tool on a remote agent",
-	}, func(ctx context.Context, req *mcp.CallToolRequest, params struct {
-		PeerID    string `json:"peer_id" jsonschema:"The Peer ID of the target agent"`
-		ToolName  string `json:"tool_name" jsonschema:"The name of the tool to call"`
-		Arguments string `json:"arguments" jsonschema:"JSON encoded arguments for the tool"`
-	}) (*mcp.CallToolResult, any, error) {
-		logger.Infof("[MCP] call_remote_tool called for peer %s, tool %s", params.PeerID, params.ToolName)
-		targetPeer, err := peer.Decode(params.PeerID)
-		if err != nil {
-			return nil, nil, err
-		}
-		var args map[string]any
-		if params.Arguments != "" {
-			if err := json.Unmarshal([]byte(params.Arguments), &args); err != nil {
-				return nil, nil, err
-			}
-		}
-
-		res, err := node.CallMCPTool(ctx, targetPeer, params.ToolName, args)
-		if err != nil {
-			return nil, nil, err
-		}
-		return res, nil, nil
-	})
+	}, node.handleCallRemoteTool)
 
 	// Add the connect_peer tool.
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "connect_peer",
 		Description: "Connect to a peer in the mesh",
-	}, func(ctx context.Context, req *mcp.CallToolRequest, params struct {
-		PeerAddr string `json:"peer_addr" jsonschema:"The full multiaddress of the peer to connect to"`
-	}) (*mcp.CallToolResult, any, error) {
-		ma, err := multiaddr.NewMultiaddr(params.PeerAddr)
-		if err != nil {
-			return nil, nil, err
-		}
-		addrInfo, err := peer.AddrInfoFromP2pAddr(ma)
-		if err != nil {
-			return nil, nil, err
-		}
-		if err := node.Host.Connect(ctx, *addrInfo); err != nil {
-			return nil, nil, err
-		}
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				&mcp.TextContent{Text: "Connected"},
-			},
-		}, nil, nil
-	})
+	}, node.handleConnectPeer)
 
 	// Create the SSE handler using the SDK
 	sseHandler := mcp.NewSSEHandler(func(request *http.Request) *mcp.Server {
@@ -359,14 +183,12 @@ func (n *SamNode) callMCPToolOnce(ctx context.Context, targetPeer peer.ID, toolN
 		return nil, fmt.Errorf("failed to connect client: %w", err)
 	}
 
+	// We don't need to marshall the params, the SDK takes care of it
+	// Passing pre-marshaled []byte triggers encoding/json's base64 which gets rejected
 	callParams := &mcp.CallToolParams{
-		Name: toolName,
+		Name:      toolName,
+		Arguments: params,
 	}
-	paramsBytes, err := json.Marshal(params)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal params for tool %s: %w", toolName, err)
-	}
-	callParams.Arguments = paramsBytes // Assume it takes bytes or raw message!
 
 	res, err := session.CallTool(ctx, callParams)
 	if err != nil {
@@ -374,4 +196,26 @@ func (n *SamNode) callMCPToolOnce(ctx context.Context, targetPeer peer.ID, toolN
 	}
 
 	return res, nil
+}
+
+// fetchRemoteServiceCatalog calls the remote peer's list_local_services
+// MCP tool with the type filter and returns the parsed catalog.
+func (n *SamNode) fetchRemoteServiceCatalog(ctx context.Context, peerID peer.ID, typeStr string) ([]*api.ServiceInfo, error) {
+	res, err := n.callMCPToolOnce(ctx, peerID, "list_local_services", map[string]string{"type": typeStr})
+	if err != nil {
+		return nil, err
+	}
+	if res == nil || len(res.Content) == 0 {
+		return nil, fmt.Errorf("empty response")
+	}
+	text, ok := res.Content[0].(*mcp.TextContent)
+	if !ok {
+		return nil, fmt.Errorf("unexpected content type: %T", res.Content[0])
+	}
+	var services []*api.ServiceInfo
+	if err := json.Unmarshal([]byte(text.Text), &services); err != nil {
+		logger.Warnf("[Discovery] catalog unmarshal failed; raw text from %s: %q", peerID, text.Text)
+		return nil, fmt.Errorf("unmarshal: %w", err)
+	}
+	return services, nil
 }

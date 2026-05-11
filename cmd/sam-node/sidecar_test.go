@@ -279,10 +279,110 @@ func TestListLocalServices(t *testing.T) {
 	node.services["service1"] = &ServiceManifest{Info: service1}
 	node.services["service2"] = &ServiceManifest{Info: service2}
 
-	services := node.ListLocalServices()
+	services := node.ListLocalServices(api.ServiceType_SERVICE_TYPE_UNSPECIFIED)
 
 	if len(services) != 2 {
 		t.Errorf("expected 2 services, got %d", len(services))
+	}
+}
+
+func TestListLocalServices_TypeFilter(t *testing.T) {
+	node := &SamNode{
+		services: make(map[string]*ServiceManifest),
+	}
+	mcpA := &api.ServiceInfo{Type: api.ServiceType_SERVICE_TYPE_MCP, Name: "mcp-a"}
+	mcpB := &api.ServiceInfo{Type: api.ServiceType_SERVICE_TYPE_MCP, Name: "mcp-b"}
+	inf := &api.ServiceInfo{Type: api.ServiceType_SERVICE_TYPE_INFERENCE, Name: "inf-a"}
+	node.services["mcp-a"] = &ServiceManifest{Info: mcpA}
+	node.services["mcp-b"] = &ServiceManifest{Info: mcpB}
+	node.services["inf-a"] = &ServiceManifest{Info: inf}
+
+	cases := []struct {
+		name      string
+		filter    api.ServiceType
+		wantCount int
+	}{
+		{"unspecified returns all", api.ServiceType_SERVICE_TYPE_UNSPECIFIED, 3},
+		{"mcp filter", api.ServiceType_SERVICE_TYPE_MCP, 2},
+		{"inference filter", api.ServiceType_SERVICE_TYPE_INFERENCE, 1},
+		{"a2a filter (none registered)", api.ServiceType_SERVICE_TYPE_A2A, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := node.ListLocalServices(tc.filter)
+			if len(got) != tc.wantCount {
+				t.Errorf("expected %d services, got %d", tc.wantCount, len(got))
+			}
+			for _, s := range got {
+				if tc.filter != api.ServiceType_SERVICE_TYPE_UNSPECIFIED && s.Type != tc.filter {
+					t.Errorf("filter %v leaked service of type %v: %s", tc.filter, s.Type, s.Name)
+				}
+			}
+		})
+	}
+}
+
+func TestServiceTypeToCID_Properties(t *testing.T) {
+	mcp1, err := serviceTypeToCID(api.ServiceType_SERVICE_TYPE_MCP)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mcp2, err := serviceTypeToCID(api.ServiceType_SERVICE_TYPE_MCP)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !mcp1.Equals(mcp2) {
+		t.Errorf("serviceTypeToCID is non-deterministic: %s vs %s", mcp1, mcp2)
+	}
+
+	inf, err := serviceTypeToCID(api.ServiceType_SERVICE_TYPE_INFERENCE)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mcp1.Equals(inf) {
+		t.Errorf("expected distinct CIDs for distinct types, both = %s", mcp1)
+	}
+
+	named, err := serviceNameToCID(api.ServiceType_SERVICE_TYPE_MCP, "some-service")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mcp1.Equals(named) {
+		t.Errorf("type-only CID collided with name-keyed CID: %s", mcp1)
+	}
+
+	if _, err := serviceTypeToCID(api.ServiceType_SERVICE_TYPE_UNSPECIFIED); err == nil {
+		t.Errorf("expected error for unspecified type")
+	}
+}
+
+// TestServiceKeyToCID_Equivalence pins the wire format: the public
+// helpers must compose into the same CID as a direct call to the
+// shared key builder, so optimizing the helpers later can't silently
+// shift the DHT keys.
+func TestServiceKeyToCID_Equivalence(t *testing.T) {
+	gotName, err := serviceNameToCID(api.ServiceType_SERVICE_TYPE_MCP, "svc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantName, err := serviceKeyToCID("mcp", "svc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !gotName.Equals(wantName) {
+		t.Errorf("serviceNameToCID != serviceKeyToCID: %s vs %s", gotName, wantName)
+	}
+
+	gotType, err := serviceTypeToCID(api.ServiceType_SERVICE_TYPE_MCP)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantType, err := serviceKeyToCID("mcp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !gotType.Equals(wantType) {
+		t.Errorf("serviceTypeToCID != serviceKeyToCID: %s vs %s", gotType, wantType)
 	}
 }
 
