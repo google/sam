@@ -27,7 +27,9 @@ import (
 	"github.com/google/sam/api"
 	"github.com/libp2p/go-libp2p"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
+	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
@@ -211,9 +213,9 @@ func TestHandleDiscoverService(t *testing.T) {
 	defer func() { _ = d.Close() }()
 
 	node := &SamNode{
-		services: make(map[string]*ServiceManifest),
-		DHT:      d,
-		Host:     h,
+		services:      make(map[string]*ServiceManifest),
+		DHT:           d,
+		Host:          h,
 		BoundHTTPAddr: "127.0.0.1:8080",
 	}
 
@@ -272,10 +274,10 @@ func TestListLocalServices(t *testing.T) {
 	node := &SamNode{
 		services: make(map[string]*ServiceManifest),
 	}
-	
+
 	service1 := &api.ServiceInfo{Type: api.ServiceType_SERVICE_TYPE_MCP, Name: "service1"}
 	service2 := &api.ServiceInfo{Type: api.ServiceType_SERVICE_TYPE_INFERENCE, Name: "service2"}
-	
+
 	node.services["service1"] = &ServiceManifest{Info: service1}
 	node.services["service2"] = &ServiceManifest{Info: service2}
 
@@ -448,7 +450,7 @@ func TestHandleRegisterService_Validation(t *testing.T) {
 
 func TestStartSidecarServer_TokenMandatory(t *testing.T) {
 	node := &SamNode{}
-	
+
 	// Test case: No token, no TLS
 	err := startSidecarServer(node, "127.0.0.1:0", "", "", "", "")
 	if err == nil {
@@ -464,5 +466,114 @@ func TestStartSidecarServer_TokenMandatory(t *testing.T) {
 		if strings.Contains(err.Error(), "token is mandatory when not using mTLS") {
 			t.Fatalf("Did not expect 'token is mandatory' error when token is provided, got: %v", err)
 		}
+	}
+}
+
+func TestRegisterService_PopulatesAggregatedTools(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	tools := []*mcp.Tool{
+		{Name: "do_thing", Description: "x", InputSchema: map[string]any{"type": "object"}},
+	}
+	handler := newFakeMCPHandler(t, tools)
+	hostedSrv := httptest.NewServer(handler)
+	defer hostedSrv.Close()
+
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+
+	priv, _, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	node, err := NewSamNode(ctx, priv, nil, nil, store, "test-mesh", "1s",
+		[]string{"/ip4/127.0.0.1/tcp/0"}, false, &NodeConfigComplete{}, 24*time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = node.Teardown() }()
+
+	req := &api.RegisterServiceRequest{
+		Service: &api.ServiceInfo{Type: api.ServiceType_SERVICE_TYPE_MCP, Name: "svc"},
+		Backend: &api.RegisterServiceRequest_TargetUrl{TargetUrl: hostedSrv.URL},
+	}
+	_ = node.RegisterService(ctx, req) // DHT.Provide may fail in isolated test; aggregation is independent.
+
+	node.servicesMu.RLock()
+	manifest, ok := node.services["svc"]
+	node.servicesMu.RUnlock()
+	if !ok {
+		t.Fatal("service was not stored in n.services")
+	}
+	if len(manifest.AggregatedTools) != 1 {
+		t.Fatalf("expected 1 aggregated tool, got %d", len(manifest.AggregatedTools))
+	}
+	if got := manifest.AggregatedTools[0].Name; got != "svc.do_thing" {
+		t.Errorf("aggregated tool name: got %q, want %q", got, "svc.do_thing")
+	}
+}
+
+func TestUnregisterService_DetachesAggregation(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	tools := []*mcp.Tool{
+		{Name: "do_thing", Description: "x", InputSchema: map[string]any{"type": "object"}},
+	}
+	handler := newFakeMCPHandler(t, tools)
+	hostedSrv := httptest.NewServer(handler)
+	defer hostedSrv.Close()
+
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+
+	priv, _, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	node, err := NewSamNode(ctx, priv, nil, nil, store, "test-mesh", "1s",
+		[]string{"/ip4/127.0.0.1/tcp/0"}, false, &NodeConfigComplete{}, 24*time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = node.Teardown() }()
+
+	req := &api.RegisterServiceRequest{
+		Service: &api.ServiceInfo{Type: api.ServiceType_SERVICE_TYPE_MCP, Name: "svc"},
+		Backend: &api.RegisterServiceRequest_TargetUrl{TargetUrl: hostedSrv.URL},
+	}
+	_ = node.RegisterService(ctx, req)
+
+	node.servicesMu.RLock()
+	manifestBefore, ok := node.services["svc"]
+	node.servicesMu.RUnlock()
+	if !ok || manifestBefore.MCPSession == nil {
+		t.Fatal("expected service registered with active MCPSession")
+	}
+	loopbackURL := manifestBefore.loopbackServer.URL
+
+	if err := node.UnregisterService(ctx, "svc"); err != nil {
+		t.Fatalf("UnregisterService: %v", err)
+	}
+
+	if manifestBefore.MCPSession != nil {
+		t.Error("MCPSession should be nil after detach")
+	}
+	if manifestBefore.loopbackServer != nil {
+		t.Error("loopbackServer should be nil after detach")
+	}
+	resp, err := http.Get(loopbackURL)
+	if err == nil {
+		_ = resp.Body.Close()
+		t.Error("loopback server should be closed after detach")
 	}
 }

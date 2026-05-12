@@ -17,7 +17,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"strings"
 
+	"github.com/google/sam/api"
 	"github.com/libp2p/go-libp2p/core/connmgr"
 	"github.com/libp2p/go-libp2p/core/control"
 	"github.com/libp2p/go-libp2p/core/network"
@@ -102,6 +104,34 @@ func (n *SamNode) HandleMCPStream(s network.Stream) {
 		Name:        "get_mesh_info",
 		Description: "Get information about the mesh network",
 	}, n.handleGetMeshInfo)
+
+	// Register aggregated hosted-service tools.
+	// TODO: Extract
+	n.servicesMu.RLock()
+	for _, manifest := range n.services {
+		if manifest.Info == nil || manifest.Info.Type != api.ServiceType_SERVICE_TYPE_MCP {
+			continue
+		}
+		if manifest.MCPSession == nil {
+			continue
+		}
+		sess := manifest.MCPSession
+		for _, tool := range manifest.AggregatedTools {
+			toolCopy := tool
+			parts := strings.SplitN(toolCopy.Name, ".", 2)
+			if len(parts) != 2 {
+				continue
+			}
+			originalName := parts[1]
+			server.AddTool(toolCopy, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+				return sess.CallTool(ctx, &mcp.CallToolParams{
+					Name:      originalName,
+					Arguments: req.Params.Arguments,
+				})
+			})
+		}
+	}
+	n.servicesMu.RUnlock()
 
 	ctx := context.Background()
 	if err := server.Run(ctx, transport); err != nil {

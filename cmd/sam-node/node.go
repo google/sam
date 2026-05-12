@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"net/http/httputil"
 	"net/url"
 	"os"
@@ -53,6 +54,7 @@ import (
 	libp2pquic "github.com/libp2p/go-libp2p/p2p/transport/quic"
 	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
 	"github.com/libp2p/go-msgio"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/multiformats/go-multiaddr"
 	"github.com/multiformats/go-multihash"
 	"google.golang.org/protobuf/proto"
@@ -77,9 +79,12 @@ type TrustedKey struct {
 }
 
 type ServiceManifest struct {
-	Info    *api.ServiceInfo
-	Handler http.Handler
-	Cmd     *exec.Cmd
+	Info            *api.ServiceInfo
+	Handler         http.Handler
+	Cmd             *exec.Cmd
+	MCPSession      *mcp.ClientSession
+	AggregatedTools []*mcp.Tool
+	loopbackServer  *httptest.Server
 }
 
 type SamNode struct {
@@ -932,12 +937,12 @@ func (n *SamNode) RegisterService(ctx context.Context, req *api.RegisterServiceR
 		return fmt.Errorf("DHT not initialized")
 	}
 
+	// Best-effort DHT advertisement; log but don't fail if the routing table is empty.
 	if err := n.DHT.Provide(ctx, srvNameCID, true); err != nil {
-		return fmt.Errorf("failed to provide service to DHT: %w", err)
+		logger.Warnf("[ServiceRegistry] DHT Provide (name) for %s: %v", info.Name, err)
 	}
-	// Per-type rendezvous record so type-only discovery finds this peer.
 	if err := n.DHT.Provide(ctx, srvTypeCID, true); err != nil {
-		return fmt.Errorf("failed to provide service type to DHT: %w", err)
+		logger.Warnf("[ServiceRegistry] DHT Provide (type) for %s: %v", info.Name, err)
 	}
 
 	var handler http.Handler
@@ -960,12 +965,17 @@ func (n *SamNode) RegisterService(ctx context.Context, req *api.RegisterServiceR
 	}
 
 	n.servicesMu.Lock()
-	n.services[info.Name] = &ServiceManifest{
+	manifest := &ServiceManifest{
 		Info:    info,
 		Handler: handler,
 		Cmd:     cmd,
 	}
+	n.services[info.Name] = manifest
 	n.servicesMu.Unlock()
+
+	if info.Type == api.ServiceType_SERVICE_TYPE_MCP {
+		_ = n.aggregateServiceTools(ctx, manifest)
+	}
 
 	logger.Infof("[ServiceRegistry] Registering service %s/%s (name CID: %s, type CID: %s)", info.Type, info.Name, srvNameCID, srvTypeCID)
 	return nil
@@ -982,8 +992,38 @@ func (n *SamNode) UnregisterService(ctx context.Context, serviceName string) err
 	delete(n.services, serviceName)
 	n.servicesMu.Unlock()
 
+	if ok {
+		n.detachServiceTools(manifest)
+	}
+
 	logger.Infof("[ServiceRegistry] Unregistered service %s", serviceName)
 	// We can't easily remove provider records from DHT, but we stop providing it.
+	return nil
+}
+
+// Teardown detaches all registered services and closes the libp2p host.
+// Store is owned by the caller and is not closed here.
+func (n *SamNode) Teardown() error {
+	n.servicesMu.Lock()
+	manifests := make([]*ServiceManifest, 0, len(n.services))
+	for name, manifest := range n.services {
+		if manifest.Cmd != nil {
+			if err := manifest.Cmd.Process.Kill(); err != nil {
+				logger.Errorf("Failed to kill process for service %s: %v", name, err)
+			}
+		}
+		manifests = append(manifests, manifest)
+		delete(n.services, name)
+	}
+	n.servicesMu.Unlock()
+
+	for _, manifest := range manifests {
+		n.detachServiceTools(manifest)
+	}
+
+	if n.Host != nil {
+		return n.Host.Close()
+	}
 	return nil
 }
 

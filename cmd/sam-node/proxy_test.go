@@ -84,7 +84,9 @@ func TestDatapathIntegration(t *testing.T) {
 	expectedBody := `{"status":"success"}`
 
 	dummyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("X-Test-Header") != expectedHeaderValue {
+		// Only assert the test header on the actual proxied request; MCP aggregation
+		// probes use other paths (/sse, /message) and don't carry it.
+		if r.URL.Path == "/api/v1/test" && r.Header.Get("X-Test-Header") != expectedHeaderValue {
 			t.Errorf("Expected header X-Test-Header to be %s, got %s", expectedHeaderValue, r.Header.Get("X-Test-Header"))
 		}
 		w.Header().Set("Content-Type", "application/json")

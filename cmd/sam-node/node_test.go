@@ -101,3 +101,17 @@ func TestHandleKeyRotationEvent(t *testing.T) {
 		t.Errorf("Expected 1 trusted key, got %d", len(node.trustedKeys))
 	}
 }
+
+func TestServiceManifest_AggregationFields(t *testing.T) {
+	// This test exists to lock in the field names introduced for
+	// the find-remote-tools feature. If any of these fields are
+	// renamed or removed, the build will fail here.
+	m := ServiceManifest{
+		MCPSession:      nil,
+		AggregatedTools: nil,
+		loopbackServer:  nil,
+	}
+	if m.MCPSession != nil || m.AggregatedTools != nil || m.loopbackServer != nil {
+		t.Fatal("zero values expected")
+	}
+}
