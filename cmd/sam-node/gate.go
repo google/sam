@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/google/sam/api"
 	"github.com/libp2p/go-libp2p/core/connmgr"
 	"github.com/libp2p/go-libp2p/core/control"
 	"github.com/libp2p/go-libp2p/core/network"
@@ -102,6 +103,20 @@ func (n *SamNode) HandleMCPStream(s network.Stream) {
 		Name:        "get_mesh_info",
 		Description: "Get information about the mesh network",
 	}, n.handleGetMeshInfo)
+
+	// Register aggregated hosted-service tools from MCP services.
+	infos := n.services.List(api.ServiceType_SERVICE_TYPE_MCP)
+	for _, info := range infos {
+		svc, ok := n.services.Get(info.Name)
+		if !ok {
+			continue
+		}
+		mcpSvc, ok := svc.(*MCPService)
+		if !ok {
+			continue
+		}
+		mcpSvc.RegisterAggregatedTools(server)
+	}
 
 	ctx := context.Background()
 	if err := server.Run(ctx, transport); err != nil {

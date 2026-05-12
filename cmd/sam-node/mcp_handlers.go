@@ -4,11 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
+	"sync"
+	"time"
 
 	"github.com/google/sam/api"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-msgio"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/multiformats/go-multiaddr"
+	"google.golang.org/protobuf/proto"
 )
 
 // SendMessageParams defines the parameters for the send_message tool.
@@ -239,4 +244,203 @@ func (n *SamNode) handleConnectPeer(ctx context.Context, req *mcp.CallToolReques
 			&mcp.TextContent{Text: "Connected"},
 		},
 	}, nil, nil
+}
+
+// FindRemoteToolsParams defines the parameters for the
+// find_remote_tools tool.
+type FindRemoteToolsParams struct {
+	Intent      string `json:"intent,omitempty" jsonschema:"Natural-language description of what the caller is looking for. Reserved for future semantic ranking; currently accepted but ignored."`
+	PeerID      string `json:"peer_id,omitempty" jsonschema:"Restrict the search to a single peer. Empty means search the whole mesh."`
+	ServiceName string `json:"service_name,omitempty" jsonschema:"Restrict results to tools whose name starts with this service prefix (e.g. 'code-reviewer'). Empty means no service filter."`
+}
+
+// remoteToolRow is one entry in the find_remote_tools response.
+type remoteToolRow struct {
+	PeerID      string `json:"peer_id"`
+	ToolName    string `json:"tool_name"`
+	Description string `json:"description"`
+}
+
+// handleFindRemoteTools implements the find_remote_tools tool.
+//
+// Scope:
+//   - If params.PeerID is set, only that peer is queried.
+//   - Otherwise the candidate list is obtained via DiscoverRemoteServices.
+//
+// Filtering:
+//   - Tools without a "." in their name (infra tools) are excluded.
+//   - If params.ServiceName is set, only tools whose name starts with
+//     "<service_name>." are returned.
+//   - params.Intent is accepted and logged at debug level, but does not
+//     filter or rank results in this implementation (placeholder for
+//     future semantic search).
+func (n *SamNode) handleFindRemoteTools(ctx context.Context, req *mcp.CallToolRequest, params FindRemoteToolsParams) (*mcp.CallToolResult, any, error) {
+	if params.Intent != "" {
+		logger.Debugf("[find_remote_tools] intent (ignored): %q", params.Intent)
+	}
+
+	selfID := n.Host.ID().String()
+	if params.PeerID != "" && params.PeerID == selfID {
+		return nil, nil, fmt.Errorf("peer_id %q is this node; cross-mesh discovery cannot target self", params.PeerID)
+	}
+
+	var rows []remoteToolRow
+
+	if params.PeerID != "" {
+		pid, err := peer.Decode(params.PeerID)
+		if err != nil {
+			return nil, nil, fmt.Errorf("invalid peer_id %q: %w", params.PeerID, err)
+		}
+		tools, err := n.fetchRemoteToolCatalogue(ctx, pid)
+		if err != nil {
+			return nil, nil, err
+		}
+		rows = appendFilteredRows(rows, params.PeerID, tools, params.ServiceName)
+	} else {
+		providers, err := n.DiscoverRemoteServices(ctx, api.ServiceType_SERVICE_TYPE_MCP, "")
+		if err != nil {
+			return nil, nil, fmt.Errorf("discover providers: %w", err)
+		}
+		seen := map[string]bool{}
+		var peerIDs []peer.ID
+		for _, p := range providers {
+			if p.PeerId == selfID || seen[p.PeerId] {
+				continue
+			}
+			seen[p.PeerId] = true
+			pid, err := peer.Decode(p.PeerId)
+			if err != nil {
+				continue
+			}
+			peerIDs = append(peerIDs, pid)
+		}
+
+		rows = n.fanOutFetch(ctx, peerIDs, params.ServiceName)
+	}
+
+	if rows == nil {
+		rows = []remoteToolRow{}
+	}
+	respData, err := json.Marshal(rows)
+	if err != nil {
+		return nil, nil, err
+	}
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{&mcp.TextContent{Text: string(respData)}},
+	}, nil, nil
+}
+
+// fetchRemoteToolCatalogue opens a libp2p MCP stream to the target peer
+// (with the same auth handshake callMCPToolOnce uses), calls tools/list,
+// and returns the result.
+func (n *SamNode) fetchRemoteToolCatalogue(ctx context.Context, targetPeer peer.ID) ([]*mcp.Tool, error) {
+	s, err := n.Host.NewStream(ctx, targetPeer, api.MCPProtocolID)
+	if err != nil {
+		return nil, fmt.Errorf("open stream: %w", err)
+	}
+	defer func() {
+		_ = s.Close()
+	}()
+
+	biscuitBytes, err := n.Store.LoadIdentity()
+	if err != nil {
+		return nil, fmt.Errorf("load identity: %w", err)
+	}
+	authFrame := api.AuthFrame{Biscuit: biscuitBytes}
+	authBytes, _ := proto.Marshal(&authFrame)
+
+	writer := msgio.NewVarintWriter(s)
+	if err := writer.WriteMsg(authBytes); err != nil {
+		return nil, fmt.Errorf("write auth frame: %w", err)
+	}
+
+	// TODO: Consider increasing this to 1MB to allocate large MCP tool catalogues
+	reader := msgio.NewVarintReaderSize(s, 1024*64)
+	respMsg, err := reader.ReadMsg()
+	if err != nil {
+		return nil, fmt.Errorf("read auth response: %w", err)
+	}
+	defer reader.ReleaseMsg(respMsg)
+
+	var resp api.AuthResponse
+	if err := proto.Unmarshal(respMsg, &resp); err != nil {
+		return nil, fmt.Errorf("parse auth response: %w", err)
+	}
+	if !resp.Success {
+		return nil, fmt.Errorf("auth rejected by %s: %s", targetPeer, resp.Error)
+	}
+
+	transport := NewStreamTransport(s)
+	client := mcp.NewClient(&mcp.Implementation{Name: "sam-node-find", Version: "0.1.0"}, nil)
+	session, err := client.Connect(ctx, transport, nil)
+	if err != nil {
+		return nil, fmt.Errorf("mcp connect: %w", err)
+	}
+	defer func() { _ = session.Close() }()
+
+	listRes, err := session.ListTools(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("list tools: %w", err)
+	}
+	return listRes.Tools, nil
+}
+
+// appendFilteredRows appends rows for tools that have a namespaced name
+// (containing ".") and, if serviceName is non-empty, whose name starts
+// with "<serviceName>.".
+func appendFilteredRows(rows []remoteToolRow, peerID string, tools []*mcp.Tool, serviceName string) []remoteToolRow {
+	for _, tool := range tools {
+		if !strings.Contains(tool.Name, ".") {
+			continue
+		}
+		if serviceName != "" && !strings.HasPrefix(tool.Name, serviceName+".") {
+			continue
+		}
+		rows = append(rows, remoteToolRow{
+			PeerID:      peerID,
+			ToolName:    tool.Name,
+			Description: tool.Description,
+		})
+	}
+	return rows
+}
+
+// fanOutFetch queries each peer's tool catalogue concurrently with a
+// small cap and returns the filtered rows. Per-peer failures are
+// logged at debug level and skipped — best-effort mesh-wide fetch.
+func (n *SamNode) fanOutFetch(ctx context.Context, peers []peer.ID, serviceName string) []remoteToolRow {
+	const maxConcurrent = 8
+	sem := make(chan struct{}, maxConcurrent)
+
+	var (
+		mu   sync.Mutex
+		rows []remoteToolRow
+	)
+
+	var wg sync.WaitGroup
+	for _, pid := range peers {
+		pid := pid
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			peerCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			defer cancel()
+
+			tools, err := n.fetchRemoteToolCatalogue(peerCtx, pid)
+			if err != nil {
+				logger.Debugf("[find_remote_tools] peer %s skipped: %v", pid, err)
+				return
+			}
+
+			mu.Lock()
+			rows = appendFilteredRows(rows, pid.String(), tools, serviceName)
+			mu.Unlock()
+		}()
+	}
+	wg.Wait()
+
+	return rows
 }

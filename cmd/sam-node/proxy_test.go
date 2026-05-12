@@ -84,7 +84,9 @@ func TestDatapathIntegration(t *testing.T) {
 	expectedBody := `{"status":"success"}`
 
 	dummyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("X-Test-Header") != expectedHeaderValue {
+		// Only assert the test header on the actual proxied request; MCP aggregation
+		// probes use other paths (/sse, /message) and don't carry it.
+		if r.URL.Path == "/api/v1/test" && r.Header.Get("X-Test-Header") != expectedHeaderValue {
 			t.Errorf("Expected header X-Test-Header to be %s, got %s", expectedHeaderValue, r.Header.Get("X-Test-Header"))
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -99,7 +101,7 @@ func TestDatapathIntegration(t *testing.T) {
 		Type: api.ServiceType_SERVICE_TYPE_MCP,
 		Name: serviceName,
 	}
-	
+
 	// We register it in the DHT and also setup the local handler.
 	// We ignore the error because DHT Provide might fail if routing table is empty in this isolated test.
 	_ = nodeA.RegisterService(ctx, &api.RegisterServiceRequest{
@@ -110,12 +112,10 @@ func TestDatapathIntegration(t *testing.T) {
 	// Manually add to services map to ensure it's registered for the test lookup
 	// because RegisterService might have failed due to DHT not being ready in this isolated test.
 	targetURL, _ := url.Parse(dummyServer.URL)
-	nodeA.servicesMu.Lock()
-	nodeA.services[serviceName] = &ServiceManifest{
-		Info:    serviceInfo,
-		Handler: httputil.NewSingleHostReverseProxy(targetURL),
-	}
-	nodeA.servicesMu.Unlock()
+	nodeA.services.insertService(&testService{
+		info:    serviceInfo,
+		handler: httputil.NewSingleHostReverseProxy(targetURL),
+	})
 
 	// Start the Sidecar server for Node B to get BoundHTTPAddr populated
 	// We don't need full sidecar for Node B in this test if we call createEgressProxy directly,
@@ -123,13 +123,13 @@ func TestDatapathIntegration(t *testing.T) {
 	nodeB.BoundHTTPAddr = "127.0.0.1:0" // Dummy
 
 	// 4. Execution: Node B makes a request via its local Egress Proxy
-	
+
 	// We need to create the egress proxy for Node B.
 	// The user request says: "Implement a reverse proxy on the local `sam-node` HTTP server that intercepts requests to `/sam/`"
 	// In sidecar.go we have `createEgressProxy(node)`. We can use it here.
-	
+
 	proxyHandler := createEgressProxy(nodeB)
-	
+
 	// We start a test server for Node B's proxy to simulate the local agent calling it.
 	proxyServer := httptest.NewServer(proxyHandler)
 	defer proxyServer.Close()
@@ -145,16 +145,16 @@ func TestDatapathIntegration(t *testing.T) {
 	req.Header.Set("X-Test-Header", expectedHeaderValue)
 
 	client := &http.Client{}
-	
+
 	pidStr := nodeA.Host.ID().String()
 	_, err = peer.Decode(pidStr)
 	if err != nil {
 		t.Fatalf("Failed to decode generated peer ID %s: %v", pidStr, err)
 	}
-	
+
 	// Wait for DHT/routing to settle or just retry a few times if needed.
 	// Since we connected directly, it should work immediately if the protocol is registered.
-	
+
 	var resp *http.Response
 	for i := 0; i < 3; i++ {
 		resp, err = client.Do(req)
@@ -248,19 +248,21 @@ func TestStdioDatapathIntegration(t *testing.T) {
 
 	// Manually add to services map to ensure it's registered for the test lookup
 	// and avoid double start by not calling RegisterService.
-	handler, cmd, err := nodeA.createStdioBridgeHandler(req.Backend.(*api.RegisterServiceRequest_Command).Command)
+	handler, cmd, err := createStdioBridgeHandler(req.Backend.(*api.RegisterServiceRequest_Command).Command)
 	if err != nil {
 		t.Fatal(err)
 	}
-	nodeA.servicesMu.Lock()
-	nodeA.services[serviceName] = &ServiceManifest{
-		Info:    serviceInfo,
-		Handler: handler,
-		Cmd:     cmd,
-	}
-	nodeA.servicesMu.Unlock()
+	nodeA.services.insertService(&testService{
+		info:    serviceInfo,
+		handler: handler,
+	})
 
-	defer func() { _ = nodeA.UnregisterService(ctx, serviceName) }()
+	defer func() {
+		_ = nodeA.UnregisterService(ctx, serviceName)
+		if cmd != nil && cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+	}()
 
 	// Start the Sidecar server for Node B to get BoundHTTPAddr populated
 	nodeB.BoundHTTPAddr = "127.0.0.1:0" // Dummy

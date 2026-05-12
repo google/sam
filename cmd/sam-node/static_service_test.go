@@ -15,6 +15,7 @@ import (
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/multiformats/go-multiaddr"
 	"google.golang.org/protobuf/proto"
 )
@@ -104,13 +105,17 @@ func TestStaticServiceRegistrationRequiresConnection(t *testing.T) {
 		}
 	}()
 
+	// Stand up a real MCP upstream so MCPService.Init() can complete its handshake.
+	upstream := httptest.NewServer(newFakeMCPHandler(t, []*mcp.Tool{}))
+	defer upstream.Close()
+
 	// 5. Try to register static services BEFORE connecting to hub
 	services := []api.ServiceConfig{
 		{
 			Type:        "mcp",
 			Name:        "test-service",
 			Description: "Test Service",
-			TargetURL:   "http://localhost:8080",
+			TargetURL:   upstream.URL,
 		},
 	}
 
@@ -137,6 +142,11 @@ func TestStaticServiceRegistrationRequiresConnection(t *testing.T) {
 	err = node.RegisterStaticServices(ctx, services)
 	if err != nil {
 		t.Fatalf("Expected RegisterStaticServices to succeed after enrollment, but failed: %v", err)
+	}
+
+	// Tear down the live MCP session so upstream.Close() can return.
+	if err := node.UnregisterService(ctx, "test-service"); err != nil {
+		t.Errorf("unregister: %v", err)
 	}
 }
 
@@ -193,7 +203,7 @@ func TestStaticServiceRegistrationCommandFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("Expected RegisterStaticServices to fail with non-existent command, but it succeeded")
 	}
-	if !strings.Contains(err.Error(), "failed to create stdio bridge") {
-		t.Fatalf("Expected error to contain 'failed to create stdio bridge', got: %v", err)
+	if !strings.Contains(err.Error(), "/non-existent/binary") {
+		t.Fatalf("Expected error to mention the missing binary, got: %v", err)
 	}
 }

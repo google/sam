@@ -8,4 +8,4 @@ services:
   - type: "mcp"
     name: "calculator"
     description: "Simple math operations"
-    target_url: "http://calc-mcp:7777"
+    target_url: "http://calc-mcp:7777/mcp"

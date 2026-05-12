@@ -27,7 +27,9 @@ import (
 	"github.com/google/sam/api"
 	"github.com/libp2p/go-libp2p"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
+	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
@@ -145,13 +147,17 @@ func TestHandleRegisterService(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	node := &SamNode{
-		services: make(map[string]*ServiceManifest),
+		services: NewServiceRegistry(d),
 		DHT:      d,
 	}
 
+	// MCPService.Init() opens a live session to the URL; serve a fake MCP backend.
+	upstream := httptest.NewServer(newFakeMCPHandler(t, []*mcp.Tool{}))
+	defer upstream.Close()
+
 	reqBody := &api.RegisterServiceRequest{
 		Service: &api.ServiceInfo{Type: api.ServiceType_SERVICE_TYPE_MCP, Name: "test-service", Description: "test desc"},
-		Backend: &api.RegisterServiceRequest_TargetUrl{TargetUrl: "http://localhost:8080"},
+		Backend: &api.RegisterServiceRequest_TargetUrl{TargetUrl: upstream.URL},
 	}
 	body, err := protojson.Marshal(reqBody)
 	if err != nil {
@@ -170,13 +176,19 @@ func TestHandleRegisterService(t *testing.T) {
 	if !node.IsServiceRegistered("test-service") {
 		t.Errorf("expected service to be registered")
 	}
+
+	// Tear down so the live MCP session releases the upstream SSE stream;
+	// otherwise upstream.Close() blocks waiting for in-flight handlers.
+	if err := node.UnregisterService(context.Background(), "test-service"); err != nil {
+		t.Errorf("unregister: %v", err)
+	}
 }
 
 func TestHandleUnregisterService(t *testing.T) {
 	node := &SamNode{
-		services: make(map[string]*ServiceManifest),
+		services: NewServiceRegistry(&fakeDHT{}),
 	}
-	node.services["test-service"] = &ServiceManifest{Info: &api.ServiceInfo{Name: "test-service"}}
+	node.services.insertService(&testService{info: &api.ServiceInfo{Name: "test-service"}})
 
 	reqBody := &api.ServiceInfo{Name: "test-service"}
 	body, err := json.Marshal(reqBody)
@@ -211,9 +223,9 @@ func TestHandleDiscoverService(t *testing.T) {
 	defer func() { _ = d.Close() }()
 
 	node := &SamNode{
-		services: make(map[string]*ServiceManifest),
-		DHT:      d,
-		Host:     h,
+		services:      NewServiceRegistry(d),
+		DHT:           d,
+		Host:          h,
 		BoundHTTPAddr: "127.0.0.1:8080",
 	}
 
@@ -270,14 +282,14 @@ func TestHandleDiscoverService(t *testing.T) {
 
 func TestListLocalServices(t *testing.T) {
 	node := &SamNode{
-		services: make(map[string]*ServiceManifest),
+		services: NewServiceRegistry(&fakeDHT{}),
 	}
-	
+
 	service1 := &api.ServiceInfo{Type: api.ServiceType_SERVICE_TYPE_MCP, Name: "service1"}
 	service2 := &api.ServiceInfo{Type: api.ServiceType_SERVICE_TYPE_INFERENCE, Name: "service2"}
-	
-	node.services["service1"] = &ServiceManifest{Info: service1}
-	node.services["service2"] = &ServiceManifest{Info: service2}
+
+	node.services.insertService(&testService{info: service1})
+	node.services.insertService(&testService{info: service2})
 
 	services := node.ListLocalServices(api.ServiceType_SERVICE_TYPE_UNSPECIFIED)
 
@@ -288,14 +300,14 @@ func TestListLocalServices(t *testing.T) {
 
 func TestListLocalServices_TypeFilter(t *testing.T) {
 	node := &SamNode{
-		services: make(map[string]*ServiceManifest),
+		services: NewServiceRegistry(&fakeDHT{}),
 	}
 	mcpA := &api.ServiceInfo{Type: api.ServiceType_SERVICE_TYPE_MCP, Name: "mcp-a"}
 	mcpB := &api.ServiceInfo{Type: api.ServiceType_SERVICE_TYPE_MCP, Name: "mcp-b"}
 	inf := &api.ServiceInfo{Type: api.ServiceType_SERVICE_TYPE_INFERENCE, Name: "inf-a"}
-	node.services["mcp-a"] = &ServiceManifest{Info: mcpA}
-	node.services["mcp-b"] = &ServiceManifest{Info: mcpB}
-	node.services["inf-a"] = &ServiceManifest{Info: inf}
+	node.services.insertService(&testService{info: mcpA})
+	node.services.insertService(&testService{info: mcpB})
+	node.services.insertService(&testService{info: inf})
 
 	cases := []struct {
 		name      string
@@ -388,7 +400,7 @@ func TestServiceKeyToCID_Equivalence(t *testing.T) {
 
 func TestHandleRegisterService_Validation(t *testing.T) {
 	node := &SamNode{
-		services: make(map[string]*ServiceManifest),
+		services: NewServiceRegistry(&fakeDHT{}),
 	}
 
 	tests := []struct {
@@ -448,7 +460,7 @@ func TestHandleRegisterService_Validation(t *testing.T) {
 
 func TestStartSidecarServer_TokenMandatory(t *testing.T) {
 	node := &SamNode{}
-	
+
 	// Test case: No token, no TLS
 	err := startSidecarServer(node, "127.0.0.1:0", "", "", "", "")
 	if err == nil {
@@ -464,5 +476,119 @@ func TestStartSidecarServer_TokenMandatory(t *testing.T) {
 		if strings.Contains(err.Error(), "token is mandatory when not using mTLS") {
 			t.Fatalf("Did not expect 'token is mandatory' error when token is provided, got: %v", err)
 		}
+	}
+}
+
+func TestRegisterService_PopulatesAggregatedTools(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	tools := []*mcp.Tool{
+		{Name: "do_thing", Description: "x", InputSchema: map[string]any{"type": "object"}},
+	}
+	handler := newFakeMCPHandler(t, tools)
+	hostedSrv := httptest.NewServer(handler)
+	defer hostedSrv.Close()
+
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+
+	priv, _, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	node, err := NewSamNode(ctx, priv, nil, nil, store, "test-mesh", "1s",
+		[]string{"/ip4/127.0.0.1/tcp/0"}, false, &NodeConfigComplete{}, 24*time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = node.Teardown() }()
+
+	req := &api.RegisterServiceRequest{
+		Service: &api.ServiceInfo{Type: api.ServiceType_SERVICE_TYPE_MCP, Name: "svc"},
+		Backend: &api.RegisterServiceRequest_TargetUrl{TargetUrl: hostedSrv.URL},
+	}
+	_ = node.RegisterService(ctx, req) // DHT.Provide may fail in isolated test; aggregation is independent.
+
+	svc, ok := node.services.Get("svc")
+	if !ok {
+		t.Fatal("service was not stored in registry")
+	}
+	mcpSvc, ok := svc.(*MCPService)
+	if !ok {
+		t.Fatalf("expected *MCPService, got %T", svc)
+	}
+	aggregated := mcpSvc.Tools()
+	if len(aggregated) != 1 {
+		t.Fatalf("expected 1 aggregated tool, got %d", len(aggregated))
+	}
+	if got := aggregated[0].Name; got != "svc.do_thing" {
+		t.Errorf("aggregated tool name: got %q, want %q", got, "svc.do_thing")
+	}
+}
+
+func TestUnregisterService_DetachesAggregation(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	tools := []*mcp.Tool{
+		{Name: "do_thing", Description: "x", InputSchema: map[string]any{"type": "object"}},
+	}
+	handler := newFakeMCPHandler(t, tools)
+	hostedSrv := httptest.NewServer(handler)
+	defer hostedSrv.Close()
+
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+
+	priv, _, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	node, err := NewSamNode(ctx, priv, nil, nil, store, "test-mesh", "1s",
+		[]string{"/ip4/127.0.0.1/tcp/0"}, false, &NodeConfigComplete{}, 24*time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = node.Teardown() }()
+
+	req := &api.RegisterServiceRequest{
+		Service: &api.ServiceInfo{Type: api.ServiceType_SERVICE_TYPE_MCP, Name: "svc"},
+		Backend: &api.RegisterServiceRequest_TargetUrl{TargetUrl: hostedSrv.URL},
+	}
+	_ = node.RegisterService(ctx, req)
+
+	svc, ok := node.services.Get("svc")
+	if !ok {
+		t.Fatal("expected service registered")
+	}
+	mcpSvc, ok := svc.(*MCPService)
+	if !ok {
+		t.Fatalf("expected *MCPService, got %T", svc)
+	}
+	if mcpSvc.session == nil {
+		t.Fatal("expected active MCP session before unregister")
+	}
+
+	if err := node.UnregisterService(ctx, "svc"); err != nil {
+		t.Fatalf("UnregisterService: %v", err)
+	}
+
+	if mcpSvc.session != nil {
+		t.Error("session should be nil after Unregister")
+	}
+	if mcpSvc.Tools() != nil {
+		t.Error("aggregatedTools should be nil after Unregister")
+	}
+	if _, stillThere := node.services.Get("svc"); stillThere {
+		t.Error("service should be removed from registry")
 	}
 }

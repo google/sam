@@ -101,3 +101,4 @@ func TestHandleKeyRotationEvent(t *testing.T) {
 		t.Errorf("Expected 1 trusted key, got %d", len(node.trustedKeys))
 	}
 }
+

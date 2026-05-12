@@ -90,6 +90,12 @@ func NewMCPHandler(node *SamNode) http.Handler {
 		Description: "Connect to a peer in the mesh",
 	}, node.handleConnectPeer)
 
+	// Add the find_remote_tools tool.
+	mcp.AddTool(mcpServer, &mcp.Tool{
+		Name:        "find_remote_tools",
+		Description: "Discover MCP tools available on hosted services across the mesh. Returns name + description per tool. Optionally narrow by peer_id, service_name, or intent (intent is reserved for future ranking and is accepted-but-ignored).",
+	}, node.handleFindRemoteTools)
+
 	// Create the SSE handler using the SDK
 	sseHandler := mcp.NewSSEHandler(func(request *http.Request) *mcp.Server {
 		return mcpServer
