@@ -39,7 +39,7 @@ jobs:
 
     - name: Extract metadata for Hub
       id: meta-hub
-      uses: docker/metadata-action@v5
+      uses: docker/metadata-action@v6
       with:
         images: ${{ env.REGISTRY }}/google/sam-hub
         tags: |
@@ -61,7 +61,7 @@ jobs:
 
     - name: Extract metadata for Node
       id: meta-node
-      uses: docker/metadata-action@v5
+      uses: docker/metadata-action@v6
       with:
         images: ${{ env.REGISTRY }}/google/sam-node
         tags: |
