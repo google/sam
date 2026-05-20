@@ -10,15 +10,9 @@ setup() {
   TEST_TMPDIR="$(mktemp -d)"
   export HOME="$TEST_TMPDIR/home"
 
-  # Match os.UserConfigDir per OS so gen_db.go and sam-node agree on the path.
-  # On Linux, os.UserConfigDir honors $XDG_CONFIG_HOME before $HOME/.config, so
-  # export it to keep both processes in sync even when the host has it set.
-  case "$(uname)" in
-    Darwin) DB_PATH="$HOME/Library/Application Support/sam-mesh/agent.db" ;;
-    *)      export XDG_CONFIG_HOME="$HOME/.config"
-            DB_PATH="$XDG_CONFIG_HOME/sam-mesh/agent.db" ;;
-  esac
-  mkdir -p "$(dirname "$DB_PATH")"
+  export SAM_DATA_DIR="$TEST_TMPDIR/data"
+  DB_PATH="$SAM_DATA_DIR/agent.db"
+  mkdir -p "$SAM_DATA_DIR"
 
   # Generate mock DB
   go run tests/e2e/gen_db.go "$DB_PATH"
