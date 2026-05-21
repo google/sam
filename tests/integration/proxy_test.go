@@ -67,10 +67,7 @@ func TestSamNodeRunWithStoredIdentity(t *testing.T) {
 	}
 	_ = db.Close()
 
-	env := append(os.Environ(),
-		"HOME="+tmpHome,
-		"XDG_CONFIG_HOME="+filepath.Join(tmpHome, ".config"),
-	)
+	env := append(os.Environ(), "HOME="+tmpHome)
 
 	runOut, runErrOut, err := runCommand(
 		t,
@@ -84,6 +81,7 @@ func TestSamNodeRunWithStoredIdentity(t *testing.T) {
 		"--listen", "/ip4/127.0.0.1/tcp/0",
 		"--bind-addr", "127.0.0.1:0",
 		"--api-token", "dummy-token",
+		"--data-dir", configDir,
 	)
 	if err != context.DeadlineExceeded {
 		t.Fatalf("expected run command to keep running until timeout, got: %v\nstdout:\n%s\nstderr:\n%s", err, runOut, runErrOut)

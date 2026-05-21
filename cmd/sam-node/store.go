@@ -35,7 +35,7 @@ type Store struct {
 	db *bbolt.DB
 }
 
-func GetDataDir() (string, error) {
+func GetDefaultDataDir() (string, error) {
 	base, err := os.UserConfigDir()
 	if err != nil {
 		return "", err
@@ -160,10 +160,8 @@ func (s *Store) Close() error {
 }
 
 const (
-	bucketBannedPeers   = "banned_peers"
+	bucketBannedPeers = "banned_peers"
 )
-
-
 
 // IsBanned checks local store to see if this peer is banned.
 func (s *Store) IsBanned(p peer.ID) bool {
@@ -180,5 +178,3 @@ func (s *Store) IsBanned(p peer.ID) bool {
 	})
 	return banned
 }
-
-

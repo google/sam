@@ -68,6 +68,7 @@ var (
 	logLevelFlag          string
 	configFile            string
 	keyGracePeriodFlag    time.Duration
+	dataDirFlag           string
 
 	apiTokenFlag string
 	tlsCertFlag  string
@@ -99,11 +100,7 @@ func main() {
 				}
 			}
 
-			dataDir, err := GetDataDir()
-			if err != nil {
-				logger.Fatalf("Failed to get data dir: %v", err)
-			}
-			store, err := NewStore(dataDir)
+			store, err := NewStore(resolveDataDir())
 			if err != nil {
 				logger.Fatalf("Failed to open store: %v", err)
 			}
@@ -257,11 +254,7 @@ func main() {
 		Short: "Log in to the mesh via interactive OIDC flow",
 		Run: func(cmd *cobra.Command, args []string) {
 			ctx := cmd.Context()
-			dataDir, err := GetDataDir()
-			if err != nil {
-				logger.Fatalf("Failed to get data dir: %v", err)
-			}
-			store, err := NewStore(dataDir)
+			store, err := NewStore(resolveDataDir())
 			if err != nil {
 				logger.Fatalf("Failed to open store: %v", err)
 			}
@@ -364,6 +357,7 @@ func main() {
 	rootCmd.PersistentFlags().StringVar(&oidcIssuerFlag, "oidc-issuer", "", "OIDC Issuer URL")
 	rootCmd.PersistentFlags().StringVar(&deviceAuthURLFlag, "device-auth-url", "", "OIDC Device Authorization URL")
 	rootCmd.PersistentFlags().StringVar(&audienceFlag, "audience", api.DefaultAudience, "OIDC Audience")
+	rootCmd.PersistentFlags().StringVar(&dataDirFlag, "data-dir", os.Getenv("SAM_DATA_DIR"), "Override directory for the agent store (defaults to OS user config dir)")
 
 	rootCmd.AddCommand(runCmd)
 	rootCmd.AddCommand(loginCmd)
@@ -382,6 +376,22 @@ func main() {
 	if err := rootCmd.ExecuteContext(ctx); err != nil {
 		os.Exit(1)
 	}
+}
+
+// resolveDataDir honors --data-dir / $SAM_DATA_DIR if set, else falls back to GetDataDir().
+func resolveDataDir() string {
+	if dataDirFlag != "" {
+		if err := os.MkdirAll(dataDirFlag, 0700); err != nil {
+			logger.Fatalf("Failed to create data directory: %v", err)
+		}
+		return dataDirFlag
+	}
+
+	dir, err := GetDefaultDataDir()
+	if err != nil {
+		logger.Fatalf("Failed to get data dir: %v", err)
+	}
+	return dir
 }
 
 // getOrGenerateKey retrieves a persistent private key or creates one if it's the first run
