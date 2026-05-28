@@ -717,6 +717,66 @@ func (x *DiscoveredProvider) GetSrvDescription() string {
 	return ""
 }
 
+type HubInfoResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	OidcIssuer    string                 `protobuf:"bytes,1,opt,name=oidc_issuer,json=oidcIssuer,proto3" json:"oidc_issuer,omitempty"`
+	ClientId      string                 `protobuf:"bytes,2,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
+	Audience      string                 `protobuf:"bytes,3,opt,name=audience,proto3" json:"audience,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HubInfoResponse) Reset() {
+	*x = HubInfoResponse{}
+	mi := &file_api_sam_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HubInfoResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HubInfoResponse) ProtoMessage() {}
+
+func (x *HubInfoResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_api_sam_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HubInfoResponse.ProtoReflect.Descriptor instead.
+func (*HubInfoResponse) Descriptor() ([]byte, []int) {
+	return file_api_sam_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *HubInfoResponse) GetOidcIssuer() string {
+	if x != nil {
+		return x.OidcIssuer
+	}
+	return ""
+}
+
+func (x *HubInfoResponse) GetClientId() string {
+	if x != nil {
+		return x.ClientId
+	}
+	return ""
+}
+
+func (x *HubInfoResponse) GetAudience() string {
+	if x != nil {
+		return x.Audience
+	}
+	return ""
+}
+
 var File_api_sam_proto protoreflect.FileDescriptor
 
 const file_api_sam_proto_rawDesc = "" +
@@ -772,7 +832,12 @@ const file_api_sam_proto_rawDesc = "" +
 	"\apeer_id\x18\x01 \x01(\tR\x06peerId\x12&\n" +
 	"\x0flocal_proxy_url\x18\x02 \x01(\tR\rlocalProxyUrl\x12\x19\n" +
 	"\bsrv_name\x18\x03 \x01(\tR\asrvName\x12'\n" +
-	"\x0fsrv_description\x18\x04 \x01(\tR\x0esrvDescription*s\n" +
+	"\x0fsrv_description\x18\x04 \x01(\tR\x0esrvDescription\"k\n" +
+	"\x0fHubInfoResponse\x12\x1f\n" +
+	"\voidc_issuer\x18\x01 \x01(\tR\n" +
+	"oidcIssuer\x12\x1b\n" +
+	"\tclient_id\x18\x02 \x01(\tR\bclientId\x12\x1a\n" +
+	"\baudience\x18\x03 \x01(\tR\baudience*s\n" +
 	"\vServiceType\x12\x1c\n" +
 	"\x18SERVICE_TYPE_UNSPECIFIED\x10\x00\x12\x14\n" +
 	"\x10SERVICE_TYPE_MCP\x10\x01\x12\x1a\n" +
@@ -792,7 +857,7 @@ func file_api_sam_proto_rawDescGZIP() []byte {
 }
 
 var file_api_sam_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_api_sam_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
+var file_api_sam_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
 var file_api_sam_proto_goTypes = []any{
 	(ServiceType)(0),               // 0: sam.v1.ServiceType
 	(MeshEvent_Type)(0),            // 1: sam.v1.MeshEvent.Type
@@ -805,12 +870,13 @@ var file_api_sam_proto_goTypes = []any{
 	(*CommandBackend)(nil),         // 8: sam.v1.CommandBackend
 	(*RegisterServiceRequest)(nil), // 9: sam.v1.RegisterServiceRequest
 	(*DiscoveredProvider)(nil),     // 10: sam.v1.DiscoveredProvider
-	nil,                            // 11: sam.v1.CommandBackend.EnvEntry
+	(*HubInfoResponse)(nil),        // 11: sam.v1.HubInfoResponse
+	nil,                            // 12: sam.v1.CommandBackend.EnvEntry
 }
 var file_api_sam_proto_depIdxs = []int32{
 	1,  // 0: sam.v1.MeshEvent.type:type_name -> sam.v1.MeshEvent.Type
 	0,  // 1: sam.v1.ServiceInfo.type:type_name -> sam.v1.ServiceType
-	11, // 2: sam.v1.CommandBackend.env:type_name -> sam.v1.CommandBackend.EnvEntry
+	12, // 2: sam.v1.CommandBackend.env:type_name -> sam.v1.CommandBackend.EnvEntry
 	7,  // 3: sam.v1.RegisterServiceRequest.service:type_name -> sam.v1.ServiceInfo
 	8,  // 4: sam.v1.RegisterServiceRequest.command:type_name -> sam.v1.CommandBackend
 	5,  // [5:5] is the sub-list for method output_type
@@ -835,7 +901,7 @@ func file_api_sam_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_sam_proto_rawDesc), len(file_api_sam_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   10,
+			NumMessages:   11,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -15,6 +15,9 @@
 package main
 
 import (
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"testing"
 	"time"
@@ -24,6 +27,7 @@ import (
 	"github.com/google/sam/api"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"google.golang.org/protobuf/proto"
 )
 
 func TestMintBiscuitToken(t *testing.T) {
@@ -76,5 +80,57 @@ func TestMintBiscuitToken(t *testing.T) {
 
 	if len(biscuitData) == 0 {
 		t.Error("Expected non-empty biscuit data")
+	}
+}
+
+func TestHandleInfoHTTP(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+
+	kr, err := NewKeyRing(dbPath, 24*time.Hour, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = kr.Close() }()
+
+	oidcIssuer = "http://mock-issuer"
+
+	hub := &Hub{
+		KeyRing:          kr,
+		AllowedAudiences: []string{"test-audience-1", "test-audience-2"},
+	}
+
+	handler := handleInfoHTTP(hub)
+
+	req := httptest.NewRequest("GET", "/info", nil)
+	w := httptest.NewRecorder()
+
+	handler(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var info api.HubInfoResponse
+	if err := proto.Unmarshal(body, &info); err != nil {
+		t.Fatalf("Failed to unmarshal protobuf: %v", err)
+	}
+
+	if info.OidcIssuer != "http://mock-issuer" {
+		t.Errorf("Expected issuer 'http://mock-issuer', got %q", info.OidcIssuer)
+	}
+
+	if info.ClientId != "test-audience-1" {
+		t.Errorf("Expected client ID 'test-audience-1', got %q", info.ClientId)
+	}
+
+	if info.Audience != "test-audience-1" {
+		t.Errorf("Expected audience 'test-audience-1', got %q", info.Audience)
 	}
 }

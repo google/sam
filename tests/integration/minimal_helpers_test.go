@@ -147,3 +147,80 @@ func startMockLibp2pHub(t *testing.T) (peer.ID, string) {
 
 	return h.ID(), httpServer.URL
 }
+
+func startMockLibp2pHubWithOIDC(t *testing.T, oidcIssuerURL string) (peer.ID, string) {
+	t.Helper()
+
+	h, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	if err != nil {
+		t.Fatalf("failed to create mock libp2p host: %v", err)
+	}
+
+	kdht, err := dht.New(context.Background(), h, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/sam"))
+	if err != nil {
+		t.Fatalf("failed to create DHT on mock hub: %v", err)
+	}
+
+	// Start HTTP server for enrollment and info
+	mux := http.NewServeMux()
+	mux.HandleFunc("/info", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		resp := &api.HubInfoResponse{
+			OidcIssuer: oidcIssuerURL,
+			ClientId:   "sam-mesh-audience",
+			Audience:   "sam-mesh-audience",
+		}
+		data, err := proto.Marshal(resp)
+		if err != nil {
+			http.Error(w, "Failed to marshal response", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/x-protobuf")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(data)
+	})
+	mux.HandleFunc("/register", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "Failed to read body", http.StatusBadRequest)
+			return
+		}
+		var req api.EnrollRequest
+		if err := proto.Unmarshal(body, &req); err != nil {
+			http.Error(w, "Invalid request format", http.StatusBadRequest)
+			return
+		}
+
+		resp := &api.EnrollResponse{
+			BiscuitToken: []byte("mock-biscuit-token"),
+			HubPublicKey: []byte("mock-hub-pub-key"),
+			HubAddresses: []string{h.Addrs()[0].String() + "/p2p/" + h.ID().String()},
+			KnownPeers:   []string{},
+		}
+		data, err := proto.Marshal(resp)
+		if err != nil {
+			http.Error(w, "Failed to marshal response", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/x-protobuf")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(data)
+	})
+
+	httpServer := httptest.NewServer(mux)
+
+	t.Cleanup(func() {
+		httpServer.Close()
+		_ = kdht.Close()
+		_ = h.Close()
+	})
+
+	return h.ID(), httpServer.URL
+}

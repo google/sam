@@ -46,7 +46,7 @@ teardown() {
   
   [[ -n "${token}" ]]
 
-  # 2. Run sam-node login and pipe the token
+  # 2. Run sam-node join to enroll and store identity
   local node_name="${MESH_PREFIX}-node-login"
   local hub_peer_id
   hub_peer_id=$(cat "/tmp/${MESH_PREFIX}-hub-peer-id")
@@ -54,13 +54,11 @@ teardown() {
   local data_vol="${MESH_PREFIX}-data"
   docker volume create "${data_vol}"
   
-  # We run it interactively to pipe stdin
-  echo "${token}" | docker run --rm \
+  docker run --rm \
     --network "${MESH_NETWORK}" \
     -v "${data_vol}:/root/.config/sam-mesh" \
-    -i \
     "sam-node:local" \
-    login --hub "http://sam-hub:9090" --oidc-issuer "http://mock-oidc:18080"
+    join "http://sam-hub:9090"
     
   # Now run the node with the stored identity
   docker run -d \

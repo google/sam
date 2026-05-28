@@ -72,6 +72,9 @@ docker-build-node:
 docker-build-mock-oidc:
 	docker build -t sam-mock-oidc:local -f tests/e2e/docker/Dockerfile.mock-oidc .
 
-docker-build: docker-build-hub docker-build-node docker-build-mock-oidc
+docker-build-e2e-runtime:
+	docker build -t sam-e2e-runtime:local -f tests/e2e/docker/Dockerfile.sam-runtime .
 
-.PHONY: docker-build-hub docker-build-node docker-build-mock-oidc docker-build
+docker-build: docker-build-hub docker-build-node docker-build-mock-oidc docker-build-e2e-runtime
+
+.PHONY: docker-build-hub docker-build-node docker-build-mock-oidc docker-build-e2e-runtime docker-build

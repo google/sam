@@ -89,3 +89,9 @@ message DiscoveredProvider {
   string srv_name = 3;
   string srv_description = 4;
 }
+
+message HubInfoResponse {
+  string oidc_issuer = 1;
+  string client_id = 2;
+  string audience = 3;
+}

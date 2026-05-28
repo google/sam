@@ -38,10 +38,12 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
   }
 
   mesh_build_runtime_image() {
-    docker build --no-cache \
-      -f tests/e2e/docker/Dockerfile.sam-runtime \
-      -t "${MESH_RUNTIME_IMAGE}" \
-      . >/dev/null
+    if ! docker image inspect "${MESH_RUNTIME_IMAGE}" >/dev/null 2>&1; then
+      docker build \
+        -f tests/e2e/docker/Dockerfile.sam-runtime \
+        -t "${MESH_RUNTIME_IMAGE}" \
+        . >/dev/null
+    fi
   }
 
   mesh_setup_env() {

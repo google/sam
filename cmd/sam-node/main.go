@@ -15,6 +15,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/ed25519"
@@ -249,11 +250,39 @@ func main() {
 		},
 	}
 
-	loginCmd := &cobra.Command{
-		Use:   "login",
-		Short: "Log in to the mesh via interactive OIDC flow",
+	joinCmd := &cobra.Command{
+		Use:   "join [hub_url]",
+		Short: "Join the Sovereign Agent Mesh hub",
+		Args:  cobra.MaximumNArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			ctx := cmd.Context()
+
+			targetHub := ""
+			if len(args) > 0 {
+				targetHub = args[0]
+			}
+
+			if targetHub == "" {
+				fmt.Print("No hub URL provided. Do you want to join the default community testing network (https://bananas.sam-mesh.dev)? [y/N]: ")
+				reader := bufio.NewReader(os.Stdin)
+				response, err := reader.ReadString('\n')
+				if err != nil {
+					fmt.Println("\nAborting: failed to read input.")
+					return
+				}
+				response = strings.ToLower(strings.TrimSpace(response))
+				if response != "y" && response != "yes" {
+					fmt.Println("Aborting join operation.")
+					return
+				}
+				targetHub = "https://bananas.sam-mesh.dev"
+			}
+
+			if !strings.HasPrefix(targetHub, "http://") && !strings.HasPrefix(targetHub, "https://") {
+				targetHub = "https://" + targetHub
+			}
+			targetHub = strings.TrimSuffix(targetHub, "/")
+
 			store, err := NewStore(resolveDataDir())
 			if err != nil {
 				logger.Fatalf("Failed to open store: %v", err)
@@ -270,32 +299,29 @@ func main() {
 			}()
 
 			dummyNode := &SamNode{Store: store}
-			deviceAuthURL := deviceAuthURLFlag
-			tokenURL := ""
 
-			if oidcIssuerFlag != "" {
-				logger.Info("Discovering OIDC endpoints...")
-				var err error
-				tokenURL, deviceAuthURL, err = dummyNode.DiscoverEndpoints(context.Background(), oidcIssuerFlag)
-				if err != nil {
-					logger.Fatalf("Failed to discover OIDC endpoints: %v", err)
-				}
+			fmt.Printf("Discovering hub info from %s...\n", targetHub)
+			hubInfo, err := dummyNode.DiscoverHubInfo(ctx, targetHub)
+			if err != nil {
+				logger.Fatalf("Failed to discover hub info: %v", err)
 			}
 
-			if deviceAuthURL == "" {
-				deviceAuthURL = "https://oauth2.googleapis.com/device/code"
+			fmt.Printf("OIDC Issuer discovered: %s\n", hubInfo.OidcIssuer)
+			fmt.Printf("Client ID discovered: %s\n", hubInfo.ClientId)
+
+			logger.Info("Discovering OIDC endpoints...")
+			tokenURL, deviceAuthURL, err := dummyNode.DiscoverEndpoints(ctx, hubInfo.OidcIssuer)
+			if err != nil {
+				logger.Fatalf("Failed to discover OIDC endpoints: %v", err)
 			}
-			if tokenURL == "" {
-				tokenURL = "https://oauth2.googleapis.com/token"
-			}
-			clientID := clientIDFlag
-			if clientID == "" {
-				clientID = api.DefaultAudience
-			}
-			jwtStr, err := dummyNode.InteractiveLogin(ctx, deviceAuthURL, tokenURL, clientID, audienceFlag)
+
+			jwtStr, err := dummyNode.InteractiveLogin(ctx, deviceAuthURL, tokenURL, hubInfo.ClientId, hubInfo.Audience)
 			if err != nil {
 				logger.Fatalf("Failed to get token: %v", err)
 			}
+
+			// Override global hubAddr with targetHub for enrollment
+			hubAddr = targetHub
 
 			// Connect to Hub and Enroll
 			var initHubAddrs []multiaddr.Multiaddr
@@ -331,7 +357,7 @@ func main() {
 				logger.Fatalf("Enrollment failed: %v", err)
 			}
 
-			fmt.Println("Login successful and identity stored.")
+			fmt.Println("Successfully joined the Sovereign Agent Mesh!")
 		},
 	}
 
@@ -360,7 +386,7 @@ func main() {
 	rootCmd.PersistentFlags().StringVar(&dataDirFlag, "data-dir", os.Getenv("SAM_DATA_DIR"), "Override directory for the agent store (defaults to OS user config dir)")
 
 	rootCmd.AddCommand(runCmd)
-	rootCmd.AddCommand(loginCmd)
+	rootCmd.AddCommand(joinCmd)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

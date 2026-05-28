@@ -21,6 +21,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"sync/atomic"
 
@@ -36,6 +37,7 @@ func startHTTPServer(h *Hub, bindAddr string, adminToken string, tlsCertFile str
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.HandlerFor(prometheus.DefaultGatherer, promhttp.HandlerOpts{}))
 	mux.HandleFunc("/register", handleRegisterHTTP(h))
+	mux.HandleFunc("/info", handleInfoHTTP(h))
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		if isHubReady.Load() {
 			w.WriteHeader(http.StatusOK)
@@ -204,5 +206,58 @@ func handleRegisterHTTP(h *Hub) http.HandlerFunc {
 
 		logger.Infow("Successfully enrolled peer via HTTP", "peer_id", req.PeerId)
 		samHubEnrollmentTotal.WithLabelValues("success").Inc()
+	}
+}
+
+func handleInfoHTTP(h *Hub) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		// Find the OIDC issuer deterministically by sorting the map keys
+		issuer := ""
+		if len(h.Providers) > 0 {
+			issuers := make([]string, 0, len(h.Providers))
+			for iss := range h.Providers {
+				issuers = append(issuers, iss)
+			}
+			sort.Strings(issuers)
+			issuer = issuers[0]
+		}
+
+		// Fallback if Providers isn't fully populated (e.g. in unit tests)
+		if issuer == "" {
+			issuer = oidcIssuer
+		}
+		// If multiple issuers in fallback, pick the first one deterministically
+		if strings.Contains(issuer, ",") {
+			parts := strings.Split(issuer, ",")
+			issuer = strings.TrimSpace(parts[0])
+		}
+
+		// Get primary client ID / audience
+		aud := api.DefaultAudience
+		if len(h.AllowedAudiences) > 0 {
+			aud = h.AllowedAudiences[0]
+		}
+
+		resp := &api.HubInfoResponse{
+			OidcIssuer: issuer,
+			ClientId:   aud,
+			Audience:   aud,
+		}
+
+		respData, err := proto.Marshal(resp)
+		if err != nil {
+			logger.Errorf("[Info] Failed to marshal info response: %v", err)
+			http.Error(w, "Failed to serialize response", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/x-protobuf")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(respData)
 	}
 }

@@ -26,9 +26,8 @@ import (
 	"time"
 )
 
-func TestSamNodeLogin(t *testing.T) {
+func TestSamNodeJoin(t *testing.T) {
 	nodeBin := buildBinary(t, "./cmd/sam-node")
-	_, hubAddr := startMockLibp2pHub(t)
 	tmpHome := t.TempDir()
 	env := append(os.Environ(),
 		"HOME="+tmpHome,
@@ -50,11 +49,12 @@ func TestSamNodeLogin(t *testing.T) {
 	mux.HandleFunc("/device/code", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(map[string]interface{}{
-			"device_code":      "dev_code_123",
-			"user_code":        "ABCD-1234",
-			"verification_uri": "http://example.com/verify",
-			"expires_in":       60,
-			"interval":         1,
+			"device_code":               "dev_code_123",
+			"user_code":                 "ABCD-1234",
+			"verification_uri":          "http://example.com/verify",
+			"verification_uri_complete": "http://example.com/verify?code=ABCD-1234",
+			"expires_in":                60,
+			"interval":                  1,
 		}); err != nil {
 			t.Errorf("Failed to encode response: %v", err)
 		}
@@ -68,8 +68,11 @@ func TestSamNodeLogin(t *testing.T) {
 			t.Errorf("Failed to encode response: %v", err)
 		}
 	})
-	server := httptest.NewServer(mux)
-	defer server.Close()
+	oidcServer := httptest.NewServer(mux)
+	defer oidcServer.Close()
+
+	// Start mock libp2p hub that knows about our mock OIDC server
+	_, hubAddr := startMockLibp2pHubWithOIDC(t, oidcServer.URL)
 
 	stdout, stderr, err := runCommand(
 		t,
@@ -78,21 +81,19 @@ func TestSamNodeLogin(t *testing.T) {
 		env,
 		"", // No stdin needed
 		nodeBin,
-		"login",
-		"--hub", hubAddr,
-		"--oidc-issuer", server.URL,
+		"join",
+		hubAddr,
 	)
 	if err != nil {
-		t.Fatalf("login command failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+		t.Fatalf("join command failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
 	}
 
 	out := stdout + stderr
-	if !strings.Contains(out, "Login successful and identity stored.") {
-		t.Fatalf("login did not succeed:\n%s", out)
+	if !strings.Contains(out, "Successfully joined the Sovereign Agent Mesh!") {
+		t.Fatalf("join did not succeed:\n%s", out)
 	}
 
-	// Verify that the identity is actually stored.
-	// We can try to run the node without flags now!
+	// Verify that the identity is stored and node can run
 	stdout, stderr, err = runCommand(
 		t,
 		repoRoot(t),
@@ -105,7 +106,6 @@ func TestSamNodeLogin(t *testing.T) {
 		"--bind-addr", "127.0.0.1:0",
 		"--api-token", "dummy-token",
 	)
-	// We expect it to keep running because it uses stored identity.
 	if err != context.DeadlineExceeded {
 		t.Fatalf("expected run command to keep running, got: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
 	}

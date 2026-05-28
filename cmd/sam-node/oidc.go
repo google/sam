@@ -21,11 +21,15 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
+	"github.com/google/sam/api"
 	"golang.org/x/oauth2/clientcredentials"
+	"google.golang.org/protobuf/proto"
 )
 
 // FetchJWT fetches a JWT token using the Client Credentials flow.
@@ -79,16 +83,17 @@ func (n *SamNode) InteractiveLogin(ctx context.Context, deviceAuthURL, tokenURL,
 	}()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
 		return "", fmt.Errorf("device auth request failed: %s - %s", resp.Status, string(body))
 	}
 
 	var authResp struct {
-		DeviceCode      string `json:"device_code"`
-		UserCode        string `json:"user_code"`
-		VerificationURI string `json:"verification_uri"`
-		ExpiresIn       int    `json:"expires_in"`
-		Interval        int    `json:"interval"`
+		DeviceCode              string `json:"device_code"`
+		UserCode                string `json:"user_code"`
+		VerificationURI         string `json:"verification_uri"`
+		VerificationURIComplete string `json:"verification_uri_complete"`
+		ExpiresIn               int    `json:"expires_in"`
+		Interval                int    `json:"interval"`
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&authResp); err != nil {
@@ -99,11 +104,22 @@ func (n *SamNode) InteractiveLogin(ctx context.Context, deviceAuthURL, tokenURL,
 	fmt.Println("Device Authorization Flow")
 	fmt.Println("------------------------------------------------------------")
 	fmt.Printf("To authenticate, please go to the following URL in your browser:\n\n")
-	fmt.Printf("  %s\n\n", authResp.VerificationURI)
-	fmt.Printf("And enter the following code:\n\n")
-	fmt.Printf("  %s\n\n", authResp.UserCode)
+	targetURL := authResp.VerificationURIComplete
+	if targetURL == "" {
+		targetURL = authResp.VerificationURI
+	}
+	fmt.Printf("  %s\n\n", targetURL)
+	if authResp.VerificationURIComplete == "" {
+		fmt.Printf("And enter the following code:\n\n")
+		fmt.Printf("  %s\n\n", authResp.UserCode)
+	} else {
+		fmt.Println("The login code has been pre-filled for your convenience.")
+	}
 	fmt.Println("Waiting for authorization...")
 	fmt.Println("------------------------------------------------------------")
+
+	// Try to open browser automatically
+	openBrowser(targetURL)
 
 	interval := authResp.Interval
 	if interval <= 0 {
@@ -212,4 +228,70 @@ func (n *SamNode) DiscoverEndpoints(ctx context.Context, issuerURL string) (toke
 		return "", "", fmt.Errorf("failed to extract claims: %w", err)
 	}
 	return claims.TokenURL, claims.DeviceURL, nil
+}
+
+// DiscoverHubInfo queries the hub's /info endpoint to fetch OIDC configurations.
+func (n *SamNode) DiscoverHubInfo(ctx context.Context, hubURL string) (*api.HubInfoResponse, error) {
+	if !strings.HasPrefix(hubURL, "http://") && !strings.HasPrefix(hubURL, "https://") {
+		hubURL = "https://" + hubURL
+	}
+	hubURL = strings.TrimSuffix(hubURL, "/")
+
+	urlStr := hubURL + "/info"
+	req, err := http.NewRequestWithContext(ctx, "GET", urlStr, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
+	}
+
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("HTTP request failed: %w", err)
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			logger.Errorf("Failed to close response body: %v", err)
+		}
+	}()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
+		return nil, fmt.Errorf("hub returned status %s: %s", resp.Status, string(body))
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	var hubInfo api.HubInfoResponse
+	if err := proto.Unmarshal(body, &hubInfo); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal hub info: %w", err)
+	}
+
+	return &hubInfo, nil
+}
+
+func openBrowser(targetURL string) {
+	parsedURL, err := url.Parse(targetURL)
+	if err != nil || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") {
+		logger.Debugf("Failed to open browser: invalid or unsafe URL scheme %q", targetURL)
+		return
+	}
+	var cmdErr error
+	switch runtime.GOOS {
+	case "linux":
+		cmdErr = exec.Command("xdg-open", targetURL).Start()
+	case "darwin":
+		cmdErr = exec.Command("open", targetURL).Start()
+	case "windows":
+		cmdErr = exec.Command("rundll32", "url.dll,FileProtocolHandler", targetURL).Start()
+	default:
+		cmdErr = fmt.Errorf("unsupported platform")
+	}
+	if cmdErr != nil {
+		logger.Debugf("Failed to open browser: %v", cmdErr)
+	}
 }
