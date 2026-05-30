@@ -45,7 +45,7 @@ spec:
         args: 
           - "run"
           - "--config=/etc/sam/sam-node.yaml"
-          - "--hub=http://sam-hub-internal-${ENV_NAME}.sam-${ENV_NAME}.svc.cluster.local"
+          - "--hub=https://sam-hub-internal-${ENV_NAME}.sam-${ENV_NAME}.svc.cluster.local"
           - "--jwt-path=/var/run/secrets/tokens/sam-token"
           - "--api-token=secret-token"
         ports:
