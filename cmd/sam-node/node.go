@@ -749,7 +749,13 @@ func (n *SamNode) findProvidersByCID(ctx context.Context, c cid.Cid) ([]peer.Add
 	if n.DHT == nil {
 		return nil, fmt.Errorf("DHT not initialized")
 	}
-	lookupCtx, cancel := context.WithTimeout(ctx, dhtLookupTimeout)
+	timeout := dhtLookupTimeout
+	if deadline, ok := ctx.Deadline(); ok {
+		if remaining := time.Until(deadline); remaining > 0 {
+			timeout = remaining
+		}
+	}
+	lookupCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	// FindProvidersAsync can emit the same peer multiple times when the
 	// DHT walk converges from different paths; dedupe so downstream
@@ -802,6 +808,92 @@ func (n *SamNode) DiscoverRemoteServices(ctx context.Context, serviceType api.Se
 	return n.discoverServicesByName(ctx, serviceType, typeStr, serviceName)
 }
 
+// DiscoverRemoteServicesStream performs service discovery and streams results down the returned channel.
+// The channel is closed automatically when discovery completes or the context is cancelled.
+func (n *SamNode) DiscoverRemoteServicesStream(ctx context.Context, serviceType api.ServiceType, serviceName string) (<-chan *api.DiscoveredProvider, error) {
+	typeStr, err := serviceTypeToString(serviceType)
+	if err != nil {
+		return nil, err
+	}
+
+	out := make(chan *api.DiscoveredProvider, 16)
+
+	go func() {
+		defer close(out)
+
+		if serviceName != "" {
+			peers, err := n.FindProvidersByName(ctx, serviceType, serviceName)
+			if err != nil {
+				logger.Errorf("[Discovery] FindProvidersByName failed: %v", err)
+				return
+			}
+			for _, p := range peers {
+				if p.ID == n.Host.ID() {
+					continue
+				}
+				select {
+				case <-ctx.Done():
+					return
+				case out <- &api.DiscoveredProvider{
+					PeerId:        p.ID.String(),
+					LocalProxyUrl: n.localProxyURL(p.ID, typeStr, serviceName),
+					SrvName:       serviceName,
+				}:
+				}
+			}
+			return
+		}
+
+		peers, err := n.FindProvidersByType(ctx, serviceType)
+		if err != nil {
+			logger.Errorf("[Discovery] FindProvidersByType failed: %v", err)
+			return
+		}
+
+		timeout := discoveryFanoutTimeout
+		if deadline, ok := ctx.Deadline(); ok {
+			if remaining := time.Until(deadline); remaining > 0 {
+				timeout = remaining
+			}
+		}
+		fanoutCtx, cancel := context.WithTimeout(ctx, timeout)
+		defer cancel()
+
+		var wg sync.WaitGroup
+		for _, p := range peers {
+			if p.ID == n.Host.ID() {
+				continue
+			}
+			wg.Add(1)
+			go func(peerID peer.ID) {
+				defer wg.Done()
+				services, err := n.fetchRemoteServiceCatalog(fanoutCtx, peerID, typeStr)
+				if err != nil {
+					logger.Warnf("[Discovery] catalog fetch from %s failed: %v", peerID, err)
+					return
+				}
+				for _, info := range services {
+					dp := &api.DiscoveredProvider{
+						PeerId:         peerID.String(),
+						LocalProxyUrl:  n.localProxyURL(peerID, typeStr, info.Name),
+						SrvName:        info.Name,
+						SrvDescription: info.Description,
+					}
+					select {
+					case <-fanoutCtx.Done():
+						return
+					case out <- dp:
+					}
+				}
+			}(p.ID)
+		}
+		wg.Wait()
+	}()
+
+	return out, nil
+}
+
+
 // discoverServicesByName: targeted DHT lookup, no fan-out.
 func (n *SamNode) discoverServicesByName(ctx context.Context, serviceType api.ServiceType, typeStr, serviceName string) ([]*api.DiscoveredProvider, error) {
 	peers, err := n.FindProvidersByName(ctx, serviceType, serviceName)
@@ -830,7 +922,13 @@ func (n *SamNode) discoverServicesByType(ctx context.Context, serviceType api.Se
 		return nil, err
 	}
 
-	fanoutCtx, cancel := context.WithTimeout(ctx, discoveryFanoutTimeout)
+	timeout := discoveryFanoutTimeout
+	if deadline, ok := ctx.Deadline(); ok {
+		if remaining := time.Until(deadline); remaining > 0 {
+			timeout = remaining
+		}
+	}
+	fanoutCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	type peerCatalog struct {

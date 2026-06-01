@@ -15,6 +15,7 @@
 package integration_test
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -126,6 +127,149 @@ func TestServiceDiscovery(t *testing.T) {
 	unregisterService(t, actualApiAddrA, apiToken, serviceName)
 
 	t.Log("Service discovery test passed.")
+}
+
+func TestServiceDiscoveryStreaming(t *testing.T) {
+	nodeBin := buildBinary(t, "./cmd/sam-node")
+	_, hubAddr := startMockLibp2pHub(t)
+
+	homeA := t.TempDir()
+	homeB := t.TempDir()
+
+	apiToken := "secret-token"
+
+	// Start Node A
+	t.Log("Starting Node A...")
+	_ = startBackgroundNode(t, nodeBin, hubAddr, homeA,
+		"--listen", "/ip4/127.0.0.1/udp/0/quic-v1",
+		"--listen", "/ip4/127.0.0.1/tcp/0",
+		"--discovery-interval", "100ms",
+		"--bind-addr", "127.0.0.1:0",
+		"--api-token", apiToken,
+	)
+
+	// Start Node B
+	t.Log("Starting Node B...")
+	_ = startBackgroundNode(t, nodeBin, hubAddr, homeB,
+		"--listen", "/ip4/127.0.0.1/udp/0/quic-v1",
+		"--listen", "/ip4/127.0.0.1/tcp/0",
+		"--discovery-interval", "100ms",
+		"--bind-addr", "127.0.0.1:0",
+		"--api-token", apiToken,
+	)
+
+	// Resolve actual addresses from logs
+	actualApiAddrA := waitForMCPAddr(t, filepath.Join(homeA, "node.log"))
+	actualApiAddrB := waitForMCPAddr(t, filepath.Join(homeB, "node.log"))
+
+	// Wait for nodes to start sidecar API
+	waitForAPI(t, actualApiAddrA)
+	waitForAPI(t, actualApiAddrB)
+
+	addrA := waitForPeerInfoInLog(t, filepath.Join(homeA, "node.log"))
+
+	// Connect Node B to Node A
+	callMCP(t, actualApiAddrB, "connect_peer", map[string]any{"peer_addr": addrA})
+
+	// Wait for DHT to have peers on Node A
+	t.Log("Waiting for DHT to have peers on Node A...")
+	deadline := time.Now().Add(10 * time.Second)
+	var dhtReady bool
+	for time.Now().Before(deadline) {
+		respData := callMCP(t, actualApiAddrA, "get_mesh_info", map[string]any{})
+		var data map[string]any
+		if err := json.Unmarshal([]byte(respData), &data); err == nil {
+			dhtSize, _ := data["dht_size"].(float64)
+			if dhtSize > 0 {
+				dhtReady = true
+				break
+			}
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	if !dhtReady {
+		t.Fatalf("DHT not ready on Node A")
+	}
+
+	// Agent A registers a service
+	serviceName := "mcp:github-tools"
+	registerService(t, actualApiAddrA, apiToken, serviceName)
+
+	// Wait for DHT propagation
+	t.Log("Waiting for DHT propagation...")
+	time.Sleep(2 * time.Second)
+
+	// Call streaming endpoint with invalid timeout first to verify validation
+	t.Log("Testing invalid timeout query parameter...")
+	badReq, _ := http.NewRequest("GET", "http://"+actualApiAddrB+"/sam/service/discover?type=mcp&name="+serviceName+"&stream=true&timeout=invalid", nil)
+	badReq.Header.Set("Authorization", "Bearer "+apiToken)
+	badResp, err := http.DefaultClient.Do(badReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = badResp.Body.Close()
+	if badResp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("Expected StatusBadRequest for invalid timeout, got %d", badResp.StatusCode)
+	}
+
+	// Agent B queries the streaming endpoint via HTTP Sidecar
+	t.Log("Agent B discovering service via SSE stream...")
+	req, _ := http.NewRequest("GET", "http://"+actualApiAddrB+"/sam/service/discover?type=mcp&name="+serviceName+"&stream=true&timeout=5s", nil)
+	req.Header.Set("Authorization", "Bearer "+apiToken)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Failed to request streaming discovery: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("Streaming discovery failed with status: %d", resp.StatusCode)
+	}
+
+	contentType := resp.Header.Get("Content-Type")
+	if !strings.HasPrefix(contentType, "text/event-stream") {
+		t.Fatalf("Expected Content-Type text/event-stream, got %q", contentType)
+	}
+
+	// Parse stream chunk-by-chunk
+	reader := bufio.NewReader(resp.Body)
+	peerIDA := getPeerIDFromAddr(addrA)
+	var foundStreamed bool
+
+	for {
+		line, err := reader.ReadString('\n')
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("Failed to read SSE line: %v", err)
+		}
+
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "data:") {
+			dataContent := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+			if dataContent == "{}" {
+				continue // Done event or keep-alive empty JSON
+			}
+			var provider api.DiscoveredProvider
+			if err := json.Unmarshal([]byte(dataContent), &provider); err == nil {
+				if provider.PeerId == peerIDA.String() {
+					foundStreamed = true
+				}
+			}
+		}
+		if strings.HasPrefix(line, "event: done") {
+			break
+		}
+	}
+
+	if !foundStreamed {
+		t.Fatalf("Failed to stream and find provider Node A in SSE results")
+	}
+
+	// Agent A unregisters the service
+	unregisterService(t, actualApiAddrA, apiToken, serviceName)
 }
 
 func waitForAPI(t *testing.T, addr string) {

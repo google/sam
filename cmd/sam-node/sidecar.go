@@ -15,19 +15,21 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net"
-	"google.golang.org/protobuf/encoding/protojson"
 	"net/http"
 	"net/http/httputil"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/google/sam/api"
+	"google.golang.org/protobuf/encoding/protojson"
 	libp2phttp "github.com/libp2p/go-libp2p-http"
 )
 
@@ -242,8 +244,8 @@ func handleDiscoverService(node *SamNode, w http.ResponseWriter, r *http.Request
 
 	serviceName := r.URL.Query().Get("name")
 	serviceTypeStr := r.URL.Query().Get("type")
-	if serviceName == "" || serviceTypeStr == "" {
-		http.Error(w, "name and type query parameters are required", http.StatusBadRequest)
+	if serviceTypeStr == "" {
+		http.Error(w, "type query parameter is required", http.StatusBadRequest)
 		return
 	}
 
@@ -253,7 +255,74 @@ func handleDiscoverService(node *SamNode, w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	providers, err := node.DiscoverRemoteServices(r.Context(), serviceType, serviceName)
+	timeoutStr := r.URL.Query().Get("timeout")
+	var customTimeout time.Duration
+	if timeoutStr != "" {
+		customTimeout, err = time.ParseDuration(timeoutStr)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Invalid timeout parameter: %v", err), http.StatusBadRequest)
+			return
+		}
+	}
+
+	ctx := r.Context()
+	if customTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, customTimeout)
+		defer cancel()
+	}
+
+	streamParam := r.URL.Query().Get("stream")
+	acceptHeader := r.Header.Get("Accept")
+	isStreaming := streamParam == "true" || acceptHeader == "text/event-stream"
+
+	if isStreaming {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
+			return
+		}
+
+		out, err := node.DiscoverRemoteServicesStream(ctx, serviceType, serviceName)
+		if err != nil {
+			logger.Errorf("Failed to start streaming service discovery: %v", err)
+			if _, err := fmt.Fprintf(w, "event: error\ndata: %s\n\n", err.Error()); err != nil {
+				logger.Errorf("Failed to write SSE error: %v", err)
+			}
+			flusher.Flush()
+			return
+		}
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case dp, ok := <-out:
+				if !ok {
+					if _, err := fmt.Fprintf(w, "event: done\ndata: {}\n\n"); err != nil {
+						logger.Errorf("Failed to write SSE done: %v", err)
+					}
+					flusher.Flush()
+					return
+				}
+				data, err := json.Marshal(dp)
+				if err != nil {
+					logger.Errorf("Failed to marshal discovered provider: %v", err)
+					continue
+				}
+				if _, err := fmt.Fprintf(w, "data: %s\n\n", data); err != nil {
+					logger.Errorf("Failed to write SSE data: %v", err)
+				}
+				flusher.Flush()
+			}
+		}
+	}
+
+	providers, err := node.DiscoverRemoteServices(ctx, serviceType, serviceName)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to discover services: %v", err), http.StatusInternalServerError)
 		return
