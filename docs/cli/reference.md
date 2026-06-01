@@ -11,36 +11,52 @@ The current repository exposes two CLIs:
 sam-node --help
 ```
 
-### sam-node login
+### sam-node join
 
-Start the login flow and persist identity biscuit in the local store.
+Join the Sovereign Agent Mesh hub and enroll the node.
 
 ```bash
-sam-node login --hub http://localhost:8080
+sam-node join [hub_url] [flags]
 ```
+
+If `hub_url` is omitted, you will be prompted to join the default community testing network (`https://bananas.sam-mesh.dev`). This command initiates an interactive OIDC device login flow and stores the returned identity Biscuit token and generated keypair in the database.
 
 Flags:
 
-- `--hub`: hub base URL (default `http://localhost:8080`)
+*   `--data-dir`: Override directory for the agent store (defaults to OS user config dir).
 
 ### sam-node run
 
-Start the mesh node.
+Start the sovereign mesh node.
 
 ```bash
-sam-node run
+sam-node run [flags]
 ```
 
 Flags:
 
-- `--token`: identity biscuit override (if omitted, load from local store)
-- `--listen`: repeatable libp2p listen addresses
+*   `--data-dir`: Override directory for the agent store (defaults to OS user config dir) where identity and private keys are loaded.
+*   `--bind-addr`: Local TCP address for the HTTP server (MCP and Sidecar API) (default `"127.0.0.1:8080"`).
+*   `--listen`: libp2p Listen Addrs (default `[/ip4/0.0.0.0/udp/5001/quic-v1,/ip4/0.0.0.0/tcp/5002]`).
+*   `--jwt`: Pre-fetched JWT token to enroll dynamically.
+*   `--jwt-path`: Path to a file containing a pre-fetched JWT token.
+*   `--oidc-issuer`: OIDC Issuer URL for M2M auto-enrollment.
+*   `--client-id`: OIDC Client ID for M2M auto-enrollment.
+*   `--client-secret`: OIDC Client Secret for M2M auto-enrollment.
+*   `--api-token`: Static Bearer token for API authorization.
+*   `--log-level`: Log level (debug, info, warn, error) (default `"info"`).
 
 Examples:
 
 ```bash
-sam-node run --token <identity-biscuit>
-sam-node run --listen /ip4/0.0.0.0/udp/5001/quic-v1 --listen /ip4/0.0.0.0/tcp/5002
+# Start using saved identity
+sam-node run
+
+# Start with explicit OIDC details
+sam-node run --oidc-issuer https://issuer.example.com --client-id my-id --client-secret my-secret
+
+# Start and bind HTTP API to all interfaces (e.g. inside Docker)
+sam-node run --bind-addr 0.0.0.0:8080
 ```
 
 ## sam-hub
