@@ -93,10 +93,9 @@ func (b *baseService) Teardown() error {
 	return b.cmd.Process.Kill()
 }
 
-// InferenceService and A2AService are zero-override embeddings. They exist
+// A2AService is zero-override embedding. They exist
 // so the factory produces a distinct type per ServiceType, leaving room for
 // future per-kind behaviour without churn.
-type InferenceService struct{ baseService }
 type A2AService struct{ baseService }
 
 func NewServiceFromRequest(req *api.RegisterServiceRequest) (Service, error) {
