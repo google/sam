@@ -157,6 +157,32 @@ jobs:
             exit 1
           }
 
+      - name: Provision Hub Secrets
+        run: |
+          export ENV_NAME="${{ vars.ENV_NAME }}"
+          export NAMESPACE="sam-${ENV_NAME}"
+          # Idempotently provision the sam-hub-secret if it doesn't already exist
+          if ! kubectl get secret sam-hub-secret -n ${NAMESPACE} >/dev/null 2>&1; then
+            echo "Generating a new random 32-byte hex key for SAM_HUB_KEY..."
+            HUB_KEY=$(openssl rand -hex 32)
+            kubectl create secret generic sam-hub-secret \
+              --namespace=${NAMESPACE} \
+              --from-literal=sam-hub-key="${HUB_KEY}"
+          else
+            echo "sam-hub-secret already exists in namespace ${NAMESPACE}. Skipping generation."
+          fi
+
+      - name: Copy Wildcard TLS Secret to sam-hub
+        run: |
+          export ENV_NAME="${{ vars.ENV_NAME }}"
+          export NAMESPACE="sam-${ENV_NAME}"
+          if [[ "${NAMESPACE}" == "sam-hub" ]]; then
+            kubectl delete secret hub-sam-mesh-tls -n sam-hub --ignore-not-found
+            kubectl get secret hub-sam-mesh-tls -n sam-bananas -o yaml | \
+              sed 's/namespace: sam-bananas/namespace: sam-hub/' | \
+              kubectl create -f -
+          fi
+
       - name: Deploy Hub
         run: |
           sudo apt-get install -y gettext-base

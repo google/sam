@@ -1,0 +1,84 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cert-sync-sa
+  namespace: sam-hub
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cert-reader
+  namespace: sam-${ENV_NAME}
+rules:
+- apiGroups: [""]
+  resources: ["secrets"]
+  resourceNames: ["hub-sam-mesh-tls"]
+  verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cert-sync-read-binding
+  namespace: sam-${ENV_NAME}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: cert-reader
+subjects:
+- kind: ServiceAccount
+  name: cert-sync-sa
+  namespace: sam-hub
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cert-writer
+  namespace: sam-hub
+rules:
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get", "create", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cert-sync-write-binding
+  namespace: sam-hub
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: cert-writer
+subjects:
+- kind: ServiceAccount
+  name: cert-sync-sa
+  namespace: sam-hub
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: cert-sync-cronjob
+  namespace: sam-hub
+spec:
+  schedule: "0 0 * * *" # Run daily at midnight
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: cert-sync-sa
+          restartPolicy: OnFailure
+          containers:
+          - name: sync-agent
+            image: bitnami/kubectl:latest
+            command:
+            - /bin/sh
+            - -c
+            - |
+              echo "Fetching latest wildcard TLS secret from sam-${ENV_NAME} namespace..."
+              kubectl delete secret hub-sam-mesh-tls -n sam-hub --ignore-not-found
+              kubectl get secret hub-sam-mesh-tls -n sam-${ENV_NAME} -o yaml | \
+                sed "s/namespace: sam-${ENV_NAME}/namespace: sam-hub/" | \
+                kubectl create -f -
+              echo "Certificate successfully synchronized!"

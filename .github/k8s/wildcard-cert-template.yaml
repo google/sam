@@ -1,0 +1,14 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: hub-sam-mesh-cert
+  namespace: ${NAMESPACE}
+spec:
+  secretName: hub-sam-mesh-tls
+  issuerRef:
+    name: google-public-ca-issuer
+    kind: Issuer
+  commonName: "*.sam-mesh.dev"
+  dnsNames:
+  - "*.sam-mesh.dev"
+  - "sam-mesh.dev"

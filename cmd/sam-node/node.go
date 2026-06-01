@@ -418,11 +418,11 @@ func (n *SamNode) listenForHubEvents(ctx context.Context) {
 			continue
 		}
 
-		// use the original author not the one that just relay the message
-		if msg.GetFrom() != n.HubPeerID {
-			logger.Warnf("[Mesh Event] Ignored event from non-hub peer: %s", msg.ReceivedFrom)
-			continue
-		}
+		// Since the signature is verified against our list of trusted hub public keys
+		// in verifyEvent below, any message with a valid signature is cryptographically
+		// proven to have been authored by one of the hubs. We do not restrict msg.GetFrom()
+		// to a single HubPeerID because there can be multiple hub replicas in a cluster,
+		// each with its own PeerID.
 
 		if !n.verifyEvent(&event) {
 			logger.Warnf("[Mesh Event] Potential spoofing attempt: invalid signature on event from %s", msg.ReceivedFrom)

@@ -17,10 +17,10 @@ spec:
       targetPort: 4001
       protocol: UDP
       name: libp2p-udp
-    - port: 80
+    - port: 443
       targetPort: 9090
       protocol: TCP
-      name: register-http
+      name: register-https
   selector:
     app: sam-hub-${ENV_NAME}
 ---
@@ -32,10 +32,10 @@ metadata:
 spec:
   type: ClusterIP
   ports:
-    - port: 80
+    - port: 443
       targetPort: 9090
       protocol: TCP
-      name: http
+      name: https
   selector:
     app: sam-hub-${ENV_NAME}
 ---
@@ -57,6 +57,13 @@ spec:
       containers:
       - name: sam-hub
         image: ghcr.io/google/sam-hub:${IMAGE_TAG}
+        env:
+        - name: SAM_HUB_KEY
+          valueFrom:
+            secretKeyRef:
+              name: sam-hub-secret
+              key: sam-hub-key
+              optional: true # Make it optional so it doesn't block local kind testing if not created
         ports:
         - containerPort: 4001
           protocol: TCP
@@ -71,12 +78,14 @@ spec:
           httpGet:
             path: /healthz
             port: metrics
+            scheme: HTTPS
           initialDelaySeconds: 5
           periodSeconds: 10
         livenessProbe:
           httpGet:
             path: /healthz
             port: metrics
+            scheme: HTTPS
           initialDelaySeconds: 15
           periodSeconds: 20
         args:
@@ -86,6 +95,8 @@ spec:
         - "--issuer=https://auth.sam-mesh.dev,https://container.googleapis.com/v1/projects/${GCP_PROJECT_ID}/locations/${CLUSTER_REGION}/clusters/${CLUSTER_NAME}"
         # 1. Dex CLI client ID. 2. Canary projected volume audience.
         - "--allowed-audiences=sam-mesh-audience,sam-hub-audience"
+        - "--tls-cert-file=/etc/sam/certs/tls.crt"
+        - "--tls-key-file=/etc/sam/certs/tls.key"
         resources:
           requests:
             cpu: 100m
@@ -93,6 +104,14 @@ spec:
           limits:
             cpu: 500m
             memory: 512Mi
+        volumeMounts:
+        - name: tls-certs
+          mountPath: /etc/sam/certs
+          readOnly: true
+      volumes:
+      - name: tls-certs
+        secret:
+          secretName: hub-sam-mesh-tls
 ---
 apiVersion: monitoring.googleapis.com/v1
 kind: PodMonitoring
