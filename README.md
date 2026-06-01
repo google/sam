@@ -33,24 +33,65 @@ SAM_HUB_KEY=$(openssl rand -hex 32) \
 ./bin/sam-hub
 ```
 
-### 2. Login a node
+### 2. Join a mesh (Enroll node)
+
+To register the node's cryptographic identity with the hub:
 
 ```bash
-./bin/sam-node login --hub http://localhost:8080
+./bin/sam-node join http://localhost:8080
 ```
 
-This prints a login URL. After authenticating in browser, paste the returned biscuit token back into the CLI prompt.
+This initiates the interactive OIDC Device Authorization flow. It prints a URL to open in your browser for authentication. Once authorized, it automatically receives the node's Biscuit identity token and saves it (along with the derived node private key) inside the local data store.
 
-### 3. Run a node
+### 3. Run the node
+
+Start the node using the stored identity (note that `--api-token` is mandatory to protect the local API when not using mTLS):
 
 ```bash
-./bin/sam-node run
+./bin/sam-node run --api-token my-secret-token
 ```
 
-Or pass a token directly:
+Or run the node by explicitly passing OIDC credentials to dynamically authenticate and enroll on start:
 
 ```bash
-./bin/sam-node run --token <identity-token>
+./bin/sam-node run \
+  --oidc-issuer https://issuer.example.com \
+  --client-id <id> \
+  --client-secret <secret> \
+  --api-token my-secret-token
+```
+
+## Docker Quick Start
+
+You can run the SAM node using Docker and the officially published image. To persist your node's identity, private key, and mesh discovery configuration across runs, use a host volume mounted to the container's data directory.
+
+### 1. Join the Mesh (Enroll)
+
+Run the container interactively to register your node with the community testnet (`https://bananas.sam-mesh.dev`):
+
+```bash
+docker run -it \
+  -v $(pwd)/sam-data:/data \
+  ghcr.io/google/sam-node:latest \
+  join --data-dir /data https://bananas.sam-mesh.dev
+```
+
+- Follow the printed device authentication instructions in your browser.
+- This generates the node identity and stores it inside `./sam-data/agent.db` on the host.
+
+### 2. Run the Node
+
+Start the background mesh node container using the stored identity. Make sure to publish the required libp2p ports (5001/UDP and 5002/TCP), set a secure `--api-token` to protect the local MCP/Sidecar API, and bind the HTTP server to `0.0.0.0:8080` so that it can be reached from the host:
+
+```bash
+docker run -d \
+  --name sam-node \
+  -v $(pwd)/sam-data:/data \
+  -p 5001:5001/udp \
+  -p 5002:5002 \
+  -p 8080:8080 \
+  ghcr.io/google/sam-node:latest \
+  run --data-dir /data --bind-addr 0.0.0.0:8080 --api-token my-secret-token
 ```
 
 ## Local MCP Server
