@@ -15,13 +15,17 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -29,11 +33,13 @@ import (
 )
 
 func main() {
-	serverURL := flag.String("url", "", "MCP server URL (e.g. http://localhost:8080/)")
+	serverURL := flag.String("url", "", "MCP server URL or Sidecar API base URL (e.g. http://localhost:8080/)")
 	toolName := flag.String("tool", "", "Tool to call")
-	toolArgs := flag.String("args", "{}", "JSON arguments for the tool")
+	toolArgs := flag.String("args", "{}", "JSON arguments for the tool or discovery parameters")
 	timeoutArgs := flag.Int("timeout", 10, "Timeout in seconds")
 	listTools := flag.Bool("list", false, "List available tools and exit")
+	streamOpt := flag.Bool("stream", false, "Enable streaming mode for service discovery HTTP API")
+	tokenOpt := flag.String("token", "", "Authorization Bearer token for protected sidecar endpoints")
 	flag.Parse()
 
 	if *serverURL == "" {
@@ -50,6 +56,87 @@ func main() {
 		fmt.Println("Received signal, shutting down...")
 		cancel()
 	}()
+
+	if *streamOpt {
+		var args map[string]string
+		if *toolArgs != "" {
+			if err := json.Unmarshal([]byte(*toolArgs), &args); err != nil {
+				log.Fatalf("Failed to parse args: %v", err)
+			}
+		}
+		serviceType := args["type"]
+		serviceName := args["name"]
+
+		if serviceType == "" {
+			log.Fatal("Must specify 'type' in -args (e.g. -args '{\"type\":\"mcp\"}')")
+		}
+
+		// Construct URL
+		baseURL := strings.TrimSuffix(*serverURL, "/mcp/events")
+		baseURL = strings.TrimSuffix(baseURL, "/")
+		if !strings.Contains(baseURL, "/sam/service/discover") {
+			baseURL = baseURL + "/sam/service/discover"
+		}
+
+		discoveryURL := fmt.Sprintf("%s?type=%s&stream=true", baseURL, serviceType)
+		if serviceName != "" {
+			discoveryURL = fmt.Sprintf("%s&name=%s", discoveryURL, serviceName)
+		}
+		if *timeoutArgs > 0 {
+			discoveryURL = fmt.Sprintf("%s&timeout=%ds", discoveryURL, *timeoutArgs)
+		}
+
+		req, err := http.NewRequestWithContext(ctx, "GET", discoveryURL, nil)
+		if err != nil {
+			log.Fatalf("Failed to create request: %v", err)
+		}
+
+		if *tokenOpt != "" {
+			req.Header.Set("Authorization", "Bearer "+*tokenOpt)
+		}
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			log.Fatalf("Request failed: %v", err)
+		}
+		defer func() {
+			if err := resp.Body.Close(); err != nil {
+				log.Printf("Failed to close response body: %v", err)
+			}
+		}()
+
+		if resp.StatusCode != http.StatusOK {
+			bodyBytes, _ := io.ReadAll(resp.Body)
+			log.Fatalf("Discovery failed with status: %d, error: %s", resp.StatusCode, string(bodyBytes))
+		}
+
+		reader := bufio.NewReader(resp.Body)
+		for {
+			line, err := reader.ReadString('\n')
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				if ctx.Err() != nil {
+					return // Context canceled
+				}
+				log.Fatalf("Failed to read stream: %v", err)
+			}
+
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+
+			if strings.HasPrefix(line, "data:") {
+				dataContent := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+				fmt.Println(dataContent)
+			} else if strings.HasPrefix(line, "event:") {
+				fmt.Printf("[%s]\n", strings.TrimSpace(strings.TrimPrefix(line, "event:")))
+			}
+		}
+		return
+	}
 
 	// Create MCP client
 	client := mcp.NewClient(&mcp.Implementation{
