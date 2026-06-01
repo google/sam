@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/biscuit-auth/biscuit-go/v2"
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/sam/api"
@@ -43,6 +44,12 @@ func TestMintBiscuitToken(t *testing.T) {
 	hub := &Hub{
 		KeyRing: kr,
 		Policy: &api.PolicyConfig{
+			Bindings: []api.Binding{
+				{
+					Group: "system:serviceaccounts:sam-canary",
+					Role:  "canary-role",
+				},
+			},
 			Roles: map[string]api.RolePolicy{
 				"admin": {
 					MCP: api.MCPPolicy{
@@ -52,12 +59,13 @@ func TestMintBiscuitToken(t *testing.T) {
 						AllowedTargets: []string{"target1"},
 					},
 				},
+				"canary-role": {
+					MCP: api.MCPPolicy{
+						AllowedTools: []string{"/sam/mcp/1.0.0"},
+					},
+				},
 			},
 		},
-	}
-
-	claims := jwt.MapClaims{
-		"roles": []any{"admin"},
 	}
 
 	priv, _, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
@@ -73,13 +81,101 @@ func TestMintBiscuitToken(t *testing.T) {
 		Expiry: time.Now().Add(1 * time.Hour),
 	}
 
-	biscuitData, err := hub.mintBiscuitToken(claims, token, dummyPeer)
+	// Case 1: Direct OIDC role (valid)
+	claims1 := jwt.MapClaims{
+		"roles": []any{"admin"},
+	}
+	biscuitData1, err := hub.mintBiscuitToken(claims1, token, dummyPeer)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if len(biscuitData1) == 0 {
+		t.Error("Expected non-empty biscuit data for direct role")
+	}
 
-	if len(biscuitData) == 0 {
-		t.Error("Expected non-empty biscuit data")
+	b1, err := biscuit.Unmarshal(biscuitData1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authorizer1, err := b1.Authorizer(kr.GetCurrentPublicKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	rule1 := biscuit.Policy{Queries: []biscuit.Rule{
+		{
+			Head: biscuit.Predicate{Name: "allow", IDs: []biscuit.Term{}},
+			Body: []biscuit.Predicate{
+				{Name: "role", IDs: []biscuit.Term{biscuit.String("admin")}},
+			},
+		},
+	}, Kind: biscuit.PolicyKindAllow}
+	authorizer1.AddPolicy(rule1)
+	if err := authorizer1.Authorize(); err != nil {
+		t.Errorf("Expected direct role 'admin' to be authorized: %v", err)
+	}
+
+	// Case 2: OIDC group claim mapped to role via bindings
+	claims2 := jwt.MapClaims{
+		"groups": []any{"system:serviceaccounts:sam-canary"},
+	}
+	biscuitData2, err := hub.mintBiscuitToken(claims2, token, dummyPeer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(biscuitData2) == 0 {
+		t.Error("Expected non-empty biscuit data for mapped group")
+	}
+
+	b2, err := biscuit.Unmarshal(biscuitData2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authorizer2, err := b2.Authorizer(kr.GetCurrentPublicKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	rule2 := biscuit.Policy{Queries: []biscuit.Rule{
+		{
+			Head: biscuit.Predicate{Name: "allow", IDs: []biscuit.Term{}},
+			Body: []biscuit.Predicate{
+				{Name: "role", IDs: []biscuit.Term{biscuit.String("canary-role")}},
+			},
+		},
+	}, Kind: biscuit.PolicyKindAllow}
+	authorizer2.AddPolicy(rule2)
+	if err := authorizer2.Authorize(); err != nil {
+		t.Errorf("Expected mapped role 'canary-role' to be authorized: %v", err)
+	}
+
+	// Case 3: Unmapped OIDC group and undefined direct role
+	claims3 := jwt.MapClaims{
+		"groups": []any{"unknown-group"},
+		"roles":  []any{"undefined-role"},
+	}
+	biscuitData3, err := hub.mintBiscuitToken(claims3, token, dummyPeer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b3, err := biscuit.Unmarshal(biscuitData3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authorizer3, err := b3.Authorizer(kr.GetCurrentPublicKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Verify no role matches
+	rule3 := biscuit.Policy{Queries: []biscuit.Rule{
+		{
+			Head: biscuit.Predicate{Name: "allow", IDs: []biscuit.Term{}},
+			Body: []biscuit.Predicate{
+				{Name: "role", IDs: []biscuit.Term{biscuit.Variable("any_role")}},
+			},
+		},
+	}, Kind: biscuit.PolicyKindAllow}
+	authorizer3.AddPolicy(rule3)
+	if err := authorizer3.Authorize(); err == nil {
+		t.Error("Expected unmapped role and group to fail authorization check")
 	}
 }
 

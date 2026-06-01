@@ -411,30 +411,40 @@ func (h *Hub) parseAndVerifyJWT(ctx context.Context, jwtStr string, allowedAudie
 }
 
 func (h *Hub) mintBiscuitToken(claims jwt.MapClaims, token *oidc.IDToken, remotePeer peer.ID) ([]byte, error) {
-	var claimsGroups []string
+	var oidcRoles []string
 	if rolesAny, ok := claims["roles"].([]any); ok {
 		for _, r := range rolesAny {
-			if str, ok := r.(string); ok {
-				claimsGroups = append(claimsGroups, str)
-			}
-		}
-	}
-	if groupsAny, ok := claims["groups"].([]any); ok {
-		for _, g := range groupsAny {
-			if str, ok := g.(string); ok {
-				claimsGroups = append(claimsGroups, str)
+			if str, ok := r.(string); ok && str != "" {
+				oidcRoles = append(oidcRoles, str)
 			}
 		}
 	}
 
-	// Resolve roles based on configured group bindings (RBAC mapping)
+	var oidcGroups []string
+	if groupsAny, ok := claims["groups"].([]any); ok {
+		for _, g := range groupsAny {
+			if str, ok := g.(string); ok && str != "" {
+				oidcGroups = append(oidcGroups, str)
+			}
+		}
+	}
+
+	// Resolve roles based on configured group bindings and explicit OIDC roles
 	resolvedRoles := make(map[string]bool)
 	if h.Policy != nil {
-		for _, b := range h.Policy.Bindings {
-			for _, cg := range claimsGroups {
+		// 1. Map OIDC groups to roles via configured bindings (RBAC mapping)
+		for _, cg := range oidcGroups {
+			for _, b := range h.Policy.Bindings {
 				if b.Group == cg {
 					resolvedRoles[b.Role] = true
 				}
+			}
+		}
+
+		// 2. Validate and accept pre-resolved OIDC roles directly if defined in policy (Zero-Trust check)
+		for _, r := range oidcRoles {
+			if _, exists := h.Policy.Roles[r]; exists {
+				resolvedRoles[r] = true
 			}
 		}
 	}
@@ -464,8 +474,8 @@ func (h *Hub) mintBiscuitToken(claims jwt.MapClaims, token *oidc.IDToken, remote
 
 	// Assert original OIDC groups in the token (semantic audit trail)
 	seenGroups := make(map[string]bool)
-	for _, cg := range claimsGroups {
-		if cg == "" || seenGroups[cg] {
+	for _, cg := range oidcGroups {
+		if seenGroups[cg] {
 			continue
 		}
 		seenGroups[cg] = true
