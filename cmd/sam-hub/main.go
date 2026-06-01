@@ -462,12 +462,23 @@ func (h *Hub) mintBiscuitToken(claims jwt.MapClaims, token *oidc.IDToken, remote
 		return nil, fmt.Errorf("failed to add client_peer_id fact: %w", err)
 	}
 
-	for role := range resolvedRoles {
+	// Assert original OIDC groups in the token (semantic audit trail)
+	for _, cg := range claimsGroups {
 		if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
 			Name: api.FactGroup,
-			IDs:  []biscuit.Term{biscuit.String(role)},
+			IDs:  []biscuit.Term{biscuit.String(cg)},
 		}}); err != nil {
 			return nil, fmt.Errorf("failed to add group fact: %w", err)
+		}
+	}
+
+	// Assert resolved authorized roles in the token
+	for role := range resolvedRoles {
+		if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+			Name: api.FactRole,
+			IDs:  []biscuit.Term{biscuit.String(role)},
+		}}); err != nil {
+			return nil, fmt.Errorf("failed to add role fact: %w", err)
 		}
 
 		if h.Policy != nil {
