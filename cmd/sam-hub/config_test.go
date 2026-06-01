@@ -160,4 +160,73 @@ roles:
 	if err == nil {
 		t.Error("expected error for invalid binding referencing a nonexistent role, got nil")
 	}
+
+	// 8. Test valid user binding
+	userBindingYAML := `
+version: "v1alpha1"
+bindings:
+  - user: "system:serviceaccount:sam-canary:sam-node-sa"
+    role: "mesh-member"
+roles:
+  mesh-member:
+    mcp:
+      allowed_tools: ["/sam/mcp/1.0.0"]
+`
+	userBindingFile := filepath.Join(dir, "user_binding.yaml")
+	if err := os.WriteFile(userBindingFile, []byte(userBindingYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	config, err = LoadPolicyConfig(userBindingFile)
+	if err != nil {
+		t.Fatalf("expected no error for valid user binding, got %v", err)
+	}
+	if len(config.Bindings) != 1 {
+		t.Errorf("expected 1 binding, got %d", len(config.Bindings))
+	}
+	if config.Bindings[0].User != "system:serviceaccount:sam-canary:sam-node-sa" || config.Bindings[0].Role != "mesh-member" {
+		t.Errorf("unexpected binding values: %+v", config.Bindings[0])
+	}
+
+	// 9. Test invalid binding with both group and user missing
+	missingBothYAML := `
+version: "v1alpha1"
+bindings:
+  - role: "mesh-member"
+roles:
+  mesh-member:
+    mcp:
+      allowed_tools: ["/sam/mcp/1.0.0"]
+`
+	missingBothFile := filepath.Join(dir, "missing_both.yaml")
+	if err := os.WriteFile(missingBothFile, []byte(missingBothYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = LoadPolicyConfig(missingBothFile)
+	if err == nil {
+		t.Error("expected error for binding with both group and user missing, got nil")
+	}
+
+	// 10. Test invalid binding with both group and user populated
+	bothPopulatedYAML := `
+version: "v1alpha1"
+bindings:
+  - group: "some-group"
+    user: "some-user"
+    role: "mesh-member"
+roles:
+  mesh-member:
+    mcp:
+      allowed_tools: ["/sam/mcp/1.0.0"]
+`
+	bothPopulatedFile := filepath.Join(dir, "both_populated.yaml")
+	if err := os.WriteFile(bothPopulatedFile, []byte(bothPopulatedYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = LoadPolicyConfig(bothPopulatedFile)
+	if err == nil {
+		t.Error("expected error for binding specifying both group and user, got nil")
+	}
 }

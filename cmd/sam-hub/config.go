@@ -51,8 +51,11 @@ func LoadPolicyConfig(path string) (*api.PolicyConfig, error) {
 // ValidatePolicyConfig ensures that no wildcards are used in policies, and that all referenced roles in bindings exist.
 func ValidatePolicyConfig(config *api.PolicyConfig) error {
 	for _, b := range config.Bindings {
-		if b.Group == "" {
-			return fmt.Errorf("binding group cannot be empty")
+		if b.Group == "" && b.User == "" {
+			return fmt.Errorf("binding must specify either 'group' or 'user'")
+		}
+		if b.Group != "" && b.User != "" {
+			return fmt.Errorf("binding cannot specify both 'group' and 'user' concurrently")
 		}
 		if b.Role == "" {
 			return fmt.Errorf("binding role cannot be empty")

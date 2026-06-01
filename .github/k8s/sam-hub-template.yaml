@@ -129,7 +129,7 @@ data:
   policies.yaml: |
     version: "v1alpha1"
     bindings:
-      - group: "system:serviceaccounts:sam-canary-${ENV_NAME}"
+      - user: "system:serviceaccount:sam-canary-${ENV_NAME}:sam-node-sa"
         role: "sam-canary"
     roles:
       sam-canary:

@@ -30,6 +30,7 @@ const (
 	FactClientPeerID  = "client_peer_id"
 	FactGroup         = "group"
 	FactRole          = "role"
+	FactUser          = "user"
 	FactMCPTool       = "allow_mcp_tool"
 	FactNetworkTarget = "allow_network_target"
 )

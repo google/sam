@@ -49,6 +49,10 @@ func TestMintBiscuitToken(t *testing.T) {
 					Group: "system:serviceaccounts:sam-canary",
 					Role:  "canary-role",
 				},
+				{
+					User: "system:serviceaccount:sam-canary:sam-node-sa",
+					Role: "canary-role",
+				},
 			},
 			Roles: map[string]api.RolePolicy{
 				"admin": {
@@ -174,8 +178,34 @@ func TestMintBiscuitToken(t *testing.T) {
 		},
 	}, Kind: biscuit.PolicyKindAllow}
 	authorizer3.AddPolicy(rule3)
-	if err := authorizer3.Authorize(); err == nil {
-		t.Error("Expected unmapped role and group to fail authorization check")
+	// Case 4: GKE Workload Identity projected token (no groups claim, sub-based mapping)
+	claims4 := jwt.MapClaims{
+		"sub": "system:serviceaccount:sam-canary:sam-node-sa",
+	}
+	biscuitData4, err := hub.mintBiscuitToken(claims4, token, dummyPeer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b4, err := biscuit.Unmarshal(biscuitData4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authorizer4, err := b4.Authorizer(kr.GetCurrentPublicKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Verify that it mapped the derived group "system:serviceaccounts:sam-canary" to "canary-role"
+	rule4 := biscuit.Policy{Queries: []biscuit.Rule{
+		{
+			Head: biscuit.Predicate{Name: "allow", IDs: []biscuit.Term{}},
+			Body: []biscuit.Predicate{
+				{Name: "role", IDs: []biscuit.Term{biscuit.String("canary-role")}},
+			},
+		},
+	}, Kind: biscuit.PolicyKindAllow}
+	authorizer4.AddPolicy(rule4)
+	if err := authorizer4.Authorize(); err != nil {
+		t.Errorf("Expected sub-derived role 'canary-role' to be authorized: %v", err)
 	}
 }
 

@@ -429,13 +429,22 @@ func (h *Hub) mintBiscuitToken(claims jwt.MapClaims, token *oidc.IDToken, remote
 		}
 	}
 
-	// Resolve roles based on configured group bindings and explicit OIDC roles
+	oidcSub, _ := claims["sub"].(string)
+
+	// Resolve roles based on configured bindings and explicit OIDC roles
 	resolvedRoles := make(map[string]bool)
 	if h.Policy != nil {
-		// 1. Map OIDC groups to roles via configured bindings (RBAC mapping)
-		for _, cg := range oidcGroups {
-			for _, b := range h.Policy.Bindings {
-				if b.Group == cg {
+		// 1. Map OIDC groups and users to roles via configured bindings (RBAC mapping)
+		for _, b := range h.Policy.Bindings {
+			if b.Group != "" {
+				for _, cg := range oidcGroups {
+					if b.Group == cg {
+						resolvedRoles[b.Role] = true
+					}
+				}
+			}
+			if b.User != "" && oidcSub != "" {
+				if b.User == oidcSub {
 					resolvedRoles[b.Role] = true
 				}
 			}
@@ -470,6 +479,15 @@ func (h *Hub) mintBiscuitToken(claims jwt.MapClaims, token *oidc.IDToken, remote
 		IDs:  []biscuit.Term{biscuit.String(remotePeer.String())},
 	}}); err != nil {
 		return nil, fmt.Errorf("failed to add client_peer_id fact: %w", err)
+	}
+
+	if oidcSub != "" {
+		if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+			Name: api.FactUser,
+			IDs:  []biscuit.Term{biscuit.String(oidcSub)},
+		}}); err != nil {
+			return nil, fmt.Errorf("failed to add user fact: %w", err)
+		}
 	}
 
 	// Assert original OIDC groups in the token (semantic audit trail)

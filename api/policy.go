@@ -8,7 +8,8 @@ type PolicyConfig struct {
 }
 
 type Binding struct {
-	Group string `yaml:"group"`
+	Group string `yaml:"group,omitempty"`
+	User  string `yaml:"user,omitempty"`
 	Role  string `yaml:"role"`
 }
 
