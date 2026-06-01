@@ -28,7 +28,7 @@ The public deployment has two isolated release tracks:
 
 Updates to both release tracks are fully automated via a robust **Continuous Deployment** pipeline:
 
-1.  **GitHub Actions Trigger:** The workflow defined in [.github/workflows/deploy.yaml](file:///usr/local/google/home/aojea/src/sam/.github/workflows/deploy.yaml) is automatically triggered by repository events (pushing to `main` or pushing a version tag).
+1.  **GitHub Actions Trigger:** The workflow defined in [.github/workflows/deploy.yaml](../.github/workflows/deploy.yaml) is automatically triggered by repository events (pushing to main or pushing a version tag).
 2.  **Determining the Track & Tag:**
     *   If the event is a release tag, the pipeline dynamically targets the `hub` GitHub environment and sets the container image tag to the release version.
     *   Otherwise, it targets the `bananas` environment and sets the container image tag to the Git commit SHA.
