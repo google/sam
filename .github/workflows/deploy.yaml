@@ -145,6 +145,29 @@ jobs:
 
       - name: Deploy Dex Resources
         run: |
+          print_rollout_diagnostics() {
+            local namespace="$1"
+            local deployment="$2"
+            local selector="$3"
+
+            echo "Collecting diagnostics for deployment/${deployment} in namespace ${namespace}..."
+
+            kubectl describe deployment/${deployment} -n ${namespace} || true
+            kubectl get pods -n ${namespace} -l "${selector}" -o wide || true
+            kubectl describe pods -n ${namespace} -l "${selector}" || true
+            kubectl get events -n ${namespace} --sort-by=.lastTimestamp || true
+
+            for pod in $(kubectl get pods -n ${namespace} -l "${selector}" -o name 2>/dev/null); do
+              echo "==== Describe ${pod} ===="
+              kubectl describe -n ${namespace} "${pod}" || true
+
+              for container in $(kubectl get -n ${namespace} "${pod}" -o jsonpath='{.spec.containers[*].name}' 2>/dev/null); do
+                echo "==== Logs for ${pod} container ${container} ===="
+                kubectl logs -n ${namespace} "${pod#pod/}" -c "${container}" --tail=-1 || true
+              done
+            done
+          }
+
           # Apply the Dex manifests
           kubectl apply -f .github/k8s/dex-config.yaml
           kubectl apply -f .github/k8s/dex-deployment.yaml
@@ -152,7 +175,10 @@ jobs:
           # Force a restart to pick up any changes to the secrets, and wait for readiness
           kubectl rollout restart deployment/dex -n dex
           kubectl rollout status deployment/dex -n dex --timeout=120s || {
-            echo "Dex Deployment failed! Rolling back..."
+            echo "Dex Deployment failed!"
+            print_rollout_diagnostics "dex" "dex" "app=dex"
+
+            echo "Rolling back Dex deployment..."
             kubectl rollout undo deployment/dex -n dex
             exit 1
           }
@@ -185,6 +211,29 @@ jobs:
 
       - name: Deploy Hub
         run: |
+          print_rollout_diagnostics() {
+            local namespace="$1"
+            local deployment="$2"
+            local selector="$3"
+
+            echo "Collecting diagnostics for deployment/${deployment} in namespace ${namespace}..."
+
+            kubectl describe deployment/${deployment} -n ${namespace} || true
+            kubectl get pods -n ${namespace} -l "${selector}" -o wide || true
+            kubectl describe pods -n ${namespace} -l "${selector}" || true
+            kubectl get events -n ${namespace} --sort-by=.lastTimestamp || true
+
+            for pod in $(kubectl get pods -n ${namespace} -l "${selector}" -o name 2>/dev/null); do
+              echo "==== Describe ${pod} ===="
+              kubectl describe -n ${namespace} "${pod}" || true
+
+              for container in $(kubectl get -n ${namespace} "${pod}" -o jsonpath='{.spec.containers[*].name}' 2>/dev/null); do
+                echo "==== Logs for ${pod} container ${container} ===="
+                kubectl logs -n ${namespace} "${pod#pod/}" -c "${container}" --tail=-1 || true
+              done
+            done
+          }
+
           sudo apt-get install -y gettext-base
           
           export ENV_NAME="${{ vars.ENV_NAME }}"
@@ -199,7 +248,10 @@ jobs:
           envsubst < .github/k8s/sam-hub-template.yaml | kubectl apply -f -
           
           kubectl rollout status deployment/sam-hub-${ENV_NAME} -n ${NAMESPACE} --timeout=120s || {
-            echo "Hub Deployment failed! Rolling back..."
+            echo "Hub Deployment failed!"
+            print_rollout_diagnostics "${NAMESPACE}" "sam-hub-${ENV_NAME}" "app=sam-hub-${ENV_NAME}"
+
+            echo "Rolling back Hub deployment..."
             kubectl rollout undo deployment/sam-hub-${ENV_NAME} -n ${NAMESPACE}
             kubectl rollout status deployment/sam-hub-${ENV_NAME} -n ${NAMESPACE}
             exit 1
@@ -207,6 +259,29 @@ jobs:
 
       - name: Deploy Canaries
         run: |
+          print_rollout_diagnostics() {
+            local namespace="$1"
+            local deployment="$2"
+            local selector="$3"
+
+            echo "Collecting diagnostics for deployment/${deployment} in namespace ${namespace}..."
+
+            kubectl describe deployment/${deployment} -n ${namespace} || true
+            kubectl get pods -n ${namespace} -l "${selector}" -o wide || true
+            kubectl describe pods -n ${namespace} -l "${selector}" || true
+            kubectl get events -n ${namespace} --sort-by=.lastTimestamp || true
+
+            for pod in $(kubectl get pods -n ${namespace} -l "${selector}" -o name 2>/dev/null); do
+              echo "==== Describe ${pod} ===="
+              kubectl describe -n ${namespace} "${pod}" || true
+
+              for container in $(kubectl get -n ${namespace} "${pod}" -o jsonpath='{.spec.containers[*].name}' 2>/dev/null); do
+                echo "==== Logs for ${pod} container ${container} ===="
+                kubectl logs -n ${namespace} "${pod#pod/}" -c "${container}" --tail=-1 || true
+              done
+            done
+          }
+
           export ENV_NAME="${{ vars.ENV_NAME }}"
           export CANARY_NAMESPACE="sam-canary-${ENV_NAME}"
           export IMAGE_TAG="${{ env.IMAGE_TAG }}"
@@ -227,15 +302,21 @@ jobs:
 
           
           kubectl rollout status deployment/sam-canary-${ENV_NAME} -n ${CANARY_NAMESPACE} --timeout=120s || {
-            echo "Canary Deployment failed! Rolling back..."
+            echo "Canary Deployment failed!"
+            print_rollout_diagnostics "${CANARY_NAMESPACE}" "sam-canary-${ENV_NAME}" "app=sam-canary-${ENV_NAME}"
+
+            echo "Rolling back Canary deployment..."
             kubectl rollout undo deployment/sam-canary-${ENV_NAME} -n ${CANARY_NAMESPACE}
-            kubectl rollout status deployment/sam-canary-${ENV_NAME} -n ${CANARY_NAMESPACE}
+            kubectl rollout status deployment/sam-canary-${ENV_NAME} -n ${CANARY_NAMESPACE} || true
             exit 1
           }
 
           kubectl rollout status deployment/openclaw-canary-${ENV_NAME} -n ${CANARY_NAMESPACE} --timeout=120s || {
-            echo "OpenClaw Canary Deployment failed! Rolling back..."
+            echo "OpenClaw Canary Deployment failed!"
+            print_rollout_diagnostics "${CANARY_NAMESPACE}" "openclaw-canary-${ENV_NAME}" "app=openclaw-canary-${ENV_NAME}"
+
+            echo "Rolling back OpenClaw Canary deployment..."
             kubectl rollout undo deployment/openclaw-canary-${ENV_NAME} -n ${CANARY_NAMESPACE}
-            kubectl rollout status deployment/openclaw-canary-${ENV_NAME} -n ${CANARY_NAMESPACE}
+            kubectl rollout status deployment/openclaw-canary-${ENV_NAME} -n ${CANARY_NAMESPACE} || true
             exit 1
           }
