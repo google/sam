@@ -90,7 +90,10 @@ func TestHandleBannedEvent(t *testing.T) {
 func TestHandleKeyRotationEvent(t *testing.T) {
 	node := &SamNode{}
 
-	_, pub, _ := ed25519.GenerateKey(nil)
+	pub, _, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatalf("Failed to generate key: %v", err)
+	}
 
 	event := &api.MeshEvent{
 		Type:         api.MeshEvent_KEY_ROTATION,
@@ -104,4 +107,3 @@ func TestHandleKeyRotationEvent(t *testing.T) {
 		t.Errorf("Expected 1 trusted key, got %d", len(node.trustedKeys))
 	}
 }
-

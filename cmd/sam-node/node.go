@@ -15,6 +15,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/sha256"
@@ -549,10 +550,19 @@ func (n *SamNode) handleBannedEvent(event *api.MeshEvent) {
 }
 
 func (n *SamNode) handleKeyRotationEvent(event *api.MeshEvent) {
+	if len(event.NewPublicKey) != ed25519.PublicKeySize {
+		logger.Errorf("[Mesh Event] Key rotation failed: invalid public key size %d, expected %d", len(event.NewPublicKey), ed25519.PublicKeySize)
+		return
+	}
 	logger.Infof("[Mesh Event] Key rotation received")
 	n.keysMu.Lock()
+	defer n.keysMu.Unlock()
+	for _, tk := range n.trustedKeys {
+		if bytes.Equal(tk.Key, event.NewPublicKey) {
+			return // Ignore duplicate
+		}
+	}
 	n.trustedKeys = append(n.trustedKeys, TrustedKey{Key: ed25519.PublicKey(event.NewPublicKey), ReceivedAt: time.Now()})
-	n.keysMu.Unlock()
 }
 
 func (n *SamNode) startKeyPruning(ctx context.Context, gracePeriod time.Duration) {
