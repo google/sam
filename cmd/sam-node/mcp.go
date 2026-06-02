@@ -141,7 +141,7 @@ func (n *SamNode) callMCPToolOnce(ctx context.Context, targetPeer peer.ID, toolN
 	}
 	defer func() {
 		if err := s.Close(); err != nil {
-			logger.Errorf("[MCP] Failed to close stream: %v", err)
+			logger.Debugf("[MCP] Failed to close stream: %v", err)
 		}
 	}()
 

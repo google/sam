@@ -317,7 +317,7 @@ func (n *SamNode) ConnectAndAuthWithHub(ctx context.Context, addr multiaddr.Mult
 	}
 	defer func() {
 		if err := s.Close(); err != nil {
-			logger.Errorf("failed to close stream: %v", err)
+			logger.Debugf("failed to close stream: %v", err)
 		}
 	}()
 

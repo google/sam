@@ -46,7 +46,7 @@ func (n *SamNode) WithBiscuitAuth(next network.StreamHandler) network.StreamHand
 	return func(s network.Stream) {
 		defer func() {
 			if err := s.Close(); err != nil {
-				logger.Errorf("[Auth] Failed to close stream: %v", err)
+				logger.Debugf("[Auth] Failed to close stream: %v", err)
 			}
 		}()
 		remotePeer := s.Conn().RemotePeer()
