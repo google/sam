@@ -121,6 +121,7 @@ type Hub struct {
 	ExternalAddrs    []string
 	AllowedAudiences []string
 	AllowLoopback    bool
+	SyncKey          []byte
 }
 
 // NewHub starts a host supporting both QUIC and TCP (with TLS 1.3)
@@ -238,6 +239,15 @@ func NewHub(ctx context.Context, policy *api.PolicyConfig, allowLoopback bool) (
 		AllowLoopback:    allowLoopback,
 		otherHubAddrs:    make(map[peer.ID][]string),
 		otherHubLastSeen: make(map[peer.ID]time.Time),
+		SyncKey: func() []byte {
+			if len(initialSeed) > 0 {
+				return initialSeed
+			}
+			if kr != nil {
+				return kr.GetCurrentKey()
+			}
+			return nil
+		}(),
 	}
 
 	h.Network().Notify(&notifier{hub: hub})

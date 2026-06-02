@@ -31,7 +31,10 @@ import (
 )
 
 func (h *Hub) encryptMsg(plaintext []byte) ([]byte, error) {
-	key := sha256.Sum256(h.KeyRing.GetCurrentKey())
+	if len(h.SyncKey) == 0 {
+		return nil, fmt.Errorf("no sync key available")
+	}
+	key := sha256.Sum256(h.SyncKey)
 	block, err := aes.NewCipher(key[:])
 	if err != nil {
 		return nil, err
@@ -48,31 +51,31 @@ func (h *Hub) encryptMsg(plaintext []byte) ([]byte, error) {
 }
 
 func (h *Hub) decryptMsg(ciphertext []byte) ([]byte, error) {
-	// Try all valid keys in case a rotation just happened
-	for _, priv := range h.KeyRing.GetAllValidKeys() {
-		key := sha256.Sum256(priv)
-		block, err := aes.NewCipher(key[:])
-		if err != nil {
-			continue
-		}
-		gcm, err := cipher.NewGCM(block)
-		if err != nil {
-			continue
-		}
-		nonceSize := gcm.NonceSize()
-		if len(ciphertext) < nonceSize {
-			continue
-		}
-		nonce, actualCiphertext := ciphertext[:nonceSize], ciphertext[nonceSize:]
-		plaintext, err := gcm.Open(nil, nonce, actualCiphertext, nil)
-		if err == nil {
-			return plaintext, nil
-		}
+	if len(h.SyncKey) == 0 {
+		return nil, fmt.Errorf("no sync key available")
 	}
-	return nil, fmt.Errorf("failed to decrypt sync message")
+	key := sha256.Sum256(h.SyncKey)
+	block, err := aes.NewCipher(key[:])
+	if err != nil {
+		return nil, err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+	nonceSize := gcm.NonceSize()
+	if len(ciphertext) < nonceSize {
+		return nil, fmt.Errorf("ciphertext too short")
+	}
+	nonce, actualCiphertext := ciphertext[:nonceSize], ciphertext[nonceSize:]
+	return gcm.Open(nil, nonce, actualCiphertext, nil)
 }
 
 func (h *Hub) startSyncListener(ctx context.Context) {
+	if h.SyncTopic == nil {
+		logger.Warn("SyncTopic is nil, sync listener will not start")
+		return
+	}
 	sub, err := h.SyncTopic.Subscribe()
 	if err != nil {
 		logger.Errorf("Failed to subscribe to sync topic: %v", err)
@@ -208,6 +211,10 @@ func (h *Hub) publishFullSync(ctx context.Context) {
 }
 
 func (h *Hub) publishSyncMessage(ctx context.Context, msg *api.HubSyncMessage) {
+	if h.SyncTopic == nil {
+		logger.Warn("SyncTopic is nil, sync message will not be published")
+		return
+	}
 	data, err := proto.Marshal(msg)
 	if err != nil {
 		logger.Errorf("Failed to marshal sync msg: %v", err)
