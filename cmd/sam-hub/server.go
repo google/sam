@@ -181,6 +181,9 @@ func handleRegisterHTTP(h *Hub) http.HandlerFunc {
 			}
 		} else {
 			for _, addr := range h.Host.Addrs() {
+				if !AllowLoopback && isLoopbackOrLinkLocal(addr) {
+					continue
+				}
 				hubAddrs = append(hubAddrs, addr.String()+"/p2p/"+h.Host.ID().String())
 			}
 		}
