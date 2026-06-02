@@ -42,7 +42,7 @@ spec:
           mountPath: /data
       containers:
       - name: openclaw
-        image: ghcr.io/openclaw/openclaw:2026.4.9
+        image: ghcr.io/openclaw/openclaw:latest
         ports:
         - containerPort: 18789
           name: http-gateway
