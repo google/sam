@@ -95,7 +95,7 @@ func TestStaticServiceRegistrationRequiresConnection(t *testing.T) {
 	}
 
 	// 4. Create Node with empty hub addrs initially
-	node, err := NewSamNode(context.Background(), priv, nil, []multiaddr.Multiaddr{}, store, "test-mesh", "100ms", []string{"/ip4/127.0.0.1/tcp/0"}, false, nil, 24*time.Hour)
+	node, err := NewSamNode(context.Background(), priv, nil, []multiaddr.Multiaddr{}, store, "test-mesh", "100ms", []string{"/ip4/127.0.0.1/tcp/0"}, false, nil, 24*time.Hour, true)
 	if err != nil {
 		t.Fatalf("failed to create node: %v", err)
 	}
@@ -168,7 +168,7 @@ func TestStaticServiceRegistrationCommandFailure(t *testing.T) {
 	}
 
 	// 4. Create Node with empty hub addrs initially
-	node, err := NewSamNode(context.Background(), priv, nil, []multiaddr.Multiaddr{}, store, "test-mesh", "100ms", []string{"/ip4/127.0.0.1/tcp/0"}, false, nil, 24*time.Hour)
+	node, err := NewSamNode(context.Background(), priv, nil, []multiaddr.Multiaddr{}, store, "test-mesh", "100ms", []string{"/ip4/127.0.0.1/tcp/0"}, false, nil, 24*time.Hour, true)
 	if err != nil {
 		t.Fatalf("failed to create node: %v", err)
 	}

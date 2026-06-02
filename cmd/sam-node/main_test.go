@@ -49,7 +49,4 @@ func TestGetOrGenerateKey(t *testing.T) {
 	}
 }
 
-func init() {
-	AllowLoopback = true
-}
 

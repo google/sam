@@ -112,7 +112,7 @@ func startBareNode(t *testing.T, ctx context.Context) (*SamNode, func()) {
 		t.Fatal(err)
 	}
 	node, err := NewSamNode(ctx, priv, nil, nil, store, "test-mesh", "1s",
-		[]string{"/ip4/127.0.0.1/tcp/0"}, false, &NodeConfigComplete{}, 24*time.Hour)
+		[]string{"/ip4/127.0.0.1/tcp/0"}, false, &NodeConfigComplete{}, 24*time.Hour, true)
 	if err != nil {
 		t.Fatal(err)
 	}

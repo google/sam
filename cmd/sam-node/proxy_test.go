@@ -53,7 +53,7 @@ func TestDatapathIntegration(t *testing.T) {
 	// Pre-populate stores with dummy keys to avoid enrollment failure if required
 	// For this test, we assume we can run without full enrollment if we bypass AuthHandler
 
-	nodeA, err := NewSamNode(ctx, privA, nil, nil, storeA, "test-mesh", "1s", []string{"/ip4/127.0.0.1/tcp/0"}, false, &NodeConfigComplete{}, 24*time.Hour)
+	nodeA, err := NewSamNode(ctx, privA, nil, nil, storeA, "test-mesh", "1s", []string{"/ip4/127.0.0.1/tcp/0"}, false, &NodeConfigComplete{}, 24*time.Hour, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +63,7 @@ func TestDatapathIntegration(t *testing.T) {
 		}
 	}()
 
-	nodeB, err := NewSamNode(ctx, privB, nil, nil, storeB, "test-mesh", "1s", []string{"/ip4/127.0.0.1/tcp/0"}, false, &NodeConfigComplete{}, 24*time.Hour)
+	nodeB, err := NewSamNode(ctx, privB, nil, nil, storeB, "test-mesh", "1s", []string{"/ip4/127.0.0.1/tcp/0"}, false, &NodeConfigComplete{}, 24*time.Hour, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,13 +212,13 @@ func TestStdioDatapathIntegration(t *testing.T) {
 	}
 	defer func() { _ = storeB.Close() }()
 
-	nodeA, err := NewSamNode(ctx, privA, nil, nil, storeA, "test-mesh", "1s", []string{"/ip4/127.0.0.1/tcp/0"}, false, &NodeConfigComplete{}, 24*time.Hour)
+	nodeA, err := NewSamNode(ctx, privA, nil, nil, storeA, "test-mesh", "1s", []string{"/ip4/127.0.0.1/tcp/0"}, false, &NodeConfigComplete{}, 24*time.Hour, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = nodeA.Host.Close() }()
 
-	nodeB, err := NewSamNode(ctx, privB, nil, nil, storeB, "test-mesh", "1s", []string{"/ip4/127.0.0.1/tcp/0"}, false, &NodeConfigComplete{}, 24*time.Hour)
+	nodeB, err := NewSamNode(ctx, privB, nil, nil, storeB, "test-mesh", "1s", []string{"/ip4/127.0.0.1/tcp/0"}, false, &NodeConfigComplete{}, 24*time.Hour, true)
 	if err != nil {
 		t.Fatal(err)
 	}

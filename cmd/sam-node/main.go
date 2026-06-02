@@ -92,8 +92,6 @@ func main() {
 		Short: "Start the sovereign mesh node",
 		Run: func(cmd *cobra.Command, args []string) {
 			ctx := cmd.Context()
-			AllowLoopback = allowLoopbackFlag
-
 			// Initialize logging
 			golog.SetAllLoggers(golog.LevelInfo)
 			if logLevelFlag != "" {
@@ -179,7 +177,7 @@ func main() {
 					logger.Fatal("Hub public key not found in store and not provided. Cannot verify peers.")
 				}
 				priv := getOrGenerateKey(store)
-				node, err = NewSamNode(context.Background(), priv, hubPubKey, hubAddrs, store, meshFlag, discoveryIntervalFlag, listenAddrs, enableRelayFlag, nodeConfig, keyGracePeriodFlag)
+				node, err = NewSamNode(context.Background(), priv, hubPubKey, hubAddrs, store, meshFlag, discoveryIntervalFlag, listenAddrs, enableRelayFlag, nodeConfig, keyGracePeriodFlag, allowLoopbackFlag)
 				if err != nil {
 					logger.Fatalf("Failed to start mesh node: %v", err)
 				}
@@ -218,7 +216,7 @@ func main() {
 
 				priv := getOrGenerateKey(store)
 				enrollCtx, enrollCancel := context.WithCancel(context.Background())
-				node, err = NewSamNode(enrollCtx, priv, nil, initHubAddrs, store, meshFlag, discoveryIntervalFlag, listenAddrs, enableRelayFlag, nodeConfig, keyGracePeriodFlag)
+				node, err = NewSamNode(enrollCtx, priv, nil, initHubAddrs, store, meshFlag, discoveryIntervalFlag, listenAddrs, enableRelayFlag, nodeConfig, keyGracePeriodFlag, allowLoopbackFlag)
 				if err != nil {
 					enrollCancel()
 					logger.Fatalf("Failed to initialize node for enrollment: %v", err)
@@ -257,7 +255,7 @@ func main() {
 					newHubAddrs = append(newHubAddrs, ma)
 				}
 
-				node, err = NewSamNode(context.Background(), priv, hubPubKey, newHubAddrs, store, meshFlag, discoveryIntervalFlag, listenAddrs, enableRelayFlag, nodeConfig, keyGracePeriodFlag)
+				node, err = NewSamNode(context.Background(), priv, hubPubKey, newHubAddrs, store, meshFlag, discoveryIntervalFlag, listenAddrs, enableRelayFlag, nodeConfig, keyGracePeriodFlag, allowLoopbackFlag)
 				if err != nil {
 					logger.Fatalf("Failed to start mesh node after enrollment: %v", err)
 				}
@@ -303,8 +301,6 @@ func main() {
 		Args:  cobra.MaximumNArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			ctx := cmd.Context()
-			AllowLoopback = allowLoopbackFlag
-
 			targetHub := ""
 			if len(args) > 0 {
 				targetHub = args[0]
@@ -399,7 +395,7 @@ func main() {
 			}
 
 			priv := getOrGenerateKey(store)
-			node, err := NewSamNode(context.Background(), priv, nil, initHubAddrs, store, meshFlag, discoveryIntervalFlag, []string{"/ip4/0.0.0.0/udp/0/quic-v1", "/ip4/0.0.0.0/tcp/0"}, enableRelayFlag, nodeConfig, keyGracePeriodFlag)
+			node, err := NewSamNode(context.Background(), priv, nil, initHubAddrs, store, meshFlag, discoveryIntervalFlag, []string{"/ip4/0.0.0.0/udp/0/quic-v1", "/ip4/0.0.0.0/tcp/0"}, enableRelayFlag, nodeConfig, keyGracePeriodFlag, allowLoopbackFlag)
 			if err != nil {
 				logger.Fatalf("Failed to initialize node for enrollment: %v", err)
 			}

@@ -73,7 +73,7 @@ type TrustedKey struct {
 	ReceivedAt time.Time
 }
 
-var AllowLoopback bool
+
 
 type SamNode struct {
 	Host              host.Host
@@ -93,10 +93,11 @@ type SamNode struct {
 	rateLimiter       *PeerRateLimiter
 	services          *ServiceRegistry
 	BoundHTTPAddr     string
+	AllowLoopback     bool
 }
 
 // NewSamNode creates a new Agent instance secured with the 4-layer pipeline.
-func NewSamNode(ctx context.Context, privKey crypto.PrivKey, hubPubKey ed25519.PublicKey, hubAddrs []multiaddr.Multiaddr, store *Store, meshID string, discoveryInterval string, listenAddrs []string, enableRelay bool, nodeConfig *NodeConfigComplete, keyGracePeriod time.Duration) (*SamNode, error) {
+func NewSamNode(ctx context.Context, privKey crypto.PrivKey, hubPubKey ed25519.PublicKey, hubAddrs []multiaddr.Multiaddr, store *Store, meshID string, discoveryInterval string, listenAddrs []string, enableRelay bool, nodeConfig *NodeConfigComplete, keyGracePeriod time.Duration, allowLoopback bool) (*SamNode, error) {
 	var trustedKeys []TrustedKey
 	if len(hubPubKey) > 0 {
 		trustedKeys = []TrustedKey{{Key: hubPubKey, ReceivedAt: time.Now()}}
@@ -108,7 +109,8 @@ func NewSamNode(ctx context.Context, privKey crypto.PrivKey, hubPubKey ed25519.P
 		knownPeers:   make(map[string]bool),
 		receivedMsgs: make(map[string][]string),
 		topics:       make(map[string]*pubsub.Topic),
-		LocalPolicy:  nodeConfig,
+		LocalPolicy:   nodeConfig,
+		AllowLoopback: allowLoopback,
 	}
 
 	var err error
@@ -156,7 +158,7 @@ func NewSamNode(ctx context.Context, privKey crypto.PrivKey, hubPubKey ed25519.P
 		libp2p.EnableNATService(),
 		libp2p.ConnectionManager(cm),
 		libp2p.AddrsFactory(func(addrs []multiaddr.Multiaddr) []multiaddr.Multiaddr {
-			if AllowLoopback {
+			if allowLoopback {
 				return addrs
 			}
 			var filtered []multiaddr.Multiaddr

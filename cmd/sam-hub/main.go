@@ -101,7 +101,7 @@ var (
 	allowLoopbackFlag     bool
 )
 
-var AllowLoopback bool
+
 
 var logger = golog.Logger("sam-hub")
 
@@ -119,10 +119,11 @@ type Hub struct {
 	limiter          *rate.Limiter
 	ExternalAddrs    []string
 	AllowedAudiences []string
+	AllowLoopback    bool
 }
 
 // NewHub starts a host supporting both QUIC and TCP (with TLS 1.3)
-func NewHub(ctx context.Context, policy *api.PolicyConfig) (*Hub, error) {
+func NewHub(ctx context.Context, policy *api.PolicyConfig, allowLoopback bool) (*Hub, error) {
 	gater := newHubConnGate()
 
 	// Connection Manager for DoS protection
@@ -143,7 +144,7 @@ func NewHub(ctx context.Context, policy *api.PolicyConfig) (*Hub, error) {
 		libp2p.EnableAutoNATv2(),
 		libp2p.EnableNATService(),
 		libp2p.AddrsFactory(func(addrs []multiaddr.Multiaddr) []multiaddr.Multiaddr {
-			if AllowLoopback {
+			if allowLoopback {
 				return addrs
 			}
 			var filtered []multiaddr.Multiaddr
@@ -233,6 +234,7 @@ func NewHub(ctx context.Context, policy *api.PolicyConfig) (*Hub, error) {
 		limiter:          rate.NewLimiter(rate.Limit(EnrollRateLimit), EnrollBurst),
 		ExternalAddrs:    externalMultiaddrs,
 		AllowedAudiences: auds,
+		AllowLoopback:    allowLoopback,
 	}
 
 	h.Network().Notify(&notifier{hub: hub})
@@ -675,8 +677,6 @@ func main() {
 		Short: "Sovereign Agent Mesh - Multi-Transport Hub",
 		Run: func(cmd *cobra.Command, args []string) {
 			ctx := cmd.Context()
-			AllowLoopback = allowLoopbackFlag
-
 			// Initialize logging
 			if os.Getenv("LOG_FORMAT") == "json" {
 				_ = os.Setenv("GOLOG_LOG_FMT", "json")
@@ -694,7 +694,7 @@ func main() {
 				logger.Fatal(err)
 			}
 
-			h, err := NewHub(ctx, policyConfig)
+			h, err := NewHub(ctx, policyConfig, allowLoopbackFlag)
 			if err != nil {
 				logger.Fatal(err)
 			}

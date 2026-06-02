@@ -19,7 +19,7 @@ func startBackgroundNode(t *testing.T, nodeBin string, hubAddr string, homeDir s
 		"HOME="+homeDir,
 		"XDG_CONFIG_HOME="+filepath.Join(homeDir, ".config"),
 	)
-	allArgs := append([]string{"run", "--hub", hubAddr, "--jwt", "test-jwt", "--bind-addr", "127.0.0.1:0", "--api-token", "test-token"}, args...)
+	allArgs := append([]string{"run", "--hub", hubAddr, "--jwt", "test-jwt", "--bind-addr", "127.0.0.1:0", "--api-token", "test-token", "--allow-loopback"}, args...)
 	cmd := exec.Command(nodeBin, allArgs...)
 	cmd.Env = env
 

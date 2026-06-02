@@ -502,7 +502,7 @@ func TestRegisterService_PopulatesAggregatedTools(t *testing.T) {
 		t.Fatal(err)
 	}
 	node, err := NewSamNode(ctx, priv, nil, nil, store, "test-mesh", "1s",
-		[]string{"/ip4/127.0.0.1/tcp/0"}, false, &NodeConfigComplete{}, 24*time.Hour)
+		[]string{"/ip4/127.0.0.1/tcp/0"}, false, &NodeConfigComplete{}, 24*time.Hour, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -554,7 +554,7 @@ func TestUnregisterService_DetachesAggregation(t *testing.T) {
 		t.Fatal(err)
 	}
 	node, err := NewSamNode(ctx, priv, nil, nil, store, "test-mesh", "1s",
-		[]string{"/ip4/127.0.0.1/tcp/0"}, false, &NodeConfigComplete{}, 24*time.Hour)
+		[]string{"/ip4/127.0.0.1/tcp/0"}, false, &NodeConfigComplete{}, 24*time.Hour, true)
 	if err != nil {
 		t.Fatal(err)
 	}

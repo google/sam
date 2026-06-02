@@ -64,6 +64,7 @@ roles: {}
 		"--bind-address", "127.0.0.1:0",
 		"--policy-file", policyFile,
 		"--keys-db", filepath.Join(tmpDir, "keysA.db"),
+		"--allow-loopback",
 	)
 	var stdoutA, stderrA safeBuffer
 	cmdA.Stdout = &stdoutA
@@ -80,6 +81,7 @@ roles: {}
 		"--bind-address", "127.0.0.1:0",
 		"--policy-file", policyFile,
 		"--keys-db", filepath.Join(tmpDir, "keysB.db"),
+		"--allow-loopback",
 	)
 	var stdoutB, stderrB safeBuffer
 	cmdB.Stdout = &stdoutB

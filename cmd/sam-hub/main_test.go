@@ -261,7 +261,4 @@ func TestHandleInfoHTTP(t *testing.T) {
 	}
 }
 
-func init() {
-	AllowLoopback = true
-}
 
