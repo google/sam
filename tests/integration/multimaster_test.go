@@ -141,7 +141,7 @@ roles: {}
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer clientHost.Close()
+	defer func() { _ = clientHost.Close() }()
 
 	sharedHubPeerID := peerIDA
 
