@@ -55,15 +55,11 @@ roles: {}
 		t.Fatal(err)
 	}
 
-	// We use a shared static seed to derive identical Peer IDs for both replicas
-	sharedSeedHex := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-
 	portA := getFreePort(t)
 	portB := getFreePort(t)
 
 	// Start Replica A
 	cmdA := exec.Command(hubBin,
-		"--libp2p-key", sharedSeedHex,
 		"--listen", fmt.Sprintf("/ip4/127.0.0.1/tcp/%d", portA),
 		"--bind-address", "127.0.0.1:0",
 		"--policy-file", policyFile,
@@ -80,7 +76,6 @@ roles: {}
 
 	// Start Replica B
 	cmdB := exec.Command(hubBin,
-		"--libp2p-key", sharedSeedHex,
 		"--listen", fmt.Sprintf("/ip4/127.0.0.1/tcp/%d", portB),
 		"--bind-address", "127.0.0.1:0",
 		"--policy-file", policyFile,
@@ -126,15 +121,15 @@ roles: {}
 	}
 
 	if peerIDA == "" || peerIDB == "" {
-		t.Fatalf("replicas failed to report Peer ID in time. A: %q, B: %q\nStdout A:\n%s\nStdout B:\n%s", peerIDA, peerIDB, stdoutA.String(), stdoutB.String())
+		t.Fatalf("replicas failed to report Peer ID in time. A: %q, B: %q\nStdout A:\n%s\nStderr A:\n%s\nStdout B:\n%s\nStderr B:\n%s", peerIDA, peerIDB, stdoutA.String(), stderrA.String(), stdoutB.String(), stderrB.String())
 	}
 
-	// ASSERT: Both replicas must have the exact same Peer ID!
-	if peerIDA != peerIDB {
-		t.Fatalf("expected replicas to share the same Peer ID, but got A: %s, B: %s", peerIDA, peerIDB)
+	// ASSERT: Both replicas must have different Peer IDs!
+	if peerIDA == peerIDB {
+		t.Fatalf("expected replicas to have unique Peer IDs, but both got: %s", peerIDA)
 	}
 
-	t.Logf("Both replicas successfully started and share the same Peer ID: %s", peerIDA)
+	t.Logf("Replicas successfully started. Replica A: %s, Replica B: %s", peerIDA, peerIDB)
 
 	// Create a separate libp2p client host
 	clientHost, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
@@ -143,10 +138,8 @@ roles: {}
 	}
 	defer func() { _ = clientHost.Close() }()
 
-	sharedHubPeerID := peerIDA
-
 	// Validate connecting to Replica A
-	addrA, err := multiaddr.NewMultiaddr(fmt.Sprintf("/ip4/127.0.0.1/tcp/%d/p2p/%s", portA, sharedHubPeerID))
+	addrA, err := multiaddr.NewMultiaddr(fmt.Sprintf("/ip4/127.0.0.1/tcp/%d/p2p/%s", portA, peerIDA))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +157,7 @@ roles: {}
 	t.Log("Successfully connected and authenticated with Hub Replica A!")
 
 	// Validate connecting to Replica B
-	addrB, err := multiaddr.NewMultiaddr(fmt.Sprintf("/ip4/127.0.0.1/tcp/%d/p2p/%s", portB, sharedHubPeerID))
+	addrB, err := multiaddr.NewMultiaddr(fmt.Sprintf("/ip4/127.0.0.1/tcp/%d/p2p/%s", portB, peerIDB))
 	if err != nil {
 		t.Fatal(err)
 	}

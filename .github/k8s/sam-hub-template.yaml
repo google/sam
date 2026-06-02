@@ -8,6 +8,8 @@ spec:
   loadBalancerClass: "networking.gke.io/l4-regional-external"
   loadBalancerIP: ${LOAD_BALANCER_IP}
   allocateLoadBalancerNodePorts: false
+  sessionAffinity: ClientIP
+  externalTrafficPolicy: Local
   ports:
     - port: 4001
       targetPort: 4001
