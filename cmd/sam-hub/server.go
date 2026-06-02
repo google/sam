@@ -24,6 +24,7 @@ import (
 	"sort"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/google/sam/api"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -158,10 +159,24 @@ func handleRegisterHTTP(h *Hub) http.HandlerFunc {
 		h.gater.authenticated[pID] = true
 		h.gater.mu.Unlock()
 
+		// NEW: Propagate addition to other hubs
+		h.publishSyncMessage(context.Background(), HubSyncMessage{
+			Action:    "ADD",
+			PeerID:    pID.String(),
+			Timestamp: time.Now().Unix(),
+		})
+
+		// NEW: Compile addresses of ALL Hub Replicas + Known Peers
 		var authPeers []peer.ID
 		h.gater.mu.Lock()
 		for p := range h.gater.authenticated {
 			authPeers = append(authPeers, p)
+		}
+
+		var allHubAddrs []string
+		allHubAddrs = append(allHubAddrs, h.getMyHubAddrs()...)
+		for _, addrs := range h.otherHubAddrs {
+			allHubAddrs = append(allHubAddrs, addrs...)
 		}
 		h.gater.mu.Unlock()
 
@@ -170,28 +185,10 @@ func handleRegisterHTTP(h *Hub) http.HandlerFunc {
 			knownPeers = append(knownPeers, p.String())
 		}
 
-		var hubAddrs []string
-		if len(h.ExternalAddrs) > 0 {
-			for _, addr := range h.ExternalAddrs {
-				fullAddr := addr
-				if !strings.Contains(addr, "/p2p/") {
-					fullAddr = addr + "/p2p/" + h.Host.ID().String()
-				}
-				hubAddrs = append(hubAddrs, fullAddr)
-			}
-		} else {
-			for _, addr := range h.Host.Addrs() {
-				if !h.AllowLoopback && isLoopbackOrLinkLocal(addr) {
-					continue
-				}
-				hubAddrs = append(hubAddrs, addr.String()+"/p2p/"+h.Host.ID().String())
-			}
-		}
-
 		resp := &api.EnrollResponse{
 			BiscuitToken: biscuitData,
 			HubPublicKey: h.KeyRing.GetCurrentPublicKey(),
-			HubAddresses: hubAddrs,
+			HubAddresses: allHubAddrs,
 			Expiration:   token.Expiry.Unix(),
 			KnownPeers:   knownPeers,
 		}

@@ -72,11 +72,18 @@ func (n *notifier) Disconnected(_ network.Network, c network.Conn) {
 	wasAuth := n.hub.gater.authenticated[p]
 	delete(n.hub.gater.authenticated, p)
 	n.hub.gater.mu.Unlock()
-	
+
 	logger.Infow("Peer disconnected", "peer_id", p, "was_authenticated", wasAuth)
 
 	if wasAuth {
 		samHubActiveNodes.Dec() // Decrement active nodes
+
+		// Notify other hubs to clean up this peer
+		n.hub.publishSyncMessage(context.Background(), HubSyncMessage{
+			Action:    "REMOVE",
+			PeerID:    p.String(),
+			Timestamp: time.Now().Unix(),
+		})
 
 		event := &api.MeshEvent{
 			Type:      api.MeshEvent_EXIT,

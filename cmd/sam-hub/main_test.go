@@ -15,6 +15,7 @@
 package main
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -260,5 +261,130 @@ func TestHandleInfoHTTP(t *testing.T) {
 		t.Errorf("Expected audience 'test-audience-1', got %q", info.Audience)
 	}
 }
+
+func TestHubReplicaSynchronization(t *testing.T) {
+	// 1. Save and restore original global variables to avoid side effects
+	origOidcIssuer := oidcIssuer
+	origListenAddrs := listenAddrs
+	origKeysDBPath := keysDBPath
+	origBiscuitHex := biscuitHex
+	origKeyGracePeriod := keyGracePeriod
+	origAllowLoopbackFlag := allowLoopbackFlag
+
+	defer func() {
+		oidcIssuer = origOidcIssuer
+		listenAddrs = origListenAddrs
+		keysDBPath = origKeysDBPath
+		biscuitHex = origBiscuitHex
+		keyGracePeriod = origKeyGracePeriod
+		allowLoopbackFlag = origAllowLoopbackFlag
+	}()
+
+	// Configure parameters for test
+	oidcIssuer = "https://accounts.google.com"
+	listenAddrs = []string{"/ip4/127.0.0.1/tcp/0"}
+	keyGracePeriod = 24 * time.Hour
+	allowLoopbackFlag = true
+	// Use same hex key so they can decrypt each other's messages!
+	biscuitHex = "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	tmpDir := t.TempDir()
+
+	// 2. Spin up Hub Replica A
+	keysDBPath = filepath.Join(tmpDir, "keysA.db")
+	hubA, err := NewHub(ctx, nil, true)
+	if err != nil {
+		t.Fatalf("failed to create hub A: %v", err)
+	}
+	defer func() { _ = hubA.Host.Close() }()
+
+	// 3. Spin up Hub Replica B
+	keysDBPath = filepath.Join(tmpDir, "keysB.db")
+	hubB, err := NewHub(ctx, nil, true)
+	if err != nil {
+		t.Fatalf("failed to create hub B: %v", err)
+	}
+	defer func() { _ = hubB.Host.Close() }()
+
+	// 4. Connect Hub A and Hub B directly
+	err = hubA.Host.Connect(ctx, peer.AddrInfo{
+		ID:    hubB.Host.ID(),
+		Addrs: hubB.Host.Addrs(),
+	})
+	if err != nil {
+		t.Fatalf("failed to connect Hub A to Hub B: %v", err)
+	}
+
+	// Wait a moment for GossipSub sub and mesh connection
+	time.Sleep(200 * time.Millisecond)
+
+	// 5. Create a dummy peer to authenticate
+	priv, _, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	peerC, err := peer.IDFromPrivateKey(priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 6. Authenticate peerC on Hub A
+	hubA.gater.mu.Lock()
+	hubA.gater.authenticated[peerC] = true
+	hubA.gater.mu.Unlock()
+
+	// 7. Broadcast ADD event from Hub A
+	hubA.publishSyncMessage(ctx, HubSyncMessage{
+		Action:    "ADD",
+		PeerID:    peerC.String(),
+		Timestamp: time.Now().Unix(),
+	})
+
+	// 8. Verify Hub B receives the ADD and authenticates peerC
+	authedOnB := false
+	for i := 0; i < 100; i++ {
+		hubB.gater.mu.RLock()
+		authedOnB = hubB.gater.authenticated[peerC]
+		hubB.gater.mu.RUnlock()
+		if authedOnB {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !authedOnB {
+		t.Fatal("Expected Hub B to authenticate peerC via sync ADD event, but it did not")
+	}
+
+	// 9. Remove peerC from Hub A and broadcast REMOVE
+	hubA.gater.mu.Lock()
+	delete(hubA.gater.authenticated, peerC)
+	hubA.gater.mu.Unlock()
+
+	hubA.publishSyncMessage(ctx, HubSyncMessage{
+		Action:    "REMOVE",
+		PeerID:    peerC.String(),
+		Timestamp: time.Now().Unix(),
+	})
+
+	// 10. Verify Hub B receives the REMOVE and removes peerC
+	removedOnB := false
+	for i := 0; i < 100; i++ {
+		hubB.gater.mu.RLock()
+		authed := hubB.gater.authenticated[peerC]
+		hubB.gater.mu.RUnlock()
+		if !authed {
+			removedOnB = true
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !removedOnB {
+		t.Fatal("Expected Hub B to de-authenticate peerC via sync REMOVE event, but it remained authenticated")
+	}
+}
+
 
 

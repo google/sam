@@ -101,8 +101,6 @@ var (
 	allowLoopbackFlag     bool
 )
 
-
-
 var logger = golog.Logger("sam-hub")
 
 // Hub handles identity bridging and network discovery
@@ -114,6 +112,8 @@ type Hub struct {
 	MeshID           string
 	PubSub           *pubsub.PubSub
 	EventTopic       *pubsub.Topic
+	SyncTopic        *pubsub.Topic
+	otherHubAddrs    map[peer.ID][]string
 	gater            *hubConnGate
 	Policy           *api.PolicyConfig
 	limiter          *rate.Limiter
@@ -235,6 +235,7 @@ func NewHub(ctx context.Context, policy *api.PolicyConfig, allowLoopback bool) (
 		ExternalAddrs:    externalMultiaddrs,
 		AllowedAudiences: auds,
 		AllowLoopback:    allowLoopback,
+		otherHubAddrs:    make(map[peer.ID][]string),
 	}
 
 	h.Network().Notify(&notifier{hub: hub})
@@ -246,8 +247,17 @@ func NewHub(ctx context.Context, policy *api.PolicyConfig, allowLoopback bool) (
 	if err != nil {
 		return nil, err
 	}
+
+	syncTopic, err := ps.Join(api.GossipHubSync)
+	if err != nil {
+		return nil, err
+	}
+
 	hub.PubSub = ps
 	hub.EventTopic = topic
+	hub.SyncTopic = syncTopic
+	hub.startSyncListener(ctx)
+
 	return hub, nil
 }
 
@@ -298,6 +308,13 @@ func (h *Hub) handleAuthHandshake(s network.Stream) {
 	}
 	h.gater.authenticated[remotePeer] = true
 	h.gater.mu.Unlock()
+
+	// NEW: Notify other hubs of this peer
+	h.publishSyncMessage(context.Background(), HubSyncMessage{
+		Action:    "ADD",
+		PeerID:    remotePeer.String(),
+		Timestamp: time.Now().Unix(),
+	})
 
 	// Publish JOIN event
 	event := &api.MeshEvent{
