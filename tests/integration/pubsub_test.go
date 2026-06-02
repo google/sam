@@ -46,7 +46,7 @@ func TestPubSubTools(t *testing.T) {
 
 	// Start Node 1
 	env1 := append(os.Environ(), "HOME="+tmpHome1, "XDG_CONFIG_HOME="+filepath.Join(tmpHome1, ".config"))
-	cmd1 := exec.CommandContext(ctx, nodeBin, "run", "--hub", hubAddr, "--bind-addr", "127.0.0.1:0", "--listen", "/ip4/127.0.0.1/udp/5003/quic-v1", "--listen", "/ip4/127.0.0.1/tcp/5004", "--jwt", "dummy-token", "--log-level", "debug", "--discovery-interval", "100ms", "--api-token", "dummy-token")
+	cmd1 := exec.CommandContext(ctx, nodeBin, "run", "--hub", hubAddr, "--bind-addr", "127.0.0.1:0", "--listen", "/ip4/127.0.0.1/udp/5003/quic-v1", "--listen", "/ip4/127.0.0.1/tcp/5004", "--jwt", "dummy-token", "--log-level", "debug", "--discovery-interval", "100ms", "--api-token", "dummy-token", "--allow-loopback")
 	cmd1.Env = env1
 	logFile1, err := os.Create(filepath.Join(tmpHome1, "node1.log"))
 	if err != nil {
@@ -61,7 +61,7 @@ func TestPubSubTools(t *testing.T) {
 
 	// Start Node 2
 	env2 := append(os.Environ(), "HOME="+tmpHome2, "XDG_CONFIG_HOME="+filepath.Join(tmpHome2, ".config"))
-	cmd2 := exec.CommandContext(ctx, nodeBin, "run", "--hub", hubAddr, "--bind-addr", "127.0.0.1:0", "--listen", "/ip4/127.0.0.1/udp/5005/quic-v1", "--listen", "/ip4/127.0.0.1/tcp/5006", "--jwt", "dummy-token", "--log-level", "debug", "--discovery-interval", "100ms", "--api-token", "dummy-token")
+	cmd2 := exec.CommandContext(ctx, nodeBin, "run", "--hub", hubAddr, "--bind-addr", "127.0.0.1:0", "--listen", "/ip4/127.0.0.1/udp/5005/quic-v1", "--listen", "/ip4/127.0.0.1/tcp/5006", "--jwt", "dummy-token", "--log-level", "debug", "--discovery-interval", "100ms", "--api-token", "dummy-token", "--allow-loopback")
 	cmd2.Env = env2
 	logFile2, err := os.Create(filepath.Join(tmpHome2, "node2.log"))
 	if err != nil {

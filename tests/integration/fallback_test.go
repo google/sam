@@ -117,7 +117,7 @@ func TestFallbackReEnrollment(t *testing.T) {
 	}
 
 	// 5. Run Node in background
-	cmd := exec.Command(nodeBin, "run", "--hub", hubAddr, "--listen", "/ip4/127.0.0.1/tcp/0", "--jwt-path", jwtPath, "--bind-addr", "127.0.0.1:0", "--api-token", "dummy-token")
+	cmd := exec.Command(nodeBin, "run", "--hub", hubAddr, "--listen", "/ip4/127.0.0.1/tcp/0", "--jwt-path", jwtPath, "--bind-addr", "127.0.0.1:0", "--api-token", "dummy-token", "--allow-loopback")
 	cmd.Dir = repoRoot(t)
 	cmd.Env = env
 
