@@ -87,7 +87,8 @@ func (h *Hub) startSyncListener(ctx context.Context) {
 			if err != nil {
 				return
 			}
-			if msg.From == h.Host.ID() {
+			fromPeer, err := peer.IDFromBytes(msg.From)
+			if err == nil && fromPeer == h.Host.ID() {
 				continue // Skip our own broadcast
 			}
 
