@@ -70,6 +70,12 @@ func (n *notifier) ListenClose(network.Network, multiaddr.Multiaddr) {}
 func (n *notifier) Connected(network.Network, network.Conn)          {}
 func (n *notifier) Disconnected(_ network.Network, c network.Conn) {
 	p := c.RemotePeer()
+
+	// If there are still active connections to this peer, don't remove them yet
+	if len(n.hub.Host.Network().ConnsToPeer(p)) > 0 {
+		return
+	}
+
 	n.hub.gater.mu.Lock()
 	wasAuth := n.hub.gater.authenticated[p]
 	now := time.Now().UnixMilli()
@@ -104,12 +110,16 @@ func (n *notifier) Disconnected(_ network.Network, c network.Conn) {
 				return
 			}
 			// Notify the mesh about the peer disconnection
-			if err := n.hub.EventTopic.Publish(context.Background(), data); err != nil {
-				logger.Errorw("Failed to publish mesh event", "peer_id", p, "error", err)
-				return
+			if n.hub.EventTopic != nil {
+				if err := n.hub.EventTopic.Publish(context.Background(), data); err != nil {
+					logger.Errorw("Failed to publish mesh event", "peer_id", p, "error", err)
+					return
+				}
+				logger.Infow("Published EXIT event", "peer_id", p)
+				samHubMeshEventsTotal.WithLabelValues("EXIT").Inc()
+			} else {
+				logger.Warnw("EventTopic is nil, could not publish EXIT event", "peer_id", p)
 			}
-			logger.Infow("Published EXIT event", "peer_id", p)
-			samHubMeshEventsTotal.WithLabelValues("EXIT").Inc()
 		}
 	}
 }

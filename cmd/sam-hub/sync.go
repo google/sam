@@ -266,10 +266,15 @@ func (h *Hub) pruneStaleData() {
 	nowMilli := now.UnixMilli()
 	for p, ts := range h.gater.lastUpdated {
 		if !h.gater.authenticated[p] {
-            if nowMilli-ts > int64(time.Hour/time.Millisecond) {
+			if nowMilli-ts > int64(time.Hour/time.Millisecond) {
 				delete(h.gater.lastUpdated, p)
 				logger.Debugf("Pruned transient peer %s from lastUpdated", p.String())
 			}
+		} else if nowMilli-ts > int64(2*time.Hour/time.Millisecond) {
+			samHubActiveNodes.Dec()
+			delete(h.gater.authenticated, p)
+			delete(h.gater.lastUpdated, p)
+			logger.Infof("Pruned expired peer %s from authenticated list", p.String())
 		}
 	}
 }
