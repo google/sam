@@ -472,10 +472,11 @@ func (n *SamNode) listenForHubEvents(ctx context.Context) {
 		}
 
 		// Freshness check: reject events older than the threshold to prevent replay attacks
-		if time.Since(time.UnixMilli(event.Timestamp)) > FreshnessThreshold {
-			logger.Warnf("[Mesh Event] Dropping stale event from %s (timestamp: %d)", msg.ReceivedFrom, event.Timestamp)
-			continue
-		}
+        eventTime := time.UnixMilli(event.Timestamp)
+        if time.Since(eventTime) > FreshnessThreshold || time.Until(eventTime) > FreshnessThreshold {
+            logger.Warnf("[Mesh Event] Dropping stale or future event from %s (timestamp: %d)", msg.ReceivedFrom, event.Timestamp)
+            continue
+        }
 
 		switch event.Type {
 		case api.MeshEvent_JOIN:
