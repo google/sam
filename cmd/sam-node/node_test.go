@@ -23,50 +23,11 @@ import (
 	lru "github.com/hashicorp/golang-lru/v2"
 )
 
-func TestHandleJoinEvent(t *testing.T) {
-	node := &SamNode{
-		knownPeers: make(map[string]bool),
-	}
 
-	event := &api.MeshEvent{
-		Type:      api.MeshEvent_JOIN,
-		PeerId:    "12D3KooWAFv4iJst5G6MjwXhZ66K5zS1tP7A9vSg4vK8f1T7X8t9",
-		Timestamp: time.Now().UnixMilli(),
-	}
-
-	node.handleJoinEvent(event)
-
-	if !node.knownPeers[event.PeerId] {
-		t.Error("Expected peer to be added to knownPeers")
-	}
-}
-
-func TestHandleExitEvent(t *testing.T) {
-	node := &SamNode{
-		knownPeers: map[string]bool{
-			"12D3KooWAFv4iJst5G6MjwXhZ66K5zS1tP7A9vSg4vK8f1T7X8t9": true,
-		},
-	}
-
-	event := &api.MeshEvent{
-		Type:      api.MeshEvent_EXIT,
-		PeerId:    "12D3KooWAFv4iJst5G6MjwXhZ66K5zS1tP7A9vSg4vK8f1T7X8t9",
-		Timestamp: time.Now().UnixMilli(),
-	}
-
-	node.handleExitEvent(event)
-
-	if node.knownPeers[event.PeerId] {
-		t.Error("Expected peer to be removed from knownPeers")
-	}
-}
 
 func TestHandleBannedEvent(t *testing.T) {
 	revokedCache, _ := lru.New[string, int64](10)
 	node := &SamNode{
-		knownPeers: map[string]bool{
-			"12D3KooWAFv4iJst5G6MjwXhZ66K5zS1tP7A9vSg4vK8f1T7X8t9": true,
-		},
 		revokedPeers: revokedCache,
 	}
 
@@ -77,10 +38,6 @@ func TestHandleBannedEvent(t *testing.T) {
 	}
 
 	node.handleBannedEvent(event)
-
-	if node.knownPeers[event.PeerId] {
-		t.Error("Expected peer to be removed from knownPeers")
-	}
 
 	if !node.revokedPeers.Contains(event.PeerId) {
 		t.Error("Expected peer to be added to revokedPeers")

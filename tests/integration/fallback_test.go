@@ -308,7 +308,6 @@ func startMockHubDynamic(t *testing.T, pubA, pubB ed25519.PublicKey) (peer.ID, s
 			BiscuitToken: []byte("mock-biscuit-token"),
 			HubPublicKey: pub,
 			HubAddresses: []string{h.Addrs()[0].String() + "/p2p/" + h.ID().String()},
-			KnownPeers:   []string{},
 		}
 		data, err := proto.Marshal(resp)
 		if err != nil {

@@ -31,10 +31,8 @@ message AuthResponse {
 
 message MeshEvent {
   enum Type {
-    JOIN = 0;
-    EXIT = 1;
-    BANNED = 2;
-    KEY_ROTATION = 3;
+    BANNED = 0;
+    KEY_ROTATION = 1;
   }
   Type type = 1;
   string peer_id = 2;
@@ -54,7 +52,6 @@ message EnrollResponse {
   bytes hub_public_key = 3;
   repeated string hub_addresses = 4;
   int64 expiration = 5;
-  repeated string known_peers = 6;
 }
 
 enum ServiceType {
@@ -96,17 +93,3 @@ message HubInfoResponse {
   string audience = 3;
 }
 
-message HubSyncMessage {
-  enum Action {
-    ACTION_UNSPECIFIED = 0;
-    ADD = 1;
-    REMOVE = 2;
-    FULL_SYNC = 3;
-  }
-  Action action = 1;
-  string peer_id = 2;
-  repeated string peers = 3;
-  repeated string hub_addrs = 4;
-  int64 timestamp = 5;
-  map<string, int64> peer_timestamps = 6;
-}

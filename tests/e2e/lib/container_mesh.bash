@@ -122,7 +122,7 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
     local idx="$1"
     local output
     output="$(timeout 15s docker run --rm --network "${MESH_NETWORK}" "${MESH_RUNTIME_IMAGE}" mcp-client -url "http://sam-node-${idx}:8080/mcp/events" -tool "get_mesh_info" 2>/dev/null)"
-    echo "${output}" | jq '.known_peers | length'
+    echo "${output}" | jq 'if .connected_peers then (.connected_peers | length) - 1 else 0 end'
   }
 
   mesh_wait_for_node_count() {
@@ -135,7 +135,7 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
       output="$(timeout 15s docker run --rm --network "${MESH_NETWORK}" "${MESH_RUNTIME_IMAGE}" mcp-client -url "http://sam-node-${idx}:8080/mcp/events" -tool "get_mesh_info" 2>/dev/null)"
       echo "Node ${idx} get_mesh_info raw output: ${output}"
       local count
-      count="$(echo "${output}" | jq '.known_peers | length')"
+      count="$(echo "${output}" | jq 'if .connected_peers then (.connected_peers | length) - 1 else 0 end')"
       echo "Node ${idx} reported known peers count: ${count}"
       if [[ "${count}" -eq "${expected}" ]]; then
         return 0

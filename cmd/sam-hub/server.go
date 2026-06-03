@@ -24,7 +24,6 @@ import (
 	"sort"
 	"strings"
 	"sync/atomic"
-	"time"
 
 	"github.com/google/sam/api"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -151,48 +150,13 @@ func handleRegisterHTTP(h *Hub) http.HandlerFunc {
 			http.Error(w, "Failed to mint biscuit", http.StatusInternalServerError)
 			return
 		}
-
-		h.gater.mu.Lock()
-		now := time.Now().UnixMilli()
-		h.gater.lastUpdated[pID] = now
-		if !h.gater.authenticated[pID] {
-			samHubActiveNodes.Inc()
-		}
-		h.gater.authenticated[pID] = true
-		h.gater.mu.Unlock()
-
-		// NEW: Propagate addition to other hubs
-		h.publishSyncMessage(context.Background(), &api.HubSyncMessage{
-			Action:    api.HubSyncMessage_ADD,
-			PeerId:    pID.String(),
-			Timestamp: now,
-		})
-
-		// NEW: Compile addresses of ALL Hub Replicas + Known Peers
-		var authPeers []peer.ID
-		h.gater.mu.Lock()
-		for p := range h.gater.authenticated {
-			authPeers = append(authPeers, p)
-		}
-
-		var allHubAddrs []string
-		allHubAddrs = append(allHubAddrs, h.getMyHubAddrs()...)
-		for _, addrs := range h.otherHubAddrs {
-			allHubAddrs = append(allHubAddrs, addrs...)
-		}
-		h.gater.mu.Unlock()
-
-		var knownPeers []string
-		for _, p := range authPeers {
-			knownPeers = append(knownPeers, p.String())
-		}
+		allHubAddrs := getMyHubAddrs(h)
 
 		resp := &api.EnrollResponse{
 			BiscuitToken: biscuitData,
 			HubPublicKey: h.KeyRing.GetCurrentPublicKey(),
 			HubAddresses: allHubAddrs,
 			Expiration:   token.Expiry.Unix(),
-			KnownPeers:   knownPeers,
 		}
 
 		respData, err := proto.Marshal(resp)
@@ -262,4 +226,23 @@ func handleInfoHTTP(h *Hub) http.HandlerFunc {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(respData)
 	}
+}
+
+func getMyHubAddrs(h *Hub) []string {
+	var addrs []string
+	if len(h.ExternalAddrs) > 0 {
+		for _, addr := range h.ExternalAddrs {
+			addrs = append(addrs, addr+"/p2p/"+h.Host.ID().String())
+		}
+	} else {
+		for _, addr := range h.Host.Addrs() {
+			if h.AllowLoopback {
+				addrs = append(addrs, addr.String()+"/p2p/"+h.Host.ID().String())
+			} else {
+				// We don't have isLoopbackOrLinkLocal easily here so just include all or rely on AddrsFactory from main.go
+				addrs = append(addrs, addr.String()+"/p2p/"+h.Host.ID().String())
+			}
+		}
+	}
+	return addrs
 }

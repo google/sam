@@ -231,13 +231,6 @@ func main() {
 					logger.Fatalf("Enrollment failed: %v", err)
 				}
 
-				node.mu.Lock()
-				enrollKnownPeers := make(map[string]bool)
-				for k, v := range node.knownPeers {
-					enrollKnownPeers[k] = v
-				}
-				node.mu.Unlock()
-
 				if teardownErr := node.Teardown(); teardownErr != nil {
 					logger.Errorf("Failed to teardown enrollment node: %v", teardownErr)
 				}
@@ -259,15 +252,6 @@ func main() {
 				if err != nil {
 					logger.Fatalf("Failed to start mesh node after enrollment: %v", err)
 				}
-
-				node.mu.Lock()
-				for k, v := range enrollKnownPeers {
-					if node.Host != nil && k == node.Host.ID().String() {
-						continue
-					}
-					node.knownPeers[k] = v
-				}
-				node.mu.Unlock()
 			}
 
 			// Register static services from config
@@ -564,17 +548,6 @@ func (n *SamNode) Enroll(ctx context.Context, jwt string) error {
 	n.keysMu.Lock()
 	n.trustedKeys = append(n.trustedKeys, TrustedKey{Key: ed25519.PublicKey(enrollResp.HubPublicKey), ReceivedAt: time.Now()})
 	n.keysMu.Unlock()
-
-	// Add known peers from response
-	n.mu.Lock()
-	for _, p := range enrollResp.KnownPeers {
-		if n.Host != nil && p == n.Host.ID().String() {
-			continue
-		}
-		n.knownPeers[p] = true
-		fmt.Printf("[Enroll] Added known peer from hub: %s\n", p)
-	}
-	n.mu.Unlock()
 
 	// Connect and Auth to hub after enrollment to join the mesh
 	for _, addrStr := range enrollResp.HubAddresses {

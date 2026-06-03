@@ -163,12 +163,6 @@ func (n *SamNode) handleGetMeshInfo(ctx context.Context, req *mcp.CallToolReques
 	if n == nil {
 		return nil, nil, fmt.Errorf("node not initialized")
 	}
-	n.mu.Lock()
-	var knownPeers []string
-	for p := range n.knownPeers {
-		knownPeers = append(knownPeers, p)
-	}
-	n.mu.Unlock()
 
 	peers := n.Host.Network().Peers()
 	var connectedPeers []string
@@ -178,7 +172,6 @@ func (n *SamNode) handleGetMeshInfo(ctx context.Context, req *mcp.CallToolReques
 	dhtSize := n.DHT.RoutingTable().Size()
 
 	resData := map[string]any{
-		"known_peers":     knownPeers,
 		"connected_peers": connectedPeers,
 		"dht_size":        dhtSize,
 		"hub_peer_id":     n.HubPeerID.String(),

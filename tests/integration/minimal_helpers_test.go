@@ -142,7 +142,6 @@ func startMockLibp2pHub(t *testing.T) (peer.ID, string) {
 			BiscuitToken: []byte("mock-biscuit-token"),
 			HubPublicKey: []byte("mock-hub-pub-key"),
 			HubAddresses: []string{h.Addrs()[0].String() + "/p2p/" + h.ID().String()},
-			KnownPeers:   []string{},
 		}
 		data, err := proto.Marshal(resp)
 		if err != nil {
@@ -234,7 +233,6 @@ func startMockLibp2pHubWithOIDC(t *testing.T, oidcIssuerURL string) (peer.ID, st
 			BiscuitToken: []byte("mock-biscuit-token"),
 			HubPublicKey: []byte("mock-hub-pub-key"),
 			HubAddresses: []string{h.Addrs()[0].String() + "/p2p/" + h.ID().String()},
-			KnownPeers:   []string{},
 		}
 		data, err := proto.Marshal(resp)
 		if err != nil {
