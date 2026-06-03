@@ -112,23 +112,13 @@ type relayACL struct {
 }
 
 func (a *relayACL) AllowReserve(p peer.ID, addr multiaddr.Multiaddr) bool {
-	for i := 0; i < 20; i++ {
-		if _, ok := a.hub.authenticatedPeers.Load(p); ok {
-			return true
-		}
-		time.Sleep(250 * time.Millisecond)
-	}
-	return false
+	_, ok := a.hub.authenticatedPeers.Load(p)
+	return ok
 }
 
 func (a *relayACL) AllowConnect(src peer.ID, srcAddr multiaddr.Multiaddr, dest peer.ID) bool {
-	for i := 0; i < 20; i++ {
-		if _, ok := a.hub.authenticatedPeers.Load(src); ok {
-			return true
-		}
-		time.Sleep(250 * time.Millisecond)
-	}
-	return false
+	_, ok := a.hub.authenticatedPeers.Load(src)
+	return ok
 }
 
 // Hub handles identity bridging and network discovery

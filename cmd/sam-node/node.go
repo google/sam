@@ -47,6 +47,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/p2p/discovery/routing"
 	"github.com/libp2p/go-libp2p/p2p/discovery/util"
+	"github.com/libp2p/go-libp2p/p2p/host/autorelay"
 	"github.com/libp2p/go-libp2p/p2p/net/connmgr"
 	libp2ptls "github.com/libp2p/go-libp2p/p2p/security/tls"
 	libp2pquic "github.com/libp2p/go-libp2p/p2p/transport/quic"
@@ -81,23 +82,13 @@ type nodeRelayACL struct {
 }
 
 func (a *nodeRelayACL) AllowReserve(p peer.ID, addr multiaddr.Multiaddr) bool {
-	for i := 0; i < 20; i++ {
-		if _, ok := a.node.authPeers.Load(p); ok {
-			return true
-		}
-		time.Sleep(250 * time.Millisecond)
-	}
-	return false
+	_, ok := a.node.authPeers.Load(p)
+	return ok
 }
 
 func (a *nodeRelayACL) AllowConnect(src peer.ID, srcAddr multiaddr.Multiaddr, dest peer.ID) bool {
-	for i := 0; i < 20; i++ {
-		if _, ok := a.node.authPeers.Load(src); ok {
-			return true
-		}
-		time.Sleep(250 * time.Millisecond)
-	}
-	return false
+	_, ok := a.node.authPeers.Load(src)
+	return ok
 }
 
 type SamNode struct {
@@ -199,7 +190,11 @@ func NewSamNode(ctx context.Context, privKey crypto.PrivKey, hubPubKey ed25519.P
 
 	// If we have a Hub, configure it as our static fallback relay for NAT hole-punching
 	if len(staticRelays) > 0 {
-		opts = append(opts, libp2p.EnableAutoRelayWithStaticRelays(staticRelays))
+		opts = append(opts, libp2p.EnableAutoRelayWithStaticRelays(
+			staticRelays,
+			autorelay.WithBootDelay(2*time.Second),
+			autorelay.WithBackoff(3*time.Second),
+		))
 	}
 
 	// If the user explicitly opts in, allow this node to serve as a relay for others

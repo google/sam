@@ -191,7 +191,7 @@ func (n *SamNode) handleGetMeshInfo(ctx context.Context, req *mcp.CallToolReques
 type CallRemoteToolParams struct {
 	PeerID    string `json:"peer_id" jsonschema:"The Peer ID of the target agent"`
 	ToolName  string `json:"tool_name" jsonschema:"The name of the tool to call"`
-	Arguments string `json:"arguments" jsonschema:"JSON encoded arguments for the tool"`
+	Arguments any    `json:"arguments" jsonschema:"Arguments for the tool"`
 }
 
 // handleCallRemoteTool implements the call_remote_tool tool.
@@ -202,9 +202,16 @@ func (n *SamNode) handleCallRemoteTool(ctx context.Context, req *mcp.CallToolReq
 		return nil, nil, err
 	}
 	var args map[string]any
-	if params.Arguments != "" {
-		if err := json.Unmarshal([]byte(params.Arguments), &args); err != nil {
-			return nil, nil, err
+	if params.Arguments != nil {
+		if m, ok := params.Arguments.(map[string]any); ok {
+			args = m
+		} else {
+			// fallback attempt if it's somehow passed as a string
+			if s, ok := params.Arguments.(string); ok && s != "" {
+				if err := json.Unmarshal([]byte(s), &args); err != nil {
+					return nil, nil, err
+				}
+			}
 		}
 	}
 	res, err := n.CallMCPTool(ctx, targetPeer, params.ToolName, args)
