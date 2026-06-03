@@ -28,13 +28,26 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+// meshInstructions tells connecting clients a mesh is reachable here and how
+// the find → describe → call flow works. Sent at initialize time.
+const meshInstructions = `This MCP server connects this node to a SAM mesh: a network of remote agents that host their own MCP tools. The tools listed here are infrastructure for reaching tools on other peers when no local tool or capability covers the task.
+
+Reach into the mesh only when the needed tool isn't available locally. To do so:
+  1. find_remote_tools — discover what tools exist across the mesh (returns peer_id + namespaced tool_name + description). Optionally narrow by service_name or peer_id.
+  2. describe_remote_tool — fetch a specific tool's input_schema before calling it. Always do this so you know the argument shape.
+  3. call_remote_tool — invoke it. Pass peer_id, the namespaced tool_name, and arguments as a JSON object whose keys match the input_schema from step 2 (not a stringified blob).
+
+Other useful tools: discover_remote_services browses services by type, get_mesh_info reports connected peers and mesh state, list_local_services shows what this node hosts.
+
+Remote tool names are namespaced as '<service>.<tool>' (e.g. 'code-reviewer.review_pr'). Prefer discovering and describing a tool before calling it rather than guessing arguments.`
+
 // NewMCPHandler creates a new HTTP handler for the MCP server using the official SDK.
 func NewMCPHandler(node *SamNode) http.Handler {
 	// Create an MCP server.
 	mcpServer := mcp.NewServer(&mcp.Implementation{
 		Name:    "sam-node-mcp",
 		Version: "0.1.0",
-	}, nil)
+	}, &mcp.ServerOptions{Instructions: meshInstructions})
 
 	// Add the send_message tool.
 	mcp.AddTool(mcpServer, &mcp.Tool{
