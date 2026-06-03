@@ -243,37 +243,6 @@ func NewHub(ctx context.Context, policy *api.PolicyConfig, allowLoopback bool) (
 	return hub, nil
 }
 
-func (h *Hub) verifyBiscuit(biscuitData []byte, remotePeer peer.ID) (*biscuit.Biscuit, error) {
-	b, err := biscuit.Unmarshal(biscuitData)
-	if err != nil {
-		return nil, fmt.Errorf("malformed biscuit: %w", err)
-	}
-
-	keys := h.KeyRing.GetAllValidPublicKeys()
-	var lastErr error
-	for _, pubKey := range keys {
-		authorizer, err := b.Authorizer(pubKey)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-
-		rule, err := parser.FromStringPolicy("allow if true")
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		authorizer.AddPolicy(rule)
-
-		if err := authorizer.Authorize(); err == nil {
-			return b, nil
-		} else {
-			lastErr = err
-		}
-	}
-
-	return nil, fmt.Errorf("no valid key found for verification: %v", lastErr)
-}
 
 func (h *Hub) parseAndVerifyJWT(ctx context.Context, jwtStr string, allowedAudiences []string) (jwt.MapClaims, *oidc.IDToken, error) {
 	jwtParser := jwt.Parser{}

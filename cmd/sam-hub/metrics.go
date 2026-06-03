@@ -6,10 +6,6 @@ import (
 )
 
 var (
-	samHubActiveNodes = promauto.NewGauge(prometheus.GaugeOpts{
-		Name: "sam_hub_active_nodes",
-		Help: "The current number of nodes connected/enrolled in the mesh.",
-	})
 
 	samHubEnrollmentTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "sam_hub_enrollment_total",
