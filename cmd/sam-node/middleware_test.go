@@ -416,7 +416,7 @@ func TestVerifyEvent(t *testing.T) {
 	event := &api.MeshEvent{
 		Type:      api.MeshEvent_BANNED,
 		PeerId:    "attacker-peer",
-		Timestamp: time.Now().Unix(),
+		Timestamp: time.Now().UnixMilli(),
 	}
 
 	// Sign it

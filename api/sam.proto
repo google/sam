@@ -95,3 +95,18 @@ message HubInfoResponse {
   string client_id = 2;
   string audience = 3;
 }
+
+message HubSyncMessage {
+  enum Action {
+    ACTION_UNSPECIFIED = 0;
+    ADD = 1;
+    REMOVE = 2;
+    FULL_SYNC = 3;
+  }
+  Action action = 1;
+  string peer_id = 2;
+  repeated string peers = 3;
+  repeated string hub_addrs = 4;
+  int64 timestamp = 5;
+  map<string, int64> peer_timestamps = 6;
+}

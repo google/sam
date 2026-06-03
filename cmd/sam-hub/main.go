@@ -101,8 +101,6 @@ var (
 	allowLoopbackFlag     bool
 )
 
-
-
 var logger = golog.Logger("sam-hub")
 
 // Hub handles identity bridging and network discovery
@@ -114,12 +112,16 @@ type Hub struct {
 	MeshID           string
 	PubSub           *pubsub.PubSub
 	EventTopic       *pubsub.Topic
+	SyncTopic        *pubsub.Topic
+	otherHubAddrs    map[peer.ID][]string
+	otherHubLastSeen map[peer.ID]time.Time
 	gater            *hubConnGate
 	Policy           *api.PolicyConfig
 	limiter          *rate.Limiter
 	ExternalAddrs    []string
 	AllowedAudiences []string
 	AllowLoopback    bool
+	SyncKey          []byte
 }
 
 // NewHub starts a host supporting both QUIC and TCP (with TLS 1.3)
@@ -235,6 +237,17 @@ func NewHub(ctx context.Context, policy *api.PolicyConfig, allowLoopback bool) (
 		ExternalAddrs:    externalMultiaddrs,
 		AllowedAudiences: auds,
 		AllowLoopback:    allowLoopback,
+		otherHubAddrs:    make(map[peer.ID][]string),
+		otherHubLastSeen: make(map[peer.ID]time.Time),
+		SyncKey: func() []byte {
+			if len(initialSeed) > 0 {
+				return initialSeed
+			}
+			if kr != nil {
+				return kr.GetCurrentKey()
+			}
+			return nil
+		}(),
 	}
 
 	h.Network().Notify(&notifier{hub: hub})
@@ -246,8 +259,17 @@ func NewHub(ctx context.Context, policy *api.PolicyConfig, allowLoopback bool) (
 	if err != nil {
 		return nil, err
 	}
+
+	syncTopic, err := ps.Join(api.GossipHubSync)
+	if err != nil {
+		return nil, err
+	}
+
 	hub.PubSub = ps
 	hub.EventTopic = topic
+	hub.SyncTopic = syncTopic
+	hub.startSyncListener(ctx)
+
 	return hub, nil
 }
 
@@ -293,17 +315,26 @@ func (h *Hub) handleAuthHandshake(s network.Stream) {
 
 	// Update active nodes gauge and gater state
 	h.gater.mu.Lock()
+	now := time.Now().UnixMilli()
+	h.gater.lastUpdated[remotePeer] = now
 	if !h.gater.authenticated[remotePeer] {
 		samHubActiveNodes.Inc()
 	}
 	h.gater.authenticated[remotePeer] = true
 	h.gater.mu.Unlock()
 
+	// Notify other hubs of this peer
+	h.publishSyncMessage(context.Background(), &api.HubSyncMessage{
+		Action:    api.HubSyncMessage_ADD,
+		PeerId:    remotePeer.String(),
+		Timestamp: now,
+	})
+
 	// Publish JOIN event
 	event := &api.MeshEvent{
 		Type:      api.MeshEvent_JOIN,
 		PeerId:    remotePeer.String(),
-		Timestamp: time.Now().Unix(),
+		Timestamp: time.Now().UnixMilli(),
 	}
 	if err := h.signEvent(event); err != nil {
 		logger.Errorw("Failed to sign mesh event", "peer_id", remotePeer, "error", err)
@@ -612,7 +643,7 @@ func (h *Hub) startRotation(ctx context.Context) {
 				// Broadcast event
 				event := &api.MeshEvent{
 					Type:         api.MeshEvent_KEY_ROTATION,
-					Timestamp:    time.Now().Unix(),
+					Timestamp:    time.Now().UnixMilli(),
 					NewPublicKey: newPub,
 				}
 

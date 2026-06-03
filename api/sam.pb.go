@@ -139,6 +139,58 @@ func (MeshEvent_Type) EnumDescriptor() ([]byte, []int) {
 	return file_api_sam_proto_rawDescGZIP(), []int{2, 0}
 }
 
+type HubSyncMessage_Action int32
+
+const (
+	HubSyncMessage_ACTION_UNSPECIFIED HubSyncMessage_Action = 0
+	HubSyncMessage_ADD                HubSyncMessage_Action = 1
+	HubSyncMessage_REMOVE             HubSyncMessage_Action = 2
+	HubSyncMessage_FULL_SYNC          HubSyncMessage_Action = 3
+)
+
+// Enum value maps for HubSyncMessage_Action.
+var (
+	HubSyncMessage_Action_name = map[int32]string{
+		0: "ACTION_UNSPECIFIED",
+		1: "ADD",
+		2: "REMOVE",
+		3: "FULL_SYNC",
+	}
+	HubSyncMessage_Action_value = map[string]int32{
+		"ACTION_UNSPECIFIED": 0,
+		"ADD":                1,
+		"REMOVE":             2,
+		"FULL_SYNC":          3,
+	}
+)
+
+func (x HubSyncMessage_Action) Enum() *HubSyncMessage_Action {
+	p := new(HubSyncMessage_Action)
+	*p = x
+	return p
+}
+
+func (x HubSyncMessage_Action) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (HubSyncMessage_Action) Descriptor() protoreflect.EnumDescriptor {
+	return file_api_sam_proto_enumTypes[2].Descriptor()
+}
+
+func (HubSyncMessage_Action) Type() protoreflect.EnumType {
+	return &file_api_sam_proto_enumTypes[2]
+}
+
+func (x HubSyncMessage_Action) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use HubSyncMessage_Action.Descriptor instead.
+func (HubSyncMessage_Action) EnumDescriptor() ([]byte, []int) {
+	return file_api_sam_proto_rawDescGZIP(), []int{10, 0}
+}
+
 type AuthFrame struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Biscuit       []byte                 `protobuf:"bytes,1,opt,name=biscuit,proto3" json:"biscuit,omitempty"`
@@ -777,6 +829,90 @@ func (x *HubInfoResponse) GetAudience() string {
 	return ""
 }
 
+type HubSyncMessage struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	Action         HubSyncMessage_Action  `protobuf:"varint,1,opt,name=action,proto3,enum=sam.v1.HubSyncMessage_Action" json:"action,omitempty"`
+	PeerId         string                 `protobuf:"bytes,2,opt,name=peer_id,json=peerId,proto3" json:"peer_id,omitempty"`
+	Peers          []string               `protobuf:"bytes,3,rep,name=peers,proto3" json:"peers,omitempty"`
+	HubAddrs       []string               `protobuf:"bytes,4,rep,name=hub_addrs,json=hubAddrs,proto3" json:"hub_addrs,omitempty"`
+	Timestamp      int64                  `protobuf:"varint,5,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	PeerTimestamps map[string]int64       `protobuf:"bytes,6,rep,name=peer_timestamps,json=peerTimestamps,proto3" json:"peer_timestamps,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *HubSyncMessage) Reset() {
+	*x = HubSyncMessage{}
+	mi := &file_api_sam_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HubSyncMessage) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HubSyncMessage) ProtoMessage() {}
+
+func (x *HubSyncMessage) ProtoReflect() protoreflect.Message {
+	mi := &file_api_sam_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HubSyncMessage.ProtoReflect.Descriptor instead.
+func (*HubSyncMessage) Descriptor() ([]byte, []int) {
+	return file_api_sam_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *HubSyncMessage) GetAction() HubSyncMessage_Action {
+	if x != nil {
+		return x.Action
+	}
+	return HubSyncMessage_ACTION_UNSPECIFIED
+}
+
+func (x *HubSyncMessage) GetPeerId() string {
+	if x != nil {
+		return x.PeerId
+	}
+	return ""
+}
+
+func (x *HubSyncMessage) GetPeers() []string {
+	if x != nil {
+		return x.Peers
+	}
+	return nil
+}
+
+func (x *HubSyncMessage) GetHubAddrs() []string {
+	if x != nil {
+		return x.HubAddrs
+	}
+	return nil
+}
+
+func (x *HubSyncMessage) GetTimestamp() int64 {
+	if x != nil {
+		return x.Timestamp
+	}
+	return 0
+}
+
+func (x *HubSyncMessage) GetPeerTimestamps() map[string]int64 {
+	if x != nil {
+		return x.PeerTimestamps
+	}
+	return nil
+}
+
 var File_api_sam_proto protoreflect.FileDescriptor
 
 const file_api_sam_proto_rawDesc = "" +
@@ -837,7 +973,23 @@ const file_api_sam_proto_rawDesc = "" +
 	"\voidc_issuer\x18\x01 \x01(\tR\n" +
 	"oidcIssuer\x12\x1b\n" +
 	"\tclient_id\x18\x02 \x01(\tR\bclientId\x12\x1a\n" +
-	"\baudience\x18\x03 \x01(\tR\baudience*s\n" +
+	"\baudience\x18\x03 \x01(\tR\baudience\"\x8f\x03\n" +
+	"\x0eHubSyncMessage\x125\n" +
+	"\x06action\x18\x01 \x01(\x0e2\x1d.sam.v1.HubSyncMessage.ActionR\x06action\x12\x17\n" +
+	"\apeer_id\x18\x02 \x01(\tR\x06peerId\x12\x14\n" +
+	"\x05peers\x18\x03 \x03(\tR\x05peers\x12\x1b\n" +
+	"\thub_addrs\x18\x04 \x03(\tR\bhubAddrs\x12\x1c\n" +
+	"\ttimestamp\x18\x05 \x01(\x03R\ttimestamp\x12S\n" +
+	"\x0fpeer_timestamps\x18\x06 \x03(\v2*.sam.v1.HubSyncMessage.PeerTimestampsEntryR\x0epeerTimestamps\x1aA\n" +
+	"\x13PeerTimestampsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\x03R\x05value:\x028\x01\"D\n" +
+	"\x06Action\x12\x16\n" +
+	"\x12ACTION_UNSPECIFIED\x10\x00\x12\a\n" +
+	"\x03ADD\x10\x01\x12\n" +
+	"\n" +
+	"\x06REMOVE\x10\x02\x12\r\n" +
+	"\tFULL_SYNC\x10\x03*s\n" +
 	"\vServiceType\x12\x1c\n" +
 	"\x18SERVICE_TYPE_UNSPECIFIED\x10\x00\x12\x14\n" +
 	"\x10SERVICE_TYPE_MCP\x10\x01\x12\x1a\n" +
@@ -856,34 +1008,39 @@ func file_api_sam_proto_rawDescGZIP() []byte {
 	return file_api_sam_proto_rawDescData
 }
 
-var file_api_sam_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_api_sam_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
+var file_api_sam_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
+var file_api_sam_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_api_sam_proto_goTypes = []any{
 	(ServiceType)(0),               // 0: sam.v1.ServiceType
 	(MeshEvent_Type)(0),            // 1: sam.v1.MeshEvent.Type
-	(*AuthFrame)(nil),              // 2: sam.v1.AuthFrame
-	(*AuthResponse)(nil),           // 3: sam.v1.AuthResponse
-	(*MeshEvent)(nil),              // 4: sam.v1.MeshEvent
-	(*EnrollRequest)(nil),          // 5: sam.v1.EnrollRequest
-	(*EnrollResponse)(nil),         // 6: sam.v1.EnrollResponse
-	(*ServiceInfo)(nil),            // 7: sam.v1.ServiceInfo
-	(*CommandBackend)(nil),         // 8: sam.v1.CommandBackend
-	(*RegisterServiceRequest)(nil), // 9: sam.v1.RegisterServiceRequest
-	(*DiscoveredProvider)(nil),     // 10: sam.v1.DiscoveredProvider
-	(*HubInfoResponse)(nil),        // 11: sam.v1.HubInfoResponse
-	nil,                            // 12: sam.v1.CommandBackend.EnvEntry
+	(HubSyncMessage_Action)(0),     // 2: sam.v1.HubSyncMessage.Action
+	(*AuthFrame)(nil),              // 3: sam.v1.AuthFrame
+	(*AuthResponse)(nil),           // 4: sam.v1.AuthResponse
+	(*MeshEvent)(nil),              // 5: sam.v1.MeshEvent
+	(*EnrollRequest)(nil),          // 6: sam.v1.EnrollRequest
+	(*EnrollResponse)(nil),         // 7: sam.v1.EnrollResponse
+	(*ServiceInfo)(nil),            // 8: sam.v1.ServiceInfo
+	(*CommandBackend)(nil),         // 9: sam.v1.CommandBackend
+	(*RegisterServiceRequest)(nil), // 10: sam.v1.RegisterServiceRequest
+	(*DiscoveredProvider)(nil),     // 11: sam.v1.DiscoveredProvider
+	(*HubInfoResponse)(nil),        // 12: sam.v1.HubInfoResponse
+	(*HubSyncMessage)(nil),         // 13: sam.v1.HubSyncMessage
+	nil,                            // 14: sam.v1.CommandBackend.EnvEntry
+	nil,                            // 15: sam.v1.HubSyncMessage.PeerTimestampsEntry
 }
 var file_api_sam_proto_depIdxs = []int32{
 	1,  // 0: sam.v1.MeshEvent.type:type_name -> sam.v1.MeshEvent.Type
 	0,  // 1: sam.v1.ServiceInfo.type:type_name -> sam.v1.ServiceType
-	12, // 2: sam.v1.CommandBackend.env:type_name -> sam.v1.CommandBackend.EnvEntry
-	7,  // 3: sam.v1.RegisterServiceRequest.service:type_name -> sam.v1.ServiceInfo
-	8,  // 4: sam.v1.RegisterServiceRequest.command:type_name -> sam.v1.CommandBackend
-	5,  // [5:5] is the sub-list for method output_type
-	5,  // [5:5] is the sub-list for method input_type
-	5,  // [5:5] is the sub-list for extension type_name
-	5,  // [5:5] is the sub-list for extension extendee
-	0,  // [0:5] is the sub-list for field type_name
+	14, // 2: sam.v1.CommandBackend.env:type_name -> sam.v1.CommandBackend.EnvEntry
+	8,  // 3: sam.v1.RegisterServiceRequest.service:type_name -> sam.v1.ServiceInfo
+	9,  // 4: sam.v1.RegisterServiceRequest.command:type_name -> sam.v1.CommandBackend
+	2,  // 5: sam.v1.HubSyncMessage.action:type_name -> sam.v1.HubSyncMessage.Action
+	15, // 6: sam.v1.HubSyncMessage.peer_timestamps:type_name -> sam.v1.HubSyncMessage.PeerTimestampsEntry
+	7,  // [7:7] is the sub-list for method output_type
+	7,  // [7:7] is the sub-list for method input_type
+	7,  // [7:7] is the sub-list for extension type_name
+	7,  // [7:7] is the sub-list for extension extendee
+	0,  // [0:7] is the sub-list for field type_name
 }
 
 func init() { file_api_sam_proto_init() }
@@ -900,8 +1057,8 @@ func file_api_sam_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_sam_proto_rawDesc), len(file_api_sam_proto_rawDesc)),
-			NumEnums:      2,
-			NumMessages:   11,
+			NumEnums:      3,
+			NumMessages:   13,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

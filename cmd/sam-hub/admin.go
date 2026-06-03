@@ -47,7 +47,7 @@ func handleBan(admin HubAdmin) http.HandlerFunc {
 		event := &api.MeshEvent{
 			Type:      api.MeshEvent_BANNED,
 			PeerId:    peerID,
-			Timestamp: time.Now().Unix(),
+			Timestamp: time.Now().UnixMilli(),
 		}
 
 		logger.Infof("[Admin API] Publishing ban event for peer: %s", peerID)

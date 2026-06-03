@@ -29,8 +29,9 @@ func TestHandleJoinEvent(t *testing.T) {
 	}
 
 	event := &api.MeshEvent{
-		Type:   api.MeshEvent_JOIN,
-		PeerId: "12D3KooWAFv4iJst5G6MjwXhZ66K5zS1tP7A9vSg4vK8f1T7X8t9",
+		Type:      api.MeshEvent_JOIN,
+		PeerId:    "12D3KooWAFv4iJst5G6MjwXhZ66K5zS1tP7A9vSg4vK8f1T7X8t9",
+		Timestamp: time.Now().UnixMilli(),
 	}
 
 	node.handleJoinEvent(event)
@@ -48,8 +49,9 @@ func TestHandleExitEvent(t *testing.T) {
 	}
 
 	event := &api.MeshEvent{
-		Type:   api.MeshEvent_EXIT,
-		PeerId: "12D3KooWAFv4iJst5G6MjwXhZ66K5zS1tP7A9vSg4vK8f1T7X8t9",
+		Type:      api.MeshEvent_EXIT,
+		PeerId:    "12D3KooWAFv4iJst5G6MjwXhZ66K5zS1tP7A9vSg4vK8f1T7X8t9",
+		Timestamp: time.Now().UnixMilli(),
 	}
 
 	node.handleExitEvent(event)
@@ -71,7 +73,7 @@ func TestHandleBannedEvent(t *testing.T) {
 	event := &api.MeshEvent{
 		Type:      api.MeshEvent_BANNED,
 		PeerId:    "12D3KooWAFv4iJst5G6MjwXhZ66K5zS1tP7A9vSg4vK8f1T7X8t9",
-		Timestamp: time.Now().Unix(),
+		Timestamp: time.Now().UnixMilli(),
 	}
 
 	node.handleBannedEvent(event)
@@ -88,11 +90,15 @@ func TestHandleBannedEvent(t *testing.T) {
 func TestHandleKeyRotationEvent(t *testing.T) {
 	node := &SamNode{}
 
-	_, pub, _ := ed25519.GenerateKey(nil)
+	pub, _, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatalf("Failed to generate key: %v", err)
+	}
 
 	event := &api.MeshEvent{
 		Type:         api.MeshEvent_KEY_ROTATION,
 		NewPublicKey: pub,
+		Timestamp:    time.Now().UnixMilli(),
 	}
 
 	node.handleKeyRotationEvent(event)
@@ -101,4 +107,3 @@ func TestHandleKeyRotationEvent(t *testing.T) {
 		t.Errorf("Expected 1 trusted key, got %d", len(node.trustedKeys))
 	}
 }
-
