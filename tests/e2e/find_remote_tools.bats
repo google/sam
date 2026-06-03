@@ -127,7 +127,7 @@ teardown() {
 
   echo "[$(date +%T)] Calling call_remote_tool for calculator.add"
   local call_args
-  call_args="{\"peer_id\":\"${node2_peer_id}\",\"tool_name\":\"calculator.add\",\"arguments\":\"{\\\"a\\\":2,\\\"b\\\":3}\"}"
+  call_args="{\"peer_id\":\"${node2_peer_id}\",\"tool_name\":\"calculator.add\",\"arguments\":{\"a\":2,\"b\":3}}"
   run docker run --rm --network "${MESH_NETWORK}" \
     "${MESH_RUNTIME_IMAGE}" mcp-client \
     -url "http://sam-node-1:8080/mcp/events" \

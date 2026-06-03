@@ -188,10 +188,14 @@ func (n *SamNode) handleGetMeshInfo(ctx context.Context, req *mcp.CallToolReques
 }
 
 // CallRemoteToolParams defines the parameters for the call_remote_tool tool.
+//
+// Arguments is a JSON object whose shape matches the target tool's
+// input_schema (use describe_remote_tool to fetch it). Earlier revisions
+// took a stringified JSON blob here; that footgun is gone.
 type CallRemoteToolParams struct {
-	PeerID    string `json:"peer_id" jsonschema:"The Peer ID of the target agent"`
-	ToolName  string `json:"tool_name" jsonschema:"The name of the tool to call"`
-	Arguments any    `json:"arguments" jsonschema:"Arguments for the tool"`
+	PeerID    string         `json:"peer_id" jsonschema:"The Peer ID of the target agent"`
+	ToolName  string         `json:"tool_name" jsonschema:"The name of the tool to call"`
+	Arguments map[string]any `json:"arguments,omitempty" jsonschema:"Tool arguments as a JSON object whose keys match the target tool's input_schema. Call describe_remote_tool first to learn the schema."`
 }
 
 // handleCallRemoteTool implements the call_remote_tool tool.
@@ -201,20 +205,7 @@ func (n *SamNode) handleCallRemoteTool(ctx context.Context, req *mcp.CallToolReq
 	if err != nil {
 		return nil, nil, err
 	}
-	var args map[string]any
-	if params.Arguments != nil {
-		if m, ok := params.Arguments.(map[string]any); ok {
-			args = m
-		} else {
-			// fallback attempt if it's somehow passed as a string
-			if s, ok := params.Arguments.(string); ok && s != "" {
-				if err := json.Unmarshal([]byte(s), &args); err != nil {
-					return nil, nil, err
-				}
-			}
-		}
-	}
-	res, err := n.CallMCPTool(ctx, targetPeer, params.ToolName, args)
+	res, err := n.CallMCPTool(ctx, targetPeer, params.ToolName, params.Arguments)
 	if err != nil {
 		return nil, nil, err
 	}

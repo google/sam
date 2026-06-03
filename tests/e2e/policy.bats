@@ -129,7 +129,7 @@ mesh_call_remote_tool() {
   local target_peer_id="$2"
   local tool_name="$3"
   
-  local args="{\"peer_id\":\"${target_peer_id}\",\"tool_name\":\"${tool_name}\",\"arguments\":\"{}\"}"
+  local args="{\"peer_id\":\"${target_peer_id}\",\"tool_name\":\"${tool_name}\",\"arguments\":{}}"
   
   docker run --rm --network "${MESH_NETWORK}" "${MESH_RUNTIME_IMAGE}" mcp-client -url "http://sam-node-${caller_idx}:8080/mcp/events" -tool "call_remote_tool" -args "${args}"
 }
