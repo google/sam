@@ -57,8 +57,8 @@ Use tool discovery when you need remote MCP tools:
 
 ## Describe Before Calling
 
-For namespaced tools returned by `find_remote_tools`, call
-`describe_remote_tool` before `call_remote_tool`.
+All tools returned by `find_remote_tools` are namespaced. Always call
+`describe_remote_tool` before calling them with `call_remote_tool`.
 
 Remote MCP tools returned by `find_remote_tools` are namespaced as:
 
