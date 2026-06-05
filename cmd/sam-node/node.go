@@ -745,17 +745,20 @@ func (n *SamNode) verifyBiscuit(biscuitData []byte, remotePeer peer.ID) (*biscui
 	keys := n.trustedKeys
 	n.keysMu.RUnlock()
 
+	var lastErr error
 	for _, tk := range keys {
 		if len(tk.Key) != ed25519.PublicKeySize {
 			continue
 		}
 		authorizer, err := b.Authorizer(tk.Key)
 		if err != nil {
+			lastErr = fmt.Errorf("authorizer error: %w", err)
 			continue
 		}
 
 		rule, err := parser.FromStringPolicy("allow if true")
 		if err != nil {
+			lastErr = fmt.Errorf("policy error: %w", err)
 			continue
 		}
 		authorizer.AddPolicy(rule)
@@ -763,9 +766,14 @@ func (n *SamNode) verifyBiscuit(biscuitData []byte, remotePeer peer.ID) (*biscui
 		if err := authorizer.Authorize(); err == nil {
 			n.verificationCache.Add(hashStr, hex.EncodeToString(tk.Key))
 			return b, nil
+		} else {
+			lastErr = fmt.Errorf("authorize error: %w", err)
 		}
 	}
 
+	if lastErr != nil {
+		return nil, fmt.Errorf("no valid key found (last error: %v)", lastErr)
+	}
 	return nil, fmt.Errorf("no valid key found")
 }
 
