@@ -52,6 +52,7 @@ import (
 	libp2ptls "github.com/libp2p/go-libp2p/p2p/security/tls"
 	libp2pquic "github.com/libp2p/go-libp2p/p2p/transport/quic"
 	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
+	"github.com/libp2p/go-libp2p/p2p/transport/websocket"
 	"github.com/libp2p/go-msgio"
 	"github.com/multiformats/go-multiaddr"
 	"google.golang.org/protobuf/proto"
@@ -169,6 +170,7 @@ func NewSamNode(ctx context.Context, privKey crypto.PrivKey, hubPubKey ed25519.P
 		libp2p.Identity(privKey),
 		libp2p.Transport(libp2pquic.NewTransport),
 		libp2p.Transport(tcp.NewTCPTransport),
+		libp2p.Transport(websocket.New),
 		libp2p.Security(libp2ptls.ID, libp2ptls.New),
 		libp2p.ConnectionGater(gater),
 		libp2p.ListenAddrStrings(listenAddrs...),
