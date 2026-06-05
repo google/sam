@@ -16,6 +16,8 @@ package main
 
 import (
 	"github.com/libp2p/go-libp2p/core/network"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"sync"
 
@@ -48,12 +50,11 @@ import (
 	"github.com/libp2p/go-libp2p/p2p/net/connmgr"
 	"github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/relay"
 	libp2ptls "github.com/libp2p/go-libp2p/p2p/security/tls"
-	libp2pquic "github.com/libp2p/go-libp2p/p2p/transport/quic"
+	"github.com/libp2p/go-libp2p/p2p/transport/websocket"
 	"github.com/multiformats/go-multiaddr"
 
 	"golang.org/x/time/rate"
 
-	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
 	"github.com/spf13/cobra"
 	"google.golang.org/protobuf/proto"
 )
@@ -139,7 +140,7 @@ type Hub struct {
 }
 
 // NewHub starts a host supporting both QUIC and TCP (with TLS 1.3)
-func NewHub(ctx context.Context, policy *api.PolicyConfig, allowLoopback bool) (*Hub, error) {
+func NewHub(ctx context.Context, policy *api.PolicyConfig, allowLoopback bool, mux *http.ServeMux) (*Hub, error) {
 
 	// Connection Manager for DoS protection
 	cm, err := connmgr.NewConnManager(LowWaterMark, HighWaterMark, connmgr.WithGracePeriod(ConnGracePeriod))
@@ -147,9 +148,7 @@ func NewHub(ctx context.Context, policy *api.PolicyConfig, allowLoopback bool) (
 		return nil, fmt.Errorf("failed to create connection manager: %w", err)
 	}
 
-	h, err := libp2p.New(
-		libp2p.Transport(libp2pquic.NewTransport),
-		libp2p.Transport(tcp.NewTCPTransport),
+	opts := []libp2p.Option{
 		libp2p.ListenAddrStrings(listenAddrs...),
 		// FIPS compliant Security
 		libp2p.Security(libp2ptls.ID, libp2ptls.New),
@@ -168,7 +167,12 @@ func NewHub(ctx context.Context, policy *api.PolicyConfig, allowLoopback bool) (
 			}
 			return filtered
 		}),
-	)
+	}
+	if mux != nil {
+		opts = append(opts, libp2p.Transport(websocket.New, websocket.WithHTTPHandler(mux)))
+	}
+
+	h, err := libp2p.New(opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -606,17 +610,87 @@ func main() {
 				logger.Fatal(err)
 			}
 
-			h, err := NewHub(ctx, policyConfig, allowLoopbackFlag)
+			// Add websocket listen address based on bindAddress
+			host, port, err := net.SplitHostPort(bindAddress)
+			if err != nil {
+				// if bindAddress is just ":9090"
+				if strings.HasPrefix(bindAddress, ":") {
+					host = "0.0.0.0"
+					port = strings.TrimPrefix(bindAddress, ":")
+				} else {
+					logger.Fatalf("Invalid bind address: %v", err)
+				}
+			}
+			if host == "" {
+				host = "0.0.0.0"
+			}
+			ipVersion := "ip4"
+			if strings.Contains(host, ":") {
+				ipVersion = "ip6"
+			}
+			wsAddr := fmt.Sprintf("/%s/%s/tcp/%s/ws", ipVersion, host, port)
+			listenAddrs = append(listenAddrs, wsAddr)
+
+			var hRef atomic.Pointer[Hub]
+
+			mux := http.NewServeMux()
+			mux.Handle("/metrics", promhttp.HandlerFor(prometheus.DefaultGatherer, promhttp.HandlerOpts{}))
+			mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+				if isHubReady.Load() {
+					w.WriteHeader(http.StatusOK)
+					_, _ = w.Write([]byte("ok"))
+				} else {
+					w.WriteHeader(http.StatusServiceUnavailable)
+					_, _ = w.Write([]byte("not ready"))
+				}
+			})
+
+			// Register Hub-specific HTTP routes using an atomic pointer to avoid data races
+			mux.HandleFunc("/register", func(w http.ResponseWriter, r *http.Request) {
+				if h := hRef.Load(); h != nil {
+					handleRegisterHTTP(h)(w, r)
+				} else {
+					http.Error(w, "Hub not ready", http.StatusServiceUnavailable)
+				}
+			})
+			mux.HandleFunc("/info", func(w http.ResponseWriter, r *http.Request) {
+				if h := hRef.Load(); h != nil {
+					handleInfoHTTP(h)(w, r)
+				} else {
+					http.Error(w, "Hub not ready", http.StatusServiceUnavailable)
+				}
+			})
+			mux.HandleFunc("/admin/ban", func(w http.ResponseWriter, r *http.Request) {
+				if adminToken != "" {
+					authHeader := r.Header.Get("Authorization")
+					if authHeader != "Bearer "+adminToken {
+						http.Error(w, "Unauthorized", http.StatusUnauthorized)
+						return
+					}
+				}
+				if h := hRef.Load(); h != nil {
+					handleBan(h)(w, r)
+				} else {
+					http.Error(w, "Hub not ready", http.StatusServiceUnavailable)
+				}
+			})
+
+			h, err := NewHub(ctx, policyConfig, allowLoopbackFlag, mux)
 			if err != nil {
 				logger.Fatal(err)
 			}
+			hRef.Store(h)
 
 			// Start key rotation if enabled
 			h.startRotation(ctx)
 
-			startHTTPServer(h, bindAddress, adminToken, tlsCertFile, tlsKeyFile, tlsCAFile, &isHubReady)
+			// We don't start a separate HTTP server unless TLS is specifically required for admin separately,
+			// but WithHTTPHandler already shares the port on the websocket listener.
+			if tlsCertFile != "" && tlsKeyFile != "" {
+				logger.Warn("Separate TLS server not supported via CLI when using WithHTTPHandler. Ignoring tlsCertFile.")
+			}
 
-			logger.Infof("SAM Hub Online (QUIC + TCP)")
+			logger.Infof("SAM Hub Online (QUIC + TCP + WS on %s)", bindAddress)
 			isHubReady.Store(true)
 			logger.Infof("MeshID: %s", h.MeshID)
 			logger.Infof("PeerID: %s", h.Host.ID())
@@ -633,7 +707,6 @@ func main() {
 	rootCmd.Flags().StringVar(&oidcIssuer, "issuer", defIssuer, "OIDC Issuer URL")
 	rootCmd.Flags().StringVar(&clientID, "client-id", os.Getenv("SAM_OIDC_ID"), "OIDC Client ID")
 	rootCmd.Flags().StringVar(&biscuitHex, "key", os.Getenv("SAM_HUB_KEY"), "Hub Private Key (32-byte Hex)")
-	rootCmd.Flags().StringSliceVar(&listenAddrs, "listen", []string{"/ip4/0.0.0.0/udp/8080/quic-v1", "/ip4/0.0.0.0/tcp/8080"}, "libp2p Listen Addrs")
 	rootCmd.Flags().StringSliceVar(&externalMultiaddrs, "external-multiaddr", []string{}, "External multiaddrs to announce")
 	rootCmd.Flags().StringVar(&meshName, "mesh", DefaultMeshName, "Mesh federation name")
 	rootCmd.Flags().StringVar(&allowedAudiencesFlag, "allowed-audiences", api.DefaultAudience, "Comma-separated list of allowed OIDC audiences")

@@ -11,14 +11,6 @@ spec:
   sessionAffinity: ClientIP
   externalTrafficPolicy: Local
   ports:
-    - port: 4001
-      targetPort: 4001
-      protocol: TCP
-      name: libp2p-tcp
-    - port: 4001
-      targetPort: 4001
-      protocol: UDP
-      name: libp2p-udp
     - port: 443
       targetPort: 9090
       protocol: TCP
@@ -68,12 +60,6 @@ spec:
               key: sam-hub-key
               optional: true # Make it optional so it doesn't block local kind testing if not created
         ports:
-        - containerPort: 4001
-          protocol: TCP
-          name: libp2p-tcp
-        - containerPort: 4001
-          protocol: UDP
-          name: libp2p-udp
         - containerPort: 9090
           protocol: TCP
           name: metrics
@@ -92,7 +78,6 @@ spec:
           initialDelaySeconds: 15
           periodSeconds: 20
         args:
-        - "--listen=/ip4/0.0.0.0/tcp/4001,/ip4/0.0.0.0/udp/4001/quic-v1"
         - "--external-multiaddr=${EXTERNAL_MULTIADDR}"
         # 1. Trust Dex for humans/Google/GitHub. 2. Trust GKE for internal Canaries.
         - "--issuer=https://auth.sam-mesh.dev,https://container.googleapis.com/v1/projects/${GCP_PROJECT_ID}/locations/${CLUSTER_REGION}/clusters/${CLUSTER_NAME}"

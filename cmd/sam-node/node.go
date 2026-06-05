@@ -52,6 +52,7 @@ import (
 	libp2ptls "github.com/libp2p/go-libp2p/p2p/security/tls"
 	libp2pquic "github.com/libp2p/go-libp2p/p2p/transport/quic"
 	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
+	"github.com/libp2p/go-libp2p/p2p/transport/websocket"
 	"github.com/libp2p/go-msgio"
 	"github.com/multiformats/go-multiaddr"
 	"google.golang.org/protobuf/proto"
@@ -169,6 +170,7 @@ func NewSamNode(ctx context.Context, privKey crypto.PrivKey, hubPubKey ed25519.P
 		libp2p.Identity(privKey),
 		libp2p.Transport(libp2pquic.NewTransport),
 		libp2p.Transport(tcp.NewTCPTransport),
+		libp2p.Transport(websocket.New),
 		libp2p.Security(libp2ptls.ID, libp2ptls.New),
 		libp2p.ConnectionGater(gater),
 		libp2p.ListenAddrStrings(listenAddrs...),
@@ -743,17 +745,20 @@ func (n *SamNode) verifyBiscuit(biscuitData []byte, remotePeer peer.ID) (*biscui
 	keys := n.trustedKeys
 	n.keysMu.RUnlock()
 
+	var lastErr error
 	for _, tk := range keys {
 		if len(tk.Key) != ed25519.PublicKeySize {
 			continue
 		}
 		authorizer, err := b.Authorizer(tk.Key)
 		if err != nil {
+			lastErr = fmt.Errorf("authorizer error: %w", err)
 			continue
 		}
 
 		rule, err := parser.FromStringPolicy("allow if true")
 		if err != nil {
+			lastErr = fmt.Errorf("policy error: %w", err)
 			continue
 		}
 		authorizer.AddPolicy(rule)
@@ -761,9 +766,14 @@ func (n *SamNode) verifyBiscuit(biscuitData []byte, remotePeer peer.ID) (*biscui
 		if err := authorizer.Authorize(); err == nil {
 			n.verificationCache.Add(hashStr, hex.EncodeToString(tk.Key))
 			return b, nil
+		} else {
+			lastErr = fmt.Errorf("authorize error: %w", err)
 		}
 	}
 
+	if lastErr != nil {
+		return nil, fmt.Errorf("no valid key found (last error: %v)", lastErr)
+	}
 	return nil, fmt.Errorf("no valid key found")
 }
 

@@ -35,8 +35,6 @@ teardown() {
     --issuer "http://mock-oidc:18080" \
     --client-id "sam-e2e" \
     --key "${hub_key}" \
-    --listen "/ip4/0.0.0.0/udp/4001/quic-v1" \
-    --listen "/ip4/0.0.0.0/tcp/4002" \
     --mesh "e2e-mesh" \
     --admin-token "e2e-token" \
     --log-level debug >/dev/null
@@ -91,7 +89,7 @@ teardown() {
 
   # Publish ban event for Node 2
   echo "[$(date +%T)] Publishing ban event"
-  run docker exec "${hub_name}" /sam-hub admin ban --peer "${node2_peer_id}" --connect "/dns4/sam-hub/tcp/4002/p2p/${hub_peer_id}" --admin-token "e2e-token"
+  run docker exec "${hub_name}" /sam-hub admin ban --peer "${node2_peer_id}" --connect "/dns4/sam-hub/tcp/9090/ws/p2p/${hub_peer_id}" --admin-token "e2e-token"
   
   echo "admin ban output: $output"
   [[ "$status" -eq 0 ]]

@@ -29,10 +29,10 @@ test-python:
 test-python-e2e: build docker-build
 	bats --verbose-run tests/e2e/python_sdk_test.bats
 
-e2e-test:
+e2e-test: build docker-build
 	bats --verbose-run tests/e2e/
 
-test-e2e: build
+test-e2e: build docker-build
 	@command -v bats >/dev/null 2>&1 || { \
 		echo "bats not found; attempting install"; \
 		if command -v apt-get >/dev/null 2>&1; then \

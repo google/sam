@@ -193,8 +193,7 @@ EOF"
     --client-id "sam-e2e" \
     --allowed-audiences "sam-e2e" \
     --key "${key}" \
-    --listen "/ip4/0.0.0.0/udp/4001/quic-v1" \
-    --listen "/ip4/0.0.0.0/tcp/4002" \
+    --external-multiaddr "/dns4/sam-hub/tcp/9090/ws" \
     --mesh "e2e-mesh" \
     --policy-file "/etc/sam/policies.yaml" >/dev/null
 

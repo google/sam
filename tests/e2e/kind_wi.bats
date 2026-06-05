@@ -113,8 +113,6 @@ spec:
         - "${issuer}"
         - "--key"
         - "0000000000000000000000000000000000000000000000000000000000000000"
-        - "--listen"
-        - "/ip4/0.0.0.0/tcp/4002"
         - "--insecure-skip-tls-verify"
         envFrom:
         - configMapRef:
@@ -127,9 +125,6 @@ metadata:
 spec:
   type: ClusterIP
   ports:
-  - name: p2p
-    port: 4002
-    targetPort: 4002
   - name: http
     port: 9090
     targetPort: 9090

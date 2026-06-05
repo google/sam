@@ -16,85 +16,15 @@ package main
 
 import (
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"io"
 	"net/http"
-	"os"
 	"sort"
 	"strings"
-	"sync/atomic"
 
 	"github.com/google/sam/api"
 	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"google.golang.org/protobuf/proto"
 )
-
-// startHTTPServer starts the HTTP/HTTPS server for metrics, healthz, and admin commands.
-func startHTTPServer(h *Hub, bindAddr string, adminToken string, tlsCertFile string, tlsKeyFile string, tlsCAFile string, isHubReady *atomic.Bool) {
-	mux := http.NewServeMux()
-	mux.Handle("/metrics", promhttp.HandlerFor(prometheus.DefaultGatherer, promhttp.HandlerOpts{}))
-	mux.HandleFunc("/register", handleRegisterHTTP(h))
-	mux.HandleFunc("/info", handleInfoHTTP(h))
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		if isHubReady.Load() {
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte("ok"))
-		} else {
-			w.WriteHeader(http.StatusServiceUnavailable)
-			_, _ = w.Write([]byte("not ready"))
-		}
-	})
-
-	mux.HandleFunc("/admin/ban", func(w http.ResponseWriter, r *http.Request) {
-		if adminToken != "" {
-			authHeader := r.Header.Get("Authorization")
-			if authHeader != "Bearer "+adminToken {
-				http.Error(w, "Unauthorized", http.StatusUnauthorized)
-				return
-			}
-		}
-		handleBan(h)(w, r)
-	})
-
-	server := &http.Server{
-		Addr:    bindAddr,
-		Handler: mux,
-	}
-
-	// Configure TLS if requested
-	if tlsCertFile != "" && tlsKeyFile != "" {
-		tlsConfig := &tls.Config{}
-		if tlsCAFile != "" {
-			caCert, err := os.ReadFile(tlsCAFile)
-			if err != nil {
-				logger.Fatalf("Failed to read CA cert: %v", err)
-			}
-			caCertPool := x509.NewCertPool()
-			caCertPool.AppendCertsFromPEM(caCert)
-			tlsConfig.ClientCAs = caCertPool
-			tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
-			logger.Info("mTLS enabled for admin service")
-		}
-		server.TLSConfig = tlsConfig
-
-		logger.Infof("Starting HTTPS server on %s", bindAddr)
-		go func() {
-			if err := server.ListenAndServeTLS(tlsCertFile, tlsKeyFile); err != nil && err != http.ErrServerClosed {
-				logger.Errorf("HTTPS server failed: %v", err)
-			}
-		}()
-	} else {
-		logger.Infof("Starting HTTP server on %s", bindAddr)
-		go func() {
-			if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-				logger.Errorf("HTTP server failed: %v", err)
-			}
-		}()
-	}
-}
 
 func handleRegisterHTTP(h *Hub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
