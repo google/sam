@@ -624,8 +624,14 @@ func main() {
 			if host == "" {
 				host = "0.0.0.0"
 			}
-			wsAddr := fmt.Sprintf("/ip4/%s/tcp/%s/ws", host, port)
+			ipVersion := "ip4"
+			if strings.Contains(host, ":") {
+				ipVersion = "ip6"
+			}
+			wsAddr := fmt.Sprintf("/%s/%s/tcp/%s/ws", ipVersion, host, port)
 			listenAddrs = append(listenAddrs, wsAddr)
+
+			var hRef atomic.Pointer[Hub]
 
 			mux := http.NewServeMux()
 			mux.Handle("/metrics", promhttp.HandlerFor(prometheus.DefaultGatherer, promhttp.HandlerOpts{}))
@@ -639,14 +645,21 @@ func main() {
 				}
 			})
 
-			h, err := NewHub(ctx, policyConfig, allowLoopbackFlag, mux)
-			if err != nil {
-				logger.Fatal(err)
-			}
-
-			// Register Hub-specific HTTP routes now that Hub is created
-			mux.HandleFunc("/register", handleRegisterHTTP(h))
-			mux.HandleFunc("/info", handleInfoHTTP(h))
+			// Register Hub-specific HTTP routes using an atomic pointer to avoid data races
+			mux.HandleFunc("/register", func(w http.ResponseWriter, r *http.Request) {
+				if h := hRef.Load(); h != nil {
+					handleRegisterHTTP(h)(w, r)
+				} else {
+					http.Error(w, "Hub not ready", http.StatusServiceUnavailable)
+				}
+			})
+			mux.HandleFunc("/info", func(w http.ResponseWriter, r *http.Request) {
+				if h := hRef.Load(); h != nil {
+					handleInfoHTTP(h)(w, r)
+				} else {
+					http.Error(w, "Hub not ready", http.StatusServiceUnavailable)
+				}
+			})
 			mux.HandleFunc("/admin/ban", func(w http.ResponseWriter, r *http.Request) {
 				if adminToken != "" {
 					authHeader := r.Header.Get("Authorization")
@@ -655,8 +668,18 @@ func main() {
 						return
 					}
 				}
-				handleBan(h)(w, r)
+				if h := hRef.Load(); h != nil {
+					handleBan(h)(w, r)
+				} else {
+					http.Error(w, "Hub not ready", http.StatusServiceUnavailable)
+				}
 			})
+
+			h, err := NewHub(ctx, policyConfig, allowLoopbackFlag, mux)
+			if err != nil {
+				logger.Fatal(err)
+			}
+			hRef.Store(h)
 
 			// Start key rotation if enabled
 			h.startRotation(ctx)
