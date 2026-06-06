@@ -16,6 +16,17 @@ data:
         description: "OpenClaw AI Agent Gateway"
         # Register the OpenClaw local gateway as a mesh service
         target_url: "http://localhost:18789/mcp/events"
+  openclaw.json: |
+    {
+      "agents": {
+        "defaults": {
+          "model": "google/gemini-3.1-pro"
+        }
+      },
+      "gateway": {
+        "mode": "local"
+      }
+    }
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -33,13 +44,6 @@ spec:
         app: openclaw-canary-${ENV_NAME}
     spec:
       serviceAccountName: sam-node-sa
-      initContainers:
-      - name: init-openclaw-config
-        image: busybox:1.36.1
-        command: ["sh", "-c", "mkdir -p /data && echo '{\"gateway\": {\"mode\": \"local\"}}' > /data/openclaw.json"]
-        volumeMounts:
-        - name: openclaw-data
-          mountPath: /data
       containers:
       - name: openclaw
         image: ghcr.io/openclaw/openclaw:latest
@@ -71,6 +75,9 @@ spec:
         volumeMounts:
         - name: openclaw-data
           mountPath: /data
+        - name: config-volume
+          mountPath: /data/openclaw.json
+          subPath: openclaw.json
         - name: dshm
           mountPath: /dev/shm
       - name: sam-node
