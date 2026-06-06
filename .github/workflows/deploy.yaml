@@ -285,17 +285,15 @@ jobs:
           export ENV_NAME="${{ vars.ENV_NAME }}"
           export CANARY_NAMESPACE="sam-canary-${ENV_NAME}"
           export IMAGE_TAG="${{ env.IMAGE_TAG }}"
+          export GEMINI_API_KEY="${{ secrets.GEMINI_API_KEY }}"
           
-          # Idempotently provision the openclaw-secret if it doesn't already exist
-          if ! kubectl get secret openclaw-secret-${ENV_NAME} -n ${CANARY_NAMESPACE} >/dev/null 2>&1; then
-            echo "Generating a new random 16-byte hex key for OpenClaw Gateway Token..."
-            GATEWAY_TOKEN=$(openssl rand -hex 16)
-            kubectl create secret generic openclaw-secret-${ENV_NAME} \
-              --namespace=${CANARY_NAMESPACE} \
-              --from-literal=gateway-token="${GATEWAY_TOKEN}"
-          else
-            echo "openclaw-secret-${ENV_NAME} already exists in namespace ${CANARY_NAMESPACE}. Skipping generation."
-          fi
+          # Provision the openclaw-secret, preserving the gateway-token if it exists
+          GATEWAY_TOKEN=$(kubectl get secret openclaw-secret-${ENV_NAME} -n ${CANARY_NAMESPACE} -o jsonpath="{.data.gateway-token}" 2>/dev/null | base64 -d || openssl rand -hex 16)
+          kubectl create secret generic openclaw-secret-${ENV_NAME} \
+            --namespace=${CANARY_NAMESPACE} \
+            --from-literal=gateway-token="${GATEWAY_TOKEN}" \
+            --from-literal=gemini-api-key="${GEMINI_API_KEY}" \
+            --dry-run=client -o yaml | kubectl apply -f -
 
           envsubst < .github/k8s/sam-node-template.yaml | kubectl apply -f -
           envsubst < .github/k8s/sam-node-openclaw-template.yaml | kubectl apply -f -

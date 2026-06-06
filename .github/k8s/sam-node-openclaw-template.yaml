@@ -56,6 +56,11 @@ spec:
             secretKeyRef:
               name: openclaw-secret-${ENV_NAME}
               key: gateway-token
+        - name: GEMINI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: openclaw-secret-${ENV_NAME}
+              key: gemini-api-key
         resources:
           requests:
             cpu: 100m
