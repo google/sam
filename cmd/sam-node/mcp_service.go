@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/sam/api"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -66,7 +67,32 @@ func (m *MCPService) Init(ctx context.Context) error {
 	}
 
 	client := mcp.NewClient(&mcp.Implementation{Name: "sam-node-aggregator", Version: "0.1.0"}, nil)
-	s, err := client.Connect(ctx, transport, nil)
+	
+	var s *mcp.ClientSession
+	var err error
+
+	// Retry connection for up to 60 seconds to handle slow-starting sidecars like OpenClaw.
+	// We only retry on "connection refused" which indicates the server hasn't bound the port yet.
+	deadline := time.Now().Add(60 * time.Second)
+	delay := 500 * time.Millisecond
+	for {
+		s, err = client.Connect(ctx, transport, nil)
+		if err == nil {
+			break
+		}
+		if time.Now().After(deadline) || ctx.Err() != nil {
+			break
+		}
+		if !strings.Contains(err.Error(), "connection refused") {
+			break
+		}
+		time.Sleep(delay)
+		delay *= 2
+		if delay > 10*time.Second {
+			delay = 10 * time.Second
+		}
+	}
+
 	if err != nil {
 		// Best-effort: backend may not speak MCP (e.g. a plain HTTP service,
 		// or `cat` used as a stdio echo). Ingress proxy still works.
