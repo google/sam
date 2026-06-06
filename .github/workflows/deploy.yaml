@@ -286,6 +286,7 @@ jobs:
           export CANARY_NAMESPACE="sam-canary-${ENV_NAME}"
           export IMAGE_TAG="${{ env.IMAGE_TAG }}"
           export GEMINI_API_KEY="${{ secrets.GEMINI_API_KEY }}"
+          export HF_TOKEN="${{ secrets.HF_TOKEN }}"
           
           # Provision the openclaw-secret, preserving the gateway-token if it exists
           GATEWAY_TOKEN=$(kubectl get secret openclaw-secret-${ENV_NAME} -n ${CANARY_NAMESPACE} -o jsonpath="{.data.gateway-token}" 2>/dev/null | base64 -d || openssl rand -hex 16)
@@ -295,8 +296,14 @@ jobs:
             --from-literal=gemini-api-key="${GEMINI_API_KEY}" \
             --dry-run=client -o yaml | kubectl apply -f -
 
+          kubectl create secret generic vllm-secret-${ENV_NAME} \
+            --namespace=${CANARY_NAMESPACE} \
+            --from-literal=hf-token="${HF_TOKEN}" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
           envsubst < .github/k8s/sam-node-template.yaml | kubectl apply -f -
           envsubst < .github/k8s/sam-node-openclaw-template.yaml | kubectl apply -f -
+          envsubst < .github/k8s/sam-node-vllm-template.yaml | kubectl apply -f -
 
           
           kubectl rollout status deployment/sam-canary-${ENV_NAME} -n ${CANARY_NAMESPACE} --timeout=120s || {
@@ -316,5 +323,15 @@ jobs:
             echo "Rolling back OpenClaw Canary deployment..."
             kubectl rollout undo deployment/openclaw-canary-${ENV_NAME} -n ${CANARY_NAMESPACE}
             kubectl rollout status deployment/openclaw-canary-${ENV_NAME} -n ${CANARY_NAMESPACE} || true
+            exit 1
+          }
+
+          kubectl rollout status deployment/vllm-canary-${ENV_NAME} -n ${CANARY_NAMESPACE} --timeout=300s || {
+            echo "vLLM Canary Deployment failed!"
+            print_rollout_diagnostics "${CANARY_NAMESPACE}" "vllm-canary-${ENV_NAME}" "app=vllm-canary-${ENV_NAME}"
+
+            echo "Rolling back vLLM Canary deployment..."
+            kubectl rollout undo deployment/vllm-canary-${ENV_NAME} -n ${CANARY_NAMESPACE}
+            kubectl rollout status deployment/vllm-canary-${ENV_NAME} -n ${CANARY_NAMESPACE} || true
             exit 1
           }

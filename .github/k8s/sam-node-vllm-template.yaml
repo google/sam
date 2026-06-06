@@ -1,0 +1,104 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sam-canary-vllm-config-${ENV_NAME}
+  namespace: sam-canary-${ENV_NAME}
+data:
+  sam-node.yaml: |
+    version: "v1alpha1"
+    attenuation:
+      policies: []
+      checks: []
+      rules: []
+    services:
+      - type: inference
+        name: vllm-tpu
+        description: "vLLM TPU Inference Service"
+        target_url: "http://localhost:8000/v1"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm-canary-${ENV_NAME}
+  namespace: sam-canary-${ENV_NAME}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vllm-canary-${ENV_NAME}
+  template:
+    metadata:
+      labels:
+        app: vllm-canary-${ENV_NAME}
+    spec:
+      serviceAccountName: sam-node-sa
+      nodeSelector:
+        cloud.google.com/gke-tpu-accelerator: tpu-v5-lite-podslice
+      tolerations:
+      - key: "google.com/tpu"
+        operator: "Exists"
+        effect: "NoSchedule"
+      containers:
+      - name: vllm-tpu
+        image: vllm/vllm-tpu:latest
+        args: ["--model", "google/gemma-4-12B-it", "--port", "8000"]
+        ports:
+        - containerPort: 8000
+          name: http
+        env:
+        - name: HF_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: vllm-secret-${ENV_NAME}
+              key: hf-token
+        resources:
+          requests:
+            cpu: 100m
+            memory: 2Gi
+            google.com/tpu: "1"
+          limits:
+            cpu: 1000m
+            memory: 8Gi
+            google.com/tpu: "1"
+        volumeMounts:
+        - name: dshm
+          mountPath: /dev/shm
+      - name: sam-node
+        image: ghcr.io/google/sam-node:${IMAGE_TAG}
+        args: 
+          - "run"
+          - "--config=/etc/sam/sam-node.yaml"
+          - "--hub=https://${ENV_NAME}.sam-mesh.dev"
+          - "--jwt-path=/var/run/secrets/tokens/sam-token"
+          - "--api-token=secret-token"
+          - "--bind-addr=127.0.0.1:8080"
+        ports:
+        - containerPort: 8080
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 256Mi
+        volumeMounts:
+        - name: config-volume
+          mountPath: /etc/sam
+        - name: sam-token
+          mountPath: /var/run/secrets/tokens
+          readOnly: true
+      volumes:
+      - name: config-volume
+        configMap:
+          name: sam-canary-vllm-config-${ENV_NAME}
+      - name: dshm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 10Gi
+      - name: sam-token
+        projected:
+          sources:
+          - serviceAccountToken:
+              path: sam-token
+              expirationSeconds: 3600
+              audience: "sam-hub-audience"
