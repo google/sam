@@ -36,7 +36,7 @@ spec:
       initContainers:
       - name: init-openclaw-config
         image: busybox:1.36.1
-        command: ["sh", "-c", "mkdir -p /data && echo '{\"gateway\": {\"mode\": \"local\"}}' > /data/openclaw.json"]
+        command: ["sh", "-c", "mkdir -p /data && echo '{\"gateway\": {\"mode\": \"local\", \"model\": \"google/gemini-3.1-pro\"}}' > /data/openclaw.json"]
         volumeMounts:
         - name: openclaw-data
           mountPath: /data
