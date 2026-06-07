@@ -1,4 +1,16 @@
 apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: hf-cache-pvc-${ENV_NAME}
+  namespace: sam-canary-${ENV_NAME}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 100Gi
+---
+apiVersion: v1
 kind: ConfigMap
 metadata:
   name: sam-canary-vllm-config-${ENV_NAME}
@@ -23,6 +35,8 @@ metadata:
   namespace: sam-canary-${ENV_NAME}
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: vllm-canary-${ENV_NAME}
@@ -39,31 +53,44 @@ spec:
       - key: "google.com/tpu"
         operator: "Exists"
         effect: "NoSchedule"
+      - key: "node.kubernetes.io/memory-pressure"
+        operator: "Exists"
+        effect: "NoSchedule"
       containers:
       - name: vllm-tpu
         image: vllm/vllm-tpu:latest
-        args: ["--model", "google/gemma-4-12B-it", "--port", "8000"]
+        resources:
+          requests:
+            cpu: 1000m
+            memory: 16Gi
+            google.com/tpu: "1"
+          limits:
+            google.com/tpu: "1"
+        command: ["/bin/bash", "-c"]
+        args:
+        - |
+          python3 -m vllm.entrypoints.openai.api_server \
+            --model google/gemma-2-2b-it \
+            --tensor-parallel-size 1 \
+            --max-model-len 2048 \
+            --enforce-eager \
+            --host 0.0.0.0 \
+            --port 8000 \
+            --trust-remote-code
         ports:
         - containerPort: 8000
           name: http
         env:
-        - name: HF_TOKEN
+        - name: HUGGING_FACE_HUB_TOKEN
           valueFrom:
             secretKeyRef:
               name: vllm-secret-${ENV_NAME}
               key: hf-token
-        resources:
-          requests:
-            cpu: 100m
-            memory: 2Gi
-            google.com/tpu: "1"
-          limits:
-            cpu: 1000m
-            memory: 8Gi
-            google.com/tpu: "1"
         volumeMounts:
         - name: dshm
           mountPath: /dev/shm
+        - name: hf-cache
+          mountPath: /root/.cache/huggingface
       - name: sam-node
         image: ghcr.io/google/sam-node:${IMAGE_TAG}
         args: 
@@ -89,13 +116,16 @@ spec:
           mountPath: /var/run/secrets/tokens
           readOnly: true
       volumes:
+      - name: hf-cache
+        persistentVolumeClaim:
+          claimName: hf-cache-pvc-${ENV_NAME}
       - name: config-volume
         configMap:
           name: sam-canary-vllm-config-${ENV_NAME}
       - name: dshm
         emptyDir:
           medium: Memory
-          sizeLimit: 10Gi
+          sizeLimit: 16Gi
       - name: sam-token
         projected:
           sources:
