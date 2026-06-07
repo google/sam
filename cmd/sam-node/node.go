@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"github.com/biscuit-auth/biscuit-go/v2"
+	"github.com/biscuit-auth/biscuit-go/v2/datalog"
 	"github.com/biscuit-auth/biscuit-go/v2/parser"
 	"github.com/google/sam/api"
 	lru "github.com/hashicorp/golang-lru/v2"
@@ -783,7 +784,9 @@ func (n *SamNode) verifyBiscuit(biscuitData []byte, remotePeer peer.ID) (*biscui
 		if len(tk.Key) != ed25519.PublicKeySize {
 			continue
 		}
-		authorizer, err := b.Authorizer(tk.Key)
+		authorizer, err := b.Authorizer(tk.Key, biscuit.WithWorldOptions(
+			datalog.WithMaxDuration(5*time.Second),
+		))
 		if err != nil {
 			lastErr = fmt.Errorf("authorizer error: %w", err)
 			continue
