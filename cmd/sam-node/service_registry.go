@@ -142,3 +142,24 @@ func (r *ServiceRegistry) TeardownAll() {
 		}
 	}
 }
+
+// ReprovideAll re-provides all registered services to the DHT.
+func (r *ServiceRegistry) ReprovideAll(ctx context.Context) {
+	r.mu.Lock()
+	var toProvide []*api.ServiceInfo
+	for _, svc := range r.services {
+		toProvide = append(toProvide, svc.Info())
+	}
+	r.mu.Unlock()
+
+	for _, info := range toProvide {
+		srvNameCID, err := serviceNameToCID(info.Type, info.Name)
+		if err == nil {
+			_ = r.dht.Provide(ctx, srvNameCID, true)
+		}
+		srvTypeCID, err := serviceTypeToCID(info.Type)
+		if err == nil {
+			_ = r.dht.Provide(ctx, srvTypeCID, true)
+		}
+	}
+}

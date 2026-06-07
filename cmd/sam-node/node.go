@@ -43,6 +43,7 @@ import (
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/crypto"
+	"github.com/libp2p/go-libp2p/core/event"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -113,6 +114,8 @@ type SamNode struct {
 	services          *ServiceRegistry
 	BoundHTTPAddr     string
 	AllowLoopback     bool
+	authSuccess       chan struct{}
+	authOnce          sync.Once
 }
 
 // NewSamNode creates a new Agent instance secured with the 4-layer pipeline.
@@ -130,6 +133,7 @@ func NewSamNode(ctx context.Context, privKey crypto.PrivKey, hubPubKey ed25519.P
 		topics:            make(map[string]*pubsub.Topic),
 		LocalPolicy:       nodeConfig,
 		AllowLoopback:     allowLoopback,
+		authSuccess:       make(chan struct{}),
 	}
 
 	var err error
@@ -192,8 +196,6 @@ func NewSamNode(ctx context.Context, privKey crypto.PrivKey, hubPubKey ed25519.P
 		}),
 	}
 
-	authSuccess := make(chan struct{})
-
 	// If we have a Hub, configure it as our static fallback relay for NAT hole-punching
 	if len(staticRelays) > 0 {
 		opts = append(opts, libp2p.EnableAutoRelayWithPeerSource(
@@ -203,7 +205,7 @@ func NewSamNode(ctx context.Context, privKey crypto.PrivKey, hubPubKey ed25519.P
 					defer close(c)
 					select {
 					case <-ctx.Done():
-					case <-authSuccess:
+					case <-node.authSuccess:
 						for _, r := range staticRelays {
 							c <- r
 						}
@@ -302,9 +304,7 @@ func NewSamNode(ctx context.Context, privKey crypto.PrivKey, hubPubKey ed25519.P
 		}
 	}
 
-	if authenticated {
-		close(authSuccess)
-	}
+	
 
 	// Initialize Gossipsub for Hub Events
 	ps, err := pubsub.NewGossipSub(ctx, h)
@@ -312,6 +312,26 @@ func NewSamNode(ctx context.Context, privKey crypto.PrivKey, hubPubKey ed25519.P
 		return nil, err
 	}
 	node.PubSub = ps
+
+	// Subscribe to local address updates to reprovide services
+	sub, err := h.EventBus().Subscribe(new(event.EvtLocalAddressesUpdated))
+	if err == nil {
+		go func() {
+			defer sub.Close()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-sub.Out():
+					// Debounce or reprovide immediately
+					go func() {
+						time.Sleep(2 * time.Second) // Small debounce
+						node.services.ReprovideAll(ctx)
+					}()
+				}
+			}
+		}()
+	}
 
 	// Listen for Network Evictions/Revocations from the Hub
 	go node.listenForHubEvents(ctx)
@@ -447,6 +467,9 @@ func (n *SamNode) ConnectAndAuthWithHub(ctx context.Context, addr multiaddr.Mult
 	}
 
 	logger.Infof("[AuthN] Successfully authenticated with hub via libp2p")
+	n.authOnce.Do(func() {
+		close(n.authSuccess)
+	})
 	return nil
 }
 
