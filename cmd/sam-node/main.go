@@ -434,6 +434,7 @@ func main() {
 		<-sigChan
 		fmt.Println("\n[Signal] Received interrupt, shutting down...")
 		cancel()
+		signal.Stop(sigChan)
 	}()
 
 	if err := rootCmd.ExecuteContext(ctx); err != nil {
