@@ -16,6 +16,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -53,7 +54,7 @@ func NewStore(dir string) (*Store, error) {
 	dbPath := filepath.Join(dir, "agent.db")
 	db, err := bbolt.Open(dbPath, 0600, &bbolt.Options{Timeout: 5 * time.Second})
 	if err != nil {
-		if err == bbolterrors.ErrTimeout {
+		if errors.Is(err, bbolterrors.ErrTimeout) {
 			return nil, fmt.Errorf("timeout waiting for file lock, is another instance of sam-node running?")
 		}
 		return nil, err
