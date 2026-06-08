@@ -158,6 +158,7 @@ func NewHub(ctx context.Context, policy *api.PolicyConfig, allowLoopback bool, m
 		// FIPS compliant Security
 		libp2p.Security(libp2ptls.ID, libp2ptls.New),
 		libp2p.ConnectionManager(cm),
+		libp2p.EnableRelayService(),
 		libp2p.EnableAutoNATv2(),
 		libp2p.EnableNATService(),
 		libp2p.AddrsFactory(func(addrs []multiaddr.Multiaddr) []multiaddr.Multiaddr {
