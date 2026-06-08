@@ -756,23 +756,9 @@ func (n *SamNode) startDiscovery(ctx context.Context, meshID string, interval ti
 				if n.Host.Network().Connectedness(p.ID) != network.Connected {
 					logger.Infof("[Discovery] Found peer not connected via DHT: %s", p.ID)
 					
-					// Add relay addresses to the peer if HubPeerID is known
-					if n.HubPeerID != "" && p.ID != n.Host.ID() && p.ID != n.HubPeerID {
-						baseAddrs := n.Host.Peerstore().Addrs(n.HubPeerID)
-						if circuitMaddr, err := multiaddr.NewMultiaddr(fmt.Sprintf("/p2p-circuit/p2p/%s", p.ID)); err == nil {
-							for _, ba := range baseAddrs {
-								p2pStr := fmt.Sprintf("/p2p/%s", n.HubPeerID)
-								if !strings.Contains(ba.String(), p2pStr) {
-									if p2pMaddr, err := multiaddr.NewMultiaddr(p2pStr); err == nil {
-										ba = ba.Encapsulate(p2pMaddr)
-									}
-								}
-								fullAddr := ba.Encapsulate(circuitMaddr)
-								p.Addrs = append(p.Addrs, fullAddr)
-								n.Host.Peerstore().AddAddr(p.ID, fullAddr, time.Minute*10)
-								logger.Infof("[Discovery] Added relay address for DHT peer %s: %s", p.ID, fullAddr)
-							}
-						}
+					// Log the addresses returned by DHT to confirm they include p2p-circuit paths
+					for _, addr := range p.Addrs {
+						logger.Infof("[Discovery] Peer %s advertised address: %s", p.ID, addr)
 					}
 
 					go func(pi peer.AddrInfo) {
@@ -948,24 +934,14 @@ func (n *SamNode) findProvidersByCID(ctx context.Context, c cid.Cid) ([]peer.Add
 		}
 		logger.Infof("[Discovery] Evaluating relay for %s: HubPeerID=%s, HubAddrsCount=%d", p.ID, n.HubPeerID, hubAddrsCount)
 
-		if n.HubPeerID != "" && p.ID != n.Host.ID() && p.ID != n.HubPeerID {
-			baseAddrs := n.Host.Peerstore().Addrs(n.HubPeerID)
-
-			if circuitMaddr, err := multiaddr.NewMultiaddr(fmt.Sprintf("/p2p-circuit/p2p/%s", p.ID)); err == nil {
-				for _, ba := range baseAddrs {
-					p2pStr := fmt.Sprintf("/p2p/%s", n.HubPeerID)
-					if !strings.Contains(ba.String(), p2pStr) {
-						if p2pMaddr, err := multiaddr.NewMultiaddr(p2pStr); err == nil {
-							ba = ba.Encapsulate(p2pMaddr)
-						}
-					}
-					fullAddr := ba.Encapsulate(circuitMaddr)
-					p.Addrs = append(p.Addrs, fullAddr)
-					n.Host.Peerstore().AddAddr(p.ID, fullAddr, time.Minute*10)
-					logger.Infof("[Discovery] Added relay address for %s: %s", p.ID, fullAddr)
-				}
-			}
+		for _, addr := range p.Addrs {
+			logger.Infof("[Discovery] Provider %s advertised address: %s", p.ID, addr)
 		}
+		
+		if len(p.Addrs) > 0 {
+			n.Host.Peerstore().AddAddrs(p.ID, p.Addrs, peerstore.TempAddrTTL)
+		}
+		
 		providers = append(providers, p)
 	}
 	return providers, nil
