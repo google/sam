@@ -3,4 +3,4 @@
 - [Agent Integration](#/agent_integration.md)
 - [CLI Reference](#/cli/reference.md)
 - [Testing](#/testing.md)
-- [License](https://github.com/aojea/sam/blob/main/LICENSE)
+- [License](https://github.com/google/sam/blob/main/LICENSE)

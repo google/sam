@@ -9,7 +9,7 @@
 ## Build
 
 ```bash
-git clone https://github.com/aojea/sam.git
+git clone https://github.com/google/sam.git
 cd sam
 make build
 ```
