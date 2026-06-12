@@ -4,42 +4,26 @@ metadata:
   name: sam-hub-${ENV_NAME}
   namespace: ${NAMESPACE}
 spec:
-  type: LoadBalancer
-  loadBalancerClass: "networking.gke.io/l4-regional-external"
-  loadBalancerIP: ${LOAD_BALANCER_IP}
-  allocateLoadBalancerNodePorts: false
-  sessionAffinity: ClientIP
-  externalTrafficPolicy: Local
+  clusterIP: None
   ports:
-    - port: 443
-      targetPort: 9090
+    - port: 4501
+      targetPort: 4501
       protocol: TCP
-      name: register-https
-  selector:
-    app: sam-hub-${ENV_NAME}
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: sam-hub-internal-${ENV_NAME}
-  namespace: ${NAMESPACE}
-spec:
-  type: ClusterIP
-  sessionAffinity: ClientIP
-  ports:
-    - port: 443
-      targetPort: 9090
-      protocol: TCP
-      name: https
+      name: p2p-tcp
+    - port: 4501
+      targetPort: 4501
+      protocol: UDP
+      name: p2p-udp
   selector:
     app: sam-hub-${ENV_NAME}
 ---
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
   name: sam-hub-${ENV_NAME}
   namespace: ${NAMESPACE}
 spec:
+  serviceName: "sam-hub-${ENV_NAME}"
   replicas: 3
   selector:
     matchLabels:
@@ -53,6 +37,10 @@ spec:
       - name: sam-hub
         image: ghcr.io/google/sam-hub:${IMAGE_TAG}
         env:
+        - name: HOST_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.hostIP
         - name: SAM_HUB_KEY
           valueFrom:
             secretKeyRef:
@@ -63,28 +51,38 @@ spec:
         - containerPort: 9090
           protocol: TCP
           name: metrics
+        - containerPort: 4501
+          hostPort: 4501
+          protocol: TCP
+          name: p2p-tcp
+        - containerPort: 4501
+          hostPort: 4501
+          protocol: UDP
+          name: p2p-udp
         readinessProbe:
           httpGet:
             path: /healthz
             port: metrics
-            scheme: HTTPS
+            scheme: HTTP
           initialDelaySeconds: 5
           periodSeconds: 10
         livenessProbe:
           httpGet:
             path: /healthz
             port: metrics
-            scheme: HTTPS
+            scheme: HTTP
           initialDelaySeconds: 15
           periodSeconds: 20
         args:
-        - "--external-multiaddr=/dns4/${ENV_NAME}.sam-mesh.dev/tcp/443/wss"
+        - "--listen=/ip4/0.0.0.0/tcp/4501"
+        - "--listen=/ip4/0.0.0.0/udp/4501/quic-v1"
+        - "--external-multiaddr=/ip4/$(HOST_IP)/tcp/4501"
+        - "--external-multiaddr=/ip4/$(HOST_IP)/udp/4501/quic-v1"
+        - "--external-multiaddr=/ip4/$(HOST_IP)/tcp/4501/wss"
         # 1. Trust Dex for humans/Google/GitHub. 2. Trust GKE for internal Canaries.
         - "--issuer=https://auth.sam-mesh.dev,https://container.googleapis.com/v1/projects/${GCP_PROJECT_ID}/locations/${CLUSTER_REGION}/clusters/${CLUSTER_NAME}"
         # 1. Dex CLI client ID. 2. Canary projected volume audience.
         - "--allowed-audiences=sam-mesh-audience,sam-hub-audience"
-        - "--tls-cert-file=/etc/sam/certs/tls.crt"
-        - "--tls-key-file=/etc/sam/certs/tls.key"
         - "--policy-file=/etc/sam/policies/policies.yaml"
         resources:
           requests:
@@ -94,16 +92,10 @@ spec:
             cpu: 500m
             memory: 512Mi
         volumeMounts:
-        - name: tls-certs
-          mountPath: /etc/sam/certs
-          readOnly: true
         - name: policies-volume
           mountPath: /etc/sam/policies
           readOnly: true
       volumes:
-      - name: tls-certs
-        secret:
-          secretName: hub-sam-mesh-tls
       - name: policies-volume
         configMap:
           name: sam-hub-policies-${ENV_NAME}
@@ -139,6 +131,4 @@ spec:
   - port: metrics
     interval: 30s
     path: /metrics
-    scheme: https
-    tls:
-      insecureSkipVerify: true
+    scheme: http

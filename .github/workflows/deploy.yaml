@@ -198,27 +198,18 @@ jobs:
             echo "sam-hub-secret already exists in namespace ${NAMESPACE}. Skipping generation."
           fi
 
-      - name: Copy Wildcard TLS Secret to sam-hub
-        run: |
-          export ENV_NAME="${{ vars.ENV_NAME }}"
-          export NAMESPACE="sam-${ENV_NAME}"
-          if [[ "${NAMESPACE}" == "sam-hub" ]]; then
-            kubectl delete secret hub-sam-mesh-tls -n sam-hub --ignore-not-found
-            kubectl get secret hub-sam-mesh-tls -n sam-bananas -o yaml | \
-              sed 's/namespace: sam-bananas/namespace: sam-hub/' | \
-              kubectl create -f -
-          fi
+
 
       - name: Deploy Hub
         run: |
           print_rollout_diagnostics() {
             local namespace="$1"
-            local deployment="$2"
+            local resource="$2"
             local selector="$3"
 
-            echo "Collecting diagnostics for deployment/${deployment} in namespace ${namespace}..."
+            echo "Collecting diagnostics for ${resource} in namespace ${namespace}..."
 
-            kubectl describe deployment/${deployment} -n ${namespace} || true
+            kubectl describe ${resource} -n ${namespace} || true
             kubectl get pods -n ${namespace} -l "${selector}" -o wide || true
             kubectl describe pods -n ${namespace} -l "${selector}" || true
             kubectl get events -n ${namespace} --sort-by=.lastTimestamp || true
@@ -247,13 +238,13 @@ jobs:
 
           envsubst < .github/k8s/sam-hub-template.yaml | kubectl apply -f -
           
-          kubectl rollout status deployment/sam-hub-${ENV_NAME} -n ${NAMESPACE} --timeout=120s || {
+          kubectl rollout status statefulset/sam-hub-${ENV_NAME} -n ${NAMESPACE} --timeout=120s || {
             echo "Hub Deployment failed!"
-            print_rollout_diagnostics "${NAMESPACE}" "sam-hub-${ENV_NAME}" "app=sam-hub-${ENV_NAME}"
+            print_rollout_diagnostics "${NAMESPACE}" "statefulset/sam-hub-${ENV_NAME}" "app=sam-hub-${ENV_NAME}"
 
             echo "Rolling back Hub deployment..."
-            kubectl rollout undo deployment/sam-hub-${ENV_NAME} -n ${NAMESPACE}
-            kubectl rollout status deployment/sam-hub-${ENV_NAME} -n ${NAMESPACE}
+            kubectl rollout undo statefulset/sam-hub-${ENV_NAME} -n ${NAMESPACE}
+            kubectl rollout status statefulset/sam-hub-${ENV_NAME} -n ${NAMESPACE}
             exit 1
           }
 

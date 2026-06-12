@@ -710,12 +710,10 @@ func main() {
 			// Start key rotation if enabled
 			h.startRotation(ctx)
 
-			logger.Infof("SAM Hub Online (QUIC + TCP + WS on %s)", bindAddress)
+			logger.Infof("SAM Hub Online (HTTP on %s, P2P on %v)", bindAddress, listenAddrs)
 			isHubReady.Store(true)
 			logger.Infof("MeshID: %s", h.MeshID)
 			logger.Infof("PeerID: %s", h.Host.ID())
-
-			logger.Infof("Hub running on P2P transports only.")
 			<-ctx.Done()
 		},
 	}
@@ -727,6 +725,7 @@ func main() {
 	rootCmd.Flags().StringVar(&oidcIssuer, "issuer", defIssuer, "OIDC Issuer URL")
 	rootCmd.Flags().StringVar(&clientID, "client-id", os.Getenv("SAM_OIDC_ID"), "OIDC Client ID")
 	rootCmd.Flags().StringVar(&biscuitHex, "key", os.Getenv("SAM_HUB_KEY"), "Hub Private Key (32-byte Hex)")
+	rootCmd.Flags().StringSliceVar(&listenAddrs, "listen", []string{}, "libp2p Listen Addrs")
 	rootCmd.Flags().StringSliceVar(&externalMultiaddrs, "external-multiaddr", []string{}, "External multiaddrs to announce")
 	rootCmd.Flags().StringVar(&meshName, "mesh", DefaultMeshName, "Mesh federation name")
 	rootCmd.Flags().StringVar(&allowedAudiencesFlag, "allowed-audiences", api.DefaultAudience, "Comma-separated list of allowed OIDC audiences")
