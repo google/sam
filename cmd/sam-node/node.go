@@ -416,6 +416,7 @@ dhtLoop:
 	if len(errs) > 0 {
 		return fmt.Errorf("failed to register static services: %w", errors.Join(errs...))
 	}
+	logger.Infof("[ServiceRegistry] Successfully registered %d static services", len(services))
 	return nil
 }
 

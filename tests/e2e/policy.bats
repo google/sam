@@ -232,7 +232,7 @@ EOF"
 
   mesh_wait_for_log "${MESH_PREFIX}-node-2" "SAM Node Online" 20
   local node2_id
-  node2_id=$(docker logs "${MESH_PREFIX}-node-2" 2>&1 | grep -A 1 "SAM Node Online" | grep -oE '12D3Koo[a-zA-Z0-9]+' | head -n 1)
+  node2_id=$(docker logs "${MESH_PREFIX}-node-2" 2>&1 | grep "PeerID:" | grep -oE '12D3Koo[a-zA-Z0-9]+' | head -n 1)
 
   # Wait for discovery (Node 2 should see Node 1)
   local i

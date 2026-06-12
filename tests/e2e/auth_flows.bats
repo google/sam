@@ -54,11 +54,45 @@ teardown() {
   local data_vol="${MESH_PREFIX}-data"
   docker volume create "${data_vol}"
   
-  docker run --rm \
+  docker run --name "${node_name}-join" \
     --network "${MESH_NETWORK}" \
     -v "${data_vol}:/root/.config/sam-mesh" \
     "sam-node:local" \
-    join "http://sam-hub:9090"
+    join "http://sam-hub:9090" > "/tmp/${node_name}-join.out" 2>&1 &
+  local join_pid=$!
+
+  # Wait for redirect_uri and state in the output
+  local redirect_uri=""
+  local state=""
+  local port=""
+  for i in {1..20}; do
+    if grep -q "redirect_uri=" "/tmp/${node_name}-join.out"; then
+      # Output format: http://mock-oidc...redirect_uri=http%3A%2F%2F127.0.0.1%3A<PORT>%2Fcallback&...&state=<STATE>
+      local line
+      line=$(grep "redirect_uri=" "/tmp/${node_name}-join.out" | head -n 1)
+      redirect_uri=$(echo "$line" | grep -o 'redirect_uri=[^&]*' | cut -d= -f2 | tr -d '\r\n')
+      state=$(echo "$line" | grep -o 'state=[^&]*' | cut -d= -f2 | tr -d '\r\n')
+      
+      # URL decode redirect_uri
+      # e.g. http%3A%2F%2F127.0.0.1%3A41353%2Fcallback -> http://127.0.0.1:41353/callback
+      redirect_uri=$(echo "$redirect_uri" | sed -e 's/%3A/:/g' -e 's/%2F/\//g')
+      
+      port=$(echo "$redirect_uri" | grep -o ':[0-9]*' | tr -d ':\r\n')
+      if [[ -n "$port" && -n "$state" ]]; then
+        break
+      fi
+    fi
+    sleep 1
+  done
+
+  [[ -n "$port" ]] && [[ -n "$state" ]]
+
+  # Trigger the callback in the sam-node container's network namespace
+  docker run --rm --network "container:${node_name}-join" python:3.12 python3 -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:${port}/callback?code=dev_code_123&state=${state}')"
+
+  # Wait for the join process to finish
+  wait $join_pid
+  docker rm -f "${node_name}-join" >/dev/null 2>&1 || true
     
   # Now run the node with the stored identity
   docker run -d \

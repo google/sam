@@ -16,9 +16,13 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os/exec"
@@ -31,6 +35,18 @@ import (
 	"golang.org/x/oauth2/clientcredentials"
 	"google.golang.org/protobuf/proto"
 )
+
+// generatePKCE generates a PKCE code verifier and challenge.
+func generatePKCE() (string, string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", "", err
+	}
+	verifier := base64.RawURLEncoding.EncodeToString(b)
+	hash := sha256.Sum256([]byte(verifier))
+	challenge := base64.RawURLEncoding.EncodeToString(hash[:])
+	return verifier, challenge, nil
+}
 
 // FetchJWT fetches a JWT token using the Client Credentials flow.
 func (n *SamNode) FetchJWT(ctx context.Context, tokenURL, clientID, clientSecret string) (string, error) {
@@ -47,31 +63,141 @@ func (n *SamNode) FetchJWT(ctx context.Context, tokenURL, clientID, clientSecret
 }
 
 // InteractiveLogin prompts the user to go to a URL and enter a code.
-func (n *SamNode) InteractiveLogin(ctx context.Context, deviceAuthURL, tokenURL, clientID, audience string) (string, error) {
-	if deviceAuthURL == "" {
-		return "", fmt.Errorf("device authorization URL is required")
+func (n *SamNode) InteractiveLogin(ctx context.Context, authURL, tokenURL, clientID, audience string) (string, error) {
+	if authURL == "" {
+		return "", fmt.Errorf("authorization URL is required")
 	}
 	if tokenURL == "" {
 		return "", fmt.Errorf("token URL is required")
 	}
 	if clientID == "" {
-		return "", fmt.Errorf("client ID is required for device flow")
+		return "", fmt.Errorf("client ID is required")
 	}
 
-	data := url.Values{}
-	data.Set("client_id", clientID)
-	data.Set("scope", "openid email profile")
+	stateBytes := make([]byte, 16)
+	if _, err := rand.Read(stateBytes); err != nil {
+		return "", fmt.Errorf("failed to generate state: %w", err)
+	}
+	state := base64.RawURLEncoding.EncodeToString(stateBytes)
+
+	verifier, challenge, err := generatePKCE()
+	if err != nil {
+		return "", fmt.Errorf("failed to generate PKCE: %w", err)
+	}
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return "", fmt.Errorf("failed to start local server: %w", err)
+	}
+	defer func() { _ = listener.Close() }()
+
+	port := listener.Addr().(*net.TCPAddr).Port
+	redirectURI := fmt.Sprintf("http://127.0.0.1:%d/callback", port)
+
+	authReq, err := http.NewRequest("GET", authURL, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create auth request: %w", err)
+	}
+	q := authReq.URL.Query()
+	q.Add("response_type", "code")
+	q.Add("client_id", clientID)
+	q.Add("redirect_uri", redirectURI)
+	q.Add("scope", "openid email profile")
+	q.Add("state", state)
+	q.Add("code_challenge", challenge)
+	q.Add("code_challenge_method", "S256")
 	if audience != "" {
-		data.Set("audience", audience)
+		q.Add("audience", audience)
+	}
+	authReq.URL.RawQuery = q.Encode()
+	targetURL := authReq.URL.String()
+
+	fmt.Println("------------------------------------------------------------")
+	fmt.Println("OAuth Authorization Flow")
+	fmt.Println("------------------------------------------------------------")
+	fmt.Printf("To authenticate, please go to the following URL in your browser:\n\n")
+	fmt.Printf("  %s\n\n", targetURL)
+	fmt.Println("Waiting for authorization...")
+	fmt.Println("------------------------------------------------------------")
+
+	// Try to open browser automatically
+	openBrowserFunc(targetURL)
+
+	codeChan := make(chan string)
+	errChan := make(chan error)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query()
+		if query.Get("state") != state {
+			http.Error(w, "Invalid state parameter", http.StatusBadRequest)
+			select {
+			case errChan <- fmt.Errorf("invalid state parameter received"):
+			case <-ctx.Done():
+			}
+			return
+		}
+		if errStr := query.Get("error"); errStr != "" {
+			desc := query.Get("error_description")
+			http.Error(w, "Authorization failed: "+errStr, http.StatusBadRequest)
+			select {
+			case errChan <- fmt.Errorf("authorization failed: %s - %s", errStr, desc):
+			case <-ctx.Done():
+			}
+			return
+		}
+		code := query.Get("code")
+		if code == "" {
+			http.Error(w, "No code in request", http.StatusBadRequest)
+			select {
+			case errChan <- fmt.Errorf("no code received"):
+			case <-ctx.Done():
+			}
+			return
+		}
+
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte("<html><body><h1>Authorization successful!</h1><p>You can close this window and return to the CLI.</p></body></html>"))
+
+		select {
+		case codeChan <- code:
+		case <-ctx.Done():
+		}
+	})
+
+	srv := &http.Server{Handler: mux}
+	go func() {
+		if err := srv.Serve(listener); err != nil && err != http.ErrServerClosed {
+			errChan <- fmt.Errorf("local server error: %w", err)
+		}
+	}()
+
+	var code string
+	select {
+	case <-ctx.Done():
+		_ = srv.Close()
+		return "", ctx.Err()
+	case err := <-errChan:
+		_ = srv.Close()
+		return "", err
+	case code = <-codeChan:
+		_ = srv.Close()
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", deviceAuthURL, strings.NewReader(data.Encode()))
+	tokenData := url.Values{}
+	tokenData.Set("grant_type", "authorization_code")
+	tokenData.Set("client_id", clientID)
+	tokenData.Set("code", code)
+	tokenData.Set("redirect_uri", redirectURI)
+	tokenData.Set("code_verifier", verifier)
+
+	req, err := http.NewRequestWithContext(ctx, "POST", tokenURL, strings.NewReader(tokenData.Encode()))
 	if err != nil {
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	client := &http.Client{}
+	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
@@ -83,117 +209,26 @@ func (n *SamNode) InteractiveLogin(ctx context.Context, deviceAuthURL, tokenURL,
 	}()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
-		return "", fmt.Errorf("device auth request failed: %s - %s", resp.Status, string(body))
+		var errResp struct {
+			Error            string `json:"error"`
+			ErrorDescription string `json:"error_description"`
+		}
+		_ = json.NewDecoder(resp.Body).Decode(&errResp)
+		return "", fmt.Errorf("token request failed: %s - %s", errResp.Error, errResp.ErrorDescription)
 	}
 
-	var authResp struct {
-		DeviceCode              string `json:"device_code"`
-		UserCode                string `json:"user_code"`
-		VerificationURI         string `json:"verification_uri"`
-		VerificationURIComplete string `json:"verification_uri_complete"`
-		ExpiresIn               int    `json:"expires_in"`
-		Interval                int    `json:"interval"`
+	var tokenResp struct {
+		AccessToken string `json:"access_token"`
+		IdToken     string `json:"id_token"`
 	}
-
-	if err := json.NewDecoder(resp.Body).Decode(&authResp); err != nil {
+	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
 		return "", err
 	}
 
-	fmt.Println("------------------------------------------------------------")
-	fmt.Println("Device Authorization Flow")
-	fmt.Println("------------------------------------------------------------")
-	fmt.Printf("To authenticate, please go to the following URL in your browser:\n\n")
-	targetURL := authResp.VerificationURIComplete
-	if targetURL == "" {
-		targetURL = authResp.VerificationURI
+	if tokenResp.IdToken != "" {
+		return tokenResp.IdToken, nil
 	}
-	fmt.Printf("  %s\n\n", targetURL)
-	if authResp.VerificationURIComplete == "" {
-		fmt.Printf("And enter the following code:\n\n")
-		fmt.Printf("  %s\n\n", authResp.UserCode)
-	} else {
-		fmt.Println("The login code has been pre-filled for your convenience.")
-	}
-	fmt.Println("Waiting for authorization...")
-	fmt.Println("------------------------------------------------------------")
-
-	// Try to open browser automatically
-	openBrowser(targetURL)
-
-	interval := authResp.Interval
-	if interval <= 0 {
-		interval = 5
-	}
-
-	ticker := time.NewTicker(time.Duration(interval) * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return "", ctx.Err()
-		case <-ticker.C:
-			pollData := url.Values{}
-			pollData.Set("grant_type", "urn:ietf:params:oauth:grant-type:device_code")
-			pollData.Set("device_code", authResp.DeviceCode)
-			pollData.Set("client_id", clientID)
-
-			req, err := http.NewRequestWithContext(ctx, "POST", tokenURL, strings.NewReader(pollData.Encode()))
-			if err != nil {
-				return "", err
-			}
-			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-			resp, err := client.Do(req)
-			if err != nil {
-				return "", err
-			}
-
-			if resp.StatusCode == http.StatusOK {
-				var tokenResp struct {
-					AccessToken string `json:"access_token"`
-					IdToken     string `json:"id_token"`
-				}
-				err := json.NewDecoder(resp.Body).Decode(&tokenResp)
-				if closeErr := resp.Body.Close(); closeErr != nil {
-					logger.Errorf("Failed to close response body: %v", closeErr)
-				}
-				if err != nil {
-					return "", err
-				}
-				if tokenResp.IdToken != "" {
-					return tokenResp.IdToken, nil
-				}
-				return tokenResp.AccessToken, nil
-			}
-
-			var errResp struct {
-				Error string `json:"error"`
-			}
-			err = json.NewDecoder(resp.Body).Decode(&errResp)
-			if closeErr := resp.Body.Close(); closeErr != nil {
-				logger.Errorf("Failed to close response body: %v", closeErr)
-			}
-			if err != nil {
-				return "", fmt.Errorf("token request failed with status %s", resp.Status)
-			}
-
-			switch errResp.Error {
-			case "authorization_pending":
-				continue
-			case "slow_down":
-				ticker.Reset(time.Duration(interval+5) * time.Second)
-				continue
-			case "expired_token":
-				return "", fmt.Errorf("device code expired")
-			case "access_denied":
-				return "", fmt.Errorf("access denied by user")
-			default:
-				return "", fmt.Errorf("token request failed: %s", errResp.Error)
-			}
-		}
-	}
+	return tokenResp.AccessToken, nil
 }
 
 // DiscoverTokenURL discovers the token URL from the OIDC issuer.
@@ -214,20 +249,20 @@ func (n *SamNode) DiscoverTokenURL(ctx context.Context, issuerURL string) (strin
 	return claims.TokenURL, nil
 }
 
-// DiscoverEndpoints discovers both token and device auth endpoints.
-func (n *SamNode) DiscoverEndpoints(ctx context.Context, issuerURL string) (tokenURL, deviceURL string, err error) {
+// DiscoverEndpoints discovers both token and authorization endpoints.
+func (n *SamNode) DiscoverEndpoints(ctx context.Context, issuerURL string) (tokenURL, authURL string, err error) {
 	provider, err := oidc.NewProvider(ctx, issuerURL)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to create OIDC provider: %w", err)
 	}
 	var claims struct {
-		TokenURL  string `json:"token_endpoint"`
-		DeviceURL string `json:"device_authorization_endpoint"`
+		TokenURL string `json:"token_endpoint"`
+		AuthURL  string `json:"authorization_endpoint"`
 	}
 	if err := provider.Claims(&claims); err != nil {
 		return "", "", fmt.Errorf("failed to extract claims: %w", err)
 	}
-	return claims.TokenURL, claims.DeviceURL, nil
+	return claims.TokenURL, claims.AuthURL, nil
 }
 
 // DiscoverHubInfo queries the hub's /info endpoint to fetch OIDC configurations.
@@ -273,6 +308,8 @@ func (n *SamNode) DiscoverHubInfo(ctx context.Context, hubURL string) (*api.HubI
 
 	return &hubInfo, nil
 }
+
+var openBrowserFunc = openBrowser
 
 func openBrowser(targetURL string) {
 	parsedURL, err := url.Parse(targetURL)

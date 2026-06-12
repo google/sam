@@ -49,6 +49,7 @@ func (n *SamNode) handleListLocalServices(ctx context.Context, req *mcp.CallTool
 		typeFilter = parsed
 	}
 	services := n.ListLocalServices(typeFilter)
+	logger.Infof("[ListLocalServices] Filter: %v, Returning %d services", typeFilter, len(services))
 	respData, err := json.Marshal(services)
 	if err != nil {
 		return nil, nil, err

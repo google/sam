@@ -392,7 +392,7 @@ func TestSelfHealingHTTPFallback(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"issuer":                        "http://" + r.Host,
 			"token_endpoint":                "http://" + r.Host + "/token",
-			"device_authorization_endpoint": "http://" + r.Host + "/device/code",
+			"authorization_endpoint": "http://" + r.Host + "/auth",
 		})
 	})
 	mux.HandleFunc("/device/code", func(w http.ResponseWriter, r *http.Request) {
@@ -453,7 +453,7 @@ func TestSelfHealingHTTPFallback(t *testing.T) {
 	)
 
 	// Step 1: Enroll via Join (using mock OIDC)
-	joinStdout, joinStderr, err := runCommand(
+	joinStdout, joinStderr, err := runCommandWithCallback(
 		t,
 		repoRoot(t),
 		5*time.Second,

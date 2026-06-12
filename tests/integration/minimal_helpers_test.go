@@ -21,17 +21,20 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+
 	"github.com/google/sam/api"
 	"github.com/libp2p/go-libp2p"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
-	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/network"
+	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-msgio"
 	"google.golang.org/protobuf/proto"
 )
@@ -83,6 +86,82 @@ func runCommand(
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return stdout.String(), stderr.String(), context.DeadlineExceeded
+	}
+	return stdout.String(), stderr.String(), err
+}
+
+type interceptorWriter struct {
+	w       io.Writer
+	buf     *bytes.Buffer
+	handled bool
+}
+
+func (iw *interceptorWriter) Write(p []byte) (n int, err error) {
+	n, err = iw.w.Write(p)
+	iw.buf.Write(p)
+	if !iw.handled {
+		s := iw.buf.String()
+		if strings.Contains(s, "redirect_uri=") && strings.Contains(s, "state=") {
+			iw.handled = true
+			go func() {
+				// Parse URL from the buffer to extract state and redirect_uri
+				// The URL is printed like: "  http://...redirect_uri=...&state=..."
+				lines := strings.Split(s, "\n")
+				for _, line := range lines {
+					if strings.Contains(line, "redirect_uri=") {
+						parts := strings.Split(strings.TrimSpace(line), " ")
+						for _, p := range parts {
+							if strings.HasPrefix(p, "http") {
+								u, err := url.Parse(p)
+								if err == nil {
+									redirectURI := u.Query().Get("redirect_uri")
+									state := u.Query().Get("state")
+									if redirectURI != "" && state != "" {
+										time.Sleep(100 * time.Millisecond)
+										_, _ = http.Get(redirectURI + "?code=dev_code_123&state=" + state)
+									}
+								}
+							}
+						}
+					}
+				}
+			}()
+		}
+	}
+	return n, err
+}
+
+func runCommandWithCallback(
+	t *testing.T,
+	cwd string,
+	timeout time.Duration,
+	env []string,
+	stdin string,
+	name string,
+	args ...string,
+) (string, string, error) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Dir = cwd
+	if len(env) > 0 {
+		cmd.Env = append(cmd.Env, env...)
+	}
+	if stdin != "" {
+		cmd.Stdin = bytes.NewBufferString(stdin)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &interceptorWriter{w: &stdout, buf: &bytes.Buffer{}}
 	cmd.Stderr = &stderr
 
 	err := cmd.Run()

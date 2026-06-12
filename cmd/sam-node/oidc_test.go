@@ -5,52 +5,34 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"sync/atomic"
+	"net/url"
 	"testing"
 	"time"
 )
 
 func TestInteractiveLogin(t *testing.T) {
-	// Mock OIDC server
 	mux := http.NewServeMux()
-	
-	// State for polling
-	var authorized atomic.Bool
-	
-	mux.HandleFunc("/device/code", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != "POST" {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(map[string]interface{}{
-			"device_code":      "dev_code_123",
-			"user_code":        "ABCD-1234",
-			"verification_uri": "http://example.com/verify",
-			"expires_in":       60,
-			"interval":         1, // Fast polling for test
-		}); err != nil {
-			t.Errorf("Failed to encode response: %v", err)
-		}
-	})
 
 	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "POST" {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
-		
-		if !authorized.Load() {
-			w.WriteHeader(http.StatusBadRequest)
-			if err := json.NewEncoder(w).Encode(map[string]string{
-				"error": "authorization_pending",
-			}); err != nil {
-				t.Errorf("Failed to encode response: %v", err)
-			}
+		_ = r.ParseForm()
+		if r.FormValue("grant_type") != "authorization_code" {
+			http.Error(w, "Invalid grant_type", http.StatusBadRequest)
 			return
 		}
-		
+		if r.FormValue("code") != "dev_code_123" {
+			http.Error(w, "Invalid code", http.StatusBadRequest)
+			return
+		}
+		if r.FormValue("code_verifier") == "" {
+			http.Error(w, "Missing code_verifier", http.StatusBadRequest)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(map[string]string{
 			"access_token": "access_token_xyz",
 			"id_token":     "id_token_abc",
@@ -63,33 +45,31 @@ func TestInteractiveLogin(t *testing.T) {
 	defer server.Close()
 
 	node := &SamNode{}
-	
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// Run InteractiveLogin in a goroutine because it blocks
-	type result struct {
-		token string
-		err   error
+	// Mock openBrowser to simulate the user authorizing in the browser
+	originalOpenBrowser := openBrowserFunc
+	openBrowserFunc = func(urlStr string) {
+		u, _ := url.Parse(urlStr)
+		redirectURI := u.Query().Get("redirect_uri")
+		state := u.Query().Get("state")
+
+		go func() {
+			time.Sleep(100 * time.Millisecond)
+			_, _ = http.Get(redirectURI + "?code=dev_code_123&state=" + state)
+		}()
 	}
-	resChan := make(chan result, 1)
+	defer func() { openBrowserFunc = originalOpenBrowser }()
 
-	go func() {
-		token, err := node.InteractiveLogin(ctx, server.URL+"/device/code", server.URL+"/token", "client_id_test", "sam-e2e")
-		resChan <- result{token, err}
-	}()
-
-	// Wait a bit and then authorize the user
-	time.Sleep(1500 * time.Millisecond)
-	authorized.Store(true)
-
-	res := <-resChan
-	if res.err != nil {
-		t.Fatalf("InteractiveLogin failed: %v", res.err)
+	token, err := node.InteractiveLogin(ctx, "http://auth.example.com/auth", server.URL+"/token", "client_id_test", "sam-e2e")
+	if err != nil {
+		t.Fatalf("InteractiveLogin failed: %v", err)
 	}
 
-	if res.token != "id_token_abc" {
-		t.Errorf("Expected token 'id_token_abc', got '%s'", res.token)
+	if token != "id_token_abc" {
+		t.Errorf("Expected token 'id_token_abc', got '%s'", token)
 	}
 }
 
@@ -98,9 +78,9 @@ func TestDiscoverEndpoints(t *testing.T) {
 	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(map[string]interface{}{
-			"issuer":                        "http://" + r.Host,
-			"token_endpoint":                "http://" + r.Host + "/token",
-			"device_authorization_endpoint": "http://" + r.Host + "/device/code",
+			"issuer":                 "http://" + r.Host,
+			"token_endpoint":         "http://" + r.Host + "/token",
+			"authorization_endpoint": "http://" + r.Host + "/auth",
 		}); err != nil {
 			t.Errorf("Failed to encode response: %v", err)
 		}
@@ -112,7 +92,7 @@ func TestDiscoverEndpoints(t *testing.T) {
 	node := &SamNode{}
 	ctx := context.Background()
 
-	tokenURL, deviceURL, err := node.DiscoverEndpoints(ctx, server.URL)
+	tokenURL, authURL, err := node.DiscoverEndpoints(ctx, server.URL)
 	if err != nil {
 		t.Fatalf("DiscoverEndpoints failed: %v", err)
 	}
@@ -120,7 +100,7 @@ func TestDiscoverEndpoints(t *testing.T) {
 	if tokenURL != server.URL+"/token" {
 		t.Errorf("Expected tokenURL %s, got %s", server.URL+"/token", tokenURL)
 	}
-	if deviceURL != server.URL+"/device/code" {
-		t.Errorf("Expected deviceURL %s, got %s", server.URL+"/device/code", deviceURL)
+	if authURL != server.URL+"/auth" {
+		t.Errorf("Expected authURL %s, got %s", server.URL+"/auth", authURL)
 	}
 }

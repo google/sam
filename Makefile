@@ -64,16 +64,16 @@ update:
 	go mod tidy
 
 docker-build-hub:
-	docker build -t sam-hub:local -f Dockerfile.sam-hub .
+	docker build --load -t sam-hub:local -f Dockerfile.sam-hub .
 
 docker-build-node:
-	docker build --no-cache -t sam-node:local -f Dockerfile.sam-node .
+	docker build --load --no-cache -t sam-node:local -f Dockerfile.sam-node .
 
 docker-build-mock-oidc:
-	docker build -t sam-mock-oidc:local -f tests/e2e/docker/Dockerfile.mock-oidc .
+	docker build --load -t sam-mock-oidc:local -f tests/e2e/docker/Dockerfile.mock-oidc .
 
 docker-build-e2e-runtime:
-	docker build -t sam-e2e-runtime:local -f tests/e2e/docker/Dockerfile.sam-runtime .
+	docker build --load -t sam-e2e-runtime:local -f tests/e2e/docker/Dockerfile.sam-runtime .
 
 docker-build: docker-build-hub docker-build-node docker-build-mock-oidc docker-build-e2e-runtime
 

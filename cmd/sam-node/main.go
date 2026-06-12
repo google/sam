@@ -338,12 +338,12 @@ func main() {
 			fmt.Printf("Client ID discovered: %s\n", hubInfo.ClientId)
 
 			logger.Info("Discovering OIDC endpoints...")
-			tokenURL, deviceAuthURL, err := dummyNode.DiscoverEndpoints(ctx, hubInfo.OidcIssuer)
+			tokenURL, authURL, err := dummyNode.DiscoverEndpoints(ctx, hubInfo.OidcIssuer)
 			if err != nil {
 				logger.Fatalf("Failed to discover OIDC endpoints: %v", err)
 			}
 
-			jwtStr, err := dummyNode.InteractiveLogin(ctx, deviceAuthURL, tokenURL, hubInfo.ClientId, hubInfo.Audience)
+			jwtStr, err := dummyNode.InteractiveLogin(ctx, authURL, tokenURL, hubInfo.ClientId, hubInfo.Audience)
 			if err != nil {
 				logger.Fatalf("Failed to get token: %v", err)
 			}

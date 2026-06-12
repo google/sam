@@ -26,8 +26,7 @@ The manifests for the SAM Hub are available in [sam-hub.yaml](manifests/sam-hub.
 
 To use Google as the OIDC provider instead of the mock provider:
 
-1.  **Create OAuth Client ID:** Create a OAuth 2.0 Client ID in the Google Cloud Console.
-2.  **Set Redirect URI:** Set the authorized redirect URI to `http://<your-hub-public-ip>:8080/callback` (replace `<your-hub-public-ip>` with your actual public IP or domain).
+2.  **No Redirect URI required:** Because `sam-node` implements RFC 8252 (dynamic loopback port selection for native apps), you don't need to configure a specific Redirect URI when setting up a Desktop app. The authorization server will automatically allow loopback redirects.
 3.  **Update Secret:** Update the `sam-hub-secret` in `sam-hub.yaml` with your Google credentials:
     ```yaml
     SAM_OIDC_ISSUER: "https://accounts.google.com"
@@ -175,10 +174,10 @@ sam-node run \
   --client-secret "$SAM_OIDC_SECRET"
 ```
 
-#### 2. Device Authorization Flow (Human Intervention)
-*   **Description:** For input-constrained devices or CLI tools used by humans. The device asks the user to go to a link on their computer or smartphone to authorize the device, avoiding the need to enter complex passwords in the CLI.
-*   **Use Case:** When a human operator is enrolling a node manually.
-*   **How to use:** The user obtains a token via the OIDC provider's device flow (or browser flow) and passes it directly via the `--jwt` flag.
+#### 2. Native App Authorization Code Flow (Human Intervention)
+*   **Description:** For devices operated by humans, this uses the standard Authorization Code Flow with PKCE for native apps (RFC 8252). `sam-node` spins up a temporary local HTTP server, opens your browser, and receives the authentication token locally via an ephemeral loopback address.
+*   **Use Case:** When a human operator is enrolling a node manually via their local terminal.
+*   **How to use:** When you omit the `--jwt` or `--token-url` flags (or pass the OIDC issuer flag interactively), the node opens the browser and completes the flow without needing to enter complex passwords in the CLI. Alternatively, you can obtain a token yourself and pass it via the `--jwt` flag.
 *   **Example:**
 ```bash
 sam-node run \
