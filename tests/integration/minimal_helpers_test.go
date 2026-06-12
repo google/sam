@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -76,9 +77,13 @@ func runCommand(
 
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = cwd
-	if len(env) > 0 {
-		cmd.Env = append(cmd.Env, env...)
+	var finalEnv []string
+	for _, e := range append(os.Environ(), env...) {
+		if !strings.HasPrefix(e, "SSH_CLIENT=") && !strings.HasPrefix(e, "SSH_TTY=") {
+			finalEnv = append(finalEnv, e)
+		}
 	}
+	cmd.Env = finalEnv
 	if stdin != "" {
 		cmd.Stdin = bytes.NewBufferString(stdin)
 	}
@@ -152,9 +157,13 @@ func runCommandWithCallback(
 
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = cwd
-	if len(env) > 0 {
-		cmd.Env = append(cmd.Env, env...)
+	var finalEnv []string
+	for _, e := range append(os.Environ(), env...) {
+		if !strings.HasPrefix(e, "SSH_CLIENT=") && !strings.HasPrefix(e, "SSH_TTY=") {
+			finalEnv = append(finalEnv, e)
+		}
 	}
+	cmd.Env = finalEnv
 	if stdin != "" {
 		cmd.Stdin = bytes.NewBufferString(stdin)
 	}

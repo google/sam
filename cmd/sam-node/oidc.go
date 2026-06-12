@@ -25,6 +25,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -85,14 +86,24 @@ func (n *SamNode) InteractiveLogin(ctx context.Context, authURL, tokenURL, clien
 		return "", fmt.Errorf("failed to generate PKCE: %w", err)
 	}
 
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		return "", fmt.Errorf("failed to start local server: %w", err)
-	}
-	defer func() { _ = listener.Close() }()
+	isHeadless := headlessFlag || os.Getenv("SSH_CLIENT") != "" || os.Getenv("SSH_TTY") != ""
 
-	port := listener.Addr().(*net.TCPAddr).Port
-	redirectURI := fmt.Sprintf("http://127.0.0.1:%d/callback", port)
+	var redirectURI string
+	var listener net.Listener
+
+	if isHeadless {
+		redirectURI = "urn:ietf:wg:oauth:2.0:oob"
+	} else {
+		var err error
+		listener, err = net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			return "", fmt.Errorf("failed to start local server: %w", err)
+		}
+		defer func() { _ = listener.Close() }()
+
+		port := listener.Addr().(*net.TCPAddr).Port
+		redirectURI = fmt.Sprintf("http://127.0.0.1:%d/callback", port)
+	}
 
 	authReq, err := http.NewRequest("GET", authURL, nil)
 	if err != nil {
@@ -117,71 +128,109 @@ func (n *SamNode) InteractiveLogin(ctx context.Context, authURL, tokenURL, clien
 	fmt.Println("------------------------------------------------------------")
 	fmt.Printf("To authenticate, please go to the following URL in your browser:\n\n")
 	fmt.Printf("  %s\n\n", targetURL)
-	fmt.Println("Waiting for authorization...")
+	if isHeadless {
+		fmt.Println("After authorizing, paste the authorization code below:")
+	} else {
+		fmt.Println("Waiting for authorization... (If your browser fails, you can paste the callback URL or code here)")
+	}
 	fmt.Println("------------------------------------------------------------")
 
 	// Try to open browser automatically
 	openBrowserFunc(targetURL)
 
+	loginCtx, loginCancel := context.WithCancel(ctx)
+	defer loginCancel()
+
 	codeChan := make(chan string)
 	errChan := make(chan error)
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
-		query := r.URL.Query()
-		if query.Get("state") != state {
-			http.Error(w, "Invalid state parameter", http.StatusBadRequest)
-			select {
-			case errChan <- fmt.Errorf("invalid state parameter received"):
-			case <-ctx.Done():
+	var srv *http.Server
+	if !isHeadless {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
+			query := r.URL.Query()
+			if query.Get("state") != state {
+				http.Error(w, "Invalid state parameter", http.StatusBadRequest)
+				select {
+				case errChan <- fmt.Errorf("invalid state parameter received"):
+				case <-loginCtx.Done():
+				}
+				return
 			}
-			return
-		}
-		if errStr := query.Get("error"); errStr != "" {
-			desc := query.Get("error_description")
-			http.Error(w, "Authorization failed: "+errStr, http.StatusBadRequest)
-			select {
-			case errChan <- fmt.Errorf("authorization failed: %s - %s", errStr, desc):
-			case <-ctx.Done():
+			if errStr := query.Get("error"); errStr != "" {
+				desc := query.Get("error_description")
+				http.Error(w, "Authorization failed: "+errStr, http.StatusBadRequest)
+				select {
+				case errChan <- fmt.Errorf("authorization failed: %s - %s", errStr, desc):
+				case <-loginCtx.Done():
+				}
+				return
 			}
-			return
-		}
-		code := query.Get("code")
-		if code == "" {
-			http.Error(w, "No code in request", http.StatusBadRequest)
-			select {
-			case errChan <- fmt.Errorf("no code received"):
-			case <-ctx.Done():
+			code := query.Get("code")
+			if code == "" {
+				http.Error(w, "No code in request", http.StatusBadRequest)
+				select {
+				case errChan <- fmt.Errorf("no code received"):
+				case <-loginCtx.Done():
+				}
+				return
 			}
-			return
-		}
 
-		w.Header().Set("Content-Type", "text/html")
-		_, _ = w.Write([]byte("<html><body><h1>Authorization successful!</h1><p>You can close this window and return to the CLI.</p></body></html>"))
+			w.Header().Set("Content-Type", "text/html")
+			_, _ = w.Write([]byte("<html><body><h1>Authorization successful!</h1><p>You can close this window and return to the CLI.</p></body></html>"))
 
-		select {
-		case codeChan <- code:
-		case <-ctx.Done():
-		}
-	})
+			select {
+			case codeChan <- code:
+			case <-loginCtx.Done():
+			}
+		})
 
-	srv := &http.Server{Handler: mux}
+		srv = &http.Server{Handler: mux}
+		go func() {
+			if err := srv.Serve(listener); err != nil && err != http.ErrServerClosed {
+				select {
+				case errChan <- fmt.Errorf("local server error: %w", err):
+				case <-loginCtx.Done():
+				}
+			}
+		}()
+	}
+
+	// Also allow manual code entry via stdin
 	go func() {
-		if err := srv.Serve(listener); err != nil && err != http.ErrServerClosed {
-			errChan <- fmt.Errorf("local server error: %w", err)
+		var input string
+		if _, err := fmt.Scanln(&input); err != nil {
+			return
+		}
+		input = strings.TrimSpace(input)
+		if input == "" {
+			return
+		}
+		if parsed, err := url.Parse(input); err == nil && parsed.Query().Get("code") != "" {
+			input = parsed.Query().Get("code")
+		}
+		select {
+		case codeChan <- input:
+		case <-loginCtx.Done():
 		}
 	}()
 
 	var code string
 	select {
 	case <-ctx.Done():
-		_ = srv.Close()
+		if srv != nil {
+			_ = srv.Close()
+		}
 		return "", ctx.Err()
 	case err := <-errChan:
-		_ = srv.Close()
+		if srv != nil {
+			_ = srv.Close()
+		}
 		return "", err
 	case code = <-codeChan:
-		_ = srv.Close()
+		if srv != nil {
+			_ = srv.Close()
+		}
 	}
 
 	tokenData := url.Values{}

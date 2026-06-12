@@ -71,6 +71,7 @@ var (
 	keyGracePeriodFlag    time.Duration
 	dataDirFlag           string
 	allowLoopbackFlag     bool
+	headlessFlag          bool
 
 	apiTokenFlag string
 	tlsCertFlag  string
@@ -421,6 +422,7 @@ func main() {
 	rootCmd.PersistentFlags().StringVar(&deviceAuthURLFlag, "device-auth-url", "", "OIDC Device Authorization URL")
 	rootCmd.PersistentFlags().StringVar(&audienceFlag, "audience", api.DefaultAudience, "OIDC Audience")
 	rootCmd.PersistentFlags().StringVar(&dataDirFlag, "data-dir", os.Getenv("SAM_DATA_DIR"), "Override directory for the agent store (defaults to OS user config dir)")
+	rootCmd.PersistentFlags().BoolVar(&headlessFlag, "headless", false, "Force headless out-of-band (OOB) authentication flow")
 
 	rootCmd.AddCommand(runCmd)
 	rootCmd.AddCommand(joinCmd)
