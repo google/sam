@@ -154,10 +154,12 @@ func (n *SamNode) CallMCPTool(ctx context.Context, targetPeer peer.ID, toolName 
 
 func (n *SamNode) callMCPToolOnce(ctx context.Context, targetPeer peer.ID, toolName string, params any) (*mcp.CallToolResult, error) {
 	// Open stream
+	logger.Debugf("Dialing %s for MCP...\n", targetPeer)
 	s, err := n.Host.NewStream(ctx, targetPeer, api.MCPProtocolID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open stream to %s: %w", targetPeer, err)
 	}
+	logger.Debugf("Opened stream to %s for MCP\n", targetPeer)
 	defer func() {
 		if err := s.Close(); err != nil {
 			logger.Debugf("[MCP] Failed to close stream: %v", err)
@@ -177,12 +179,14 @@ func (n *SamNode) callMCPToolOnce(ctx context.Context, targetPeer peer.ID, toolN
 	authBytes, _ := proto.Marshal(&authFrame)
 
 	// Write AuthFrame
+	logger.Debugf("Writing auth frame to %s...\n", targetPeer)
 	writer := msgio.NewVarintWriter(s)
 	if err := writer.WriteMsg(authBytes); err != nil {
 		return nil, fmt.Errorf("failed to write auth frame to %s: %w", targetPeer, err)
 	}
 
 	// Read ACK
+	logger.Debugf("Reading auth response from %s...\n", targetPeer)
 	reader := msgio.NewVarintReaderSize(s, 1024*64)
 	msg, err := reader.ReadMsg()
 	if err != nil {
@@ -226,7 +230,7 @@ func (n *SamNode) callMCPToolOnce(ctx context.Context, targetPeer peer.ID, toolN
 // fetchRemoteServiceCatalog calls the remote peer's list_local_services
 // MCP tool with the type filter and returns the parsed catalog.
 func (n *SamNode) fetchRemoteServiceCatalog(ctx context.Context, peerID peer.ID, typeStr string) ([]*api.ServiceInfo, error) {
-	res, err := n.callMCPToolOnce(ctx, peerID, "list_local_services", map[string]string{"type": typeStr})
+	res, err := n.CallMCPTool(ctx, peerID, "list_local_services", map[string]string{"type": typeStr})
 	if err != nil {
 		return nil, err
 	}

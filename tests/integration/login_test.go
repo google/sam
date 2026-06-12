@@ -41,7 +41,7 @@ func TestSamNodeJoin(t *testing.T) {
 		if err := json.NewEncoder(w).Encode(map[string]interface{}{
 			"issuer":                        "http://" + r.Host,
 			"token_endpoint":                "http://" + r.Host + "/token",
-			"device_authorization_endpoint": "http://" + r.Host + "/device/code",
+			"authorization_endpoint": "http://" + r.Host + "/auth",
 		}); err != nil {
 			t.Errorf("Failed to encode response: %v", err)
 		}
@@ -74,7 +74,7 @@ func TestSamNodeJoin(t *testing.T) {
 	// Start mock libp2p hub that knows about our mock OIDC server
 	_, hubAddr := startMockLibp2pHubWithOIDC(t, oidcServer.URL)
 
-	stdout, stderr, err := runCommand(
+	stdout, stderr, err := runCommandWithCallback(
 		t,
 		repoRoot(t),
 		5*time.Second,

@@ -18,11 +18,9 @@ data:
       http: 0.0.0.0:5556
       
     oauth2:
-      # Explicitly enable the Device Flow for headless CLI usage
       grantTypes:
         - "authorization_code"
         - "refresh_token"
-        - "urn:ietf:params:oauth:grant-type:device_code"
       skipApprovalScreen: true
       
     connectors:
@@ -48,7 +46,5 @@ data:
       name: 'SAM Mesh CLI'
       public: true # Allows PKCE flow for CLIs without exposing the secret
       redirectURIs:
-      - 'http://127.0.0.1:8080/callback'
-      - 'http://localhost:8080/callback'
-      - 'https://auth.sam-mesh.dev/device/callback'
-      - '/device/callback'
+      - 'http://127.0.0.1/callback'
+      - 'http://localhost/callback'
