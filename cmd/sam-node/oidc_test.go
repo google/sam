@@ -6,11 +6,21 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"testing"
 	"time"
 )
 
 func TestInteractiveLogin(t *testing.T) {
+	origSSHClient := os.Getenv("SSH_CLIENT")
+	origSSHTTY := os.Getenv("SSH_TTY")
+	os.Unsetenv("SSH_CLIENT")
+	os.Unsetenv("SSH_TTY")
+	defer func() {
+		os.Setenv("SSH_CLIENT", origSSHClient)
+		os.Setenv("SSH_TTY", origSSHTTY)
+	}()
+
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
