@@ -138,6 +138,9 @@ func (n *SamNode) InteractiveLogin(ctx context.Context, authURL, tokenURL, clien
 	// Try to open browser automatically
 	openBrowserFunc(targetURL)
 
+	loginCtx, loginCancel := context.WithCancel(ctx)
+	defer loginCancel()
+
 	codeChan := make(chan string)
 	errChan := make(chan error)
 
@@ -150,7 +153,7 @@ func (n *SamNode) InteractiveLogin(ctx context.Context, authURL, tokenURL, clien
 				http.Error(w, "Invalid state parameter", http.StatusBadRequest)
 				select {
 				case errChan <- fmt.Errorf("invalid state parameter received"):
-				case <-ctx.Done():
+				case <-loginCtx.Done():
 				}
 				return
 			}
@@ -159,7 +162,7 @@ func (n *SamNode) InteractiveLogin(ctx context.Context, authURL, tokenURL, clien
 				http.Error(w, "Authorization failed: "+errStr, http.StatusBadRequest)
 				select {
 				case errChan <- fmt.Errorf("authorization failed: %s - %s", errStr, desc):
-				case <-ctx.Done():
+				case <-loginCtx.Done():
 				}
 				return
 			}
@@ -168,7 +171,7 @@ func (n *SamNode) InteractiveLogin(ctx context.Context, authURL, tokenURL, clien
 				http.Error(w, "No code in request", http.StatusBadRequest)
 				select {
 				case errChan <- fmt.Errorf("no code received"):
-				case <-ctx.Done():
+				case <-loginCtx.Done():
 				}
 				return
 			}
@@ -178,7 +181,7 @@ func (n *SamNode) InteractiveLogin(ctx context.Context, authURL, tokenURL, clien
 
 			select {
 			case codeChan <- code:
-			case <-ctx.Done():
+			case <-loginCtx.Done():
 			}
 		})
 
@@ -187,7 +190,7 @@ func (n *SamNode) InteractiveLogin(ctx context.Context, authURL, tokenURL, clien
 			if err := srv.Serve(listener); err != nil && err != http.ErrServerClosed {
 				select {
 				case errChan <- fmt.Errorf("local server error: %w", err):
-				case <-ctx.Done():
+				case <-loginCtx.Done():
 				}
 			}
 		}()
@@ -208,7 +211,7 @@ func (n *SamNode) InteractiveLogin(ctx context.Context, authURL, tokenURL, clien
 		}
 		select {
 		case codeChan <- input:
-		case <-ctx.Done():
+		case <-loginCtx.Done():
 		}
 	}()
 
