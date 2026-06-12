@@ -6,6 +6,10 @@ metadata:
 spec:
   clusterIP: None
   ports:
+    - port: 9090
+      targetPort: 9090
+      protocol: TCP
+      name: http
     - port: 4501
       targetPort: 4501
       protocol: TCP
@@ -79,6 +83,7 @@ spec:
         - "--external-multiaddr=/ip4/$(HOST_IP)/tcp/4501"
         - "--external-multiaddr=/ip4/$(HOST_IP)/udp/4501/quic-v1"
         - "--external-multiaddr=/ip4/$(HOST_IP)/tcp/4501/wss"
+        - "--external-multiaddr=/dnsaddr/bootstrap.${ENV_NAME}.sam-mesh.dev"
         # 1. Trust Dex for humans/Google/GitHub. 2. Trust GKE for internal Canaries.
         - "--issuer=https://auth.sam-mesh.dev,https://container.googleapis.com/v1/projects/${GCP_PROJECT_ID}/locations/${CLUSTER_REGION}/clusters/${CLUSTER_NAME}"
         # 1. Dex CLI client ID. 2. Canary projected volume audience.
@@ -132,3 +137,66 @@ spec:
     interval: 30s
     path: /metrics
     scheme: http
+---
+apiVersion: networking.gke.io/v1
+kind: HealthCheckPolicy
+metadata:
+  name: sam-hub-healthcheck-${ENV_NAME}
+  namespace: ${NAMESPACE}
+spec:
+  default:
+    checkIntervalSec: 15
+    timeoutSec: 5
+    healthyThreshold: 1
+    unhealthyThreshold: 2
+    config:
+      type: HTTP
+      httpHealthCheck:
+        requestPath: /healthz
+  targetRef:
+    group: ""
+    kind: Service
+    name: sam-hub-${ENV_NAME}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: sam-hub-gateway-${ENV_NAME}
+  namespace: ${NAMESPACE}
+  annotations:
+    networking.gke.io/certmap: sam-hub-cert-map-${ENV_NAME}
+spec:
+  gatewayClassName: gke-l7-global-external-managed
+  addresses:
+  - type: NamedAddress
+    value: sam-hub-ip-${ENV_NAME}
+  listeners:
+  - name: https
+    protocol: HTTPS
+    port: 443
+    allowedRoutes:
+      namespaces:
+        from: Same
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: sam-hub-route-${ENV_NAME}
+  namespace: ${NAMESPACE}
+spec:
+  parentRefs:
+  - name: sam-hub-gateway-${ENV_NAME}
+  hostnames:
+  - "${ENV_NAME}.sam-mesh.dev"
+  rules:
+  - matches:
+    - path:
+        type: Exact
+        value: /register
+    - path:
+        type: Exact
+        value: /info
+    backendRefs:
+    - name: sam-hub-${ENV_NAME}
+      port: 9090
+
