@@ -96,7 +96,7 @@ spec:
         args: 
           - "run"
           - "--config=/etc/sam/sam-node.yaml"
-          - "--hub=https://${ENV_NAME}.sam-mesh.dev"
+          - "--hub=http://sam-hub-${ENV_NAME}.${NAMESPACE}.svc.cluster.local:9090"
           - "--jwt-path=/var/run/secrets/tokens/sam-token"
           - "--api-token=secret-token"
           - "--bind-addr=127.0.0.1:8080"
