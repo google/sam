@@ -379,7 +379,45 @@ func NewSamNode(ctx context.Context, privKey crypto.PrivKey, hubPubKey ed25519.P
 		return nil, fmt.Errorf("failed to start ingress server: %w", err)
 	}
 
+	// Start connection monitor
+	node.startConnectionMonitor(ctx, 2*time.Minute, 1*time.Minute, 3)
+
 	return node, nil
+}
+
+func (n *SamNode) startConnectionMonitor(ctx context.Context, bootstrapDuration, checkInterval time.Duration, maxFailures int) {
+	go func() {
+		// Wait for initial bootstrap to complete
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(bootstrapDuration):
+		}
+
+		ticker := time.NewTicker(checkInterval)
+		defer ticker.Stop()
+
+		consecutiveFailures := 0
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if len(n.Host.Network().Peers()) == 0 {
+					consecutiveFailures++
+					logger.Warnf("Not connected to the mesh (0 peers). Consecutive failures: %d/%d", consecutiveFailures, maxFailures)
+					if consecutiveFailures >= maxFailures {
+						logger.Fatalf("Not connected to the mesh (0 peers) for %d consecutive checks. Exiting to avoid network partition.", maxFailures)
+					}
+				} else {
+					if consecutiveFailures > 0 {
+						logger.Infof("Reconnected to the mesh. Resetting failure count.")
+					}
+					consecutiveFailures = 0
+				}
+			}
+		}
+	}()
 }
 
 func (n *SamNode) RegisterStaticServices(ctx context.Context, services []api.ServiceConfig) error {
