@@ -507,6 +507,9 @@ func (n *SamNode) StartRenewalLoop(ctx context.Context, issuerURL, clientID, cli
 					renewAfter = duration - RenewalBuffer
 				} else if duration > 0 {
 					renewAfter = duration / 2
+					if renewAfter < 2*time.Second {
+						renewAfter = 2 * time.Second
+					}
 				} else {
 					renewAfter = 1 * time.Second
 				}
