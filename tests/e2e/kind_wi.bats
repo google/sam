@@ -1,24 +1,11 @@
 #!/usr/bin/env bats
 
 setup() {
-  if ! command -v kind >/dev/null 2>&1; then
-    skip "kind not available"
-  fi
-  if ! command -v kubectl >/dev/null 2>&1; then
-    skip "kubectl not available"
-  fi
-  if ! command -v jq >/dev/null 2>&1; then
-    skip "jq not available"
-  fi
-
   # We use a unique cluster name to avoid conflicts
   CLUSTER_NAME="sam-wi-test-$RANDOM"
   
   # Create Kind cluster
   kind create cluster --name "${CLUSTER_NAME}"
-  
-  # Build images
-  make docker-build
   
   # Load images into Kind
   kind load docker-image sam-hub:local --name "${CLUSTER_NAME}"
