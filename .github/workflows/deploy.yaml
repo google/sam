@@ -275,6 +275,7 @@ jobs:
 
           export ENV_NAME="${{ vars.ENV_NAME }}"
           export CANARY_NAMESPACE="sam-canary-${ENV_NAME}"
+          export NAMESPACE="sam-${ENV_NAME}"
           export IMAGE_TAG="${{ env.IMAGE_TAG }}"
           export GEMINI_API_KEY="${{ secrets.GEMINI_API_KEY }}"
           export HF_TOKEN="${{ secrets.HF_TOKEN }}"
