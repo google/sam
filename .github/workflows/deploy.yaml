@@ -236,7 +236,8 @@ jobs:
           export CLUSTER_REGION="${{ vars.CLUSTER_REGION }}"
           export CLUSTER_NAME="${{ vars.CLUSTER_NAME }}"
 
-          envsubst < .github/k8s/sam-hub-template.yaml | kubectl apply -f -
+          envsubst '${ENV_NAME} ${NAMESPACE} ${GCP_PROJECT_ID} ${CLUSTER_NAME} ${CLUSTER_REGION} ${IMAGE_TAG}' < .github/k8s/sam-hub-template.yaml | kubectl apply -f -
+          envsubst '${ENV_NAME} ${NAMESPACE} ${GCP_PROJECT_ID}' < .github/k8s/dns-sync-cronjob-template.yaml | kubectl apply -f -
           
           kubectl rollout status statefulset/sam-hub-${ENV_NAME} -n ${NAMESPACE} --timeout=120s || {
             echo "Hub Deployment failed!"
