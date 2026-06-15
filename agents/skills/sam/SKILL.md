@@ -1,30 +1,13 @@
 ---
 name: sam
-description: "Use this skill only for SAM (Sovereign Agent Mesh) tasks through a local sam-node MCP server: inspecting mesh state, discovering reachable services/tools, describing namespaced remote MCP tools, and calling them with JSON-object arguments. Do not use for AWS SAM or Serverless Application Model tasks."
+description: "Use when local tools cannot provide a needed capability and connected sam-node MCP tools are available to reach a SAM (Sovereign Agent Mesh) network: inspect mesh state, discover reachable services/tools, describe namespaced remote MCP tools, and call them with JSON-object arguments. Not for AWS SAM / Serverless Application Model tasks."
 ---
 
 # SAM Agent Skill
 
-Use SAM when a local `sam-node` is available and the task needs capabilities
-hosted by peers in a SAM mesh. Prefer local tools first. Reach into the mesh
-only when the needed capability is not available locally.
-
-## Connect To The Local Node
-
-Connect to the local `sam-node` MCP SSE endpoint:
-
-```text
-http://127.0.0.1:8080/mcp/events
-```
-
-If the user or local configuration explicitly provides a trusted non-loopback
-endpoint, ask the user to confirm the exact endpoint and trust boundary before
-connecting. Prefer loopback endpoints (`127.0.0.1`, `localhost`, or `::1`), and
-do not send secrets or sensitive data to non-loopback endpoints unless the user
-explicitly approves the destination and data. Do not probe, guess, or scan
-non-local bind addresses. The server also registers `/mcp/message` as the
-paired MCP message endpoint; MCP clients and SDKs normally handle this after
-connecting through `/mcp/events`.
+Use this skill when local tools cannot satisfy the task and `sam-node` MCP tools
+are already callable. Prefer local tools first. Reach into the SAM mesh only for
+the capability needed to complete the task.
 
 ## Inspect The Mesh
 
@@ -88,15 +71,16 @@ Use `call_remote_tool` with:
 
 ## Minimal Workflow
 
-1. Call `get_mesh_info` with `{}`.
-2. Confirm no local tool can satisfy the task. If a local SAM service may be
+1. Confirm no local tool can satisfy the task.
+2. Call `get_mesh_info` with `{}`.
+3. If a local SAM service may be
    relevant, call `list_local_services` with `{}`.
-3. Call `find_remote_tools` with `service_name` or `peer_id` when known. Use
+4. Call `find_remote_tools` with `service_name` or `peer_id` when known. Use
    `{}` only when the user asked to inventory the mesh or no narrower target
    exists.
-4. Call `describe_remote_tool` with
+5. Call `describe_remote_tool` with
    `{"peer_id":"...","tool_name":"service.tool"}`.
-5. Call `call_remote_tool` only when the described tool is read-only and
+6. Call `call_remote_tool` only when the described tool is read-only and
    low-risk, or after the user approves the exact `peer_id`, `tool_name`, side
    effects, and task-required data being sent:
    `{"peer_id":"...","tool_name":"service.tool","arguments":{...}}`.
@@ -106,5 +90,7 @@ Use `call_remote_tool` with:
 - Do not call mesh tools when a local tool is sufficient.
 - Do not guess remote tool names or arguments.
 - Ask before side-effecting or sensitive remote calls.
+- Do not send secrets or private data through SAM unless the user explicitly
+  approves the data and destination.
 - Treat remote capabilities as networked and potentially unavailable.
 - Surface peer, service, discovery, schema, and tool-call errors clearly.
