@@ -47,6 +47,9 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
   }
 
   mesh_setup_env() {
+    if [[ -n "${MESH_NETWORK:-}" ]]; then
+      return 0
+    fi
     mesh_cleanup_stale_resources
     
     mesh_build_runtime_image
@@ -72,19 +75,21 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
     fi
   }
 
-  mesh_cleanup_env() {
+  mesh_cleanup_test_resources() {
     local c
     for c in "${MESH_CONTAINERS[@]}"; do
       docker rm -f "${c}" >/dev/null 2>&1 || true
     done
-    if [[ -n "${MESH_NETWORK}" ]]; then
-      docker network rm "${MESH_NETWORK}" >/dev/null 2>&1 || true
-    fi
-    if [[ -n "${MESH_SOCKET_DIR}" ]]; then
-      rm -rf "${MESH_SOCKET_DIR}"
-    fi
     MESH_CONTAINERS=()
-    MESH_NETWORK=""
+  }
+
+  mesh_cleanup_env() {
+    mesh_cleanup_test_resources
+    # We leave the network and socket dir alive for the suite
+  }
+  
+  mesh_cleanup_suite() {
+    mesh_cleanup_stale_resources
   }
 
   mesh_gen_hex32() {
@@ -187,6 +192,9 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
 
   mesh_start_mock_oidc() {
     local name="${MESH_PREFIX}-oidc"
+    if docker inspect -f '{{.State.Running}}' "${name}" 2>/dev/null | grep -q "true"; then
+      return 0
+    fi
     docker run -d \
       --name "${name}" \
       --network "${MESH_NETWORK}" \
@@ -199,6 +207,9 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
 
   mesh_start_hub() {
     local name="${MESH_PREFIX}-hub"
+    if docker inspect -f '{{.State.Running}}' "${name}" 2>/dev/null | grep -q "true"; then
+      return 0
+    fi
     local key
     key="$(mesh_gen_hex32)"
 

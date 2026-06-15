@@ -135,14 +135,6 @@ mesh_call_remote_tool() {
 }
 
 setup() {
-  if ! mesh_require_docker; then
-    skip "docker not available or daemon not running"
-  fi
-
-  if [[ ! -x "./bin/sam-node" || ! -x "./bin/sam-hub" ]]; then
-    skip "missing binaries; run: make build"
-  fi
-
   mesh_setup_env
   mkdir -p tests/e2e/logs
 

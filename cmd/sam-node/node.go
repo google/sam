@@ -311,6 +311,7 @@ func NewSamNode(ctx context.Context, privKey crypto.PrivKey, hubPubKey ed25519.P
 							logger.Warnf("[AuthN] Fallback auth failed with %s: %v", addr, err)
 						} else {
 							logger.Infof("[AuthN] Fallback connection successful!")
+							authenticated = true
 							break
 						}
 					}
@@ -318,6 +319,10 @@ func NewSamNode(ctx context.Context, privKey crypto.PrivKey, hubPubKey ed25519.P
 			} else {
 				logger.Warnf("[AuthN] Failed to fetch updated addresses via HTTP: %v", err)
 			}
+		}
+
+		if !authenticated {
+			return nil, fmt.Errorf("failed to authenticate with any hub: all connection attempts failed")
 		}
 	}
 
@@ -374,7 +379,45 @@ func NewSamNode(ctx context.Context, privKey crypto.PrivKey, hubPubKey ed25519.P
 		return nil, fmt.Errorf("failed to start ingress server: %w", err)
 	}
 
+	// Start connection monitor
+	node.startConnectionMonitor(ctx, 2*time.Minute, 1*time.Minute, 3)
+
 	return node, nil
+}
+
+func (n *SamNode) startConnectionMonitor(ctx context.Context, bootstrapDuration, checkInterval time.Duration, maxFailures int) {
+	go func() {
+		// Wait for initial bootstrap to complete
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(bootstrapDuration):
+		}
+
+		ticker := time.NewTicker(checkInterval)
+		defer ticker.Stop()
+
+		consecutiveFailures := 0
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if len(n.Host.Network().Peers()) == 0 {
+					consecutiveFailures++
+					logger.Warnf("Not connected to the mesh (0 peers). Consecutive failures: %d/%d", consecutiveFailures, maxFailures)
+					if consecutiveFailures >= maxFailures {
+						logger.Fatalf("Not connected to the mesh (0 peers) for %d consecutive checks. Exiting to avoid network partition.", maxFailures)
+					}
+				} else {
+					if consecutiveFailures > 0 {
+						logger.Infof("Reconnected to the mesh. Resetting failure count.")
+					}
+					consecutiveFailures = 0
+				}
+			}
+		}
+	}()
 }
 
 func (n *SamNode) RegisterStaticServices(ctx context.Context, services []api.ServiceConfig) error {
@@ -502,8 +545,11 @@ func (n *SamNode) StartRenewalLoop(ctx context.Context, issuerURL, clientID, cli
 					renewAfter = duration - RenewalBuffer
 				} else if duration > 0 {
 					renewAfter = duration / 2
+					if renewAfter < 2*time.Second {
+						renewAfter = 2 * time.Second
+					}
 				} else {
-					renewAfter = 1 * time.Minute
+					renewAfter = 1 * time.Second
 				}
 			}
 
@@ -517,33 +563,45 @@ func (n *SamNode) StartRenewalLoop(ctx context.Context, issuerURL, clientID, cli
 			case <-timer.C:
 				fmt.Println("Renewing enrollment...")
 				var newJWT string
+				var fetchErr error
+
 				if issuerURL != "" {
 					tokenURL, err := n.DiscoverTokenURL(ctx, issuerURL)
 					if err != nil {
-						fmt.Printf("Failed to discover OIDC endpoints for renewal: %v\n", err)
-						continue
-					}
-					newJWT, err = n.FetchJWT(ctx, tokenURL, clientID, clientSecret)
-					if err != nil {
-						fmt.Printf("Failed to fetch JWT for renewal: %v\n", err)
-						continue
+						fetchErr = fmt.Errorf("failed to discover OIDC endpoints for renewal: %w", err)
+					} else {
+						newJWT, fetchErr = n.FetchJWT(ctx, tokenURL, clientID, clientSecret)
+						if fetchErr != nil {
+							fetchErr = fmt.Errorf("failed to fetch JWT for renewal: %w", fetchErr)
+						}
 					}
 				} else if jwtPath != "" {
 					data, err := os.ReadFile(jwtPath)
 					if err != nil {
-						fmt.Printf("Failed to read JWT file for renewal: %v\n", err)
-						continue
+						fetchErr = fmt.Errorf("failed to read JWT file for renewal: %w", err)
+					} else {
+						newJWT = strings.TrimSpace(string(data))
 					}
-					newJWT = strings.TrimSpace(string(data))
 				} else {
-					fmt.Println("No credentials available for renewal.")
-					continue
+					fetchErr = fmt.Errorf("no credentials available for renewal")
 				}
 
-				if err := n.Enroll(ctx, newJWT); err != nil {
-					fmt.Printf("Renewal enrollment failed: %v\n", err)
+				if fetchErr == nil {
+					fetchErr = n.Enroll(ctx, newJWT)
+				}
+
+				if fetchErr != nil {
+					logger.Errorf("Renewal failed: %v", fetchErr)
+
+					// Check if we are already expired and if so, die to avoid a split brain
+					exp, loadErr := n.Store.LoadIdentityExpiration()
+					if loadErr == nil && exp > 0 {
+						if time.Now().After(time.Unix(exp, 0)) {
+							logger.Fatalf("Identity expired and renewal failed. Exiting to avoid network partition.")
+						}
+					}
 				} else {
-					fmt.Println("Enrollment renewed successfully.")
+					logger.Infof("Enrollment renewed successfully.")
 				}
 			}
 		}
@@ -757,7 +815,7 @@ func (n *SamNode) startDiscovery(ctx context.Context, meshID string, interval ti
 
 				if n.Host.Network().Connectedness(p.ID) != network.Connected {
 					logger.Infof("[Discovery] Found peer not connected via DHT: %s", p.ID)
-					
+
 					// Log the addresses returned by DHT to confirm they include p2p-circuit paths
 					for _, addr := range p.Addrs {
 						logger.Infof("[Discovery] Peer %s advertised address: %s", p.ID, addr)
@@ -939,11 +997,11 @@ func (n *SamNode) findProvidersByCID(ctx context.Context, c cid.Cid) ([]peer.Add
 		for _, addr := range p.Addrs {
 			logger.Infof("[Discovery] Provider %s advertised address: %s", p.ID, addr)
 		}
-		
+
 		if len(p.Addrs) > 0 {
 			n.Host.Peerstore().AddAddrs(p.ID, p.Addrs, peerstore.TempAddrTTL)
 		}
-		
+
 		providers = append(providers, p)
 	}
 	return providers, nil

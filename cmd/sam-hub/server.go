@@ -32,6 +32,10 @@ func handleRegisterHTTP(h *Hub) http.HandlerFunc {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
+		if r.URL.Path != "/register" {
+			http.NotFound(w, r)
+			return
+		}
 
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
@@ -109,6 +113,10 @@ func handleInfoHTTP(h *Hub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if r.URL.Path != "/info" {
+			http.NotFound(w, r)
 			return
 		}
 

@@ -86,6 +86,7 @@ func TestSamNodeRunWithStoredIdentity(t *testing.T) {
 	if err != context.DeadlineExceeded {
 		t.Fatalf("expected run command to keep running until timeout, got: %v\nstdout:\n%s\nstderr:\n%s", err, runOut, runErrOut)
 	}
+	t.Logf("stdout:\n%s\nstderr:\n%s", runOut, runErrOut)
 
 	out := runOut + runErrOut
 	if !strings.Contains(out, "Using stored identity.") {

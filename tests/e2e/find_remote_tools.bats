@@ -24,9 +24,6 @@ start_calc_mcp() {
 }
 
 setup() {
-  if ! mesh_require_docker; then
-    skip "docker not available or daemon not running"
-  fi
   mesh_setup_env
   build_calc_mcp_image
 }
