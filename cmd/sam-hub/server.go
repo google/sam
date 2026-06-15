@@ -173,15 +173,16 @@ func getMyHubAddrs(h *Hub) []string {
 		for _, addr := range h.ExternalAddrs {
 			addrs = append(addrs, addr+"/p2p/"+h.Host.ID().String())
 		}
-	} else {
-		for _, addr := range h.Host.Addrs() {
-			if h.AllowLoopback {
-				addrs = append(addrs, addr.String()+"/p2p/"+h.Host.ID().String())
-			} else {
-				// We don't have isLoopbackOrLinkLocal easily here so just include all or rely on AddrsFactory from main.go
-				addrs = append(addrs, addr.String()+"/p2p/"+h.Host.ID().String())
-			}
+	}
+
+	for _, addr := range h.Host.Addrs() {
+		if h.AllowLoopback {
+			addrs = append(addrs, addr.String()+"/p2p/"+h.Host.ID().String())
+		} else {
+			// We don't have isLoopbackOrLinkLocal easily here so just include all or rely on AddrsFactory from main.go
+			addrs = append(addrs, addr.String()+"/p2p/"+h.Host.ID().String())
 		}
 	}
+
 	return addrs
 }

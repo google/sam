@@ -80,9 +80,8 @@ spec:
         args:
         - "--listen=/ip4/0.0.0.0/tcp/4501"
         - "--listen=/ip4/0.0.0.0/udp/4501/quic-v1"
-        - "--external-multiaddr=/ip4/$(HOST_IP)/tcp/4501"
-        - "--external-multiaddr=/ip4/$(HOST_IP)/udp/4501/quic-v1"
-        - "--external-multiaddr=/ip4/$(HOST_IP)/tcp/4501/wss"
+        - "--external-multiaddr=/dns4/bootstrap.${ENV_NAME}.sam-mesh.dev/tcp/4501"
+        - "--external-multiaddr=/dns4/bootstrap.${ENV_NAME}.sam-mesh.dev/udp/4501/quic-v1"
         - "--external-multiaddr=/dnsaddr/bootstrap.${ENV_NAME}.sam-mesh.dev"
         # 1. Trust Dex for humans/Google/GitHub. 2. Trust GKE for internal Canaries.
         - "--issuer=https://auth.sam-mesh.dev,https://container.googleapis.com/v1/projects/${GCP_PROJECT_ID}/locations/${CLUSTER_REGION}/clusters/${CLUSTER_NAME}"

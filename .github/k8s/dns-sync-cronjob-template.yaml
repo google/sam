@@ -1,0 +1,124 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: dns-sync-sa
+  namespace: ${NAMESPACE}
+  annotations:
+    iam.gke.io/gcp-service-account: dns-cert-manager@${GCP_PROJECT_ID}.iam.gserviceaccount.com
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: dns-sync-role-${ENV_NAME}
+rules:
+- apiGroups: [""]
+  resources: ["nodes"]
+  verbs: ["get", "list"]
+- apiGroups: [""]
+  resources: ["pods", "pods/log"]
+  verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: dns-sync-rolebinding-${ENV_NAME}
+subjects:
+- kind: ServiceAccount
+  name: dns-sync-sa
+  namespace: ${NAMESPACE}
+roleRef:
+  kind: ClusterRole
+  name: dns-sync-role-${ENV_NAME}
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: dns-sync-cronjob
+  namespace: ${NAMESPACE}
+spec:
+  schedule: "*/5 * * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: dns-sync-sa
+          containers:
+          - name: sync-dns
+            image: google/cloud-sdk:latest
+            command:
+            - /bin/bash
+            - -c
+            - |
+              set -e
+              # Extract IPs and PeerIDs of pods running sam-hub
+              echo "Finding sam-hub pods in ${NAMESPACE}..."
+              PODS=$(kubectl get pods -n ${NAMESPACE} -l app=sam-hub-${ENV_NAME} -o jsonpath='{range .items[?(@.status.phase=="Running")]}{.metadata.name}{" "}{.spec.nodeName}{"\n"}{end}')
+              
+              IPS=""
+              TXT_RECORDS=""
+              
+              while read -r pod node; do
+                if [ -z "$pod" ]; then continue; fi
+                echo "Checking pod: $pod on node: $node"
+                IP=$(kubectl get node $node -o jsonpath='{.status.addresses[?(@.type=="ExternalIP")].address}')
+                PEER_ID=$(kubectl logs $pod -n ${NAMESPACE} | grep "PeerID:" | tail -n 1 | awk '{print $NF}')
+                
+                if [ -n "$IP" ] && [ -n "$PEER_ID" ]; then
+                  echo "Found IP $IP and PeerID $PEER_ID"
+                  IPS="$IPS $IP"
+                  TXT_RECORDS="$TXT_RECORDS \"dnsaddr=/dns4/bootstrap.${ENV_NAME}.sam-mesh.dev/tcp/4501/p2p/$PEER_ID\""
+                  TXT_RECORDS="$TXT_RECORDS \"dnsaddr=/dns4/bootstrap.${ENV_NAME}.sam-mesh.dev/udp/4501/quic-v1/p2p/$PEER_ID\""
+                fi
+              done <<< "$PODS"
+              
+              # Unique IPs
+              UNIQUE_IPS=$(echo $IPS | tr ' ' '\n' | sort -u | tr '\n' ' ' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+              
+              if [ -z "$UNIQUE_IPS" ]; then
+                echo "No external IPs or PeerIDs found for sam-hub nodes."
+                exit 0
+              fi
+
+              # Clean TXT records for comparison
+              TXT_RECORDS_CLEAN=$(echo "$TXT_RECORDS" | tr ' ' '\n' | sort -u | tr '\n' ' ' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+
+              OLD_IPS=$(gcloud dns record-sets list --zone=${ENV_NAME} --project=${GCP_PROJECT_ID} --name="bootstrap.${ENV_NAME}.sam-mesh.dev." --type=A --format="value(rrdatas)" 2>/dev/null || true)
+              OLD_IPS_CLEAN=$(echo $OLD_IPS | tr ';' '\n' | sort -u | tr '\n' ' ' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+
+              OLD_TXT=$(gcloud dns record-sets list --zone=${ENV_NAME} --project=${GCP_PROJECT_ID} --name="_dnsaddr.bootstrap.${ENV_NAME}.sam-mesh.dev." --type=TXT --format="value(rrdatas)" 2>/dev/null || true)
+              OLD_TXT_CLEAN=$(echo "$OLD_TXT" | tr ';' '\n' | sort -u | tr '\n' ' ' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+
+              if [ "$UNIQUE_IPS" == "$OLD_IPS_CLEAN" ] && [ "$TXT_RECORDS_CLEAN" == "$OLD_TXT_CLEAN" ]; then
+                echo "DNS records are already up to date. No changes needed."
+                exit 0
+              fi
+
+              echo "DNS records changed! Updating..."
+              echo "Updating DNS record bootstrap.${ENV_NAME}.sam-mesh.dev. with IPs: $UNIQUE_IPS"
+              echo "Updating TXT record _dnsaddr.bootstrap.${ENV_NAME}.sam-mesh.dev."
+              
+              # Start transaction
+              gcloud dns record-sets transaction start --zone=${ENV_NAME} --project=${GCP_PROJECT_ID}
+              
+              # Remove old A records if they exist
+              if [ -n "$OLD_IPS" ]; then
+                OLD_IPS_CLEAN_REMV=$(echo $OLD_IPS | tr ';' ' ')
+                gcloud dns record-sets transaction remove --zone=${ENV_NAME} --project=${GCP_PROJECT_ID} --name="bootstrap.${ENV_NAME}.sam-mesh.dev." --type=A --ttl=300 $OLD_IPS_CLEAN_REMV || true
+              fi
+              
+              # Remove old TXT records if they exist
+              if [ -n "$OLD_TXT" ]; then
+                OLD_TXT_CLEAN_REMV=$(echo "$OLD_TXT" | tr ';' ' ')
+                echo "$OLD_TXT_CLEAN_REMV" | xargs -r gcloud dns record-sets transaction remove --zone=${ENV_NAME} --project=${GCP_PROJECT_ID} --name="_dnsaddr.bootstrap.${ENV_NAME}.sam-mesh.dev." --type=TXT --ttl=300 || true
+              fi
+              
+              # Add new A records
+              gcloud dns record-sets transaction add --zone=${ENV_NAME} --project=${GCP_PROJECT_ID} --name="bootstrap.${ENV_NAME}.sam-mesh.dev." --type=A --ttl=300 $UNIQUE_IPS
+              
+              # Add new TXT records
+              echo "$TXT_RECORDS" | xargs -r gcloud dns record-sets transaction add --zone=${ENV_NAME} --project=${GCP_PROJECT_ID} --name="_dnsaddr.bootstrap.${ENV_NAME}.sam-mesh.dev." --type=TXT --ttl=300
+              
+              # Execute transaction
+              gcloud dns record-sets transaction execute --zone=${ENV_NAME} --project=${GCP_PROJECT_ID}
+          restartPolicy: OnFailure
