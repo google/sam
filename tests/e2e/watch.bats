@@ -20,18 +20,17 @@ teardown() {
 }
 
 @test "sam-node run with stored identity fails if hub is unreachable" {
-  log_file="$TEST_TMPDIR/run.log"
-  run "$SAM_NODE_BINARY" run --listen /ip4/127.0.0.1/udp/0/quic-v1 --listen /ip4/127.0.0.1/tcp/0 >"$log_file" 2>&1
+  run "$SAM_NODE_BINARY" run --listen /ip4/127.0.0.1/udp/0/quic-v1 --listen /ip4/127.0.0.1/tcp/0
   
   if [[ "$status" -eq 0 ]]; then
     echo "Test failed: Node was expected to exit with non-zero status"
-    cat "$log_file"
+    echo "Output: $output"
     return 1
   fi
 
-  if ! grep -q "failed to authenticate with any hub: all connection attempts failed" "$log_file"; then
+  if [[ ! "$output" == *"all connection attempts failed"* ]]; then
     echo "Test failed: Node did not log the expected error message"
-    cat "$log_file"
+    echo "Output: $output"
     return 1
   fi
 }
