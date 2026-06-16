@@ -842,16 +842,18 @@ func (n *SamNode) startDiscovery(ctx context.Context, meshID string, interval ti
 				}
 
 				if n.Host.Network().Connectedness(p.ID) != network.Connected {
-					logger.Infof("[Discovery] Found peer not connected via DHT: %s", p.ID)
+					logger.Debugf("[Discovery] Found peer not connected via DHT: %s", p.ID)
 
 					// Log the addresses returned by DHT to confirm they include p2p-circuit paths
 					for _, addr := range p.Addrs {
-						logger.Infof("[Discovery] Peer %s advertised address: %s", p.ID, addr)
+						logger.Debugf("[Discovery] Peer %s advertised address: %s", p.ID, addr)
 					}
 
 					go func(pi peer.AddrInfo) {
-						if err := n.Host.Connect(ctx, pi); err != nil {
-							logger.Errorf("[Discovery] Failed to connect to %s: %v", pi.ID, err)
+						dialCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+						defer cancel()
+						if err := n.Host.Connect(dialCtx, pi); err != nil {
+							logger.Debugf("[Discovery] Failed to connect to %s: %v", pi.ID, err)
 						}
 					}(p)
 				}
