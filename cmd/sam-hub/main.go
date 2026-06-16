@@ -50,7 +50,6 @@ import (
 	"github.com/libp2p/go-libp2p/p2p/net/connmgr"
 	"github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/relay"
 	libp2ptls "github.com/libp2p/go-libp2p/p2p/security/tls"
-	"github.com/libp2p/go-libp2p/p2p/transport/websocket"
 	"github.com/multiformats/go-multiaddr"
 
 	"golang.org/x/time/rate"
@@ -150,8 +149,7 @@ type Hub struct {
 }
 
 // NewHub starts a host supporting both QUIC and TCP (with TLS 1.3)
-func NewHub(ctx context.Context, policy *api.PolicyConfig, allowLoopback bool, mux *http.ServeMux, serverTlsConfig *tls.Config) (*Hub, error) {
-
+func NewHub(ctx context.Context, policy *api.PolicyConfig, allowLoopback bool) (*Hub, error) {
 	// Connection Manager for DoS protection
 	cm, err := connmgr.NewConnManager(LowWaterMark, HighWaterMark, connmgr.WithGracePeriod(ConnGracePeriod))
 	if err != nil {
@@ -159,6 +157,7 @@ func NewHub(ctx context.Context, policy *api.PolicyConfig, allowLoopback bool, m
 	}
 
 	opts := []libp2p.Option{
+		libp2p.DefaultTransports,
 		libp2p.ListenAddrStrings(listenAddrs...),
 		// FIPS compliant Security
 		libp2p.Security(libp2ptls.ID, libp2ptls.New),
@@ -177,13 +176,6 @@ func NewHub(ctx context.Context, policy *api.PolicyConfig, allowLoopback bool, m
 			}
 			return filtered
 		}),
-	}
-	if mux != nil {
-		if serverTlsConfig != nil {
-			opts = append(opts, libp2p.Transport(websocket.New, websocket.WithHTTPHandler(mux), websocket.WithTLSConfig(serverTlsConfig)))
-		} else {
-			opts = append(opts, libp2p.Transport(websocket.New, websocket.WithHTTPHandler(mux)))
-		}
 	}
 
 	h, err := libp2p.New(opts...)
@@ -624,26 +616,7 @@ func main() {
 				logger.Fatal(err)
 			}
 
-			// Add websocket listen address based on bindAddress
-			host, port, err := net.SplitHostPort(bindAddress)
-			if err != nil {
-				// if bindAddress is just ":9090"
-				if strings.HasPrefix(bindAddress, ":") {
-					host = "0.0.0.0"
-					port = strings.TrimPrefix(bindAddress, ":")
-				} else {
-					logger.Fatalf("Invalid bind address: %v", err)
-				}
-			}
-			if host == "" {
-				host = "0.0.0.0"
-			}
-			ipVersion := "ip4"
-			if strings.Contains(host, ":") {
-				ipVersion = "ip6"
-			}
 			var serverTlsConfig *tls.Config
-			wsScheme := "ws"
 			if tlsCertFile != "" && tlsKeyFile != "" {
 				cert, err := tls.LoadX509KeyPair(tlsCertFile, tlsKeyFile)
 				if err != nil {
@@ -652,12 +625,15 @@ func main() {
 				serverTlsConfig = &tls.Config{
 					Certificates: []tls.Certificate{cert},
 				}
-				wsScheme = "wss"
 			}
-			wsAddr := fmt.Sprintf("/%s/%s/tcp/%s/%s", ipVersion, host, port, wsScheme)
-			listenAddrs = append(listenAddrs, wsAddr)
 
-			var hRef atomic.Pointer[Hub]
+			h, err := NewHub(ctx, policyConfig, allowLoopbackFlag)
+			if err != nil {
+				logger.Fatal(err)
+			}
+
+			// Start key rotation if enabled
+			h.startRotation(ctx)
 
 			mux := http.NewServeMux()
 			mux.Handle("/metrics", promhttp.HandlerFor(prometheus.DefaultGatherer, promhttp.HandlerOpts{}))
@@ -671,21 +647,8 @@ func main() {
 				}
 			})
 
-			// Register Hub-specific HTTP routes using an atomic pointer to avoid data races
-			mux.HandleFunc("/register", func(w http.ResponseWriter, r *http.Request) {
-				if h := hRef.Load(); h != nil {
-					handleRegisterHTTP(h)(w, r)
-				} else {
-					http.Error(w, "Hub not ready", http.StatusServiceUnavailable)
-				}
-			})
-			mux.HandleFunc("/info", func(w http.ResponseWriter, r *http.Request) {
-				if h := hRef.Load(); h != nil {
-					handleInfoHTTP(h)(w, r)
-				} else {
-					http.Error(w, "Hub not ready", http.StatusServiceUnavailable)
-				}
-			})
+			mux.HandleFunc("/register", h.handleRegisterHTTP)
+			mux.HandleFunc("/info", h.handleInfoHTTP)
 			mux.HandleFunc("/admin/ban", func(w http.ResponseWriter, r *http.Request) {
 				if adminToken != "" {
 					authHeader := r.Header.Get("Authorization")
@@ -694,27 +657,40 @@ func main() {
 						return
 					}
 				}
-				if h := hRef.Load(); h != nil {
-					handleBan(h)(w, r)
-				} else {
-					http.Error(w, "Hub not ready", http.StatusServiceUnavailable)
-				}
+				handleBan(h)(w, r)
 			})
 
-			h, err := NewHub(ctx, policyConfig, allowLoopbackFlag, mux, serverTlsConfig)
-			if err != nil {
-				logger.Fatal(err)
+			server := &http.Server{
+				Addr:              bindAddress,
+				Handler:           mux,
+				ReadHeaderTimeout: 5 * time.Second,
+				ReadTimeout:       10 * time.Second,
+				WriteTimeout:      10 * time.Second,
+				IdleTimeout:       120 * time.Second,
 			}
-			hRef.Store(h)
 
-			// Start key rotation if enabled
-			h.startRotation(ctx)
+			go func() {
+				if serverTlsConfig != nil {
+					server.TLSConfig = serverTlsConfig
+					if err := server.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
+						logger.Fatalf("HTTP server failed: %v", err)
+					}
+				} else {
+					if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+						logger.Fatalf("HTTP server failed: %v", err)
+					}
+				}
+			}()
 
 			logger.Infof("SAM Hub Online (HTTP on %s, P2P on %v)", bindAddress, listenAddrs)
 			isHubReady.Store(true)
 			logger.Infof("MeshID: %s", h.MeshID)
 			logger.Infof("PeerID: %s", h.Host.ID())
 			<-ctx.Done()
+
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = server.Shutdown(shutdownCtx)
 		},
 	}
 

@@ -29,6 +29,8 @@ teardown() {
     --key "${hub_key}" \
     --mesh "e2e-mesh" \
     --admin-token "e2e-token" \
+    --listen "/ip4/0.0.0.0/tcp/4002" \
+    --external-multiaddr "/dns4/sam-hub/tcp/4002" \
     --log-level debug >/dev/null
 
   MESH_CONTAINERS+=("${hub_name}")
@@ -81,7 +83,7 @@ teardown() {
 
   # Publish ban event for Node 2
   echo "[$(date +%T)] Publishing ban event"
-  run docker exec "${hub_name}" /sam-hub admin ban --peer "${node2_peer_id}" --connect "/dns4/sam-hub/tcp/9090/ws/p2p/${hub_peer_id}" --admin-token "e2e-token"
+  run docker exec "${hub_name}" /sam-hub admin ban --peer "${node2_peer_id}" --admin-token "e2e-token"
   
   echo "admin ban output: $output"
   [[ "$status" -eq 0 ]]

@@ -17,8 +17,8 @@ package integration_test
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"crypto/ed25519"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -28,21 +28,21 @@ import (
 	"testing"
 	"time"
 
-	"io"
-	"net/http"
-	"net/http/httptest"
 	"github.com/biscuit-auth/biscuit-go/v2"
 	"github.com/biscuit-auth/biscuit-go/v2/parser"
 	"github.com/google/sam/api"
 	"github.com/libp2p/go-libp2p"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	"github.com/libp2p/go-libp2p/core/crypto"
-	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/host"
+	"github.com/libp2p/go-libp2p/core/network"
+	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-msgio"
 	"github.com/multiformats/go-multiaddr"
 	"google.golang.org/protobuf/proto"
+	"io"
+	"net/http"
+	"net/http/httptest"
 )
 
 // init forces the biscuit-go parser to build its underlying participle
@@ -390,8 +390,8 @@ func TestSelfHealingHTTPFallback(t *testing.T) {
 	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"issuer":                        "http://" + r.Host,
-			"token_endpoint":                "http://" + r.Host + "/token",
+			"issuer":                 "http://" + r.Host,
+			"token_endpoint":         "http://" + r.Host + "/token",
 			"authorization_endpoint": "http://" + r.Host + "/auth",
 		})
 	})
@@ -497,8 +497,8 @@ func TestSelfHealingHTTPFallback(t *testing.T) {
 	success := false
 	for i := 0; i < 50; i++ {
 		out = stdout.String()
-		if strings.Contains(out, "Attempting to fetch updated hub addresses via HTTP") && 
-		   strings.Contains(out, "Fallback connection successful!") {
+		if strings.Contains(out, "Attempting to fetch updated hub addresses via HTTP") &&
+			strings.Contains(out, "Fallback connection successful!") {
 			success = true
 			break
 		}

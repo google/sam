@@ -222,7 +222,8 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
       --client-id "sam-e2e" \
       --allowed-audiences "sam-e2e,sam-mesh-audience" \
       --key "${key}" \
-      --external-multiaddr "/dns4/sam-hub/tcp/9090/ws" \
+      --listen "/ip4/0.0.0.0/tcp/4002" \
+      --external-multiaddr "/dns4/sam-hub/tcp/4002" \
       --mesh "e2e-mesh" >/dev/null
 
     MESH_CONTAINERS+=("${name}")

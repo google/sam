@@ -39,8 +39,8 @@ func TestSamNodeJoin(t *testing.T) {
 	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(map[string]interface{}{
-			"issuer":                        "http://" + r.Host,
-			"token_endpoint":                "http://" + r.Host + "/token",
+			"issuer":                 "http://" + r.Host,
+			"token_endpoint":         "http://" + r.Host + "/token",
 			"authorization_endpoint": "http://" + r.Host + "/auth",
 		}); err != nil {
 			t.Errorf("Failed to encode response: %v", err)

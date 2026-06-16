@@ -67,7 +67,7 @@ func (m *MCPService) Init(ctx context.Context) error {
 	}
 
 	client := mcp.NewClient(&mcp.Implementation{Name: "sam-node-aggregator", Version: "0.1.0"}, nil)
-	
+
 	var s *mcp.ClientSession
 	var err error
 

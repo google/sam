@@ -29,8 +29,8 @@ import (
 	"github.com/biscuit-auth/biscuit-go/v2/parser"
 	"github.com/google/sam/api"
 	lru "github.com/hashicorp/golang-lru/v2"
-	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/crypto"
+	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/libp2p/go-msgio"
@@ -42,21 +42,21 @@ type mockConn struct {
 	remotePeer peer.ID
 }
 
-func (c *mockConn) RemotePeer() peer.ID { return c.remotePeer }
-func (c *mockConn) LocalPeer() peer.ID { return "" }
-func (c *mockConn) LocalMultiaddr() multiaddr.Multiaddr { return nil }
-func (c *mockConn) RemoteMultiaddr() multiaddr.Multiaddr { return nil }
-func (c *mockConn) Stat() network.ConnStats { return network.ConnStats{} }
-func (c *mockConn) Scope() network.ConnScope { return nil }
-func (c *mockConn) Close() error { return nil }
-func (c *mockConn) CloseWithError(network.ConnErrorCode) error { return nil }
-func (c *mockConn) ConnState() network.ConnectionState { return network.ConnectionState{} }
-func (c *mockConn) GetStreams() []network.Stream { return nil }
-func (c *mockConn) ID() string { return "" }
-func (c *mockConn) IsClosed() bool { return false }
+func (c *mockConn) RemotePeer() peer.ID                               { return c.remotePeer }
+func (c *mockConn) LocalPeer() peer.ID                                { return "" }
+func (c *mockConn) LocalMultiaddr() multiaddr.Multiaddr               { return nil }
+func (c *mockConn) RemoteMultiaddr() multiaddr.Multiaddr              { return nil }
+func (c *mockConn) Stat() network.ConnStats                           { return network.ConnStats{} }
+func (c *mockConn) Scope() network.ConnScope                          { return nil }
+func (c *mockConn) Close() error                                      { return nil }
+func (c *mockConn) CloseWithError(network.ConnErrorCode) error        { return nil }
+func (c *mockConn) ConnState() network.ConnectionState                { return network.ConnectionState{} }
+func (c *mockConn) GetStreams() []network.Stream                      { return nil }
+func (c *mockConn) ID() string                                        { return "" }
+func (c *mockConn) IsClosed() bool                                    { return false }
 func (c *mockConn) NewStream(context.Context) (network.Stream, error) { return nil, nil }
-func (c *mockConn) RemotePublicKey() crypto.PubKey { return nil }
-func (c *mockConn) As(interface{}) bool { return false }
+func (c *mockConn) RemotePublicKey() crypto.PubKey                    { return nil }
+func (c *mockConn) As(interface{}) bool                               { return false }
 
 type mockStream struct {
 	r        io.Reader
@@ -65,22 +65,22 @@ type mockStream struct {
 	conn     network.Conn
 }
 
-func (s *mockStream) Read(p []byte) (n int, err error) { return s.r.Read(p) }
-func (s *mockStream) Write(p []byte) (n int, err error) { return s.w.Write(p) }
-func (s *mockStream) Close() error { return nil }
-func (s *mockStream) Protocol() protocol.ID { return s.protocol }
-func (s *mockStream) ID() string { return "" }
-func (s *mockStream) SetProtocol(protocol.ID) error { return nil }
-func (s *mockStream) CloseRead() error { return nil }
-func (s *mockStream) CloseWrite() error { return nil }
-func (s *mockStream) Reset() error { return nil }
+func (s *mockStream) Read(p []byte) (n int, err error)             { return s.r.Read(p) }
+func (s *mockStream) Write(p []byte) (n int, err error)            { return s.w.Write(p) }
+func (s *mockStream) Close() error                                 { return nil }
+func (s *mockStream) Protocol() protocol.ID                        { return s.protocol }
+func (s *mockStream) ID() string                                   { return "" }
+func (s *mockStream) SetProtocol(protocol.ID) error                { return nil }
+func (s *mockStream) CloseRead() error                             { return nil }
+func (s *mockStream) CloseWrite() error                            { return nil }
+func (s *mockStream) Reset() error                                 { return nil }
 func (s *mockStream) ResetWithError(network.StreamErrorCode) error { return nil }
-func (s *mockStream) SetDeadline(time.Time) error { return nil }
-func (s *mockStream) SetReadDeadline(time.Time) error { return nil }
-func (s *mockStream) SetWriteDeadline(time.Time) error { return nil }
-func (s *mockStream) Stat() network.Stats { return network.Stats{} }
-func (s *mockStream) Conn() network.Conn { return s.conn }
-func (s *mockStream) Scope() network.StreamScope { return nil }
+func (s *mockStream) SetDeadline(time.Time) error                  { return nil }
+func (s *mockStream) SetReadDeadline(time.Time) error              { return nil }
+func (s *mockStream) SetWriteDeadline(time.Time) error             { return nil }
+func (s *mockStream) Stat() network.Stats                          { return network.Stats{} }
+func (s *mockStream) Conn() network.Conn                           { return s.conn }
+func (s *mockStream) Scope() network.StreamScope                   { return nil }
 
 func TestAuthorize(t *testing.T) {
 	dir, err := os.MkdirTemp("", "middleware-test")

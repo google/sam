@@ -48,7 +48,7 @@ func TestPeerRateLimiter(t *testing.T) {
 		}
 	}
 	t.Logf("Allowed %d more requests after burst loop", count)
-	
+
 	if count > 0 {
 		t.Errorf("Expected requests exceeding burst to be rejected, but allowed %d more", count)
 	}
@@ -66,7 +66,7 @@ func TestPeerRateLimiter(t *testing.T) {
 	// Cache should have evicted peer1 or peer2 (LRU).
 	// Since we used peer1 and then peer2, peer1 is the oldest!
 	// So peer1 should be evicted!
-	
+
 	// Let's verify peer1 was evicted by checking if it gets a new limiter (allowed again!)
 	if !prl.Allow(peer1) {
 		t.Error("Expected evicted peer1 to be allowed again with new limiter")

@@ -168,7 +168,7 @@ func TestPubSubTools(t *testing.T) {
 	addr2 := waitForPeerInfoInLog(t, filepath.Join(tmpHome2, "node2.log"))
 	t.Logf("Node 2 address: %s", addr2)
 	callTool(mcpAddr1, "connect_peer", map[string]any{"peer_addr": addr2})
-	
+
 	// Node 1 broadcasts on topic "test-topic"
 	broadcastResult := callTool(mcpAddr1, "mesh_pubsub_broadcast", map[string]any{
 		"topic":   "test-topic",

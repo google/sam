@@ -6,7 +6,6 @@ import (
 )
 
 var (
-
 	samHubEnrollmentTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "sam_hub_enrollment_total",
 		Help: "Total enrollment requests, partitioned by status.",
