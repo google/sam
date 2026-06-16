@@ -45,7 +45,7 @@ spec:
           serviceAccountName: dns-sync-sa
           containers:
           - name: sync-dns
-            image: google/cloud-sdk:stable
+            image: google/cloud-sdk:latest
             command:
             - /bin/bash
             - -c
