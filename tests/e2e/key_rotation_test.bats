@@ -28,7 +28,8 @@ teardown() {
     --issuer "http://mock-oidc:18080" \
     --client-id "sam-e2e" \
     --key "${key}" \
-    --external-multiaddr "/dns4/sam-hub/tcp/9090/ws" \
+    --listen "/ip4/0.0.0.0/tcp/4002" \
+    --external-multiaddr "/dns4/sam-hub/tcp/4002" \
     --mesh "e2e-mesh" \
     --key-rotation-interval 5s >/dev/null
 
