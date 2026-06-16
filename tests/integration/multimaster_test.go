@@ -27,7 +27,6 @@ import (
 
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/libp2p/go-libp2p/p2p/transport/websocket"
 	"github.com/multiformats/go-multiaddr"
 )
 
@@ -58,10 +57,13 @@ roles: {}
 
 	portA := getFreePort(t)
 	portB := getFreePort(t)
+	p2pPortA := getFreePort(t)
+	p2pPortB := getFreePort(t)
 
 	// Start Replica A
 	cmdA := exec.Command(hubBin,
 		"--bind-address", fmt.Sprintf("127.0.0.1:%d", portA),
+		"--listen", fmt.Sprintf("/ip4/127.0.0.1/tcp/%d", p2pPortA),
 		"--policy-file", policyFile,
 		"--keys-db", filepath.Join(tmpDir, "keysA.db"),
 		"--allow-loopback",
@@ -78,6 +80,7 @@ roles: {}
 	// Start Replica B
 	cmdB := exec.Command(hubBin,
 		"--bind-address", fmt.Sprintf("127.0.0.1:%d", portB),
+		"--listen", fmt.Sprintf("/ip4/127.0.0.1/tcp/%d", p2pPortB),
 		"--policy-file", policyFile,
 		"--keys-db", filepath.Join(tmpDir, "keysB.db"),
 		"--allow-loopback",
@@ -135,7 +138,6 @@ roles: {}
 	// Create a separate libp2p client host
 	clientHost, err := libp2p.New(
 		libp2p.NoListenAddrs,
-		libp2p.Transport(websocket.New),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -143,7 +145,7 @@ roles: {}
 	defer func() { _ = clientHost.Close() }()
 
 	// Validate connecting to Replica A
-	addrA, err := multiaddr.NewMultiaddr(fmt.Sprintf("/ip4/127.0.0.1/tcp/%d/ws/p2p/%s", portA, peerIDA))
+	addrA, err := multiaddr.NewMultiaddr(fmt.Sprintf("/ip4/127.0.0.1/tcp/%d/p2p/%s", p2pPortA, peerIDA))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -238,12 +238,10 @@ func TestHandleInfoHTTP(t *testing.T) {
 		Host:             h,
 	}
 
-	handler := handleInfoHTTP(hub)
-
 	req := httptest.NewRequest("GET", "/info", nil)
 	w := httptest.NewRecorder()
 
-	handler(w, req)
+	hub.handleInfoHTTP(w, req)
 
 	resp := w.Result()
 	if resp.StatusCode != http.StatusOK {
