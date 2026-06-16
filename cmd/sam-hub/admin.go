@@ -37,7 +37,7 @@ func handleBan(admin HubAdmin) http.HandlerFunc {
 		}
 		peerID := r.URL.Query().Get("peer")
 		logger.Infof("[Admin API] Received ban request for peer: %s", peerID)
-		
+
 		if peerID == "" {
 			http.Error(w, "Missing peer parameter", http.StatusBadRequest)
 			return

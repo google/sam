@@ -29,8 +29,8 @@ import (
 	"time"
 
 	"github.com/google/sam/api"
-	"google.golang.org/protobuf/encoding/protojson"
 	libp2phttp "github.com/libp2p/go-libp2p-http"
+	"google.golang.org/protobuf/encoding/protojson"
 )
 
 func startSidecarServer(node *SamNode, addr, token, certFile, keyFile, caFile string) error {

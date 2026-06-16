@@ -71,7 +71,7 @@ func NewKeyRing(dbPath string, gracePeriod time.Duration, initialSeed []byte) (*
 		}
 		priv := ed25519.NewKeyFromSeed(initialSeed)
 		pub := priv.Public().(ed25519.PublicKey)
-		
+
 		if !bytes.Equal(kr.Current.Private, priv) {
 			if len(kr.Current.Private) > 0 {
 				kr.Current.Expiration = time.Now().Add(gracePeriod)

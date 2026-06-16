@@ -660,8 +660,6 @@ func main() {
 				handleBan(h)(w, r)
 			})
 
-
-
 			server := &http.Server{
 				Addr:    bindAddress,
 				Handler: mux,

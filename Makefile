@@ -52,8 +52,13 @@ test-e2e-container: build docker-build
 	@command -v bats >/dev/null 2>&1 || { echo "bats not found"; exit 1; }
 	bats --verbose-run tests/e2e/container_mesh.bats
 
+# code formatters
+.PHONY: fmt
+fmt:
+	go fmt ./...
+
 # code linters
-lint:
+lint: fmt
 	hack/lint.sh
 
 .PHONY: verify
