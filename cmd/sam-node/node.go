@@ -385,6 +385,26 @@ func NewSamNode(ctx context.Context, privKey crypto.PrivKey, hubPubKey ed25519.P
 	return node, nil
 }
 
+func (n *SamNode) IsConnected() bool {
+	return n.HubPeerID != "" && n.Host.Network().Connectedness(n.HubPeerID) == network.Connected
+}
+
+func (n *SamNode) HubPeerIDString() string {
+	return n.HubPeerID.String()
+}
+
+func (n *SamNode) LoadHubConfig() ([]byte, []string, error) {
+	return n.Store.LoadHubConfig()
+}
+
+func (n *SamNode) LoadHubURL() (string, error) {
+	return n.Store.LoadHubURL()
+}
+
+func (n *SamNode) SaveHubConfig(pubKey []byte, addrs []string) error {
+	return n.Store.SaveHubConfig(pubKey, addrs)
+}
+
 func (n *SamNode) startConnectionMonitor(ctx context.Context, bootstrapDuration, checkInterval time.Duration, maxFailures int) {
 	go func() {
 		// Wait for initial bootstrap to complete
@@ -403,17 +423,27 @@ func (n *SamNode) startConnectionMonitor(ctx context.Context, bootstrapDuration,
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				if len(n.Host.Network().Peers()) == 0 {
-					consecutiveFailures++
-					logger.Warnf("Not connected to the mesh (0 peers). Consecutive failures: %d/%d", consecutiveFailures, maxFailures)
-					if consecutiveFailures >= maxFailures {
-						logger.Fatalf("Not connected to the mesh (0 peers) for %d consecutive checks. Exiting to avoid network partition.", maxFailures)
-					}
-				} else {
+				stable, reconnected := checkHubConnection(ctx, n)
+
+				if stable {
 					if consecutiveFailures > 0 {
-						logger.Infof("Reconnected to the mesh. Resetting failure count.")
+						logger.Infof("[Monitor] Connection to hub is stable. Resetting failure count.")
+						consecutiveFailures = 0
 					}
+					continue
+				}
+
+				if reconnected {
+					logger.Infof("[Monitor] Reconnected successfully. Reproviding services to DHT...")
+					n.services.ReprovideAll(ctx)
 					consecutiveFailures = 0
+					continue
+				}
+
+				consecutiveFailures++
+				logger.Errorf("[Monitor] Failed to reconnect to the hub. Consecutive failures: %d/%d", consecutiveFailures, maxFailures)
+				if consecutiveFailures >= maxFailures {
+					logger.Fatalf("[Monitor] Failed to reconnect to the hub for %d consecutive checks. Exiting to avoid network partition.", maxFailures)
 				}
 			}
 		}
@@ -814,16 +844,18 @@ func (n *SamNode) startDiscovery(ctx context.Context, meshID string, interval ti
 				}
 
 				if n.Host.Network().Connectedness(p.ID) != network.Connected {
-					logger.Infof("[Discovery] Found peer not connected via DHT: %s", p.ID)
+					logger.Debugf("[Discovery] Found peer not connected via DHT: %s", p.ID)
 
 					// Log the addresses returned by DHT to confirm they include p2p-circuit paths
 					for _, addr := range p.Addrs {
-						logger.Infof("[Discovery] Peer %s advertised address: %s", p.ID, addr)
+						logger.Debugf("[Discovery] Peer %s advertised address: %s", p.ID, addr)
 					}
 
 					go func(pi peer.AddrInfo) {
-						if err := n.Host.Connect(ctx, pi); err != nil {
-							logger.Errorf("[Discovery] Failed to connect to %s: %v", pi.ID, err)
+						dialCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+						defer cancel()
+						if err := n.Host.Connect(dialCtx, pi); err != nil {
+							logger.Debugf("[Discovery] Failed to connect to %s: %v", pi.ID, err)
 						}
 					}(p)
 				}
