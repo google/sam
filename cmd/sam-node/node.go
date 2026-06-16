@@ -434,6 +434,8 @@ func (n *SamNode) startConnectionMonitor(ctx context.Context, bootstrapDuration,
 				}
 
 				if reconnected {
+					logger.Infof("[Monitor] Reconnected successfully. Reproviding services to DHT...")
+					n.services.ReprovideAll(ctx)
 					consecutiveFailures = 0
 					continue
 				}
