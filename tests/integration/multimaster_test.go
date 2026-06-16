@@ -163,7 +163,7 @@ roles: {}
 	t.Log("Successfully connected and authenticated with Hub Replica A!")
 
 	// Validate connecting to Replica B
-	addrB, err := multiaddr.NewMultiaddr(fmt.Sprintf("/ip4/127.0.0.1/tcp/%d/ws/p2p/%s", portB, peerIDB))
+	addrB, err := multiaddr.NewMultiaddr(fmt.Sprintf("/ip4/127.0.0.1/tcp/%d/p2p/%s", p2pPortB, peerIDB))
 	if err != nil {
 		t.Fatal(err)
 	}
