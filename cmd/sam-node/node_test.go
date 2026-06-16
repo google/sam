@@ -94,20 +94,27 @@ func TestStartRenewalLoop_ExpiredAndFails(t *testing.T) {
 	t.Fatalf("process ran with err %v, want exit status 1 (fatal crash)", err)
 }
 
-func TestConnectionMonitor_RetriesWithoutCrashing(t *testing.T) {
-	priv, _, _ := crypto.GenerateKeyPair(crypto.Ed25519, -1)
-	store, _ := NewStore(t.TempDir())
-	node, err := NewSamNode(context.Background(), priv, nil, nil, store, "test", "10s", []string{"/ip4/127.0.0.1/tcp/0"}, false, nil, 0, false)
-	if err != nil {
-		t.Fatalf("Failed to create node: %v", err)
+func TestConnectionMonitor_CrashesAfterFailures(t *testing.T) {
+	if os.Getenv("BE_CRASHER_MONITOR") == "1" {
+		priv, _, _ := crypto.GenerateKeyPair(crypto.Ed25519, -1)
+		store, _ := NewStore(t.TempDir())
+		node, err := NewSamNode(context.Background(), priv, nil, nil, store, "test", "10s", []string{"/ip4/127.0.0.1/tcp/0"}, false, nil, 0, false)
+		if err != nil {
+			os.Exit(0) // Ignore NewSamNode errors for this crasher
+		}
+
+		// Use very short durations
+		node.startConnectionMonitor(context.Background(), 10*time.Millisecond, 10*time.Millisecond, 3)
+		time.Sleep(1 * time.Second)
+		os.Exit(0) // should not be reached
+		return
 	}
 
-	// Use very short durations
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	node.startConnectionMonitor(ctx, 10*time.Millisecond, 10*time.Millisecond, 3)
-	time.Sleep(100 * time.Millisecond) // Wait long enough for multiple failures
-
-	// If it didn't crash, the test passes
+	cmd := exec.Command(os.Args[0], "-test.run=TestConnectionMonitor_CrashesAfterFailures")
+	cmd.Env = append(os.Environ(), "BE_CRASHER_MONITOR=1")
+	err := cmd.Run()
+	if e, ok := err.(*exec.ExitError); ok && !e.Success() {
+		return // Successful fatal exit
+	}
+	t.Fatalf("process ran with err %v, want exit status 1 (fatal crash)", err)
 }

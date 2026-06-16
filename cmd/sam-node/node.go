@@ -439,7 +439,10 @@ func (n *SamNode) startConnectionMonitor(ctx context.Context, bootstrapDuration,
 				}
 
 				consecutiveFailures++
-				logger.Errorf("[Monitor] Failed to reconnect to the hub. Consecutive failures: %d", consecutiveFailures)
+				logger.Errorf("[Monitor] Failed to reconnect to the hub. Consecutive failures: %d/%d", consecutiveFailures, maxFailures)
+				if consecutiveFailures >= maxFailures {
+					logger.Fatalf("[Monitor] Failed to reconnect to the hub for %d consecutive checks. Exiting to avoid network partition.", maxFailures)
+				}
 			}
 		}
 	}()

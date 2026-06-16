@@ -23,11 +23,11 @@ type hubConnectionManager interface {
 // - reconnected: true if the connection was lost but successfully recovered during this check.
 //
 // The recovery process follows these steps:
-// 1. Connection Check: If already connected, return (stable=true, reconnected=false).
-// 2. P2P Retry: If disconnected, attempt to reconnect using the known P2P multiaddresses stored locally.
-// 3. HTTP Fallback: If P2P retries fail, fall back to HTTP discovery using the stored Hub URL to fetch
-//    the new Hub addresses and Peer IDs, update the local config, and attempt to reconnect.
-// 4. Total Failure: If all reconnection attempts fail, return (stable=false, reconnected=false).
+//  1. Connection Check: If already connected, return (stable=true, reconnected=false).
+//  2. P2P Retry: If disconnected, attempt to reconnect using the known P2P multiaddresses stored locally.
+//  3. HTTP Fallback: If P2P retries fail, fall back to HTTP discovery using the stored Hub URL to fetch
+//     the new Hub addresses and Peer IDs, update the local config, and attempt to reconnect.
+//  4. Total Failure: If all reconnection attempts fail, return (stable=false, reconnected=false).
 func checkHubConnection(ctx context.Context, mgr hubConnectionManager) (stable bool, reconnected bool) {
 	if mgr.IsConnected() {
 		return true, false
@@ -52,27 +52,35 @@ func checkHubConnection(ctx context.Context, mgr hubConnectionManager) (stable b
 	}
 
 	hubURL, err := mgr.LoadHubURL()
-	if err == nil && hubURL != "" {
-		logger.Infof("[Monitor] Reconnect P2P failed. Discovering hub info from %s...", hubURL)
-		info, err := mgr.DiscoverHubInfo(ctx, hubURL)
-		if err == nil && len(info.HubAddresses) > 0 {
-			var newHubAddrs []multiaddr.Multiaddr
-			for _, addrStr := range info.HubAddresses {
-				if ma, err := multiaddr.NewMultiaddr(addrStr); err == nil {
-					newHubAddrs = append(newHubAddrs, ma)
-				}
-			}
-			if len(newHubAddrs) > 0 {
-				if pubKeyBytes, _, err := mgr.LoadHubConfig(); err == nil {
-					_ = mgr.SaveHubConfig(pubKeyBytes, info.HubAddresses)
-				}
-				for _, addr := range newHubAddrs {
-					if err := mgr.ConnectAndAuthWithHub(ctx, addr); err == nil {
-						logger.Infof("[Monitor] Successfully reconnected to Hub via HTTP fallback.")
-						return false, true
-					}
-				}
-			}
+	if err != nil || hubURL == "" {
+		return false, false
+	}
+
+	logger.Infof("[Monitor] Reconnect P2P failed. Discovering hub info from %s...", hubURL)
+	info, err := mgr.DiscoverHubInfo(ctx, hubURL)
+	if err != nil || len(info.HubAddresses) == 0 {
+		return false, false
+	}
+
+	var newHubAddrs []multiaddr.Multiaddr
+	for _, addrStr := range info.HubAddresses {
+		if ma, err := multiaddr.NewMultiaddr(addrStr); err == nil {
+			newHubAddrs = append(newHubAddrs, ma)
+		}
+	}
+
+	if len(newHubAddrs) == 0 {
+		return false, false
+	}
+
+	if pubKeyBytes, _, err := mgr.LoadHubConfig(); err == nil {
+		_ = mgr.SaveHubConfig(pubKeyBytes, info.HubAddresses)
+	}
+
+	for _, addr := range newHubAddrs {
+		if err := mgr.ConnectAndAuthWithHub(ctx, addr); err == nil {
+			logger.Infof("[Monitor] Successfully reconnected to Hub via HTTP fallback.")
+			return false, true
 		}
 	}
 
