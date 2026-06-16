@@ -17,6 +17,20 @@ proto:
 clean:
 	rm -rf "$(OUT_DIR)/"
 
+.PHONY: kind-up kind-logs kind-down
+kind-up:
+	./development/kind/run.sh $(ARGS)
+
+kind-logs:
+	./development/kind/run.sh -l
+
+kind-down:
+	kind delete cluster --name sam-kind
+
+.PHONY: kind-local-node
+kind-local-node:
+	./development/kind/run-local-node.sh $(ARGS)
+
 test:
 	CGO_ENABLED=1 go test -v -race -count 1 $(if $(WHAT),-run $(WHAT)) ./...
 

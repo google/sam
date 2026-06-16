@@ -1,0 +1,120 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: kind-mesh-e2e
+
+on:
+  push:
+    branches:
+      - "main"
+    tags:
+      - "v*"
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  GO_VERSION: "1.26"
+
+jobs:
+  kind_mesh_e2e:
+    runs-on: ubuntu-22.04
+    name: Kind mesh e2e
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Setup Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Install kind and kubectl
+        run: |
+          go install sigs.k8s.io/kind@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+          curl -sSLo /tmp/kubectl "https://dl.k8s.io/release/$(curl -sL https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          sudo install -m 0755 /tmp/kubectl /usr/local/bin/kubectl
+          kind version
+          kubectl version --client
+
+      - name: Build binaries
+        run: make build
+
+      - name: Bring up the kind mesh
+        run: make kind-up ARGS="-s"
+
+      - name: Enroll a local sam-node
+        run: |
+          ./development/kind/run-local-node.sh > "$RUNNER_TEMP/local-node.log" 2>&1 &
+          PID=$!
+          for _ in $(seq 1 60); do
+            grep -q "SAM Node Online" "$RUNNER_TEMP/local-node.log" && break
+            kill -0 "$PID" 2>/dev/null || { echo "local node exited early:"; cat "$RUNNER_TEMP/local-node.log"; exit 1; }
+            sleep 1
+          done
+          grep -q "SAM Node Online" "$RUNNER_TEMP/local-node.log" \
+            || { echo "local node did not come online:"; cat "$RUNNER_TEMP/local-node.log"; exit 1; }
+          echo "local node online"
+
+      - name: Mesh info, discover, find + call calculator
+        run: |
+          set -euo pipefail
+          URL=http://127.0.0.1:9099/mcp/events
+          mcp() { ./bin/mcp-client -url "$URL" -timeout 20 "$@" 2>/dev/null; }
+
+          echo "== get_mesh_info =="
+          info=$(mcp -tool get_mesh_info -args '{}')
+          echo "$info"
+          echo "$info" | jq -e '.hub_peer_id != "" and (.dht_size > 0)' >/dev/null \
+            || { echo "get_mesh_info assertion failed"; exit 1; }
+
+          echo "== discover services / find calculator (poll) =="
+          peer=""
+          for _ in $(seq 1 30); do
+            tools=$(mcp -tool find_remote_tools -args '{}' || true)
+            peer=$(printf '%s' "$tools" | jq -r '.[]? | select(.tool_name=="calculator.add") | .peer_id' 2>/dev/null | head -n1)
+            [ -n "$peer" ] && break
+            sleep 1
+          done
+          [ -n "$peer" ] || { echo "calculator.add not discovered"; exit 1; }
+          echo "calculator host: $peer"
+
+          echo "== call calculator.add(2,3) =="
+          result=$(mcp -tool call_remote_tool \
+            -args "{\"peer_id\":\"$peer\",\"tool_name\":\"calculator.add\",\"arguments\":{\"a\":2,\"b\":3}}")
+          echo "result: $result"
+          printf '%s' "$result" | grep -q 5 || { echo "calculator.add did not return 5"; exit 1; }
+          echo "OK: calculator.add(2,3) == 5"
+
+      - name: Collect logs on failure
+        if: failure()
+        run: |
+          mkdir -p _artifacts
+          kubectl --context kind-sam-kind -n sam-kind get pods -o wide > _artifacts/pods.txt 2>&1 || true
+          for d in sam-hub node-a node-b node-c; do
+            kubectl --context kind-sam-kind -n sam-kind logs "deploy/$d" --all-containers --tail=-1 > "_artifacts/$d.log" 2>&1 || true
+          done
+          cp "$RUNNER_TEMP/local-node.log" _artifacts/ 2>/dev/null || true
+
+      - name: Upload logs
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: kind-mesh-e2e-logs-${{ github.run_id }}
+          path: ./_artifacts
+
+      - name: Tear down the cluster
+        if: always()
+        run: make kind-down

@@ -1,0 +1,53 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ${NODE}-sa
+  namespace: ${NAMESPACE}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ${NODE}
+  namespace: ${NAMESPACE}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ${NODE}
+  template:
+    metadata:
+      labels:
+        app: ${NODE}
+    spec:
+      nodeSelector:
+        sam-role: ${NODE}
+      serviceAccountName: ${NODE}-sa
+      containers:
+      - name: sam-node
+        image: sam-node:${IMAGE_TAG}
+        imagePullPolicy: IfNotPresent
+        args:
+        - "run"
+        - "--hub=http://sam-hub:9090"
+        - "--jwt-path=/var/run/secrets/tokens/sam-token"
+        - "--api-token=devtoken"
+        - "--bind-addr=0.0.0.0:8080"
+        - "--discovery-interval=200ms"
+${CONFIG_ARG}
+        ports:
+        - { containerPort: 8080, name: mcp, protocol: TCP }
+        volumeMounts:
+        - name: sam-token
+          mountPath: /var/run/secrets/tokens
+          readOnly: true
+${CONFIG_MOUNT}
+${SIDECAR}
+      volumes:
+      - name: sam-token
+        projected:
+          sources:
+          - serviceAccountToken:
+              path: sam-token
+              expirationSeconds: 3600
+              audience: sam-mesh-audience
+${CONFIG_VOLUME}
