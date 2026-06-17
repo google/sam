@@ -64,8 +64,8 @@ spec:
                 IP_LIST=$(kubectl get node $node -o jsonpath='{.status.addresses[?(@.type=="ExternalIP")].address}')
                 POD_IP=$(kubectl get pod $pod -n ${NAMESPACE} -o jsonpath='{.status.podIP}')
 
-                # Get the PeerID
-                PEER_ID=$(curl -s http://${POD_IP}:9090/info | grep -o '"peer_id":"[^"]*' | cut -d'"' -f4 || true)
+                # Get the PeerID by extracting the base58 string from the protobuf response
+                PEER_ID=$(curl -s http://${POD_IP}:9090/info | grep -a -o '/p2p/[1-9A-HJ-NP-Za-km-z]*' | head -n 1 | cut -d/ -f3 || true)
 
                 if [ -n "$IP_LIST" ]; then
                   echo "Found IP $IP_LIST "
