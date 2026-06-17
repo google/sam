@@ -625,6 +625,9 @@ func main() {
 					golog.SetAllLoggers(lvl)
 				}
 			}
+			// Suppress noisy DHT logs
+			_ = golog.SetLogLevel("dht", "fatal")
+			_ = golog.SetLogLevel("dht/RtRefreshManager", "fatal")
 
 			policyConfig, err := LoadPolicyConfig(policyFile)
 			if err != nil {

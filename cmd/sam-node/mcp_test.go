@@ -15,9 +15,16 @@
 package main
 
 import (
+	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	dht "github.com/libp2p/go-libp2p-kad-dht"
+	"github.com/libp2p/go-libp2p/core/peerstore"
+	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
+	"github.com/multiformats/go-multiaddr"
 )
 
 func TestMCPHandler_HTTP(t *testing.T) {
@@ -60,5 +67,85 @@ func TestMCPHandler_HTTP(t *testing.T) {
 
 	if resp2.StatusCode != http.StatusOK && resp2.StatusCode != http.StatusBadRequest {
 		t.Errorf("Expected status OK or BadRequest on /mcp/events, got %d", resp2.StatusCode)
+	}
+}
+
+func TestResolveRelayAddresses(t *testing.T) {
+	ctx := context.Background()
+	mn := mocknet.New()
+
+	// Create local host
+	localHost, err := mn.GenPeer()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a real DHT bound to the mock host
+	kdht, err := dht.New(ctx, localHost, dht.Mode(dht.ModeServer))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = kdht.Close() }()
+
+	node := &SamNode{
+		Host: localHost,
+		DHT:  kdht,
+	}
+
+	// Create relay host
+	relayHost, err := mn.GenPeer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	relayID := relayHost.ID()
+
+	// Add relay direct IP to DHT peerstore
+	relayDirectAddr, _ := multiaddr.NewMultiaddr("/ip4/10.0.0.1/tcp/4501")
+	localHost.Peerstore().AddAddr(relayID, relayDirectAddr, peerstore.PermanentAddrTTL)
+	relayHost.Peerstore().AddAddr(relayID, relayDirectAddr, peerstore.PermanentAddrTTL)
+
+	// Create DHT for relay
+	relayDHT, err := dht.New(ctx, relayHost, dht.Mode(dht.ModeServer))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = relayDHT.Close() }()
+
+	_ = mn.LinkAll()
+	_ = mn.ConnectAllButSelf()
+
+	// Wait for DHT
+	_, _ = kdht.RoutingTable().TryAddPeer(relayID, true, true)
+	_, _ = relayDHT.RoutingTable().TryAddPeer(localHost.ID(), true, true)
+
+	// Create a target node behind the relay
+	targetHost, err := mn.GenPeer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	targetID := targetHost.ID()
+
+	// Add a dns-based circuit address for the target node to the local host's peerstore
+	circuitAddrStr := fmt.Sprintf("/dns4/hub.com/tcp/4501/p2p/%s/p2p-circuit", relayID.String())
+	circuitAddr, _ := multiaddr.NewMultiaddr(circuitAddrStr)
+	localHost.Peerstore().AddAddr(targetID, circuitAddr, peerstore.PermanentAddrTTL)
+
+	// Run the function
+	node.resolveRelayAddresses(ctx, targetID)
+
+	// Verify that the direct IP circuit address was added to the target's peerstore
+	addrs := localHost.Peerstore().Addrs(targetID)
+	foundDirect := false
+	expectedDirectAddrStr := fmt.Sprintf("/ip4/10.0.0.1/tcp/4501/p2p/%s/p2p-circuit", relayID.String())
+
+	for _, addr := range addrs {
+		if addr.String() == expectedDirectAddrStr {
+			foundDirect = true
+			break
+		}
+	}
+
+	if !foundDirect {
+		t.Errorf("Expected address %s not found in peerstore. Got: %v", expectedDirectAddrStr, addrs)
 	}
 }
