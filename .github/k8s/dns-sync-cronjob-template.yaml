@@ -56,23 +56,32 @@ spec:
               PODS=$(kubectl get pods -n ${NAMESPACE} -l app=sam-hub-${ENV_NAME} -o jsonpath='{range .items[?(@.status.phase=="Running")]}{.metadata.name}{" "}{.spec.nodeName}{"\n"}{end}')
               
               declare -a IP_ARRAY=()
+              declare -a TXT_ARRAY=()
               
               while read -r pod node; do
                 if [ -z "$pod" ]; then continue; fi
                 echo "Checking pod: $pod on node: $node"
                 IP_LIST=$(kubectl get node $node -o jsonpath='{.status.addresses[?(@.type=="ExternalIP")].address}')
                 POD_IP=$(kubectl get pod $pod -n ${NAMESPACE} -o jsonpath='{.status.podIP}')
-                
+
+                # Get the PeerID
+                PEER_ID=$(curl -s http://${POD_IP}:9090/info | grep -o '"peer_id":"[^"]*' | cut -d'"' -f4 || true)
+
                 if [ -n "$IP_LIST" ]; then
                   echo "Found IP $IP_LIST "
                   for ip in $IP_LIST; do
                     IP_ARRAY+=("$ip")
+                    if [ -n "$PEER_ID" ]; then
+                      TXT_ARRAY+=("\"dnsaddr=/ip4/$ip/tcp/4501/p2p/$PEER_ID\"")
+                      TXT_ARRAY+=("\"dnsaddr=/ip4/$ip/udp/4501/quic-v1/p2p/$PEER_ID\"")
+                    fi
                   done
                 fi
               done <<< "$PODS"
-              
-              # Unique IPs
+
+              # Unique IPs and TXT records
               UNIQUE_IPS=$(printf "%s\n" "${IP_ARRAY[@]}" | sort -u | tr '\n' ' ' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+              UNIQUE_TXT=$(printf "%s\n" "${TXT_ARRAY[@]}" | sort -u | tr '\n' ' ' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
               
               if [ -z "$UNIQUE_IPS" ]; then
                 echo "No external IPs found for sam-hub nodes."
@@ -82,27 +91,43 @@ spec:
               OLD_IPS=$(gcloud dns record-sets list --zone=${ENV_NAME} --project=${GCP_PROJECT_ID} --name="bootstrap.${ENV_NAME}.sam-mesh.dev." --type=A --format="value(rrdatas)" 2>/dev/null || true)
               OLD_IPS_CLEAN=$(echo $OLD_IPS | tr ';' '\n' | sort -u | tr '\n' ' ' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
 
-              if [ "$UNIQUE_IPS" == "$OLD_IPS_CLEAN" ] ; then
+              OLD_TXT=$(gcloud dns record-sets list --zone=${ENV_NAME} --project=${GCP_PROJECT_ID} --name="_dnsaddr.bootstrap.${ENV_NAME}.sam-mesh.dev." --type=TXT --format="value(rrdatas)" 2>/dev/null || true)
+              OLD_TXT_CLEAN=$(echo $OLD_TXT | tr ';' '\n' | sort -u | tr '\n' ' ' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+
+              if [ "$UNIQUE_IPS" == "$OLD_IPS_CLEAN" ] && [ "$UNIQUE_TXT" == "$OLD_TXT_CLEAN" ]; then
                 echo "DNS records are already up to date. No changes needed."
                 exit 0
               fi
 
               echo "DNS records changed! Updating..."
-              echo "Updating DNS record bootstrap.${ENV_NAME}.sam-mesh.dev. with IPs: $UNIQUE_IPS"
               
               # Start transaction
               gcloud dns record-sets transaction start --zone=${ENV_NAME} --project=${GCP_PROJECT_ID}
-              
+
               # Remove old A records if they exist
               if [ -n "$OLD_IPS" ]; then
                 OLD_IPS_CLEAN_REMV=$(echo $OLD_IPS | tr ';' ' ')
                 gcloud dns record-sets transaction remove --zone=${ENV_NAME} --project=${GCP_PROJECT_ID} --name="bootstrap.${ENV_NAME}.sam-mesh.dev." --type=A --ttl=300 $OLD_IPS_CLEAN_REMV || true
               fi
-              
-             
+
               # Add new A records
-              gcloud dns record-sets transaction add --zone=${ENV_NAME} --project=${GCP_PROJECT_ID} --name="bootstrap.${ENV_NAME}.sam-mesh.dev." --type=A --ttl=300 $UNIQUE_IPS
-               
+              gcloud dns record-sets transaction add --zone=${ENV_NAME} --project=${GCP_PROJECT_ID} --name="bootstrap.${ENV_NAME}.sam-mesh.dev." --type=A --ttl=300 $UNIQUE_IPS || true
+
+              # Remove old TXT records if they exist
+              if [ -n "$OLD_TXT" ]; then
+                # OLD_TXT could have spaces inside quotes. gcloud transaction remove needs each whole quoted string as separate arg
+                # Let's just remove using the raw semicolon-delimited values by translating ';' to spaces, but careful with inner quotes!
+                # Since TXT records are quoted, tr ';' ' ' works fine as long as there are no semicolons inside the DNSADDR.
+                OLD_TXT_CLEAN_REMV=$(echo $OLD_TXT | tr ';' ' ')
+                gcloud dns record-sets transaction remove --zone=${ENV_NAME} --project=${GCP_PROJECT_ID} --name="_dnsaddr.bootstrap.${ENV_NAME}.sam-mesh.dev." --type=TXT --ttl=300 $OLD_TXT_CLEAN_REMV || true
+              fi
+
+              # Add new TXT records
+              if [ -n "$UNIQUE_TXT" ]; then
+                # we just pass $UNIQUE_TXT as arguments (it's already quoted words separated by space)
+                eval "gcloud dns record-sets transaction add --zone=${ENV_NAME} --project=${GCP_PROJECT_ID} --name=\"_dnsaddr.bootstrap.${ENV_NAME}.sam-mesh.dev.\" --type=TXT --ttl=300 $UNIQUE_TXT || true"
+              fi
+
               # Execute transaction
               gcloud dns record-sets transaction execute --zone=${ENV_NAME} --project=${GCP_PROJECT_ID}
           restartPolicy: OnFailure
