@@ -155,7 +155,9 @@ func (n *SamNode) CallMCPTool(ctx context.Context, targetPeer peer.ID, toolName 
 func (n *SamNode) callMCPToolOnce(ctx context.Context, targetPeer peer.ID, toolName string, params any) (*mcp.CallToolResult, error) {
 	// Open stream
 	logger.Debugf("Dialing %s for MCP...\n", targetPeer)
-	s, err := n.Host.NewStream(ctx, targetPeer, api.MCPProtocolID)
+	dialCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	s, err := n.Host.NewStream(dialCtx, targetPeer, api.MCPProtocolID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open stream to %s: %w", targetPeer, err)
 	}
