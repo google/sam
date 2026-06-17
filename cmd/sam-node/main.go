@@ -249,6 +249,7 @@ func main() {
 					newHubAddrs = append(newHubAddrs, ma)
 				}
 
+				logger.Debugf("listenAddrs: %v, allowLoopback: %v", listenAddrs, allowLoopbackFlag)
 				node, err = NewSamNode(context.Background(), priv, hubPubKey, newHubAddrs, store, meshFlag, discoveryIntervalFlag, listenAddrs, enableRelayFlag, nodeConfig, keyGracePeriodFlag, allowLoopbackFlag)
 				if err != nil {
 					logger.Fatalf("Failed to start mesh node after enrollment: %v", err)
