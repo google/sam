@@ -85,6 +85,7 @@ func TestResolveRelayAddresses(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer kdht.Close()
 
 	node := &SamNode{
 		Host: localHost,
@@ -108,13 +109,14 @@ func TestResolveRelayAddresses(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer relayDHT.Close()
 
-	mn.LinkAll()
-	mn.ConnectAllButSelf()
+	_ = mn.LinkAll()
+	_ = mn.ConnectAllButSelf()
 
 	// Wait for DHT
-	kdht.RoutingTable().TryAddPeer(relayID, true, true)
-	relayDHT.RoutingTable().TryAddPeer(localHost.ID(), true, true)
+	_, _ = kdht.RoutingTable().TryAddPeer(relayID, true, true)
+	_, _ = relayDHT.RoutingTable().TryAddPeer(localHost.ID(), true, true)
 
 	// Create a target node behind the relay
 	targetHost, err := mn.GenPeer()

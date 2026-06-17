@@ -152,10 +152,12 @@ func (n *SamNode) CallMCPTool(ctx context.Context, targetPeer peer.ID, toolName 
 			return res, nil
 		}
 		logger.Warnf("[MCP] Tool call failed, retrying in %v: %v", backoff, err)
+		timer := time.NewTimer(backoff)
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			return nil, fmt.Errorf("context canceled during retry: %w", ctx.Err())
-		case <-time.After(backoff):
+		case <-timer.C:
 		}
 		backoff *= 2
 	}
@@ -191,7 +193,7 @@ func (n *SamNode) callMCPToolOnce(ctx context.Context, targetPeer peer.ID, toolN
 	authBytes, _ := proto.Marshal(&authFrame)
 
 	// Handshake should be fast; set a hard deadline to prevent hanging
-	s.SetDeadline(time.Now().Add(10 * time.Second))
+	_ = s.SetDeadline(time.Now().Add(10 * time.Second))
 
 	// Write AuthFrame
 	logger.Debugf("Writing auth frame to %s...\n", targetPeer)
@@ -210,7 +212,7 @@ func (n *SamNode) callMCPToolOnce(ctx context.Context, targetPeer peer.ID, toolN
 	defer reader.ReleaseMsg(msg)
 
 	// Clear deadline so the MCP SDK can use the stream normally without timing out
-	s.SetDeadline(time.Time{})
+	_ = s.SetDeadline(time.Time{})
 
 	var resp api.AuthResponse
 	if err := proto.Unmarshal(msg, &resp); err != nil {
@@ -271,6 +273,9 @@ func (n *SamNode) fetchRemoteServiceCatalog(ctx context.Context, peerID peer.ID,
 // looks up the relay's direct IPs via the DHT, and adds them to the target's peerstore.
 // This prevents dial backoff errors when the relay is behind a load-balanced DNS address.
 func (n *SamNode) resolveRelayAddresses(ctx context.Context, targetPeer peer.ID) {
+	if n.Host == nil || n.DHT == nil {
+		return
+	}
 	addrs := n.Host.Peerstore().Addrs(targetPeer)
 	for _, ma := range addrs {
 		parts := multiaddr.Split(ma)
@@ -300,7 +305,11 @@ func (n *SamNode) resolveRelayAddresses(ctx context.Context, targetPeer peer.ID)
 
 		for _, relayAddr := range pi.Addrs {
 			// Check if it's a direct IP (not dns)
-			code := relayAddr.Protocols()[0].Code
+			protocols := relayAddr.Protocols()
+			if len(protocols) == 0 {
+				continue
+			}
+			code := protocols[0].Code
 			if code == multiaddr.P_IP4 || code == multiaddr.P_IP6 {
 				circuitPart, _ := multiaddr.NewMultiaddr(fmt.Sprintf("/p2p/%s/p2p-circuit", relayID.String()))
 				newMa := relayAddr.Encapsulate(circuitPart)
