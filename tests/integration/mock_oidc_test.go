@@ -26,7 +26,7 @@ func startMockOIDC(t *testing.T) (string, string) {
 
 	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"issuer":   issuer,
 			"jwks_uri": issuer + "/keys",
 		})
@@ -34,7 +34,7 @@ func startMockOIDC(t *testing.T) (string, string) {
 
 	mux.HandleFunc("/keys", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"keys": []map[string]interface{}{
 				{
 					"kty": "RSA",

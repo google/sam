@@ -217,7 +217,7 @@ roles:
 
 	// Assert datapath works via Node B's local Egress Proxy
 	t.Log("Testing datapath from Node B to Node A...")
-	
+
 	// Extract Node A's Peer ID from its logs
 	peerIDRe := regexp.MustCompile(`(?m)^PeerID:\s+([A-Za-z0-9]+)$`)
 	matches := peerIDRe.FindStringSubmatch(nodeStdoutA.String())
@@ -230,12 +230,12 @@ roles:
 	proxyURL := fmt.Sprintf("http://127.0.0.1:%d/sam/%s/mcp/federated-tool", apiPortB, peerIDA_node)
 	req, _ := http.NewRequest("POST", proxyURL, bytes.NewBuffer([]byte(`{"jsonrpc": "2.0", "id": 1, "method": "test"}`)))
 	req.Header.Set("Authorization", "Bearer tokenB")
-	
+
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("Datapath failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("Datapath returned status %d: %s", resp.StatusCode, string(body))
@@ -250,7 +250,7 @@ roles:
 func fetchPeerID(t *testing.T, port int) string {
 	var bodyBytes []byte
 	var err error
-	
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -259,7 +259,7 @@ func fetchPeerID(t *testing.T, port int) string {
 		resp, err = http.Get(fmt.Sprintf("http://127.0.0.1:%d/info", port))
 		if err == nil {
 			bodyBytes, err = io.ReadAll(resp.Body)
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			if err == nil {
 				break
 			}

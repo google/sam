@@ -73,7 +73,7 @@ func (s *FakeDNSServer) serve() {
 
 		resp := dnsmessage.Message{
 			Header: dnsmessage.Header{
-				ID:            msg.Header.ID,
+				ID:            msg.ID,
 				Response:      true,
 				Authoritative: true,
 			},
@@ -85,7 +85,8 @@ func (s *FakeDNSServer) serve() {
 			domain := strings.TrimSuffix(q.Name.String(), ".")
 
 			s.mu.RLock()
-			if q.Type == dnsmessage.TypeA || q.Type == dnsmessage.TypeAAAA {
+			switch q.Type {
+			case dnsmessage.TypeA, dnsmessage.TypeAAAA:
 				if ip, ok := s.hosts[domain]; ok {
 					if ipv4 := ip.To4(); ipv4 != nil && q.Type == dnsmessage.TypeA {
 						resp.Answers = append(resp.Answers, dnsmessage.Resource{
@@ -99,7 +100,7 @@ func (s *FakeDNSServer) serve() {
 						})
 					}
 				}
-			} else if q.Type == dnsmessage.TypeTXT {
+			case dnsmessage.TypeTXT:
 				if txtRecords, ok := s.txtHosts[domain]; ok {
 					for _, txt := range txtRecords {
 						resp.Answers = append(resp.Answers, dnsmessage.Resource{
@@ -114,7 +115,7 @@ func (s *FakeDNSServer) serve() {
 
 		packed, err := resp.Pack()
 		if err == nil {
-			s.conn.WriteToUDP(packed, addr)
+			_, _ = s.conn.WriteToUDP(packed, addr)
 		}
 	}
 }
@@ -134,7 +135,7 @@ func (s *FakeDNSServer) Hijack(t *testing.T) {
 	t.Cleanup(func() {
 		net.DefaultResolver.Dial = originalDial
 		net.DefaultResolver.PreferGo = originalPreferGo
-		s.conn.Close()
+		_ = s.conn.Close()
 		dnsHijackLock.Unlock()
 	})
 }
