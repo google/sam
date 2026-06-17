@@ -95,6 +95,8 @@ func main() {
 			ctx := cmd.Context()
 			// Initialize logging
 			golog.SetAllLoggers(golog.LevelInfo)
+			_ = golog.SetLogLevel("dht", "fatal")
+			_ = golog.SetLogLevel("dht/RtRefreshManager", "fatal")
 			if logLevelFlag != "" {
 				lvl, err := golog.LevelFromString(logLevelFlag)
 				if err == nil {

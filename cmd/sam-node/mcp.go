@@ -146,7 +146,11 @@ func (n *SamNode) CallMCPTool(ctx context.Context, targetPeer peer.ID, toolName 
 			return res, nil
 		}
 		logger.Warnf("[MCP] Tool call failed, retrying in %v: %v", backoff, err)
-		time.Sleep(backoff)
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("context canceled during retry: %w", ctx.Err())
+		case <-time.After(backoff):
+		}
 		backoff *= 2
 	}
 	return nil, fmt.Errorf("failed after %d retries: %w", maxRetries, err)
