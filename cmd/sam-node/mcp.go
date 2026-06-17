@@ -274,25 +274,37 @@ func (n *SamNode) resolveRelayAddresses(ctx context.Context, targetPeer peer.ID)
 	addrs := n.Host.Peerstore().Addrs(targetPeer)
 	for _, ma := range addrs {
 		parts := multiaddr.Split(ma)
-		if len(parts) >= 2 && parts[len(parts)-1].Protocol().Code == multiaddr.P_CIRCUIT {
-			p2pPart := parts[len(parts)-2]
-			if p2pPart.Protocol().Code == multiaddr.P_P2P {
-				relayID, err := peer.Decode(p2pPart.Value())
-				if err == nil {
-					// Found a relay. Let's find its direct IPs via DHT.
-					pi, err := n.DHT.FindPeer(ctx, relayID)
-					if err == nil && len(pi.Addrs) > 0 {
-						for _, relayAddr := range pi.Addrs {
-							// Check if it's a direct IP (not dns)
-							code := relayAddr.Protocols()[0].Code
-							if code == multiaddr.P_IP4 || code == multiaddr.P_IP6 {
-								circuitPart, _ := multiaddr.NewMultiaddr(fmt.Sprintf("/p2p/%s/p2p-circuit", relayID.String()))
-								newMa := relayAddr.Encapsulate(circuitPart)
-								n.Host.Peerstore().AddAddr(targetPeer, newMa, peerstore.TempAddrTTL)
-							}
-						}
-					}
-				}
+		if len(parts) < 2 {
+			continue
+		}
+
+		if parts[len(parts)-1].Protocol().Code != multiaddr.P_CIRCUIT {
+			continue
+		}
+
+		p2pPart := parts[len(parts)-2]
+		if p2pPart.Protocol().Code != multiaddr.P_P2P {
+			continue
+		}
+
+		relayID, err := peer.Decode(p2pPart.Value())
+		if err != nil {
+			continue
+		}
+
+		// Found a relay. Let's find its direct IPs via DHT.
+		pi, err := n.DHT.FindPeer(ctx, relayID)
+		if err != nil || len(pi.Addrs) == 0 {
+			continue
+		}
+
+		for _, relayAddr := range pi.Addrs {
+			// Check if it's a direct IP (not dns)
+			code := relayAddr.Protocols()[0].Code
+			if code == multiaddr.P_IP4 || code == multiaddr.P_IP6 {
+				circuitPart, _ := multiaddr.NewMultiaddr(fmt.Sprintf("/p2p/%s/p2p-circuit", relayID.String()))
+				newMa := relayAddr.Encapsulate(circuitPart)
+				n.Host.Peerstore().AddAddr(targetPeer, newMa, peerstore.TempAddrTTL)
 			}
 		}
 	}
