@@ -95,7 +95,7 @@ func TestServiceDiscovery(t *testing.T) {
 
 	// Agent A registers a service
 	serviceName := "mcp:github-tools"
-	registerService(t, actualApiAddrA, apiToken, serviceName)
+	registerService(t, actualApiAddrA, apiToken, serviceName, "http://localhost:8080")
 
 	// Wait for DHT propagation
 	t.Log("Waiting for DHT propagation...")
@@ -193,7 +193,7 @@ func TestServiceDiscoveryStreaming(t *testing.T) {
 
 	// Agent A registers a service
 	serviceName := "mcp:github-tools"
-	registerService(t, actualApiAddrA, apiToken, serviceName)
+	registerService(t, actualApiAddrA, apiToken, serviceName, "http://localhost:8080")
 
 	// Wait for DHT propagation
 	t.Log("Waiting for DHT propagation...")
@@ -286,7 +286,7 @@ func waitForAPI(t *testing.T, addr string) {
 	t.Fatalf("timeout waiting for API at %s", addr)
 }
 
-func registerService(t *testing.T, apiAddr, token, serviceName string) {
+func registerService(t *testing.T, apiAddr, token, serviceName, targetURL string) {
 	t.Helper()
 	reqData := &api.RegisterServiceRequest{
 		Service: &api.ServiceInfo{
@@ -294,7 +294,7 @@ func registerService(t *testing.T, apiAddr, token, serviceName string) {
 			Name:        serviceName,
 			Description: "test desc",
 		},
-		Backend: &api.RegisterServiceRequest_TargetUrl{TargetUrl: "http://localhost:8080"},
+		Backend: &api.RegisterServiceRequest_TargetUrl{TargetUrl: targetURL},
 	}
 	body, err := protojson.Marshal(reqData)
 	if err != nil {

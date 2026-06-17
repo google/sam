@@ -51,12 +51,27 @@ import (
 	"github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/relay"
 	libp2ptls "github.com/libp2p/go-libp2p/p2p/security/tls"
 	"github.com/multiformats/go-multiaddr"
+	madns "github.com/multiformats/go-multiaddr-dns"
 
 	"golang.org/x/time/rate"
 
 	"github.com/spf13/cobra"
 	"google.golang.org/protobuf/proto"
 )
+
+func init() {
+	if dnsServer := os.Getenv("SAM_TEST_DNS_SERVER"); dnsServer != "" {
+		customResolver := &net.Resolver{
+			PreferGo: true,
+			Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+				d := net.Dialer{Timeout: 5 * time.Second}
+				return d.DialContext(ctx, "udp", dnsServer)
+			},
+		}
+		net.DefaultResolver = customResolver
+		madns.DefaultResolver, _ = madns.NewResolver(madns.WithDefaultResolver(customResolver))
+	}
+}
 
 const (
 	GracePeriod = 60 * time.Second
@@ -635,6 +650,10 @@ func main() {
 			// Start key rotation if enabled
 			h.startRotation(ctx)
 
+			if len(externalMultiaddrs) > 0 {
+				go startBootstrapFederation(ctx, h, externalMultiaddrs)
+			}
+
 			mux := http.NewServeMux()
 			mux.Handle("/metrics", promhttp.HandlerFor(prometheus.DefaultGatherer, promhttp.HandlerOpts{}))
 			mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -897,5 +916,48 @@ func (h *Hub) HandleAuthHandshake(s network.Stream) {
 	respBytes, _ := proto.Marshal(resp)
 	if err := writer.WriteMsg(respBytes); err != nil {
 		logger.Errorf("[AuthN] Failed to write ACK to %s: %v", remotePeer, err)
+	}
+}
+
+func startBootstrapFederation(ctx context.Context, h *Hub, peers []string) {
+	if len(peers) == 0 {
+		return
+	}
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	connectBootstrap(ctx, h, peers)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			connectBootstrap(ctx, h, peers)
+		}
+	}
+}
+
+func connectBootstrap(ctx context.Context, h *Hub, peers []string) {
+	for _, peerStr := range peers {
+		ma, err := multiaddr.NewMultiaddr(peerStr)
+		if err != nil {
+			continue
+		}
+		resolvedAddrs, err := madns.DefaultResolver.Resolve(ctx, ma)
+		if err != nil {
+			resolvedAddrs = []multiaddr.Multiaddr{ma}
+		}
+		for _, resolved := range resolvedAddrs {
+			pi, err := peer.AddrInfoFromP2pAddr(resolved)
+			if err != nil || pi.ID == h.Host.ID() {
+				continue
+			}
+			if len(h.Host.Network().ConnsToPeer(pi.ID)) == 0 {
+				if err := h.Host.Connect(ctx, *pi); err == nil {
+					logger.Infof("[Federation] Connected to bootstrap peer: %s via %s", pi.ID, peerStr)
+				}
+			}
+		}
 	}
 }
