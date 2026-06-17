@@ -23,8 +23,10 @@ import (
 
 	"github.com/google/sam/api"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-libp2p/core/peerstore"
 	"github.com/libp2p/go-msgio"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/multiformats/go-multiaddr"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -140,6 +142,10 @@ func (n *SamNode) CallMCPTool(ctx context.Context, targetPeer peer.ID, toolName 
 	maxRetries := 3
 	backoff := 1 * time.Second
 
+	// Attempt to resolve direct IPs for any relay nodes in the target's addresses.
+	// This helps avoid dial backoff issues when using shared DNS addresses for hubs.
+	n.resolveRelayAddresses(ctx, targetPeer)
+
 	for i := 0; i < maxRetries; i++ {
 		res, err = n.callMCPToolOnce(ctx, targetPeer, toolName, params)
 		if err == nil {
@@ -184,6 +190,9 @@ func (n *SamNode) callMCPToolOnce(ctx context.Context, targetPeer peer.ID, toolN
 	}
 	authBytes, _ := proto.Marshal(&authFrame)
 
+	// Handshake should be fast; set a hard deadline to prevent hanging
+	s.SetDeadline(time.Now().Add(10 * time.Second))
+
 	// Write AuthFrame
 	logger.Debugf("Writing auth frame to %s...\n", targetPeer)
 	writer := msgio.NewVarintWriter(s)
@@ -199,6 +208,9 @@ func (n *SamNode) callMCPToolOnce(ctx context.Context, targetPeer peer.ID, toolN
 		return nil, fmt.Errorf("failed to read auth response from %s: %w", targetPeer, err)
 	}
 	defer reader.ReleaseMsg(msg)
+
+	// Clear deadline so the MCP SDK can use the stream normally without timing out
+	s.SetDeadline(time.Time{})
 
 	var resp api.AuthResponse
 	if err := proto.Unmarshal(msg, &resp); err != nil {
@@ -253,4 +265,35 @@ func (n *SamNode) fetchRemoteServiceCatalog(ctx context.Context, peerID peer.ID,
 		return nil, fmt.Errorf("unmarshal: %w", err)
 	}
 	return services, nil
+}
+
+// resolveRelayAddresses scans the target peer's addresses for any p2p-circuit relays,
+// looks up the relay's direct IPs via the DHT, and adds them to the target's peerstore.
+// This prevents dial backoff errors when the relay is behind a load-balanced DNS address.
+func (n *SamNode) resolveRelayAddresses(ctx context.Context, targetPeer peer.ID) {
+	addrs := n.Host.Peerstore().Addrs(targetPeer)
+	for _, ma := range addrs {
+		parts := multiaddr.Split(ma)
+		if len(parts) >= 2 && parts[len(parts)-1].Protocol().Code == multiaddr.P_CIRCUIT {
+			p2pPart := parts[len(parts)-2]
+			if p2pPart.Protocol().Code == multiaddr.P_P2P {
+				relayID, err := peer.Decode(p2pPart.Value())
+				if err == nil {
+					// Found a relay. Let's find its direct IPs via DHT.
+					pi, err := n.DHT.FindPeer(ctx, relayID)
+					if err == nil && len(pi.Addrs) > 0 {
+						for _, relayAddr := range pi.Addrs {
+							// Check if it's a direct IP (not dns)
+							code := relayAddr.Protocols()[0].Code
+							if code == multiaddr.P_IP4 || code == multiaddr.P_IP6 {
+								circuitPart, _ := multiaddr.NewMultiaddr(fmt.Sprintf("/p2p/%s/p2p-circuit", relayID.String()))
+								newMa := relayAddr.Encapsulate(circuitPart)
+								n.Host.Peerstore().AddAddr(targetPeer, newMa, peerstore.TempAddrTTL)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
 }
