@@ -85,7 +85,7 @@ func TestResolveRelayAddresses(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer kdht.Close()
+	defer func() { _ = kdht.Close() }()
 
 	node := &SamNode{
 		Host: localHost,
@@ -109,7 +109,7 @@ func TestResolveRelayAddresses(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer relayDHT.Close()
+	defer func() { _ = relayDHT.Close() }()
 
 	_ = mn.LinkAll()
 	_ = mn.ConnectAllButSelf()
