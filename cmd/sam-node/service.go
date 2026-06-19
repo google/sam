@@ -55,7 +55,19 @@ func newReverseProxyHandler(targetURL string) (http.Handler, error) {
 	if err != nil {
 		return nil, fmt.Errorf("invalid target URL: %w", err)
 	}
-	return httputil.NewSingleHostReverseProxy(u), nil
+	proxy := httputil.NewSingleHostReverseProxy(u)
+	originalDirector := proxy.Director
+	proxy.Director = func(req *http.Request) {
+		noTrailingSlash := req.Header.Get("X-Sam-No-Trailing-Slash") == "true"
+		req.Header.Del("X-Sam-No-Trailing-Slash")
+		originalDirector(req)
+
+		if noTrailingSlash && !strings.HasSuffix(u.Path, "/") && strings.HasSuffix(req.URL.Path, "/") {
+			req.URL.Path = strings.TrimSuffix(req.URL.Path, "/")
+		}
+		logger.Debugf("[ReverseProxy] Forwarding to: %q", req.URL.String())
+	}
+	return proxy, nil
 }
 
 func (b *baseService) Info() *api.ServiceInfo { return b.info }

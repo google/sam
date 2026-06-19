@@ -348,12 +348,18 @@ func createEgressProxy(node *SamNode) http.Handler {
 			if len(parts) > 5 {
 				upstreamPath = parts[5]
 			}
+			logger.Debugf("[Egress] Routing to peer: %s, svcType: %s, svcName: %s, upstream: %q", peerID, serviceType, serviceName, upstreamPath)
 
 			req.URL.Scheme = "libp2p"
 			req.URL.Host = peerID
 			req.Host = peerID
-			req.URL.Path = fmt.Sprintf("/%s/%s/%s", serviceType, serviceName, upstreamPath)
-			logger.Infof("[Proxy] Rewriting URL to libp2p://%s%s", req.URL.Host, req.URL.Path)
+			if len(parts) == 5 {
+				req.URL.Path = fmt.Sprintf("/%s/%s", serviceType, serviceName)
+			} else {
+				req.URL.Path = fmt.Sprintf("/%s/%s/%s", serviceType, serviceName, upstreamPath)
+			}
+			req.URL.RawPath = ""
+			logger.Debugf("[Proxy] Rewriting URL to libp2p://%s%s", req.URL.Host, req.URL.Path)
 		},
 		Transport: transport,
 	}

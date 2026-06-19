@@ -17,11 +17,14 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/sam/api"
+	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/peerstore"
 	"github.com/libp2p/go-msgio"
@@ -151,6 +154,10 @@ func (n *SamNode) CallMCPTool(ctx context.Context, targetPeer peer.ID, toolName 
 		if err == nil {
 			return res, nil
 		}
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) || strings.Contains(err.Error(), "context deadline exceeded") {
+			logger.Warnf("[MCP] Tool call failed with timeout or cancellation, not retrying: %v", err)
+			return nil, err
+		}
 		logger.Warnf("[MCP] Tool call failed, retrying in %v: %v", backoff, err)
 		timer := time.NewTimer(backoff)
 		select {
@@ -167,7 +174,10 @@ func (n *SamNode) CallMCPTool(ctx context.Context, targetPeer peer.ID, toolName 
 func (n *SamNode) callMCPToolOnce(ctx context.Context, targetPeer peer.ID, toolName string, params any) (*mcp.CallToolResult, error) {
 	// Open stream
 	logger.Debugf("Dialing %s for MCP...\n", targetPeer)
-	dialCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	dialCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	// Allow limited connections (like circuit relays) to be used for this stream.
+	// Otherwise libp2p will hang waiting for a direct connection!
+	dialCtx = network.WithAllowLimitedConn(dialCtx, "mcp")
 	defer cancel()
 	s, err := n.Host.NewStream(dialCtx, targetPeer, api.MCPProtocolID)
 	if err != nil {
@@ -274,9 +284,14 @@ func (n *SamNode) fetchRemoteServiceCatalog(ctx context.Context, peerID peer.ID,
 // This prevents dial backoff errors when the relay is behind a load-balanced DNS address.
 func (n *SamNode) resolveRelayAddresses(ctx context.Context, targetPeer peer.ID) {
 	if n.Host == nil || n.DHT == nil {
+		logger.Debugf("[Discovery] Host or DHT is nil")
 		return
 	}
 	addrs := n.Host.Peerstore().Addrs(targetPeer)
+	logger.Debugf("[Discovery] resolveRelayAddresses for %s: found %d addrs in peerstore", targetPeer, len(addrs))
+
+	var validCircuitAddrs []multiaddr.Multiaddr
+
 	for _, ma := range addrs {
 		parts := multiaddr.Split(ma)
 		if len(parts) < 2 {
@@ -287,6 +302,9 @@ func (n *SamNode) resolveRelayAddresses(ctx context.Context, targetPeer peer.ID)
 			continue
 		}
 
+		// Keep the advertised circuit address
+		validCircuitAddrs = append(validCircuitAddrs, ma)
+
 		p2pPart := parts[len(parts)-2]
 		if p2pPart.Protocol().Code != multiaddr.P_P2P {
 			continue
@@ -294,27 +312,25 @@ func (n *SamNode) resolveRelayAddresses(ctx context.Context, targetPeer peer.ID)
 
 		relayID, err := peer.Decode(p2pPart.Value())
 		if err != nil {
+			logger.Debugf("[Discovery] Failed to decode relayID: %v", err)
 			continue
 		}
 
-		// Found a relay. Let's find its direct IPs via DHT.
-		pi, err := n.DHT.FindPeer(ctx, relayID)
-		if err != nil || len(pi.Addrs) == 0 {
-			continue
-		}
+		logger.Debugf("[Discovery] Found relay %s for target %s", relayID, targetPeer)
 
-		for _, relayAddr := range pi.Addrs {
-			// Check if it's a direct IP (not dns)
-			protocols := relayAddr.Protocols()
-			if len(protocols) == 0 {
-				continue
-			}
-			code := protocols[0].Code
-			if code == multiaddr.P_IP4 || code == multiaddr.P_IP6 {
-				circuitPart, _ := multiaddr.NewMultiaddr(fmt.Sprintf("/p2p/%s/p2p-circuit", relayID.String()))
-				newMa := relayAddr.Encapsulate(circuitPart)
-				n.Host.Peerstore().AddAddr(targetPeer, newMa, peerstore.TempAddrTTL)
-			}
+		circuitAddr, err := multiaddr.NewMultiaddr(fmt.Sprintf("/p2p/%s/p2p-circuit", relayID.String()))
+		if err == nil {
+			logger.Debugf("[Discovery] Added generic relay circuit address for %s: %s", targetPeer, circuitAddr.String())
+			validCircuitAddrs = append(validCircuitAddrs, circuitAddr)
+		} else {
+			logger.Errorf("[Discovery] Failed to create circuit addr: %v", err)
 		}
+	}
+
+	if len(validCircuitAddrs) > 0 {
+		// Clear existing addresses to prevent libp2p from hanging on dead private IPs
+		n.Host.Peerstore().ClearAddrs(targetPeer)
+		n.Host.Peerstore().AddAddrs(targetPeer, validCircuitAddrs, peerstore.TempAddrTTL)
+		logger.Infof("[Discovery] Replaced addrs for %s with %d circuit addrs", targetPeer, len(validCircuitAddrs))
 	}
 }
