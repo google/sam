@@ -154,8 +154,8 @@ func (n *SamNode) CallMCPTool(ctx context.Context, targetPeer peer.ID, toolName 
 		if err == nil {
 			return res, nil
 		}
-		if errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), "context deadline exceeded") {
-			logger.Warnf("[MCP] Tool call failed with timeout, not retrying: %v", err)
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) || strings.Contains(err.Error(), "context deadline exceeded") {
+			logger.Warnf("[MCP] Tool call failed with timeout or cancellation, not retrying: %v", err)
 			return nil, err
 		}
 		logger.Warnf("[MCP] Tool call failed, retrying in %v: %v", backoff, err)

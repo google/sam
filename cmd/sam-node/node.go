@@ -1270,7 +1270,10 @@ func (n *SamNode) StartIngressServer(ctx context.Context) error {
 			logger.Infof("[Ingress] Forwarding to service %s, upstreamPath: %q", serviceName, upstreamPath)
 
 			if upstreamPath == "" {
-				r.URL.Path = ""
+				r.URL.Path = "/"
+				if len(parts) == 2 {
+					r.Header.Set("X-Sam-No-Trailing-Slash", "true")
+				}
 			} else {
 				r.URL.Path = "/" + upstreamPath
 			}

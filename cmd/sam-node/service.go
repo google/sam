@@ -58,13 +58,11 @@ func newReverseProxyHandler(targetURL string) (http.Handler, error) {
 	proxy := httputil.NewSingleHostReverseProxy(u)
 	originalDirector := proxy.Director
 	proxy.Director = func(req *http.Request) {
-		originalPath := req.URL.Path
+		noTrailingSlash := req.Header.Get("X-Sam-No-Trailing-Slash") == "true"
+		req.Header.Del("X-Sam-No-Trailing-Slash")
 		originalDirector(req)
 
-		// httputil.NewSingleHostReverseProxy automatically appends a trailing slash
-		// when joining an empty request path with a target URL. If the client requested
-		// the exact base path (empty) and the target doesn't natively end in a slash, strip it.
-		if originalPath == "" && !strings.HasSuffix(u.Path, "/") && strings.HasSuffix(req.URL.Path, "/") {
+		if noTrailingSlash && !strings.HasSuffix(u.Path, "/") && strings.HasSuffix(req.URL.Path, "/") {
 			req.URL.Path = strings.TrimSuffix(req.URL.Path, "/")
 		}
 		logger.Debugf("[ReverseProxy] Forwarding to: %q", req.URL.String())

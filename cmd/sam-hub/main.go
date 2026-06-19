@@ -959,7 +959,11 @@ func connectBootstrap(ctx context.Context, h *Hub, peers []string) {
 				logger.Errorf("[Federation] HTTP Get error for %s: %v", peerStr, err)
 				continue
 			}
-
+			if resp.StatusCode != http.StatusOK {
+				logger.Errorf("[Federation] HTTP Get for %s returned status %d", peerStr, resp.StatusCode)
+				_ = resp.Body.Close()
+				continue
+			}
 			bodyBytes, err := io.ReadAll(resp.Body)
 			_ = resp.Body.Close()
 			if err != nil {

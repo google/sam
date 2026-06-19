@@ -353,7 +353,7 @@ func createEgressProxy(node *SamNode) http.Handler {
 			req.URL.Scheme = "libp2p"
 			req.URL.Host = peerID
 			req.Host = peerID
-			if upstreamPath == "" {
+			if len(parts) == 5 {
 				req.URL.Path = fmt.Sprintf("/%s/%s", serviceType, serviceName)
 			} else {
 				req.URL.Path = fmt.Sprintf("/%s/%s/%s", serviceType, serviceName, upstreamPath)
