@@ -15,6 +15,8 @@
 package main
 
 import (
+	"io"
+
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -256,6 +258,13 @@ func NewHub(ctx context.Context, policy *api.PolicyConfig, allowLoopback bool) (
 		auds = []string{api.DefaultAudience}
 	}
 
+	var filteredExternal []string
+	for _, addr := range externalMultiaddrs {
+		if !strings.HasPrefix(addr, "http://") && !strings.HasPrefix(addr, "https://") {
+			filteredExternal = append(filteredExternal, addr)
+		}
+	}
+
 	hub := &Hub{
 		Host:             h,
 		DHT:              kadDHT,
@@ -264,7 +273,7 @@ func NewHub(ctx context.Context, policy *api.PolicyConfig, allowLoopback bool) (
 		MeshID:           meshName,
 		Policy:           policy,
 		limiter:          rate.NewLimiter(rate.Limit(EnrollRateLimit), EnrollBurst),
-		ExternalAddrs:    externalMultiaddrs,
+		ExternalAddrs:    filteredExternal,
 		AllowedAudiences: auds,
 		AllowLoopback:    allowLoopback,
 	}
@@ -943,6 +952,57 @@ func startBootstrapFederation(ctx context.Context, h *Hub, peers []string) {
 
 func connectBootstrap(ctx context.Context, h *Hub, peers []string) {
 	for _, peerStr := range peers {
+		if strings.HasPrefix(peerStr, "http://") || strings.HasPrefix(peerStr, "https://") {
+			client := &http.Client{Timeout: 10 * time.Second}
+			resp, err := client.Get(peerStr + "/info")
+			if err != nil {
+				logger.Errorf("[Federation] HTTP Get error for %s: %v", peerStr, err)
+				continue
+			}
+
+			bodyBytes, err := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			if err != nil {
+				logger.Errorf("[Federation] ReadAll error: %v", err)
+				continue
+			}
+
+			var info api.HubInfoResponse
+			if err := proto.Unmarshal(bodyBytes, &info); err != nil {
+				logger.Errorf("[Federation] Proto unmarshal error: %v", err)
+				continue
+			}
+
+			for _, addrStr := range info.HubAddresses {
+				ma, err := multiaddr.NewMultiaddr(addrStr)
+				if err != nil {
+					logger.Errorf("[Federation] Multiaddr error: %v", err)
+					continue
+				}
+
+				pi, err := peer.AddrInfoFromP2pAddr(ma)
+				if err != nil {
+					logger.Errorf("[Federation] AddrInfo error: %v", err)
+					continue
+				}
+
+				if pi.ID == h.Host.ID() {
+					continue
+				}
+
+				if len(h.Host.Network().ConnsToPeer(pi.ID)) > 0 {
+					continue
+				}
+
+				if err := h.Host.Connect(ctx, *pi); err == nil {
+					logger.Infof("[Federation] Connected to bootstrap peer: %s via HTTP %s", pi.ID, peerStr)
+				} else {
+					logger.Errorf("[Federation] Failed to connect to %s: %v", pi.ID, err)
+				}
+			}
+			continue
+		}
+
 		ma, err := multiaddr.NewMultiaddr(peerStr)
 		if err != nil {
 			continue

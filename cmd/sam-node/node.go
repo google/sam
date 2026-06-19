@@ -995,7 +995,7 @@ func (n *SamNode) IsServiceRegistered(serviceName string) bool {
 // reachable mesh can't wedge a discovery call indefinitely.
 const (
 	dhtLookupTimeout       = 5 * time.Second
-	discoveryFanoutTimeout = 15 * time.Second
+	discoveryFanoutTimeout = 40 * time.Second
 )
 
 // findProvidersByCID is the shared DHT-lookup primitive; bounds the
@@ -1236,6 +1236,7 @@ func (n *SamNode) StartIngressServer(ctx context.Context) error {
 
 	server := &http.Server{
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			logger.Infof("[Ingress] Received request: %s %s", r.Method, r.URL.Path)
 			path := r.URL.Path
 			parts := strings.SplitN(strings.TrimPrefix(path, "/"), "/", 3)
 			if len(parts) < 2 {
@@ -1256,12 +1257,24 @@ func (n *SamNode) StartIngressServer(ctx context.Context) error {
 			}
 
 			svc, ok := n.services.Get(serviceName)
-			if !ok || svc.Handler() == nil {
+			if !ok {
+				logger.Errorf("[Ingress] Service not found: %s", serviceName)
 				http.Error(w, "Service not found", http.StatusNotFound)
 				return
 			}
+			if svc.Handler() == nil {
+				logger.Errorf("[Ingress] Service %s has nil handler", serviceName)
+				http.Error(w, "Service not found", http.StatusNotFound)
+				return
+			}
+			logger.Infof("[Ingress] Forwarding to service %s, upstreamPath: %q", serviceName, upstreamPath)
 
-			r.URL.Path = "/" + upstreamPath
+			if upstreamPath == "" {
+				r.URL.Path = ""
+			} else {
+				r.URL.Path = "/" + upstreamPath
+			}
+			r.URL.RawPath = ""
 			svc.Handler().ServeHTTP(w, r)
 		}),
 	}
