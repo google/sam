@@ -783,13 +783,18 @@ func (n *SamNode) verifyEvent(event *api.MeshEvent) bool {
 
 func (n *SamNode) subscribeToTopic(ctx context.Context, topicName string) error {
 	n.mu.Lock()
-	topic, ok := n.topics[topicName]
+	_, ok := n.topics[topicName]
 	var err error
+	var topic *pubsub.Topic
 	if !ok {
 		topic, err = n.PubSub.Join(topicName)
 		if err == nil {
 			n.topics[topicName] = topic
 		}
+	} else {
+		// Already joined and subscribed.
+		n.mu.Unlock()
+		return nil
 	}
 	n.mu.Unlock()
 	if err != nil {
