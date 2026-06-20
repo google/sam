@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 
-	"github.com/google/sam/api"
 	"github.com/multiformats/go-multiaddr"
 )
 
@@ -13,7 +12,7 @@ type hubConnectionManager interface {
 	LoadHubConfig() ([]byte, []string, error)
 	ConnectAndAuthWithHub(ctx context.Context, addr multiaddr.Multiaddr) error
 	LoadHubURL() (string, error)
-	DiscoverHubInfo(ctx context.Context, url string) (*api.HubInfoResponse, error)
+
 	SaveHubConfig(pubKey []byte, addrs []string) error
 }
 
@@ -57,7 +56,7 @@ func checkHubConnection(ctx context.Context, mgr hubConnectionManager) (stable b
 	}
 
 	logger.Infof("[Monitor] Reconnect P2P failed. Discovering hub info from %s...", hubURL)
-	info, err := mgr.DiscoverHubInfo(ctx, hubURL)
+	info, err := FetchHubInfo(ctx, hubURL)
 	if err != nil || len(info.HubAddresses) == 0 {
 		return false, false
 	}
@@ -74,7 +73,9 @@ func checkHubConnection(ctx context.Context, mgr hubConnectionManager) (stable b
 	}
 
 	if pubKeyBytes, _, err := mgr.LoadHubConfig(); err == nil {
-		_ = mgr.SaveHubConfig(pubKeyBytes, info.HubAddresses)
+		if saveErr := mgr.SaveHubConfig(pubKeyBytes, info.HubAddresses); saveErr != nil {
+			logger.Errorf("[Monitor] Failed to save updated hub config: %v", saveErr)
+		}
 	}
 
 	for _, addr := range newHubAddrs {

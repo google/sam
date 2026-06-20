@@ -21,7 +21,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -32,9 +31,7 @@ import (
 	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
-	"github.com/google/sam/api"
 	"golang.org/x/oauth2/clientcredentials"
-	"google.golang.org/protobuf/proto"
 )
 
 // generatePKCE generates a PKCE code verifier and challenge.
@@ -312,50 +309,6 @@ func (n *SamNode) DiscoverEndpoints(ctx context.Context, issuerURL string) (toke
 		return "", "", fmt.Errorf("failed to extract claims: %w", err)
 	}
 	return claims.TokenURL, claims.AuthURL, nil
-}
-
-// DiscoverHubInfo queries the hub's /info endpoint to fetch OIDC configurations.
-func (n *SamNode) DiscoverHubInfo(ctx context.Context, hubURL string) (*api.HubInfoResponse, error) {
-	if !strings.HasPrefix(hubURL, "http://") && !strings.HasPrefix(hubURL, "https://") {
-		hubURL = "https://" + hubURL
-	}
-	hubURL = strings.TrimSuffix(hubURL, "/")
-
-	urlStr := hubURL + "/info"
-	req, err := http.NewRequestWithContext(ctx, "GET", urlStr, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
-	}
-
-	client := &http.Client{
-		Timeout: 10 * time.Second,
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("HTTP request failed: %w", err)
-	}
-	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			logger.Errorf("Failed to close response body: %v", err)
-		}
-	}()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
-		return nil, fmt.Errorf("hub returned status %s: %s", resp.Status, string(body))
-	}
-
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response body: %w", err)
-	}
-
-	var hubInfo api.HubInfoResponse
-	if err := proto.Unmarshal(body, &hubInfo); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal hub info: %w", err)
-	}
-
-	return &hubInfo, nil
 }
 
 var openBrowserFunc = openBrowser
