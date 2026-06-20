@@ -270,3 +270,69 @@ func TestHandleInfoHTTP(t *testing.T) {
 		t.Errorf("Expected audience 'test-audience-1', got %q", info.Audience)
 	}
 }
+
+func TestVerifyBiscuit_Expiration(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+
+	kr, err := NewKeyRing(dbPath, 24*time.Hour, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = kr.Close() }()
+
+	hub := &Hub{
+		KeyRing: kr,
+		Policy:  &api.PolicyConfig{},
+	}
+
+	priv, _, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dummyPeer, err := peer.IDFromPrivateKey(priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name        string
+		expiry      time.Time
+		expectError bool
+	}{
+		{
+			name:        "Valid unexpired token",
+			expiry:      time.Now().Add(1 * time.Hour),
+			expectError: false,
+		},
+		{
+			name:        "Expired token",
+			expiry:      time.Now().Add(-1 * time.Hour),
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			token := &oidc.IDToken{
+				Expiry: tt.expiry,
+			}
+			claims := jwt.MapClaims{
+				"roles": []any{"admin"},
+			}
+
+			biscuitData, err := hub.mintBiscuitToken(claims, token, dummyPeer)
+			if err != nil {
+				t.Fatalf("mintBiscuitToken failed: %v", err)
+			}
+
+			_, err = hub.verifyBiscuit(biscuitData, dummyPeer)
+			if tt.expectError && err == nil {
+				t.Errorf("Expected error due to expiration, got nil")
+			}
+			if !tt.expectError && err != nil {
+				t.Errorf("Expected no error, got: %v", err)
+			}
+		})
+	}
+}

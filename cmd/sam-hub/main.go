@@ -865,6 +865,20 @@ func (h *Hub) verifyBiscuit(biscuitData []byte, remotePeer peer.ID) (*biscuit.Bi
 			continue
 		}
 
+		authorizer.AddFact(biscuit.Fact{
+			Predicate: biscuit.Predicate{
+				Name: "time",
+				IDs:  []biscuit.Term{biscuit.Date(time.Now())},
+			},
+		})
+
+		timeCheck, err := parser.FromStringCheck(`check if time($time), expiration($exp), $time <= $exp`)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		authorizer.AddCheck(timeCheck)
+
 		rule, err := parser.FromStringPolicy("allow if true")
 		if err != nil {
 			lastErr = err
