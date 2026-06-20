@@ -47,7 +47,7 @@ func FetchHubInfo(ctx context.Context, hubURL string) (*api.HubInfoResponse, err
 	if err != nil {
 		return nil, fmt.Errorf("HTTP request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
 	if err != nil {

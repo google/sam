@@ -117,7 +117,7 @@ func TestSyncHubConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create store: %v", err)
 	}
-	defer store.Close()
+	defer store.Close() //nolint:errcheck
 
 	// Initial store is empty, so SyncHubConfig should just return empty
 	pubKey, addrs, err := SyncHubConfig(context.Background(), store)
