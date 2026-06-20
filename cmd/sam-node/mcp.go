@@ -241,6 +241,7 @@ func (n *SamNode) callMCPToolOnce(ctx context.Context, targetPeer peer.ID, toolN
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect client: %w", err)
 	}
+	defer func() { _ = session.Close() }()
 
 	// We don't need to marshall the params, the SDK takes care of it
 	// Passing pre-marshaled []byte triggers encoding/json's base64 which gets rejected
