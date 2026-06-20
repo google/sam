@@ -123,17 +123,13 @@ func main() {
 			var hubPubKey ed25519.PublicKey
 			var hubAddrs []multiaddr.Multiaddr
 
-			storedPubKey, storedAddrs, _ := store.LoadHubConfig()
+			storedPubKey, syncedAddrs, err := SyncHubConfig(context.Background(), store)
+			if err != nil {
+				logger.Warnf("Failed to sync hub config: %v", err)
+			}
 			if len(storedPubKey) > 0 {
 				hubPubKey = storedPubKey
-				for _, addrStr := range storedAddrs {
-					ma, err := multiaddr.NewMultiaddr(addrStr)
-					if err != nil {
-						logger.Warnf("Failed to parse stored hub address %q: %v", addrStr, err)
-						continue
-					}
-					hubAddrs = append(hubAddrs, ma)
-				}
+				hubAddrs = syncedAddrs
 			}
 
 			if hubPublicKeyFlag != "" {
@@ -240,17 +236,11 @@ func main() {
 				}
 				enrollCancel()
 
-				storedPubKey, storedAddrs, _ := store.LoadHubConfig()
-				hubPubKey = storedPubKey
-				var newHubAddrs []multiaddr.Multiaddr
-				for _, addrStr := range storedAddrs {
-					ma, err := multiaddr.NewMultiaddr(addrStr)
-					if err != nil {
-						logger.Warnf("Failed to parse stored hub address %q: %v", addrStr, err)
-						continue
-					}
-					newHubAddrs = append(newHubAddrs, ma)
+				storedPubKey, newHubAddrs, err := SyncHubConfig(context.Background(), store)
+				if err != nil {
+					logger.Warnf("Failed to sync hub config post-enrollment: %v", err)
 				}
+				hubPubKey = storedPubKey
 
 				logger.Debugf("listenAddrs: %v, allowLoopback: %v", listenAddrs, allowLoopbackFlag)
 				node, err = NewSamNode(context.Background(), priv, hubPubKey, newHubAddrs, store, meshFlag, discoveryIntervalFlag, listenAddrs, enableRelayFlag, nodeConfig, keyGracePeriodFlag, allowLoopbackFlag)
@@ -334,7 +324,7 @@ func main() {
 			dummyNode := &SamNode{Store: store}
 
 			fmt.Printf("Discovering hub info from %s...\n", targetHub)
-			hubInfo, err := dummyNode.DiscoverHubInfo(ctx, targetHub)
+			hubInfo, err := FetchHubInfo(ctx, targetHub)
 			if err != nil {
 				logger.Fatalf("Failed to discover hub info: %v", err)
 			}

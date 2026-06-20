@@ -41,22 +41,22 @@ func startSidecarServer(node *SamNode, addr, token, certFile, keyFile, caFile st
 	mux.HandleFunc("/readyz", handleReadyz)
 
 	// Protected endpoints
-	mux.Handle("/sam/service/register", withAuth(token, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("/sam/service/register", withMeshConnection(node, withAuth(token, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handleRegisterService(node, w, r)
-	})))
-	mux.Handle("/sam/service/unregister", withAuth(token, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	}))))
+	mux.Handle("/sam/service/unregister", withMeshConnection(node, withAuth(token, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handleUnregisterService(node, w, r)
-	})))
-	mux.Handle("/sam/service/discover", withAuth(token, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	}))))
+	mux.Handle("/sam/service/discover", withMeshConnection(node, withAuth(token, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handleDiscoverService(node, w, r)
-	})))
+	}))))
 
 	// Mount Egress Proxy
-	mux.Handle("/sam/", withAuth(token, createEgressProxy(node)))
+	mux.Handle("/sam/", withMeshConnection(node, withAuth(token, createEgressProxy(node))))
 
 	// Mount MCP handler
 	mcpHandler := NewMCPHandler(node)
-	mux.Handle("/", mcpHandler)
+	mux.Handle("/", withMeshConnection(node, mcpHandler))
 
 	server := &http.Server{
 		Handler: mux,
@@ -126,6 +126,16 @@ func handleReadyz(w http.ResponseWriter, r *http.Request) {
 	if _, err := w.Write([]byte("OK")); err != nil {
 		logger.Errorf("Failed to write response: %v", err)
 	}
+}
+
+func withMeshConnection(node *SamNode, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if node != nil && !node.IsConnected() {
+			http.Error(w, "Service Unavailable: Not connected to the mesh", http.StatusServiceUnavailable)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func withAuth(token string, next http.Handler) http.Handler {

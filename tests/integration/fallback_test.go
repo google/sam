@@ -497,8 +497,8 @@ func TestSelfHealingHTTPFallback(t *testing.T) {
 	success := false
 	for i := 0; i < 50; i++ {
 		out = stdout.String()
-		if strings.Contains(out, "Attempting to fetch updated hub addresses via HTTP") &&
-			strings.Contains(out, "Fallback connection successful!") {
+		if strings.Contains(out, "Fetching latest hub addresses via HTTP") &&
+			strings.Contains(out, "Successfully authenticated with hub via libp2p") {
 			success = true
 			break
 		}
