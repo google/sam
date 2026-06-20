@@ -746,27 +746,23 @@ func (n *SamNode) verifyEvent(event *api.MeshEvent) bool {
 
 func (n *SamNode) subscribeToTopic(ctx context.Context, topicName string) error {
 	n.mu.Lock()
-	_, ok := n.topics[topicName]
-	var err error
-	var topic *pubsub.Topic
-	if !ok {
-		topic, err = n.PubSub.Join(topicName)
-		if err == nil {
-			n.topics[topicName] = topic
-		}
-	} else {
-		// Already joined and subscribed.
-		n.mu.Unlock()
+	defer n.mu.Unlock()
+
+	if _, ok := n.topics[topicName]; ok {
 		return nil
 	}
-	n.mu.Unlock()
+
+	topic, err := n.PubSub.Join(topicName)
 	if err != nil {
 		return err
 	}
+
 	sub, err := topic.Subscribe()
 	if err != nil {
 		return err
 	}
+
+	n.topics[topicName] = topic
 
 	bgCtx := context.Background()
 	go func() {
