@@ -190,12 +190,15 @@ func main() {
 					MeshID:            meshFlag,
 					DiscoveryInterval: discoveryIntervalFlag,
 					ListenAddrs:       listenAddrs,
-					EnableRelay:       enableRelayFlag,
-					NodeConfig:        nodeConfig,
-					KeyGracePeriod:    keyGracePeriodFlag,
-					AllowLoopback:     allowLoopbackFlag,
-					MonitorBootstrap:  monitorBootstrapFlag,
-					MonitorInterval:   monitorCheckIntervalFlag,
+					EnableRelay:          enableRelayFlag,
+					NodeConfig:           nodeConfig,
+					KeyGracePeriod:       keyGracePeriodFlag,
+					AllowLoopback:        allowLoopbackFlag,
+					MonitorBootstrap:     monitorBootstrapFlag,
+					MonitorInterval:      monitorCheckIntervalFlag,
+					AutoRelayMinInterval: autoRelayMinIntervalFlag,
+					AutoRelayBootDelay:   autoRelayBootDelayFlag,
+					AutoRelayBackoff:     autoRelayBackoffFlag,
 				})
 				if err != nil {
 					logger.Fatalf("Failed to start mesh node: %v", err)
@@ -243,11 +246,14 @@ func main() {
 					DiscoveryInterval: discoveryIntervalFlag,
 					ListenAddrs:       listenAddrs,
 					EnableRelay:       enableRelayFlag,
-					NodeConfig:        nodeConfig,
-					KeyGracePeriod:    keyGracePeriodFlag,
-					AllowLoopback:     allowLoopbackFlag,
-					MonitorBootstrap:  monitorBootstrapFlag,
-					MonitorInterval:   monitorCheckIntervalFlag,
+					NodeConfig:           nodeConfig,
+					KeyGracePeriod:       keyGracePeriodFlag,
+					AllowLoopback:        allowLoopbackFlag,
+					MonitorBootstrap:     monitorBootstrapFlag,
+					MonitorInterval:      monitorCheckIntervalFlag,
+					AutoRelayMinInterval: autoRelayMinIntervalFlag,
+					AutoRelayBootDelay:   autoRelayBootDelayFlag,
+					AutoRelayBackoff:     autoRelayBackoffFlag,
 				})
 				if err != nil {
 					enrollCancel()
