@@ -198,7 +198,7 @@ roles: {}
 	t.Log("Node B successfully reconnected to Hub B!")
 
 	// Final verification: Ensure we can actually reach Node B via the Hub B relay
-	clientHost, err := libp2p.New(libp2p.NoListenAddrs)
+	clientHost, err := libp2p.New(libp2p.NoListenAddrs, libp2p.EnableRelay())
 	if err != nil {
 		t.Fatal(err)
 	}
