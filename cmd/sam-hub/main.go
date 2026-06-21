@@ -139,9 +139,9 @@ func (a *relayACL) AllowReserve(p peer.ID, addr multiaddr.Multiaddr) bool {
 }
 
 func (a *relayACL) AllowConnect(src peer.ID, srcAddr multiaddr.Multiaddr, dest peer.ID) bool {
-	_, ok := a.hub.authenticatedPeers.Load(src)
+	_, ok := a.hub.authenticatedPeers.Load(dest)
 	if !ok {
-		logger.Errorf("[Relay] Rejecting connect from %s to %s: not authenticated", src, dest)
+		logger.Errorf("[Relay] Rejecting connect from %s to %s: dest not authenticated", src, dest)
 	} else {
 		logger.Infof("[Relay] Allowing connect from %s to %s", src, dest)
 	}
