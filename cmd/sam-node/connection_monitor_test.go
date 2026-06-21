@@ -55,6 +55,8 @@ func (m *mockHubConnectionManager) SaveHubConfig(pubKey []byte, addrs []string) 
 	return m.saveConfigErr
 }
 
+func (m *mockHubConnectionManager) UpdateRelays(addrs []multiaddr.Multiaddr) {}
+
 func TestCheckHubConnection(t *testing.T) {
 	cases := []struct {
 		name       string

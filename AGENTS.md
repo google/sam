@@ -32,3 +32,8 @@ Enforce strict modularity in testing. The repository uses a defined testing pyra
 * Ensure linter passes `make lint`
 * Ensure test passes `make test`
 * Ensure e2e test passes `make e2e-test`
+
+## 6. Environments
+* There are two public testnets available `hub.sam-mesh.dev` that is deployed from the latest released tag and `bananas.sam-mesh.dev` that is deployed from the `main` branch. 
+* Their configurations can be found under `.github/k8s`.
+* Their deployments are managed under `.github/workflows/deploy.yaml`.
