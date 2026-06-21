@@ -143,7 +143,7 @@ roles: {}
 		"--allow-loopback",
 		"--monitor-bootstrap", "1s",
 		"--monitor-interval", "1s",
-		"--autorelay-min-interval", "0s",
+		"--autorelay-min-interval", "1s",
 		"--autorelay-backoff", "1s",
 		"--autorelay-boot-delay", "0s",
 	)
