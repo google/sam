@@ -259,6 +259,9 @@ func main() {
 					enrollCancel()
 					logger.Fatalf("Enrollment failed: %v", err)
 				}
+				if err := store.SaveHubURL(hubAddr); err != nil {
+					logger.Warnf("Failed to save hub URL: %v", err)
+				}
 
 				if teardownErr := node.Teardown(); teardownErr != nil {
 					logger.Errorf("Failed to teardown enrollment node: %v", teardownErr)
