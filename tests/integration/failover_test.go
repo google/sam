@@ -143,6 +143,9 @@ roles: {}
 		"--allow-loopback",
 		"--monitor-bootstrap", "1s",
 		"--monitor-interval", "1s",
+		"--autorelay-min-interval", "0s",
+		"--autorelay-backoff", "1s",
+		"--autorelay-boot-delay", "0s",
 	)
 	cmdNode.Dir = repoRoot(t)
 	cmdNode.Env = env
@@ -198,12 +201,6 @@ roles: {}
 	t.Log("Node B successfully reconnected to Hub B!")
 
 	// Final verification: Ensure we can actually reach Node B via the Hub B relay
-	clientHost, err := libp2p.New(libp2p.NoListenAddrs, libp2p.EnableRelay())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer clientHost.Close() //nolint:errcheck
-
 	relayAddrStr := fmt.Sprintf("/ip4/127.0.0.1/tcp/%d/p2p/%s/p2p-circuit/p2p/%s", p2pPortB, peerIDB, nodePeerID)
 	relayAddr, err := multiaddr.NewMultiaddr(relayAddrStr)
 	if err != nil {
@@ -219,7 +216,12 @@ roles: {}
 
 	var connectErr error
 	for i := 0; i < 15; i++ {
+		clientHost, err := libp2p.New(libp2p.NoListenAddrs, libp2p.EnableRelay())
+		if err != nil {
+			t.Fatal(err)
+		}
 		connectErr = clientHost.Connect(ctx, *addrInfo)
+		clientHost.Close() // nolint:errcheck
 		if connectErr == nil {
 			break
 		}

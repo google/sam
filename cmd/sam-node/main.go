@@ -74,6 +74,9 @@ var (
 	dataDirFlag              string
 	allowLoopbackFlag        bool
 	headlessFlag             bool
+	autoRelayMinIntervalFlag time.Duration
+	autoRelayBootDelayFlag   time.Duration
+	autoRelayBackoffFlag     time.Duration
 
 	apiTokenFlag string
 	tlsCertFlag  string
@@ -462,6 +465,9 @@ func main() {
 	runCmd.Flags().StringVar(&discoveryIntervalFlag, "discovery-interval", DefaultDiscoveryInterval, "Polling interval for DHT discovery")
 	runCmd.Flags().DurationVar(&monitorBootstrapFlag, "monitor-bootstrap", 2*time.Minute, "Initial wait before monitoring hub connection")
 	runCmd.Flags().DurationVar(&monitorCheckIntervalFlag, "monitor-interval", 1*time.Minute, "Interval for checking hub connection")
+	runCmd.Flags().DurationVar(&autoRelayMinIntervalFlag, "autorelay-min-interval", 30*time.Second, "AutoRelay Min Interval")
+	runCmd.Flags().DurationVar(&autoRelayBootDelayFlag, "autorelay-boot-delay", 0*time.Second, "AutoRelay Boot Delay")
+	runCmd.Flags().DurationVar(&autoRelayBackoffFlag, "autorelay-backoff", 3*time.Second, "AutoRelay Backoff")
 	runCmd.Flags().BoolVar(&enableRelayFlag, "enable-relay", false, "Allow this node to serve as a relay for others")
 	runCmd.Flags().StringVar(&logLevelFlag, "log-level", "info", "Log level (debug, info, warn, error)")
 	runCmd.Flags().DurationVar(&keyGracePeriodFlag, "key-grace-period", 24*time.Hour, "Key grace period for old keys (e.g. 24h)")

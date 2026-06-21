@@ -144,9 +144,12 @@ type SamNodeConfig struct {
 	EnableRelay       bool
 	NodeConfig        *NodeConfigComplete
 	KeyGracePeriod    time.Duration
-	AllowLoopback     bool
-	MonitorBootstrap  time.Duration
-	MonitorInterval   time.Duration
+	AllowLoopback        bool
+	MonitorBootstrap     time.Duration
+	MonitorInterval      time.Duration
+	AutoRelayMinInterval time.Duration
+	AutoRelayBootDelay   time.Duration
+	AutoRelayBackoff     time.Duration
 }
 
 // NewSamNode creates a new Agent instance secured with the 4-layer pipeline.
@@ -258,8 +261,9 @@ func NewSamNode(ctx context.Context, cfg SamNodeConfig) (*SamNode, error) {
 				}()
 				return c
 			},
-			autorelay.WithBootDelay(0),
-			autorelay.WithBackoff(3*time.Second),
+			autorelay.WithBootDelay(cfg.AutoRelayBootDelay),
+			autorelay.WithBackoff(cfg.AutoRelayBackoff),
+			autorelay.WithMinInterval(cfg.AutoRelayMinInterval),
 		))
 	}
 
