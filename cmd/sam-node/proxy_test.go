@@ -53,7 +53,20 @@ func TestDatapathIntegration(t *testing.T) {
 	// Pre-populate stores with dummy keys to avoid enrollment failure if required
 	// For this test, we assume we can run without full enrollment if we bypass AuthHandler
 
-	nodeA, err := NewSamNode(ctx, privA, nil, nil, storeA, "test-mesh", "1s", []string{"/ip4/127.0.0.1/tcp/0"}, false, &NodeConfigComplete{}, 24*time.Hour, true)
+	nodeA, err := NewSamNode(ctx, SamNodeConfig{
+		PrivKey:           privA,
+		HubAddrs:          nil,
+		Store:             storeA,
+		MeshID:            "test-mesh",
+		DiscoveryInterval: "1s",
+		ListenAddrs:       []string{"/ip4/127.0.0.1/tcp/0"},
+		EnableRelay:       false,
+		NodeConfig:        &NodeConfigComplete{},
+		KeyGracePeriod:    24 * time.Hour,
+		AllowLoopback:     true,
+		MonitorBootstrap:  2 * time.Minute,
+		MonitorInterval:   1 * time.Minute,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +76,20 @@ func TestDatapathIntegration(t *testing.T) {
 		}
 	}()
 
-	nodeB, err := NewSamNode(ctx, privB, nil, nil, storeB, "test-mesh", "1s", []string{"/ip4/127.0.0.1/tcp/0"}, false, &NodeConfigComplete{}, 24*time.Hour, true)
+	nodeB, err := NewSamNode(ctx, SamNodeConfig{
+		PrivKey:           privB,
+		HubAddrs:          nil,
+		Store:             storeB,
+		MeshID:            "test-mesh",
+		DiscoveryInterval: "1s",
+		ListenAddrs:       []string{"/ip4/127.0.0.1/tcp/0"},
+		EnableRelay:       false,
+		NodeConfig:        &NodeConfigComplete{},
+		KeyGracePeriod:    24 * time.Hour,
+		AllowLoopback:     true,
+		MonitorBootstrap:  2 * time.Minute,
+		MonitorInterval:   1 * time.Minute,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,13 +238,39 @@ func TestStdioDatapathIntegration(t *testing.T) {
 	}
 	defer func() { _ = storeB.Close() }()
 
-	nodeA, err := NewSamNode(ctx, privA, nil, nil, storeA, "test-mesh", "1s", []string{"/ip4/127.0.0.1/tcp/0"}, false, &NodeConfigComplete{}, 24*time.Hour, true)
+	nodeA, err := NewSamNode(ctx, SamNodeConfig{
+		PrivKey:           privA,
+		HubAddrs:          nil,
+		Store:             storeA,
+		MeshID:            "test-mesh",
+		DiscoveryInterval: "1s",
+		ListenAddrs:       []string{"/ip4/127.0.0.1/tcp/0"},
+		EnableRelay:       false,
+		NodeConfig:        &NodeConfigComplete{},
+		KeyGracePeriod:    24 * time.Hour,
+		AllowLoopback:     true,
+		MonitorBootstrap:  2 * time.Minute,
+		MonitorInterval:   1 * time.Minute,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = nodeA.Host.Close() }()
 
-	nodeB, err := NewSamNode(ctx, privB, nil, nil, storeB, "test-mesh", "1s", []string{"/ip4/127.0.0.1/tcp/0"}, false, &NodeConfigComplete{}, 24*time.Hour, true)
+	nodeB, err := NewSamNode(ctx, SamNodeConfig{
+		PrivKey:           privB,
+		HubAddrs:          nil,
+		Store:             storeB,
+		MeshID:            "test-mesh",
+		DiscoveryInterval: "1s",
+		ListenAddrs:       []string{"/ip4/127.0.0.1/tcp/0"},
+		EnableRelay:       false,
+		NodeConfig:        &NodeConfigComplete{},
+		KeyGracePeriod:    24 * time.Hour,
+		AllowLoopback:     true,
+		MonitorBootstrap:  2 * time.Minute,
+		MonitorInterval:   1 * time.Minute,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

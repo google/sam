@@ -14,6 +14,7 @@ type hubConnectionManager interface {
 	LoadHubURL() (string, error)
 
 	SaveHubConfig(pubKey []byte, addrs []string) error
+	UpdateRelays(addrs []multiaddr.Multiaddr)
 }
 
 // checkHubConnection monitors the connection to the hub and attempts to recover it if disconnected.
@@ -46,6 +47,7 @@ func checkHubConnection(ctx context.Context, mgr hubConnectionManager) (stable b
 	for _, addr := range p2pAddrs {
 		if err := mgr.ConnectAndAuthWithHub(ctx, addr); err == nil {
 			logger.Infof("[Monitor] Successfully reconnected to Hub via P2P.")
+			mgr.UpdateRelays([]multiaddr.Multiaddr{addr})
 			return false, true
 		}
 	}
@@ -81,6 +83,7 @@ func checkHubConnection(ctx context.Context, mgr hubConnectionManager) (stable b
 	for _, addr := range newHubAddrs {
 		if err := mgr.ConnectAndAuthWithHub(ctx, addr); err == nil {
 			logger.Infof("[Monitor] Successfully reconnected to Hub via HTTP fallback.")
+			mgr.UpdateRelays(newHubAddrs)
 			return false, true
 		}
 	}

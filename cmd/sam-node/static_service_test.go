@@ -14,7 +14,9 @@ import (
 	"github.com/libp2p/go-libp2p"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	"github.com/libp2p/go-libp2p/core/crypto"
+	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-msgio"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/multiformats/go-multiaddr"
 	"google.golang.org/protobuf/proto"
@@ -31,6 +33,16 @@ func startMockLibp2pHub(t *testing.T) (peer.ID, string) {
 	if err != nil {
 		t.Fatalf("failed to create DHT on mock hub: %v", err)
 	}
+
+	// Add dummy auth handler
+	h.SetStreamHandler(api.AuthProtocolID, func(s network.Stream) {
+		defer func() { _ = s.Close() }()
+		// Just send a success response to make the client happy
+		resp := &api.AuthResponse{Success: true}
+		data, _ := proto.Marshal(resp)
+		writer := msgio.NewVarintWriter(s)
+		_ = writer.WriteMsg(data)
+	})
 
 	// Start HTTP server for enrollment
 	mux := http.NewServeMux()
@@ -94,7 +106,20 @@ func TestStaticServiceRegistrationRequiresConnection(t *testing.T) {
 	}
 
 	// 4. Create Node with empty hub addrs initially
-	node, err := NewSamNode(context.Background(), priv, nil, []multiaddr.Multiaddr{}, store, "test-mesh", "100ms", []string{"/ip4/127.0.0.1/tcp/0"}, false, nil, 24*time.Hour, true)
+	node, err := NewSamNode(context.Background(), SamNodeConfig{
+		PrivKey:           priv,
+		HubAddrs:          []multiaddr.Multiaddr{},
+		Store:             store,
+		MeshID:            "test-mesh",
+		DiscoveryInterval: "100ms",
+		ListenAddrs:       []string{"/ip4/127.0.0.1/tcp/0"},
+		EnableRelay:       false,
+		NodeConfig:        nil,
+		KeyGracePeriod:    24 * time.Hour,
+		AllowLoopback:     true,
+		MonitorBootstrap:  2 * time.Minute,
+		MonitorInterval:   1 * time.Minute,
+	})
 	if err != nil {
 		t.Fatalf("failed to create node: %v", err)
 	}
@@ -167,7 +192,20 @@ func TestStaticServiceRegistrationCommandFailure(t *testing.T) {
 	}
 
 	// 4. Create Node with empty hub addrs initially
-	node, err := NewSamNode(context.Background(), priv, nil, []multiaddr.Multiaddr{}, store, "test-mesh", "100ms", []string{"/ip4/127.0.0.1/tcp/0"}, false, nil, 24*time.Hour, true)
+	node, err := NewSamNode(context.Background(), SamNodeConfig{
+		PrivKey:           priv,
+		HubAddrs:          []multiaddr.Multiaddr{},
+		Store:             store,
+		MeshID:            "test-mesh",
+		DiscoveryInterval: "100ms",
+		ListenAddrs:       []string{"/ip4/127.0.0.1/tcp/0"},
+		EnableRelay:       false,
+		NodeConfig:        nil,
+		KeyGracePeriod:    24 * time.Hour,
+		AllowLoopback:     true,
+		MonitorBootstrap:  2 * time.Minute,
+		MonitorInterval:   1 * time.Minute,
+	})
 	if err != nil {
 		t.Fatalf("failed to create node: %v", err)
 	}

@@ -114,23 +114,56 @@ type SamNode struct {
 	AllowLoopback     bool
 	authSuccess       chan struct{}
 	authOnce          sync.Once
+	currentRelays     []peer.AddrInfo
+}
+
+// UpdateRelays updates the current relays used by AutoRelay.
+func (n *SamNode) UpdateRelays(addrs []multiaddr.Multiaddr) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	var newRelays []peer.AddrInfo
+	for _, addr := range addrs {
+		if addrInfo, err := peer.AddrInfoFromP2pAddr(addr); err == nil && addrInfo.ID != "" {
+			newRelays = append(newRelays, *addrInfo)
+			n.Host.Peerstore().AddAddrs(addrInfo.ID, addrInfo.Addrs, peerstore.PermanentAddrTTL)
+		}
+	}
+	n.currentRelays = newRelays
+	logger.Infof("[Relay] Updated current relays for AutoRelay: %v", newRelays)
+}
+
+// SamNodeConfig holds all configuration options for a SamNode.
+type SamNodeConfig struct {
+	PrivKey           crypto.PrivKey
+	HubPubKey         ed25519.PublicKey
+	HubAddrs          []multiaddr.Multiaddr
+	Store             *Store
+	MeshID            string
+	DiscoveryInterval string
+	ListenAddrs       []string
+	EnableRelay       bool
+	NodeConfig        *NodeConfigComplete
+	KeyGracePeriod    time.Duration
+	AllowLoopback     bool
+	MonitorBootstrap  time.Duration
+	MonitorInterval   time.Duration
 }
 
 // NewSamNode creates a new Agent instance secured with the 4-layer pipeline.
-func NewSamNode(ctx context.Context, privKey crypto.PrivKey, hubPubKey ed25519.PublicKey, hubAddrs []multiaddr.Multiaddr, store *Store, meshID string, discoveryInterval string, listenAddrs []string, enableRelay bool, nodeConfig *NodeConfigComplete, keyGracePeriod time.Duration, allowLoopback bool) (*SamNode, error) {
+func NewSamNode(ctx context.Context, cfg SamNodeConfig) (*SamNode, error) {
 	var trustedKeys []TrustedKey
-	if len(hubPubKey) > 0 {
-		trustedKeys = []TrustedKey{{Key: hubPubKey, ReceivedAt: time.Now()}}
+	if len(cfg.HubPubKey) > 0 {
+		trustedKeys = []TrustedKey{{Key: cfg.HubPubKey, ReceivedAt: time.Now()}}
 	}
 
 	node := &SamNode{
-		Store:             store,
+		Store:             cfg.Store,
 		trustedKeys:       trustedKeys,
 		peerLastEventTime: make(map[string]int64),
 		receivedMsgs:      make(map[string][]string),
 		topics:            make(map[string]*pubsub.Topic),
-		LocalPolicy:       nodeConfig,
-		AllowLoopback:     allowLoopback,
+		LocalPolicy:       cfg.NodeConfig,
+		AllowLoopback:     cfg.AllowLoopback,
 		authSuccess:       make(chan struct{}),
 	}
 
@@ -154,7 +187,7 @@ func NewSamNode(ctx context.Context, privKey crypto.PrivKey, hubPubKey ed25519.P
 
 	// Convert Hub multiaddrs to peer.AddrInfo to use as static relays
 	var staticRelays []peer.AddrInfo
-	for _, addr := range hubAddrs {
+	for _, addr := range cfg.HubAddrs {
 		if addrInfo, err := peer.AddrInfoFromP2pAddr(addr); err == nil && addrInfo.ID != "" {
 			staticRelays = append(staticRelays, *addrInfo)
 			if node.HubPeerID == "" {
@@ -175,11 +208,11 @@ func NewSamNode(ctx context.Context, privKey crypto.PrivKey, hubPubKey ed25519.P
 
 	// Layer 1: Establish FIPS-compliant Transports & NAT Services
 	opts := []libp2p.Option{
-		libp2p.Identity(privKey),
+		libp2p.Identity(cfg.PrivKey),
 		libp2p.DefaultTransports,
 		libp2p.Security(libp2ptls.ID, libp2ptls.New),
 		libp2p.ConnectionGater(gater),
-		libp2p.ListenAddrStrings(listenAddrs...),
+		libp2p.ListenAddrStrings(cfg.ListenAddrs...),
 		libp2p.EnableNATService(),
 		libp2p.EnableAutoNATv2(),
 		libp2p.ForceReachabilityPrivate(),
@@ -187,7 +220,7 @@ func NewSamNode(ctx context.Context, privKey crypto.PrivKey, hubPubKey ed25519.P
 		libp2p.EnableHolePunching(),
 		libp2p.ConnectionManager(cm),
 		libp2p.AddrsFactory(func(addrs []multiaddr.Multiaddr) []multiaddr.Multiaddr {
-			if allowLoopback {
+			if cfg.AllowLoopback {
 				return addrs
 			}
 			var filtered []multiaddr.Multiaddr
@@ -202,10 +235,15 @@ func NewSamNode(ctx context.Context, privKey crypto.PrivKey, hubPubKey ed25519.P
 
 	// If we have a Hub, configure it as our static fallback relay for NAT hole-punching
 	if len(staticRelays) > 0 {
+		node.currentRelays = staticRelays
 		opts = append(opts, libp2p.EnableAutoRelayWithPeerSource(
 			func(ctx context.Context, numPeers int) <-chan peer.AddrInfo {
 				logger.Infof("[Relay] AutoRelay called PeerSource for %d peers", numPeers)
-				c := make(chan peer.AddrInfo, len(staticRelays))
+				node.mu.Lock()
+				currentRelays := node.currentRelays
+				node.mu.Unlock()
+
+				c := make(chan peer.AddrInfo, len(currentRelays))
 				go func() {
 					defer close(c)
 					select {
@@ -213,7 +251,7 @@ func NewSamNode(ctx context.Context, privKey crypto.PrivKey, hubPubKey ed25519.P
 						logger.Infof("[Relay] PeerSource context done")
 					case <-node.authSuccess:
 						logger.Infof("[Relay] Yielding static relays to AutoRelay")
-						for _, r := range staticRelays {
+						for _, r := range currentRelays {
 							c <- r
 						}
 					}
@@ -226,7 +264,7 @@ func NewSamNode(ctx context.Context, privKey crypto.PrivKey, hubPubKey ed25519.P
 	}
 
 	// If the user explicitly opts in, allow this node to serve as a relay for others
-	if enableRelay {
+	if cfg.EnableRelay {
 		logger.Infof("[Relay] Enabling Relay Service")
 	}
 
@@ -241,7 +279,7 @@ func NewSamNode(ctx context.Context, privKey crypto.PrivKey, hubPubKey ed25519.P
 		h.Peerstore().AddAddrs(pi.ID, pi.Addrs, peerstore.PermanentAddrTTL)
 	}
 
-	if enableRelay {
+	if cfg.EnableRelay {
 		logger.Infof("[Relay] Enabling Relay Service with ACL")
 		_, err = relay.New(h, relay.WithACL(&nodeRelayACL{node: node}))
 		if err != nil {
@@ -265,7 +303,7 @@ func NewSamNode(ctx context.Context, privKey crypto.PrivKey, hubPubKey ed25519.P
 	var authenticated bool
 	var fatalAuthErr error
 
-	for _, addr := range hubAddrs {
+	for _, addr := range cfg.HubAddrs {
 		if err := node.ConnectAndAuthWithHub(ctx, addr); err != nil {
 			logger.Warnf("[AuthN] Failed to bootstrap and auth with hub %s: %v", addr, err)
 			if errors.Is(err, ErrFatalAuth) {
@@ -277,7 +315,7 @@ func NewSamNode(ctx context.Context, privKey crypto.PrivKey, hubPubKey ed25519.P
 		}
 	}
 
-	if len(hubAddrs) > 0 && !authenticated {
+	if len(cfg.HubAddrs) > 0 && !authenticated {
 		if fatalAuthErr != nil {
 			return nil, fmt.Errorf("fatal auth failure: %w", fatalAuthErr)
 		}
@@ -314,14 +352,14 @@ func NewSamNode(ctx context.Context, privKey crypto.PrivKey, hubPubKey ed25519.P
 	// Listen for Network Evictions/Revocations from the Hub
 	go node.listenForHubEvents(ctx)
 
-	interval, err := time.ParseDuration(discoveryInterval)
+	interval, err := time.ParseDuration(cfg.DiscoveryInterval)
 	if err != nil {
-		logger.Warnf("[Discovery] Invalid discovery interval '%s', using default %s: %v", discoveryInterval, DefaultDiscoveryInterval, err)
+		logger.Warnf("[Discovery] Invalid discovery interval '%s', using default %s: %v", cfg.DiscoveryInterval, DefaultDiscoveryInterval, err)
 		interval, _ = time.ParseDuration(DefaultDiscoveryInterval)
 	}
 
 	// Start DHT Discovery
-	go node.startDiscovery(ctx, meshID, interval)
+	go node.startDiscovery(ctx, cfg.MeshID, interval)
 
 	// Layer 3: Open the Lobby Door (Auth Protocol is bypassed by Layer 4)
 	node.Host.SetStreamHandler(api.AuthProtocolID, node.HandleAuthHandshake)
@@ -330,7 +368,7 @@ func NewSamNode(ctx context.Context, privKey crypto.PrivKey, hubPubKey ed25519.P
 	node.Host.SetStreamHandler(api.MCPProtocolID, node.WithBiscuitAuth(node.HandleMCPStream))
 
 	// Start key pruning
-	node.startKeyPruning(ctx, keyGracePeriod)
+	node.startKeyPruning(ctx, cfg.KeyGracePeriod)
 
 	// Start Ingress HTTP Server
 	if err := node.StartIngressServer(ctx); err != nil {
@@ -338,7 +376,7 @@ func NewSamNode(ctx context.Context, privKey crypto.PrivKey, hubPubKey ed25519.P
 	}
 
 	// Start connection monitor
-	node.startConnectionMonitor(ctx, 2*time.Minute, 1*time.Minute, 3)
+	node.startConnectionMonitor(ctx, cfg.MonitorBootstrap, cfg.MonitorInterval, 3)
 
 	return node, nil
 }

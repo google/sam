@@ -54,24 +54,26 @@ var (
 	hubAddr     string
 	listenAddrs []string
 
-	jwtFlag               string
-	jwtPathFlag           string
-	clientIDFlag          string
-	clientSecretFlag      string
-	oidcIssuerFlag        string
-	deviceAuthURLFlag     string
-	audienceFlag          string
-	hubPublicKeyFlag      string
-	bindAddrFlag          string
-	meshFlag              string
-	discoveryIntervalFlag string
-	enableRelayFlag       bool
-	logLevelFlag          string
-	configFile            string
-	keyGracePeriodFlag    time.Duration
-	dataDirFlag           string
-	allowLoopbackFlag     bool
-	headlessFlag          bool
+	jwtFlag                  string
+	jwtPathFlag              string
+	clientIDFlag             string
+	clientSecretFlag         string
+	oidcIssuerFlag           string
+	deviceAuthURLFlag        string
+	audienceFlag             string
+	hubPublicKeyFlag         string
+	bindAddrFlag             string
+	meshFlag                 string
+	discoveryIntervalFlag    string
+	monitorBootstrapFlag     time.Duration
+	monitorCheckIntervalFlag time.Duration
+	enableRelayFlag          bool
+	logLevelFlag             string
+	configFile               string
+	keyGracePeriodFlag       time.Duration
+	dataDirFlag              string
+	allowLoopbackFlag        bool
+	headlessFlag             bool
 
 	apiTokenFlag string
 	tlsCertFlag  string
@@ -177,7 +179,21 @@ func main() {
 					logger.Fatal("Hub public key not found in store and not provided. Cannot verify peers.")
 				}
 				priv := getOrGenerateKey(store)
-				node, err = NewSamNode(context.Background(), priv, hubPubKey, hubAddrs, store, meshFlag, discoveryIntervalFlag, listenAddrs, enableRelayFlag, nodeConfig, keyGracePeriodFlag, allowLoopbackFlag)
+				node, err = NewSamNode(context.Background(), SamNodeConfig{
+					PrivKey:           priv,
+					HubPubKey:         hubPubKey,
+					HubAddrs:          hubAddrs,
+					Store:             store,
+					MeshID:            meshFlag,
+					DiscoveryInterval: discoveryIntervalFlag,
+					ListenAddrs:       listenAddrs,
+					EnableRelay:       enableRelayFlag,
+					NodeConfig:        nodeConfig,
+					KeyGracePeriod:    keyGracePeriodFlag,
+					AllowLoopback:     allowLoopbackFlag,
+					MonitorBootstrap:  monitorBootstrapFlag,
+					MonitorInterval:   monitorCheckIntervalFlag,
+				})
 				if err != nil {
 					logger.Fatalf("Failed to start mesh node: %v", err)
 				}
@@ -216,7 +232,20 @@ func main() {
 
 				priv := getOrGenerateKey(store)
 				enrollCtx, enrollCancel := context.WithCancel(context.Background())
-				node, err = NewSamNode(enrollCtx, priv, nil, initHubAddrs, store, meshFlag, discoveryIntervalFlag, listenAddrs, enableRelayFlag, nodeConfig, keyGracePeriodFlag, allowLoopbackFlag)
+				node, err = NewSamNode(enrollCtx, SamNodeConfig{
+					PrivKey:           priv,
+					HubAddrs:          initHubAddrs,
+					Store:             store,
+					MeshID:            meshFlag,
+					DiscoveryInterval: discoveryIntervalFlag,
+					ListenAddrs:       listenAddrs,
+					EnableRelay:       enableRelayFlag,
+					NodeConfig:        nodeConfig,
+					KeyGracePeriod:    keyGracePeriodFlag,
+					AllowLoopback:     allowLoopbackFlag,
+					MonitorBootstrap:  monitorBootstrapFlag,
+					MonitorInterval:   monitorCheckIntervalFlag,
+				})
 				if err != nil {
 					enrollCancel()
 					logger.Fatalf("Failed to initialize node for enrollment: %v", err)
@@ -243,7 +272,21 @@ func main() {
 				hubPubKey = storedPubKey
 
 				logger.Debugf("listenAddrs: %v, allowLoopback: %v", listenAddrs, allowLoopbackFlag)
-				node, err = NewSamNode(context.Background(), priv, hubPubKey, newHubAddrs, store, meshFlag, discoveryIntervalFlag, listenAddrs, enableRelayFlag, nodeConfig, keyGracePeriodFlag, allowLoopbackFlag)
+				node, err = NewSamNode(context.Background(), SamNodeConfig{
+					PrivKey:           priv,
+					HubPubKey:         hubPubKey,
+					HubAddrs:          newHubAddrs,
+					Store:             store,
+					MeshID:            meshFlag,
+					DiscoveryInterval: discoveryIntervalFlag,
+					ListenAddrs:       listenAddrs,
+					EnableRelay:       enableRelayFlag,
+					NodeConfig:        nodeConfig,
+					KeyGracePeriod:    keyGracePeriodFlag,
+					AllowLoopback:     allowLoopbackFlag,
+					MonitorBootstrap:  monitorBootstrapFlag,
+					MonitorInterval:   monitorCheckIntervalFlag,
+				})
 				if err != nil {
 					logger.Fatalf("Failed to start mesh node after enrollment: %v", err)
 				}
@@ -374,7 +417,20 @@ func main() {
 			}
 
 			priv := getOrGenerateKey(store)
-			node, err := NewSamNode(context.Background(), priv, nil, initHubAddrs, store, meshFlag, discoveryIntervalFlag, []string{"/ip4/0.0.0.0/udp/0/quic-v1", "/ip4/0.0.0.0/tcp/0"}, enableRelayFlag, nodeConfig, keyGracePeriodFlag, allowLoopbackFlag)
+			node, err := NewSamNode(context.Background(), SamNodeConfig{
+				PrivKey:           priv,
+				HubAddrs:          initHubAddrs,
+				Store:             store,
+				MeshID:            meshFlag,
+				DiscoveryInterval: discoveryIntervalFlag,
+				ListenAddrs:       []string{"/ip4/0.0.0.0/udp/0/quic-v1", "/ip4/0.0.0.0/tcp/0"},
+				EnableRelay:       enableRelayFlag,
+				NodeConfig:        nodeConfig,
+				KeyGracePeriod:    keyGracePeriodFlag,
+				AllowLoopback:     allowLoopbackFlag,
+				MonitorBootstrap:  2 * time.Minute,
+				MonitorInterval:   1 * time.Minute,
+			})
 			if err != nil {
 				logger.Fatalf("Failed to initialize node for enrollment: %v", err)
 			}
@@ -401,6 +457,8 @@ func main() {
 	runCmd.Flags().StringVar(&bindAddrFlag, "bind-addr", "127.0.0.1:8080", "Local TCP address for the HTTP server (MCP and Sidecar API)")
 	runCmd.Flags().StringVar(&meshFlag, "mesh", DefaultMeshName, "Mesh federation name")
 	runCmd.Flags().StringVar(&discoveryIntervalFlag, "discovery-interval", DefaultDiscoveryInterval, "Polling interval for DHT discovery")
+	runCmd.Flags().DurationVar(&monitorBootstrapFlag, "monitor-bootstrap", 2*time.Minute, "Initial wait before monitoring hub connection")
+	runCmd.Flags().DurationVar(&monitorCheckIntervalFlag, "monitor-interval", 1*time.Minute, "Interval for checking hub connection")
 	runCmd.Flags().BoolVar(&enableRelayFlag, "enable-relay", false, "Allow this node to serve as a relay for others")
 	runCmd.Flags().StringVar(&logLevelFlag, "log-level", "info", "Log level (debug, info, warn, error)")
 	runCmd.Flags().DurationVar(&keyGracePeriodFlag, "key-grace-period", 24*time.Hour, "Key grace period for old keys (e.g. 24h)")
@@ -550,6 +608,8 @@ func (n *SamNode) Enroll(ctx context.Context, jwt string) error {
 	n.keysMu.Unlock()
 
 	// Connect and Auth to hub after enrollment to join the mesh
+	var lastAuthErr error
+	var authed bool
 	for _, addrStr := range enrollResp.HubAddresses {
 		addr, err := multiaddr.NewMultiaddr(addrStr)
 		if err != nil {
@@ -558,9 +618,15 @@ func (n *SamNode) Enroll(ctx context.Context, jwt string) error {
 		}
 		if err := n.ConnectAndAuthWithHub(ctx, addr); err != nil {
 			logger.Warnf("Failed to connect and auth with hub after enrollment: %v", err)
+			lastAuthErr = err
 		} else {
+			authed = true
 			break
 		}
+	}
+
+	if !authed {
+		return fmt.Errorf("failed to connect and authenticate with any hub after HTTP enrollment (last error: %v)", lastAuthErr)
 	}
 
 	fmt.Println("Successfully enrolled via HTTP and stored identity and hub config.")

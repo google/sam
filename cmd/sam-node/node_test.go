@@ -98,7 +98,20 @@ func TestConnectionMonitor_CrashesAfterFailures(t *testing.T) {
 	if os.Getenv("BE_CRASHER_MONITOR") == "1" {
 		priv, _, _ := crypto.GenerateKeyPair(crypto.Ed25519, -1)
 		store, _ := NewStore(t.TempDir())
-		node, err := NewSamNode(context.Background(), priv, nil, nil, store, "test", "10s", []string{"/ip4/127.0.0.1/tcp/0"}, false, nil, 0, false)
+		node, err := NewSamNode(context.Background(), SamNodeConfig{
+			PrivKey:           priv,
+			HubAddrs:          nil,
+			Store:             store,
+			MeshID:            "test",
+			DiscoveryInterval: "10s",
+			ListenAddrs:       []string{"/ip4/127.0.0.1/tcp/0"},
+			EnableRelay:       false,
+			NodeConfig:        nil,
+			KeyGracePeriod:    0,
+			AllowLoopback:     false,
+			MonitorBootstrap:  2 * time.Minute,
+			MonitorInterval:   1 * time.Minute,
+		})
 		if err != nil {
 			os.Exit(0) // Ignore NewSamNode errors for this crasher
 		}

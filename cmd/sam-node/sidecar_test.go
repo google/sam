@@ -501,8 +501,20 @@ func TestRegisterService_PopulatesAggregatedTools(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	node, err := NewSamNode(ctx, priv, nil, nil, store, "test-mesh", "1s",
-		[]string{"/ip4/127.0.0.1/tcp/0"}, false, &NodeConfigComplete{}, 24*time.Hour, true)
+	node, err := NewSamNode(ctx, SamNodeConfig{
+		PrivKey:           priv,
+		HubAddrs:          nil,
+		Store:             store,
+		MeshID:            "test-mesh",
+		DiscoveryInterval: "1s",
+		ListenAddrs:       []string{"/ip4/127.0.0.1/tcp/0"},
+		EnableRelay:       false,
+		NodeConfig:        &NodeConfigComplete{},
+		KeyGracePeriod:    24 * time.Hour,
+		AllowLoopback:     true,
+		MonitorBootstrap:  2 * time.Minute,
+		MonitorInterval:   1 * time.Minute,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -553,8 +565,20 @@ func TestUnregisterService_DetachesAggregation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	node, err := NewSamNode(ctx, priv, nil, nil, store, "test-mesh", "1s",
-		[]string{"/ip4/127.0.0.1/tcp/0"}, false, &NodeConfigComplete{}, 24*time.Hour, true)
+	node, err := NewSamNode(ctx, SamNodeConfig{
+		PrivKey:           priv,
+		HubAddrs:          nil,
+		Store:             store,
+		MeshID:            "test-mesh",
+		DiscoveryInterval: "1s",
+		ListenAddrs:       []string{"/ip4/127.0.0.1/tcp/0"},
+		EnableRelay:       false,
+		NodeConfig:        &NodeConfigComplete{},
+		KeyGracePeriod:    24 * time.Hour,
+		AllowLoopback:     true,
+		MonitorBootstrap:  2 * time.Minute,
+		MonitorInterval:   1 * time.Minute,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
