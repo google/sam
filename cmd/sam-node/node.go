@@ -88,7 +88,7 @@ func (a *nodeRelayACL) AllowReserve(p peer.ID, addr multiaddr.Multiaddr) bool {
 }
 
 func (a *nodeRelayACL) AllowConnect(src peer.ID, srcAddr multiaddr.Multiaddr, dest peer.ID) bool {
-	_, ok := a.node.authPeers.Load(src)
+	_, ok := a.node.authPeers.Load(dest)
 	return ok
 }
 
