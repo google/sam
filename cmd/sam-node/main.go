@@ -445,9 +445,9 @@ func main() {
 				AllowLoopback:        allowLoopbackFlag,
 				MonitorBootstrap:     2 * time.Minute,
 				MonitorInterval:      1 * time.Minute,
-				AutoRelayMinInterval: autoRelayMinIntervalFlag,
-				AutoRelayBootDelay:   autoRelayBootDelayFlag,
-				AutoRelayBackoff:     autoRelayBackoffFlag,
+				AutoRelayMinInterval: 30 * time.Second,
+				AutoRelayBootDelay:   0 * time.Second,
+				AutoRelayBackoff:     3 * time.Second,
 			})
 			if err != nil {
 				logger.Fatalf("Failed to initialize node for enrollment: %v", err)
