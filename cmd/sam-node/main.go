@@ -293,11 +293,14 @@ func main() {
 					DiscoveryInterval: discoveryIntervalFlag,
 					ListenAddrs:       listenAddrs,
 					EnableRelay:       enableRelayFlag,
-					NodeConfig:        nodeConfig,
-					KeyGracePeriod:    keyGracePeriodFlag,
-					AllowLoopback:     allowLoopbackFlag,
-					MonitorBootstrap:  monitorBootstrapFlag,
-					MonitorInterval:   monitorCheckIntervalFlag,
+					NodeConfig:           nodeConfig,
+					KeyGracePeriod:       keyGracePeriodFlag,
+					AllowLoopback:        allowLoopbackFlag,
+					MonitorBootstrap:     monitorBootstrapFlag,
+					MonitorInterval:      monitorCheckIntervalFlag,
+					AutoRelayMinInterval: autoRelayMinIntervalFlag,
+					AutoRelayBootDelay:   autoRelayBootDelayFlag,
+					AutoRelayBackoff:     autoRelayBackoffFlag,
 				})
 				if err != nil {
 					logger.Fatalf("Failed to start mesh node after enrollment: %v", err)
@@ -437,11 +440,14 @@ func main() {
 				DiscoveryInterval: discoveryIntervalFlag,
 				ListenAddrs:       []string{"/ip4/0.0.0.0/udp/0/quic-v1", "/ip4/0.0.0.0/tcp/0"},
 				EnableRelay:       enableRelayFlag,
-				NodeConfig:        nodeConfig,
-				KeyGracePeriod:    keyGracePeriodFlag,
-				AllowLoopback:     allowLoopbackFlag,
-				MonitorBootstrap:  2 * time.Minute,
-				MonitorInterval:   1 * time.Minute,
+				NodeConfig:           nodeConfig,
+				KeyGracePeriod:       keyGracePeriodFlag,
+				AllowLoopback:        allowLoopbackFlag,
+				MonitorBootstrap:     2 * time.Minute,
+				MonitorInterval:      1 * time.Minute,
+				AutoRelayMinInterval: autoRelayMinIntervalFlag,
+				AutoRelayBootDelay:   autoRelayBootDelayFlag,
+				AutoRelayBackoff:     autoRelayBackoffFlag,
 			})
 			if err != nil {
 				logger.Fatalf("Failed to initialize node for enrollment: %v", err)
