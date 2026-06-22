@@ -72,6 +72,15 @@ HTTPServer(("0.0.0.0", 8000), S).serve_forever()
 '
   MESH_CONTAINERS+=("http-service")
 
+  # Wait for http-service to be listening
+  local i
+  for ((i=0; i<30; i++)); do
+    if docker run --rm --network "${MESH_NETWORK}" python:3.12 python3 -c "import urllib.request; urllib.request.urlopen('http://http-service:8000')" >/dev/null 2>&1; then
+      break
+    fi
+    sleep 1
+  done
+
   # Register HTTP service on Node 1
   echo "[$(date +%T)] Registering HTTP service on Node 1"
   run docker run --rm --network "${MESH_NETWORK}" python:3.12 python3 -c "
@@ -138,12 +147,12 @@ with urllib.request.urlopen(req) as response:
   [[ "$status" -eq 0 ]]
   [[ "$output" == *"Service registered"* ]]
 
-  # Wait for DHT propagation
-  sleep 2
-
   # 3. Test HTTP Datapath: Node 2 calls Node 1's HTTP service
   echo "[$(date +%T)] Testing HTTP Datapath from Node 2 to Node 1"
-  run docker run --rm --network "${MESH_NETWORK}" python:3.12 python3 -c "
+  
+  local i
+  for ((i=0; i<15; i++)); do
+    run docker run --rm --network "${MESH_NETWORK}" python:3.12 python3 -c "
 import urllib.request
 req = urllib.request.Request(
     \"http://sam-node-2:8080/sam/${node1_peer_id}/mcp/http-tool/\",
@@ -152,6 +161,12 @@ req = urllib.request.Request(
 with urllib.request.urlopen(req) as response:
     print(response.read().decode(\"utf-8\"))
 "
+    if [[ "$status" -eq 0 ]] && [[ "$output" == *"{\"status\":\"success\"}"* ]]; then
+      break
+    fi
+    sleep 1
+  done
+
   echo "HTTP Call output: $output"
   [[ "$status" -eq 0 ]]
   [[ "$output" == *"{\"status\":\"success\"}"* ]]
@@ -171,6 +186,7 @@ req = urllib.request.Request(
 )
 try:
     with urllib.request.urlopen(req) as response:
+        print(\"SSE Client Connected\", flush=True)
         for line in response:
             print(line.decode(\"utf-8\").strip(), flush=True)
 except Exception as e:
@@ -178,8 +194,14 @@ except Exception as e:
 "
   MESH_CONTAINERS+=("sse-client")
 
-  # Wait a bit for SSE stream to establish
-  sleep 1
+  # Wait a bit for SSE stream container to start up
+  local i
+  for ((i=0; i<15; i++)); do
+    if docker logs sse-client 2>&1 | grep -q "SSE Client Connected"; then
+        break
+    fi
+    sleep 1
+  done
 
   # Send message via POST from Node 1 to Node 2's service
   test_message="{\"jsonrpc\":\"2.0\",\"method\":\"ping\",\"id\":1}"
@@ -201,11 +223,16 @@ with urllib.request.urlopen(req) as response:
   [[ "$status" -eq 0 ]]
   [[ "$output" == *"200"* ]]
 
-  # Wait for message to echo back
-  sleep 1
-
   # Check SSE client logs for the echoed message
-  run docker logs sse-client
+  local success=0
+  for ((i=0; i<15; i++)); do
+    run docker logs sse-client
+    if [[ "$output" == *"data: ${test_message}"* ]]; then
+      success=1
+      break
+    fi
+    sleep 1
+  done
   echo "SSE client logs: $output"
-  [[ "$output" == *"data: ${test_message}"* ]]
+  [[ "$success" -eq 1 ]]
 }
