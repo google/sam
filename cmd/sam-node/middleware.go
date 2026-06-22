@@ -292,5 +292,12 @@ func (n *SamNode) Authorize(rawToken []byte, req RequestContext, pubKey ed25519.
 	}
 	authorizer.AddPolicy(rule2)
 
+	// the Service catalog is public for any authenticated node.
+	rule3, err := parser.FromStringPolicy(`allow if operation("/sam/catalog")`)
+	if err != nil {
+		return fmt.Errorf("failed to parse baseline rule 3: %w", err)
+	}
+	authorizer.AddPolicy(rule3)
+
 	return authorizer.Authorize()
 }
