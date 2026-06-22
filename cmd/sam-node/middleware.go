@@ -33,6 +33,39 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+var (
+	baselineRule1 biscuit.Policy
+	baselineRule2 biscuit.Policy
+	baselineRule3 biscuit.Policy
+	baselineReplayCheck biscuit.Check
+)
+
+func init() {
+	var err error
+	rule1Str := fmt.Sprintf(`allow if operation($op), %s($op)`, api.FactMCPTool)
+	baselineRule1, err = parser.FromStringPolicy(rule1Str)
+	if err != nil {
+		panic(fmt.Sprintf("failed to parse baseline rule 1: %v", err))
+	}
+
+	rule2Str := fmt.Sprintf(`allow if operation($op), %s("*")`, api.FactMCPTool)
+	baselineRule2, err = parser.FromStringPolicy(rule2Str)
+	if err != nil {
+		panic(fmt.Sprintf("failed to parse baseline rule 2: %v", err))
+	}
+
+	baselineRule3, err = parser.FromStringPolicy(`allow if operation("/sam/catalog")`)
+	if err != nil {
+		panic(fmt.Sprintf("failed to parse baseline rule 3: %v", err))
+	}
+
+	replayCheckStr := `check if client_peer_id($id), connection_peer_id($id)`
+	baselineReplayCheck, err = parser.FromStringCheck(replayCheckStr)
+	if err != nil {
+		panic(fmt.Sprintf("failed to parse replay check: %v", err))
+	}
+}
+
 // RequestContext carries the security metadata for a specific stream request
 type RequestContext struct {
 	PeerID   peer.ID
@@ -257,12 +290,7 @@ func (n *SamNode) Authorize(rawToken []byte, req RequestContext, pubKey ed25519.
 	})
 
 	// Enforce client_peer_id matches connection_peer_id
-	replayCheckStr := `check if client_peer_id($id), connection_peer_id($id)`
-	replayCheck, err := parser.FromStringCheck(replayCheckStr)
-	if err != nil {
-		return fmt.Errorf("failed to parse replay check: %w", err)
-	}
-	authorizer.AddCheck(replayCheck)
+	authorizer.AddCheck(baselineReplayCheck)
 
 	// Apply Pre-compiled Local Attenuation
 	if n.LocalPolicy != nil {
@@ -278,19 +306,9 @@ func (n *SamNode) Authorize(rawToken []byte, req RequestContext, pubKey ed25519.
 	}
 
 	// Baseline Rules
-	rule1Str := fmt.Sprintf(`allow if operation($op), %s($op)`, api.FactMCPTool)
-	rule1, err := parser.FromStringPolicy(rule1Str)
-	if err != nil {
-		return fmt.Errorf("failed to parse baseline rule 1: %w", err)
-	}
-	authorizer.AddPolicy(rule1)
-
-	rule2Str := fmt.Sprintf(`allow if operation($op), %s("*")`, api.FactMCPTool)
-	rule2, err := parser.FromStringPolicy(rule2Str)
-	if err != nil {
-		return fmt.Errorf("failed to parse baseline rule 2: %w", err)
-	}
-	authorizer.AddPolicy(rule2)
+	authorizer.AddPolicy(baselineRule1)
+	authorizer.AddPolicy(baselineRule2)
+	authorizer.AddPolicy(baselineRule3)
 
 	return authorizer.Authorize()
 }

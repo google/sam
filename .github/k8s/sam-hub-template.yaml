@@ -118,6 +118,7 @@ data:
         mcp:
           allowed_tools:
             - "/sam/mcp/1.0.0"
+            - "/sam/catalog"
 
 ---
 apiVersion: monitoring.googleapis.com/v1

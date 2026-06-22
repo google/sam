@@ -15,6 +15,8 @@
 package main
 
 import (
+	"math/rand"
+
 	"github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/relay"
 
 	"bytes"
@@ -134,16 +136,16 @@ func (n *SamNode) UpdateRelays(addrs []multiaddr.Multiaddr) {
 
 // SamNodeConfig holds all configuration options for a SamNode.
 type SamNodeConfig struct {
-	PrivKey           crypto.PrivKey
-	HubPubKey         ed25519.PublicKey
-	HubAddrs          []multiaddr.Multiaddr
-	Store             *Store
-	MeshID            string
-	DiscoveryInterval string
-	ListenAddrs       []string
-	EnableRelay       bool
-	NodeConfig        *NodeConfigComplete
-	KeyGracePeriod    time.Duration
+	PrivKey              crypto.PrivKey
+	HubPubKey            ed25519.PublicKey
+	HubAddrs             []multiaddr.Multiaddr
+	Store                *Store
+	MeshID               string
+	DiscoveryInterval    string
+	ListenAddrs          []string
+	EnableRelay          bool
+	NodeConfig           *NodeConfigComplete
+	KeyGracePeriod       time.Duration
 	AllowLoopback        bool
 	MonitorBootstrap     time.Duration
 	MonitorInterval      time.Duration
@@ -254,7 +256,13 @@ func NewSamNode(ctx context.Context, cfg SamNodeConfig) (*SamNode, error) {
 						logger.Infof("[Relay] PeerSource context done")
 					case <-node.authSuccess:
 						logger.Infof("[Relay] Yielding static relays to AutoRelay")
-						for _, r := range currentRelays {
+						// Shuffle the relays to distribute load evenly across Hubs
+						shuffled := make([]peer.AddrInfo, len(currentRelays))
+						copy(shuffled, currentRelays)
+						rand.Shuffle(len(shuffled), func(i, j int) {
+							shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
+						})
+						for _, r := range shuffled {
 							c <- r
 						}
 					}
@@ -333,7 +341,7 @@ func NewSamNode(ctx context.Context, cfg SamNodeConfig) (*SamNode, error) {
 	}
 	node.PubSub = ps
 
-	// Subscribe to local address updates to reprovide services
+	// Subscribe to local address updates to reprovide services and log
 	sub, err := h.EventBus().Subscribe(new(event.EvtLocalAddressesUpdated))
 	if err == nil {
 		go func() {
@@ -342,7 +350,22 @@ func NewSamNode(ctx context.Context, cfg SamNodeConfig) (*SamNode, error) {
 				select {
 				case <-ctx.Done():
 					return
-				case <-sub.Out():
+				case e, ok := <-sub.Out():
+					if !ok {
+						return
+					}
+					evt, ok := e.(event.EvtLocalAddressesUpdated)
+					if !ok {
+						logger.Warnf("[Network] Unexpected event type received: %T", e)
+						continue
+					}
+
+					var addrs []multiaddr.Multiaddr
+					for _, a := range evt.Current {
+						addrs = append(addrs, a.Address)
+					}
+					logger.Infof("[Network] Local addresses updated: %v", addrs)
+
 					// Debounce or reprovide immediately
 					go func() {
 						time.Sleep(2 * time.Second) // Small debounce
