@@ -113,11 +113,14 @@ data:
     bindings:
       - user: "system:serviceaccount:sam-canary-${ENV_NAME}:sam-node-sa"
         role: "sam-canary"
+      - user: "aojea@google.com"
+        role: "sam-canary"
     roles:
       sam-canary:
         mcp:
           allowed_tools:
             - "/sam/mcp/1.0.0"
+            - "/sam/catalog"
 
 ---
 apiVersion: monitoring.googleapis.com/v1
