@@ -113,8 +113,6 @@ data:
     bindings:
       - user: "system:serviceaccount:sam-canary-${ENV_NAME}:sam-node-sa"
         role: "sam-canary"
-      - user: "aojea@google.com"
-        role: "sam-canary"
     roles:
       sam-canary:
         mcp:

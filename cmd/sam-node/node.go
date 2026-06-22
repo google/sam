@@ -350,8 +350,15 @@ func NewSamNode(ctx context.Context, cfg SamNodeConfig) (*SamNode, error) {
 				select {
 				case <-ctx.Done():
 					return
-				case e := <-sub.Out():
-					evt := e.(event.EvtLocalAddressesUpdated)
+				case e, ok := <-sub.Out():
+					if !ok {
+						return
+					}
+					evt, ok := e.(event.EvtLocalAddressesUpdated)
+					if !ok {
+						logger.Warnf("[Network] Unexpected event type received: %T", e)
+						continue
+					}
 
 					var addrs []multiaddr.Multiaddr
 					for _, a := range evt.Current {
