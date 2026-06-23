@@ -100,6 +100,8 @@ if [[ "${1:-}" == "-l" ]]; then
   exit 0
 fi
 
+check_prereqs "${1:-}"
+
 echo "== Creating kind cluster '${CLUSTER}' =="
 kind create cluster --name "${CLUSTER}" --config "${SCRIPT_DIR}/kind-config.yaml"
 
