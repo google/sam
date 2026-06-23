@@ -197,9 +197,11 @@ func (n *SamNode) callMCPToolOnce(ctx context.Context, targetPeer peer.ID, toolN
 	}
 
 	// Extract target service if it's a federated tool call (service.tool)
-	targetService := toolName
+	targetService := "/sam/catalog"
+	originalToolName := toolName
 	if parts := strings.SplitN(toolName, ".", 2); len(parts) == 2 {
 		targetService = parts[0]
+		originalToolName = parts[1]
 	}
 
 	// Marshal AuthFrame
@@ -253,7 +255,7 @@ func (n *SamNode) callMCPToolOnce(ctx context.Context, targetPeer peer.ID, toolN
 	// We don't need to marshall the params, the SDK takes care of it
 	// Passing pre-marshaled []byte triggers encoding/json's base64 which gets rejected
 	callParams := &mcp.CallToolParams{
-		Name:      toolName,
+		Name:      originalToolName,
 		Arguments: params,
 	}
 

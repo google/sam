@@ -371,7 +371,7 @@ func TestRevocation(t *testing.T) {
 
 	// Run handler in goroutine
 	go func() {
-		handler := node.WithBiscuitAuth(func(s network.Stream) {
+		handler := node.WithBiscuitAuth(func(s network.Stream, reqCtx RequestContext) {
 			t.Error("Handler should not be called for revoked peer")
 		})
 		handler(serverStream)

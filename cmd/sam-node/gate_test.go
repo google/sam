@@ -139,7 +139,7 @@ func startBareNode(t *testing.T, ctx context.Context) (*SamNode, func()) {
 
 const testMCPProtocol = protocol.ID("/sam-test/mcp/1.0.0")
 
-func TestHandleMCPStream_RegistersAggregatedTools(t *testing.T) {
+func TestHandleMCPStream_DumbPipeProxy(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -167,7 +167,9 @@ func TestHandleMCPStream_RegistersAggregatedTools(t *testing.T) {
 	t.Cleanup(func() { _ = svc.Teardown() })
 
 	// Bypass biscuit auth by exposing HandleMCPStream on a test-only protocol.
-	nodeA.Host.SetStreamHandler(testMCPProtocol, nodeA.HandleMCPStream)
+	nodeA.Host.SetStreamHandler(testMCPProtocol, func(s network.Stream) {
+		nodeA.HandleMCPStream(s, RequestContext{Target: "code-reviewer"})
+	})
 
 	if err := nodeB.Host.Connect(ctx, peer.AddrInfo{ID: nodeA.Host.ID(), Addrs: nodeA.Host.Addrs()}); err != nil {
 		t.Fatalf("connect: %v", err)
@@ -197,25 +199,20 @@ func TestHandleMCPStream_RegistersAggregatedTools(t *testing.T) {
 	}
 	found := false
 	for _, n := range names {
-		if n == "code-reviewer.review_pr" {
+		if n == "review_pr" {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Errorf("expected tools/list to include %q; got %v", "code-reviewer.review_pr", names)
+		t.Errorf("expected tools/list to include %q; got %v", "review_pr", names)
 	}
 
-	// Sanity: at least one infra tool is still present.
-	infraFound := false
+	// Dumb pipe: infra tools are NOT present.
 	for _, n := range names {
 		if n == "send_message" {
-			infraFound = true
-			break
+			t.Errorf("expected infra tool send_message to be absent in dumb pipe; got %v", names)
 		}
-	}
-	if !infraFound {
-		t.Errorf("expected infra tool send_message to be present; got %v", names)
 	}
 }
 
@@ -244,7 +241,9 @@ func TestHandleMCPStream_ForwarderRoutesCalls(t *testing.T) {
 	nodeA.services.insertService(svc)
 	t.Cleanup(func() { _ = svc.Teardown() })
 
-	nodeA.Host.SetStreamHandler(testMCPProtocol, nodeA.HandleMCPStream)
+	nodeA.Host.SetStreamHandler(testMCPProtocol, func(s network.Stream) {
+		nodeA.HandleMCPStream(s, RequestContext{Target: "svc"})
+	})
 
 	if err := nodeB.Host.Connect(ctx, peer.AddrInfo{ID: nodeA.Host.ID(), Addrs: nodeA.Host.Addrs()}); err != nil {
 		t.Fatalf("connect: %v", err)
@@ -264,7 +263,7 @@ func TestHandleMCPStream_ForwarderRoutesCalls(t *testing.T) {
 	defer func() { _ = session.Close() }()
 
 	res, err := session.CallTool(ctx, &mcp.CallToolParams{
-		Name:      "svc.echo",
+		Name:      "echo",
 		Arguments: map[string]any{"unused": true},
 	})
 	if err != nil {

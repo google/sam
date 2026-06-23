@@ -18,7 +18,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/google/sam/api"
 	"github.com/libp2p/go-libp2p/core/connmgr"
 	"github.com/libp2p/go-libp2p/core/control"
 	"github.com/libp2p/go-libp2p/core/network"
@@ -71,62 +70,58 @@ func (g *nodeConnGate) InterceptSecured(dir network.Direction, p peer.ID, n netw
 }
 
 // HandleMCPStream is the libp2p stream handler for the MCP protocol.
-// It assumes the stream is fully authenticated by the middleware.
-func (n *SamNode) HandleMCPStream(s network.Stream) {
+// It routes the authenticated stream to the appropriate backend service,
+// or serves the internal MCP catalog if the TargetService is empty/catalog.
+func (n *SamNode) HandleMCPStream(s network.Stream, reqCtx RequestContext) {
+	// If the TargetService is for a registered local backend, dumb-pipe proxy to it.
+	target := reqCtx.Target
+	if target != "" && target != "/sam/catalog" {
+		svc, ok := n.services.Get(target)
+		if ok {
+			mcpSvc, isMcp := svc.(*MCPService)
+			if isMcp {
+				mcpSvc.HandleStreamPassThrough(s)
+				return
+			}
+		}
+		// If service not found or not an MCPService, we fall through or close it.
+		// For now, close the stream if target is invalid.
+		logger.Warnf("[MCP] Client requested unknown target service %q, closing stream", target)
+		_ = s.Reset()
+		return
+	}
+
+	// Target is catalog/internal tools. We spin up an MCP server for these local mesh tools.
 	defer func() {
 		if err := s.Close(); err != nil {
-			fmt.Printf("Failed to close MCP stream: %v\n", err)
+			logger.Debugf("[MCP] Failed to close MCP stream: %v", err)
 		}
 	}()
 
-	// Handoff to SDK using custom transport
 	transport := NewStreamTransport(s)
 	server := mcp.NewServer(&mcp.Implementation{
-		Name:    "sam-node-mcp",
+		Name:    "sam-node-catalog",
 		Version: "0.1.0",
 	}, nil)
 
-	// Add the send_message tool.
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "send_message",
 		Description: "Send a message to another agent in the mesh",
 	}, n.handleSendMessage)
 
-	// Add list_local_services tool
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "list_local_services",
 		Description: "List services registered on the local node. Optionally filter by type.",
 	}, n.handleListLocalServices)
 
-	// Add the get_mesh_info tool.
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "get_mesh_info",
 		Description: "Get information about the mesh network",
 	}, n.handleGetMeshInfo)
 
-	// Add the describe_local_tool tool.
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "describe_local_tool",
-		Description: "Return the description, input schema, and output schema for a named aggregated tool on this node.",
-	}, n.handleDescribeLocalTool)
-
-	// Register aggregated hosted-service tools from MCP services.
-	infos := n.services.List(api.ServiceType_SERVICE_TYPE_MCP)
-	for _, info := range infos {
-		svc, ok := n.services.Get(info.Name)
-		if !ok {
-			continue
-		}
-		mcpSvc, ok := svc.(*MCPService)
-		if !ok {
-			continue
-		}
-		mcpSvc.RegisterAggregatedTools(server)
-	}
-
 	ctx := context.Background()
 	if err := server.Run(ctx, transport); err != nil {
-		fmt.Printf("MCP server error on stream from %s: %v\n", s.Conn().RemotePeer(), err)
+		logger.Errorf("[MCP] Catalog server error on stream from %s: %v", s.Conn().RemotePeer(), err)
 	}
 }
 func (g *nodeConnGate) InterceptUpgraded(n network.Conn) (allow bool, cc control.DisconnectReason) {

@@ -75,7 +75,7 @@ type RequestContext struct {
 }
 
 // WithBiscuitAuth enforces a Protobuf handshake on a stream before calling the next handler.
-func (n *SamNode) WithBiscuitAuth(next network.StreamHandler) network.StreamHandler {
+func (n *SamNode) WithBiscuitAuth(next func(network.Stream, RequestContext)) network.StreamHandler {
 	return func(s network.Stream) {
 		defer func() {
 			if err := s.Close(); err != nil {
@@ -155,7 +155,7 @@ func (n *SamNode) WithBiscuitAuth(next network.StreamHandler) network.StreamHand
 					logger.Errorf("[Auth] Failed to write ACK to %s: %v", remotePeer, err)
 					return
 				}
-				next(s)
+				next(s, reqCtx)
 				return
 			}
 		}
@@ -247,7 +247,7 @@ func (n *SamNode) WithBiscuitAuth(next network.StreamHandler) network.StreamHand
 			return
 		}
 
-		next(s)
+		next(s, reqCtx)
 	}
 }
 
