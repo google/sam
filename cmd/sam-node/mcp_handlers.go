@@ -188,20 +188,20 @@ func (n *SamNode) handleGetMeshInfo(ctx context.Context, req *mcp.CallToolReques
 	}, nil, nil
 }
 
-// CallRemoteToolParams defines the parameters for the call_remote_tool tool.
+// CallRemoteServerParams defines the parameters for the call_remote_server tool.
 //
 // Arguments is a JSON object whose shape matches the target tool's
-// input_schema (use describe_remote_tool to fetch it). Earlier revisions
+// input_schema (use describe_remote_server to fetch it). Earlier revisions
 // took a stringified JSON blob here; that footgun is gone.
-type CallRemoteToolParams struct {
+type CallRemoteServerParams struct {
 	PeerID    string         `json:"peer_id" jsonschema:"The Peer ID of the target agent"`
 	ToolName  string         `json:"tool_name" jsonschema:"The name of the tool to call"`
-	Arguments map[string]any `json:"arguments,omitempty" jsonschema:"Tool arguments as a JSON object whose keys match the target tool's input_schema. Call describe_remote_tool first to learn the schema."`
+	Arguments map[string]any `json:"arguments,omitempty" jsonschema:"Tool arguments as a JSON object whose keys match the target tool's input_schema. Call describe_remote_server first to learn the schema."`
 }
 
-// handleCallRemoteTool implements the call_remote_tool tool.
-func (n *SamNode) handleCallRemoteTool(ctx context.Context, req *mcp.CallToolRequest, params CallRemoteToolParams) (*mcp.CallToolResult, any, error) {
-	logger.Infof("[MCP] call_remote_tool called for peer %s, tool %s", params.PeerID, params.ToolName)
+// handleCallRemoteServer implements the call_remote_server tool.
+func (n *SamNode) handleCallRemoteServer(ctx context.Context, req *mcp.CallToolRequest, params CallRemoteServerParams) (*mcp.CallToolResult, any, error) {
+	logger.Infof("[MCP] call_remote_server called for peer %s, tool %s", params.PeerID, params.ToolName)
 	targetPeer, err := peer.Decode(params.PeerID)
 	if err != nil {
 		return nil, nil, err
@@ -238,22 +238,22 @@ func (n *SamNode) handleConnectPeer(ctx context.Context, req *mcp.CallToolReques
 	}, nil, nil
 }
 
-// FindRemoteToolsParams defines the parameters for the
-// find_remote_tools tool.
-type FindRemoteToolsParams struct {
+// FindRemoteServersParams defines the parameters for the
+// find_remote_servers tool.
+type FindRemoteServersParams struct {
 	Intent      string `json:"intent,omitempty" jsonschema:"Natural-language description of what the caller is looking for. Reserved for future semantic ranking; currently accepted but ignored."`
 	PeerID      string `json:"peer_id,omitempty" jsonschema:"Restrict the search to a single peer. Empty means search the whole mesh."`
 	ServiceName string `json:"service_name,omitempty" jsonschema:"Restrict results to tools whose name starts with this service prefix (e.g. 'code-reviewer'). Empty means no service filter."`
 }
 
-// remoteToolRow is one entry in the find_remote_tools response.
-type remoteToolRow struct {
+// remoteServerRow is one entry in the find_remote_servers response.
+type remoteServerRow struct {
 	PeerID      string `json:"peer_id"`
 	ToolName    string `json:"tool_name"`
 	Description string `json:"description"`
 }
 
-// handleFindRemoteTools implements the find_remote_tools tool.
+// handleFindRemoteServers implements the find_remote_servers tool.
 //
 // Scope:
 //   - If params.PeerID is set, only that peer is queried.
@@ -266,9 +266,9 @@ type remoteToolRow struct {
 //   - params.Intent is accepted and logged at debug level, but does not
 //     filter or rank results in this implementation (placeholder for
 //     future semantic search).
-func (n *SamNode) handleFindRemoteTools(ctx context.Context, req *mcp.CallToolRequest, params FindRemoteToolsParams) (*mcp.CallToolResult, any, error) {
+func (n *SamNode) handleFindRemoteServers(ctx context.Context, req *mcp.CallToolRequest, params FindRemoteServersParams) (*mcp.CallToolResult, any, error) {
 	if params.Intent != "" {
-		logger.Debugf("[find_remote_tools] intent (ignored): %q", params.Intent)
+		logger.Debugf("[find_remote_servers] intent (ignored): %q", params.Intent)
 	}
 
 	selfID := n.Host.ID().String()
@@ -276,7 +276,7 @@ func (n *SamNode) handleFindRemoteTools(ctx context.Context, req *mcp.CallToolRe
 		return nil, nil, fmt.Errorf("peer_id %q is this node; cross-mesh discovery cannot target self", params.PeerID)
 	}
 
-	var rows []remoteToolRow
+	var rows []remoteServerRow
 
 	if params.PeerID != "" {
 		pid, err := peer.Decode(params.PeerID)
@@ -311,7 +311,7 @@ func (n *SamNode) handleFindRemoteTools(ctx context.Context, req *mcp.CallToolRe
 	}
 
 	if rows == nil {
-		rows = []remoteToolRow{}
+		rows = []remoteServerRow{}
 	}
 	respData, err := json.Marshal(rows)
 	if err != nil {
@@ -396,7 +396,7 @@ func (n *SamNode) fetchRemoteToolCatalogue(ctx context.Context, targetPeer peer.
 // appendFilteredRows appends rows for tools that have a namespaced name
 // (containing ".") and, if serviceName is non-empty, whose name starts
 // with "<serviceName>.".
-func appendFilteredRows(rows []remoteToolRow, peerID string, tools []*mcp.Tool, serviceName string) []remoteToolRow {
+func appendFilteredRows(rows []remoteServerRow, peerID string, tools []*mcp.Tool, serviceName string) []remoteServerRow {
 	for _, tool := range tools {
 		if !strings.Contains(tool.Name, ".") {
 			continue
@@ -404,7 +404,7 @@ func appendFilteredRows(rows []remoteToolRow, peerID string, tools []*mcp.Tool, 
 		if serviceName != "" && !strings.HasPrefix(tool.Name, serviceName+".") {
 			continue
 		}
-		rows = append(rows, remoteToolRow{
+		rows = append(rows, remoteServerRow{
 			PeerID:      peerID,
 			ToolName:    tool.Name,
 			Description: tool.Description,
@@ -416,13 +416,13 @@ func appendFilteredRows(rows []remoteToolRow, peerID string, tools []*mcp.Tool, 
 // fanOutFetch queries each peer's tool catalogue concurrently with a
 // small cap and returns the filtered rows. Per-peer failures are
 // logged at debug level and skipped — best-effort mesh-wide fetch.
-func (n *SamNode) fanOutFetch(ctx context.Context, peers []peer.ID, serviceName string) []remoteToolRow {
+func (n *SamNode) fanOutFetch(ctx context.Context, peers []peer.ID, serviceName string) []remoteServerRow {
 	const maxConcurrent = 8
 	sem := make(chan struct{}, maxConcurrent)
 
 	var (
 		mu   sync.Mutex
-		rows []remoteToolRow
+		rows []remoteServerRow
 	)
 
 	var wg sync.WaitGroup
@@ -439,7 +439,7 @@ func (n *SamNode) fanOutFetch(ctx context.Context, peers []peer.ID, serviceName 
 
 			tools, err := n.fetchRemoteToolCatalogue(peerCtx, pid)
 			if err != nil {
-				logger.Debugf("[find_remote_tools] peer %s skipped: %v", pid, err)
+				logger.Debugf("[find_remote_servers] peer %s skipped: %v", pid, err)
 				return
 			}
 
@@ -454,7 +454,7 @@ func (n *SamNode) fanOutFetch(ctx context.Context, peers []peer.ID, serviceName 
 }
 
 // remoteToolDescription is the JSON payload describe_local_tool emits on the
-// peer side and describe_remote_tool re-emits on the caller side. The
+// peer side and describe_remote_server re-emits on the caller side. The
 // caller-side handler fills PeerID; the peer-side handler leaves it empty.
 //
 // InputSchema and OutputSchema mirror mcp.Tool's typing (`any`): the SDK
@@ -468,15 +468,15 @@ type remoteToolDescription struct {
 	OutputSchema any    `json:"output_schema,omitempty"`
 }
 
-// DescribeRemoteToolParams defines parameters for the describe_remote_tool
+// DescribeRemoteToolParams defines parameters for the describe_remote_server
 // sidecar tool.
 type DescribeRemoteToolParams struct {
 	PeerID   string `json:"peer_id" jsonschema:"Peer ID of the node hosting the tool. Required."`
-	ToolName string `json:"tool_name" jsonschema:"Namespaced tool name as returned by find_remote_tools (e.g. 'code-reviewer.review_pr'). Required."`
+	ToolName string `json:"tool_name" jsonschema:"Namespaced tool name as returned by find_remote_servers (e.g. 'code-reviewer.review_pr'). Required."`
 }
 
-// handleDescribeRemoteTool implements the describe_remote_tool client-facing tool.
-func (n *SamNode) handleDescribeRemoteTool(ctx context.Context, req *mcp.CallToolRequest, params DescribeRemoteToolParams) (*mcp.CallToolResult, any, error) {
+// handleDescribeRemoteServer implements the describe_remote_server client-facing tool.
+func (n *SamNode) handleDescribeRemoteServer(ctx context.Context, req *mcp.CallToolRequest, params DescribeRemoteToolParams) (*mcp.CallToolResult, any, error) {
 	if params.PeerID == "" {
 		return nil, nil, fmt.Errorf("peer_id is required")
 	}

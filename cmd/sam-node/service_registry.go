@@ -66,13 +66,15 @@ func (r *ServiceRegistry) Register(ctx context.Context, svc Service) error {
 		return err
 	}
 
-	provideCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-
-	if err := r.dht.Provide(provideCtx, srvNameCID, true); err != nil {
+	nameCtx, nameCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer nameCancel()
+	if err := r.dht.Provide(nameCtx, srvNameCID, true); err != nil {
 		logger.Warnf("[ServiceRegistry] DHT Provide (name) for %s: %v", info.Name, err)
 	}
-	if err := r.dht.Provide(provideCtx, srvTypeCID, true); err != nil {
+
+	typeCtx, typeCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer typeCancel()
+	if err := r.dht.Provide(typeCtx, srvTypeCID, true); err != nil {
 		logger.Warnf("[ServiceRegistry] DHT Provide (type) for %s: %v", info.Name, err)
 	}
 
@@ -159,11 +161,15 @@ func (r *ServiceRegistry) ReprovideAll(ctx context.Context) {
 	for _, info := range toProvide {
 		srvNameCID, err := serviceNameToCID(info.Type, info.Name)
 		if err == nil {
-			_ = r.dht.Provide(ctx, srvNameCID, true)
+			nameCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			_ = r.dht.Provide(nameCtx, srvNameCID, true)
+			cancel()
 		}
 		srvTypeCID, err := serviceTypeToCID(info.Type)
 		if err == nil {
-			_ = r.dht.Provide(ctx, srvTypeCID, true)
+			typeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			_ = r.dht.Provide(typeCtx, srvTypeCID, true)
+			cancel()
 		}
 	}
 }

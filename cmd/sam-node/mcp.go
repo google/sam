@@ -38,9 +38,9 @@ import (
 const meshInstructions = `This MCP server connects this node to a SAM mesh: a network of remote agents that host their own MCP tools. The tools listed here are infrastructure for reaching tools on other peers when no local tool or capability covers the task.
 
 Reach into the mesh only when the needed tool isn't available locally. To do so:
-  1. find_remote_tools — discover what tools exist across the mesh (returns peer_id + namespaced tool_name + description). Optionally narrow by service_name or peer_id.
-  2. describe_remote_tool — fetch a specific tool's input_schema before calling it. Always do this so you know the argument shape.
-  3. call_remote_tool — invoke it. Pass peer_id, the namespaced tool_name, and arguments as a JSON object whose keys match the input_schema from step 2 (not a stringified blob).
+  1. find_remote_servers — discover what tools exist across the mesh (returns peer_id + namespaced tool_name + description). Optionally narrow by service_name or peer_id.
+  2. describe_remote_server — fetch a specific tool's input_schema before calling it. Always do this so you know the argument shape.
+  3. call_remote_server — invoke it. Pass peer_id, the namespaced tool_name, and arguments as a JSON object whose keys match the input_schema from step 2 (not a stringified blob).
 
 Other useful tools: discover_remote_services browses services by type, get_mesh_info reports connected peers and mesh state, list_local_services shows what this node hosts.
 
@@ -96,11 +96,11 @@ func NewMCPHandler(node *SamNode) http.Handler {
 		Description: "Get information about the mesh network",
 	}, node.handleGetMeshInfo)
 
-	// Add the call_remote_tool tool.
+	// Add the call_remote_server tool.
 	mcp.AddTool(mcpServer, &mcp.Tool{
-		Name:        "call_remote_tool",
+		Name:        "call_remote_server",
 		Description: "Call an MCP tool on a remote agent",
-	}, node.handleCallRemoteTool)
+	}, node.handleCallRemoteServer)
 
 	// Add the connect_peer tool.
 	mcp.AddTool(mcpServer, &mcp.Tool{
@@ -108,17 +108,17 @@ func NewMCPHandler(node *SamNode) http.Handler {
 		Description: "Connect to a peer in the mesh",
 	}, node.handleConnectPeer)
 
-	// Add the find_remote_tools tool.
+	// Add the find_remote_servers tool.
 	mcp.AddTool(mcpServer, &mcp.Tool{
-		Name:        "find_remote_tools",
+		Name:        "find_remote_servers",
 		Description: "Discover MCP tools available on hosted services across the mesh. Returns name + description per tool. Optionally narrow by peer_id, service_name, or intent (intent is reserved for future ranking and is accepted-but-ignored).",
-	}, node.handleFindRemoteTools)
+	}, node.handleFindRemoteServers)
 
-	// Add the describe_remote_tool tool.
+	// Add the describe_remote_server tool.
 	mcp.AddTool(mcpServer, &mcp.Tool{
-		Name:        "describe_remote_tool",
-		Description: "Return the description, input schema, and output schema for a specific aggregated tool on a specific peer. peer_id and tool_name are both required; tool_name must be a namespaced '<service>.<tool>' name as returned by find_remote_tools.",
-	}, node.handleDescribeRemoteTool)
+		Name:        "describe_remote_server",
+		Description: "Return the description, input schema, and output schema for a specific aggregated tool on a specific peer. peer_id and tool_name are both required; tool_name must be a namespaced '<service>.<tool>' name as returned by find_remote_servers.",
+	}, node.handleDescribeRemoteServer)
 
 	// Create the SSE handler using the SDK
 	sseHandler := mcp.NewSSEHandler(func(request *http.Request) *mcp.Server {

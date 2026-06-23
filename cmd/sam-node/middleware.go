@@ -319,7 +319,8 @@ func (n *SamNode) Authorize(rawToken []byte, req RequestContext, pubKey ed25519.
 
 	err = authorizer.Authorize()
 	if err != nil {
-		logger.Errorf("Authorizer failure: %v\nState: %s", err, authorizer.PrintWorld())
+		logger.Errorf("Authorizer failure: %v", err)
+		logger.Debugf("Authorizer state: %s", authorizer.PrintWorld())
 	}
 	return err
 }

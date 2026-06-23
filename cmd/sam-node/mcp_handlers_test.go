@@ -61,9 +61,9 @@ func TestHandleFindRemoteTools_EmptyMesh_ReturnsEmptyArray(t *testing.T) {
 	node, cleanup := startBareNode(t, ctx)
 	defer cleanup()
 
-	res, _, err := node.handleFindRemoteTools(ctx, &mcp.CallToolRequest{}, FindRemoteToolsParams{})
+	res, _, err := node.handleFindRemoteServers(ctx, &mcp.CallToolRequest{}, FindRemoteServersParams{})
 	if err != nil {
-		t.Fatalf("handleFindRemoteTools: %v", err)
+		t.Fatalf("handleFindRemoteServers: %v", err)
 	}
 	if len(res.Content) == 0 {
 		t.Fatal("expected non-empty result content")
@@ -88,7 +88,7 @@ func TestHandleFindRemoteTools_SelfPeerRejected(t *testing.T) {
 	node, cleanup := startBareNode(t, ctx)
 	defer cleanup()
 
-	_, _, err := node.handleFindRemoteTools(ctx, &mcp.CallToolRequest{}, FindRemoteToolsParams{
+	_, _, err := node.handleFindRemoteServers(ctx, &mcp.CallToolRequest{}, FindRemoteServersParams{
 		PeerID: node.Host.ID().String(),
 	})
 	if err == nil {
@@ -144,17 +144,17 @@ func TestHandleFindRemoteTools_SinglePeer(t *testing.T) {
 		t.Fatalf("RegisterService: %v", err)
 	}
 
-	res, _, err := nodeA.handleFindRemoteTools(ctx, &mcp.CallToolRequest{}, FindRemoteToolsParams{
+	res, _, err := nodeA.handleFindRemoteServers(ctx, &mcp.CallToolRequest{}, FindRemoteServersParams{
 		PeerID: nodeB.Host.ID().String(),
 	})
 	if err != nil {
-		t.Fatalf("handleFindRemoteTools: %v", err)
+		t.Fatalf("handleFindRemoteServers: %v", err)
 	}
 	tc, ok := res.Content[0].(*mcp.TextContent)
 	if !ok {
 		t.Fatalf("expected TextContent, got %T", res.Content[0])
 	}
-	var rows []remoteToolRow
+	var rows []remoteServerRow
 	if err := json.Unmarshal([]byte(tc.Text), &rows); err != nil {
 		t.Fatalf("unmarshal: %v (text: %q)", err, tc.Text)
 	}
@@ -295,12 +295,12 @@ func TestHandleFindRemoteTools_MeshWideViaHandler(t *testing.T) {
 	// Give the DHT a moment to record the provider.
 	time.Sleep(5 * time.Second)
 
-	res, _, err := nodeA.handleFindRemoteTools(ctx, &mcp.CallToolRequest{}, FindRemoteToolsParams{})
+	res, _, err := nodeA.handleFindRemoteServers(ctx, &mcp.CallToolRequest{}, FindRemoteServersParams{})
 	if err != nil {
 		t.Fatalf("handler: %v", err)
 	}
 	tc := res.Content[0].(*mcp.TextContent)
-	var rows []remoteToolRow
+	var rows []remoteServerRow
 	if err := json.Unmarshal([]byte(tc.Text), &rows); err != nil {
 		t.Fatal(err)
 	}
@@ -452,7 +452,7 @@ func TestNewMCPHandler_RegistersFindRemoteTools(t *testing.T) {
 	}
 	found := false
 	for _, tl := range res.Tools {
-		if tl.Name == "find_remote_tools" {
+		if tl.Name == "find_remote_servers" {
 			found = true
 		}
 	}
@@ -461,7 +461,7 @@ func TestNewMCPHandler_RegistersFindRemoteTools(t *testing.T) {
 		for _, tl := range res.Tools {
 			names = append(names, tl.Name)
 		}
-		t.Errorf("find_remote_tools missing from sidecar tools/list; got %v", names)
+		t.Errorf("find_remote_servers missing from sidecar tools/list; got %v", names)
 	}
 }
 
@@ -472,7 +472,7 @@ func TestHandleDescribeRemoteTool_EmptyPeerID(t *testing.T) {
 	node, cleanup := startBareNode(t, ctx)
 	defer cleanup()
 
-	_, _, err := node.handleDescribeRemoteTool(ctx, &mcp.CallToolRequest{}, DescribeRemoteToolParams{
+	_, _, err := node.handleDescribeRemoteServer(ctx, &mcp.CallToolRequest{}, DescribeRemoteToolParams{
 		ToolName: "code-reviewer.review_pr",
 	})
 	if err == nil {
@@ -487,7 +487,7 @@ func TestHandleDescribeRemoteTool_EmptyToolName(t *testing.T) {
 	node, cleanup := startBareNode(t, ctx)
 	defer cleanup()
 
-	_, _, err := node.handleDescribeRemoteTool(ctx, &mcp.CallToolRequest{}, DescribeRemoteToolParams{
+	_, _, err := node.handleDescribeRemoteServer(ctx, &mcp.CallToolRequest{}, DescribeRemoteToolParams{
 		PeerID: "12D3KooWFakePeerID",
 	})
 	if err == nil {
@@ -502,7 +502,7 @@ func TestHandleDescribeRemoteTool_NonNamespacedRejected(t *testing.T) {
 	node, cleanup := startBareNode(t, ctx)
 	defer cleanup()
 
-	_, _, err := node.handleDescribeRemoteTool(ctx, &mcp.CallToolRequest{}, DescribeRemoteToolParams{
+	_, _, err := node.handleDescribeRemoteServer(ctx, &mcp.CallToolRequest{}, DescribeRemoteToolParams{
 		PeerID:   node.Host.ID().String(),
 		ToolName: "send_message", // no dot
 	})
@@ -521,7 +521,7 @@ func TestHandleDescribeRemoteTool_SelfPeerRejected(t *testing.T) {
 	node, cleanup := startBareNode(t, ctx)
 	defer cleanup()
 
-	_, _, err := node.handleDescribeRemoteTool(ctx, &mcp.CallToolRequest{}, DescribeRemoteToolParams{
+	_, _, err := node.handleDescribeRemoteServer(ctx, &mcp.CallToolRequest{}, DescribeRemoteToolParams{
 		PeerID:   node.Host.ID().String(),
 		ToolName: "code-reviewer.review_pr",
 	})
@@ -537,7 +537,7 @@ func TestHandleDescribeRemoteTool_InvalidPeerID(t *testing.T) {
 	node, cleanup := startBareNode(t, ctx)
 	defer cleanup()
 
-	_, _, err := node.handleDescribeRemoteTool(ctx, &mcp.CallToolRequest{}, DescribeRemoteToolParams{
+	_, _, err := node.handleDescribeRemoteServer(ctx, &mcp.CallToolRequest{}, DescribeRemoteToolParams{
 		PeerID:   "not-a-valid-peer-id",
 		ToolName: "code-reviewer.review_pr",
 	})
@@ -601,12 +601,12 @@ func TestHandleDescribeRemoteTool_RoundTrip(t *testing.T) {
 	}
 	defer func() { _ = nodeB.UnregisterService(ctx, "code-reviewer") }()
 
-	res, _, err := nodeA.handleDescribeRemoteTool(ctx, &mcp.CallToolRequest{}, DescribeRemoteToolParams{
+	res, _, err := nodeA.handleDescribeRemoteServer(ctx, &mcp.CallToolRequest{}, DescribeRemoteToolParams{
 		PeerID:   nodeB.Host.ID().String(),
 		ToolName: "code-reviewer.review_pr",
 	})
 	if err != nil {
-		t.Fatalf("handleDescribeRemoteTool: %v", err)
+		t.Fatalf("handleDescribeRemoteServer: %v", err)
 	}
 	tc, ok := res.Content[0].(*mcp.TextContent)
 	if !ok {
@@ -679,7 +679,7 @@ func TestHandleDescribeRemoteTool_RoundTrip_UnknownTool(t *testing.T) {
 	}
 	defer func() { _ = nodeB.UnregisterService(ctx, "code-reviewer") }()
 
-	_, _, err = nodeA.handleDescribeRemoteTool(ctx, &mcp.CallToolRequest{}, DescribeRemoteToolParams{
+	_, _, err = nodeA.handleDescribeRemoteServer(ctx, &mcp.CallToolRequest{}, DescribeRemoteToolParams{
 		PeerID:   nodeB.Host.ID().String(),
 		ToolName: "code-reviewer.does-not-exist",
 	})
@@ -716,7 +716,7 @@ func TestNewMCPHandler_RegistersDescribeRemoteTool(t *testing.T) {
 	}
 	found := false
 	for _, tl := range res.Tools {
-		if tl.Name == "describe_remote_tool" {
+		if tl.Name == "describe_remote_server" {
 			found = true
 		}
 	}
@@ -725,7 +725,7 @@ func TestNewMCPHandler_RegistersDescribeRemoteTool(t *testing.T) {
 		for _, tl := range res.Tools {
 			names = append(names, tl.Name)
 		}
-		t.Errorf("describe_remote_tool missing from sidecar tools/list; got %v", names)
+		t.Errorf("describe_remote_server missing from sidecar tools/list; got %v", names)
 	}
 }
 
