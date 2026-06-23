@@ -1,0 +1,9 @@
+version: "v1alpha1"
+attenuation:
+  policies:
+    - 'allow if operation("/sam/mcp/1.0.0"), node($peer)'
+services:
+  - type: "mcp"
+    name: "greeter"
+    description: "Friendly greetings and shouts"
+    target_url: "http://127.0.0.1:7778/mcp"

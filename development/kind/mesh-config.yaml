@@ -1,0 +1,5 @@
+# node -> service. A blank value means a bare node (no service, e.g. a caller).
+# The service value is a folder name under development/examples/.
+node-a:
+node-b: calc-mcp
+node-c: greeter-mcp
