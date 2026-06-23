@@ -249,6 +249,18 @@ jobs:
             exit 1
           }
 
+          echo "Triggering immediate DNS sync after Hub rollout..."
+          kubectl delete job dns-sync-rollout-${ENV_NAME} -n ${NAMESPACE} --ignore-not-found || true
+          kubectl create job --from=cronjob/dns-sync-cronjob dns-sync-rollout-${ENV_NAME} -n ${NAMESPACE}
+          echo "Waiting for DNS sync job to complete..."
+          kubectl wait --for=condition=complete job/dns-sync-rollout-${ENV_NAME} -n ${NAMESPACE} --timeout=180s || {
+            echo "DNS sync job failed or timed out!"
+            kubectl describe job/dns-sync-rollout-${ENV_NAME} -n ${NAMESPACE}
+            kubectl logs -n ${NAMESPACE} -l job-name=dns-sync-rollout-${ENV_NAME} --tail=-1 || true
+            exit 1
+          }
+
+
       - name: Deploy Canaries
         run: |
           print_rollout_diagnostics() {
