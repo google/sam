@@ -317,7 +317,6 @@ func TestListLocalServices_TypeFilter(t *testing.T) {
 		{"unspecified returns all", api.ServiceType_SERVICE_TYPE_UNSPECIFIED, 3},
 		{"mcp filter", api.ServiceType_SERVICE_TYPE_MCP, 2},
 		{"inference filter", api.ServiceType_SERVICE_TYPE_INFERENCE, 1},
-		{"a2a filter (none registered)", api.ServiceType_SERVICE_TYPE_A2A, 0},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

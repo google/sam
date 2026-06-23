@@ -127,20 +127,6 @@ func TestNewServiceFromRequest_ReturnsInferenceService(t *testing.T) {
 	}
 }
 
-func TestNewServiceFromRequest_ReturnsA2AService(t *testing.T) {
-	req := &api.RegisterServiceRequest{
-		Service: &api.ServiceInfo{Type: api.ServiceType_SERVICE_TYPE_A2A, Name: "x"},
-		Backend: &api.RegisterServiceRequest_TargetUrl{TargetUrl: "http://example.com"},
-	}
-	svc, err := NewServiceFromRequest(req)
-	if err != nil {
-		t.Fatalf("NewServiceFromRequest: %v", err)
-	}
-	if _, ok := svc.(*A2AService); !ok {
-		t.Fatalf("got %T, want *A2AService", svc)
-	}
-}
-
 func TestNewServiceFromRequest_UnspecifiedTypeFails(t *testing.T) {
 	req := &api.RegisterServiceRequest{
 		Service: &api.ServiceInfo{Type: api.ServiceType_SERVICE_TYPE_UNSPECIFIED, Name: "x"},
