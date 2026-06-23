@@ -13,9 +13,9 @@ func TestHandleSendMessage(t *testing.T) {
 	ctx := context.Background()
 	node, cleanup := startBareNode(t, ctx)
 	defer cleanup()
-	
+
 	res, _, err := node.handleSendMessage(context.Background(), &mcp.CallToolRequest{}, SendMessageParams{
-		PeerID: "123",
+		PeerID:  "123",
 		Message: "Hello",
 	})
 	if err != nil {
@@ -34,7 +34,7 @@ func TestHandleDiscoverRemoteServices(t *testing.T) {
 	ctx := context.Background()
 	node, cleanup := startBareNode(t, ctx)
 	defer cleanup()
-	
+
 	res, _, err := node.handleDiscoverRemoteServices(context.Background(), &mcp.CallToolRequest{}, DiscoverRemoteServicesParams{
 		Type: "mcp",
 		Name: "test-service",
@@ -42,7 +42,7 @@ func TestHandleDiscoverRemoteServices(t *testing.T) {
 	if err != nil {
 		t.Fatalf("handleDiscoverRemoteServices failed: %v", err)
 	}
-	
+
 	var providers []*api.DiscoveredProvider
 	text := res.Content[0].(*mcp.TextContent).Text
 	if err := json.Unmarshal([]byte(text), &providers); err != nil {
@@ -51,7 +51,7 @@ func TestHandleDiscoverRemoteServices(t *testing.T) {
 	if len(providers) != 0 {
 		t.Errorf("expected 0 providers, got %d", len(providers))
 	}
-	
+
 	// Test invalid type
 	_, _, err = node.handleDiscoverRemoteServices(context.Background(), &mcp.CallToolRequest{}, DiscoverRemoteServicesParams{
 		Type: "invalid",
@@ -76,16 +76,16 @@ func TestHandleMeshPubsub(t *testing.T) {
 	if res.Content[0].(*mcp.TextContent).Text != "Subscribed" {
 		t.Errorf("expected Subscribed")
 	}
-	
+
 	// Publish
-	res, _, err = node.handleMeshPubsubBroadcast(context.Background(), &mcp.CallToolRequest{}, MeshPubsubBroadcastParams{
-		Topic: "test-topic",
+	_, _, err = node.handleMeshPubsubBroadcast(context.Background(), &mcp.CallToolRequest{}, MeshPubsubBroadcastParams{
+		Topic:   "test-topic",
 		Payload: "test-message",
 	})
 	if err != nil {
 		t.Fatalf("handleMeshPubsubBroadcast failed: %v", err)
 	}
-	
+
 	// Poll
 	res, _, err = node.handlePollMessages(context.Background(), &mcp.CallToolRequest{}, PollMessagesParams{
 		Topic: "test-topic",
@@ -102,18 +102,18 @@ func TestHandleGetMeshInfo(t *testing.T) {
 	ctx := context.Background()
 	node, cleanup := startBareNode(t, ctx)
 	defer cleanup()
-	
+
 	res, _, err := node.handleGetMeshInfo(context.Background(), &mcp.CallToolRequest{}, GetMeshInfoParams{})
 	if err != nil {
 		t.Fatalf("handleGetMeshInfo failed: %v", err)
 	}
-	
+
 	text := res.Content[0].(*mcp.TextContent).Text
 	var info map[string]any
 	if err := json.Unmarshal([]byte(text), &info); err != nil {
 		t.Fatalf("failed to parse mesh info: %v", err)
 	}
-	
+
 	if _, ok := info["connected_peers"]; !ok {
 		t.Errorf("missing connected_peers in mesh info")
 	}
@@ -126,10 +126,10 @@ func TestHandleConnectPeer(t *testing.T) {
 	ctx := context.Background()
 	node, cleanup := startBareNode(t, ctx)
 	defer cleanup()
-	
+
 	nodeB, cleanupB := startBareNode(t, ctx)
 	defer cleanupB()
-	
+
 	res, _, err := node.handleConnectPeer(context.Background(), &mcp.CallToolRequest{}, ConnectPeerParams{
 		PeerAddr: nodeB.Host.Addrs()[0].String() + "/p2p/" + nodeB.Host.ID().String(),
 	})
@@ -145,9 +145,9 @@ func TestHandleCallRemoteServer(t *testing.T) {
 	ctx := context.Background()
 	node, cleanup := startBareNode(t, ctx)
 	defer cleanup()
-	
+
 	_, _, err := node.handleCallRemoteTool(context.Background(), &mcp.CallToolRequest{}, CallRemoteToolParams{
-		PeerID: "invalid_peer_id",
+		PeerID:   "invalid_peer_id",
 		ToolName: "test",
 	})
 	if err == nil {
