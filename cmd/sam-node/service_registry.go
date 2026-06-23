@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/google/sam/api"
 	"github.com/ipfs/go-cid"
@@ -65,10 +66,13 @@ func (r *ServiceRegistry) Register(ctx context.Context, svc Service) error {
 		return err
 	}
 
-	if err := r.dht.Provide(ctx, srvNameCID, true); err != nil {
+	provideCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	if err := r.dht.Provide(provideCtx, srvNameCID, true); err != nil {
 		logger.Warnf("[ServiceRegistry] DHT Provide (name) for %s: %v", info.Name, err)
 	}
-	if err := r.dht.Provide(ctx, srvTypeCID, true); err != nil {
+	if err := r.dht.Provide(provideCtx, srvTypeCID, true); err != nil {
 		logger.Warnf("[ServiceRegistry] DHT Provide (type) for %s: %v", info.Name, err)
 	}
 

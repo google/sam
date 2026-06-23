@@ -19,7 +19,8 @@ data:
   sam-node.yaml: |
     version: "v1alpha1"
     attenuation:
-      policies: []
+      policies:
+        - 'allow if operation("inference:vllm-tpu"), user("system:serviceaccount:sam-canary-${ENV_NAME}:sam-node-sa");'
       checks: []
       rules: []
     services:

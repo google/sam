@@ -28,27 +28,26 @@ import (
 	"github.com/google/sam/api"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/libp2p/go-msgio"
 	"google.golang.org/protobuf/proto"
 )
 
 var (
-	baselineRule1 biscuit.Policy
-	baselineRule2 biscuit.Policy
-	baselineRule3 biscuit.Policy
+	baselineRule1       biscuit.Policy
+	baselineRule2       biscuit.Policy
+	baselineRule3       biscuit.Policy
 	baselineReplayCheck biscuit.Check
 )
 
 func init() {
 	var err error
-	rule1Str := fmt.Sprintf(`allow if operation($op), %s($op)`, api.FactMCPTool)
+	rule1Str := fmt.Sprintf(`allow if operation($op), %s($op)`, api.FactMCPServer)
 	baselineRule1, err = parser.FromStringPolicy(rule1Str)
 	if err != nil {
 		panic(fmt.Sprintf("failed to parse baseline rule 1: %v", err))
 	}
 
-	rule2Str := fmt.Sprintf(`allow if operation($op), %s("*")`, api.FactMCPTool)
+	rule2Str := fmt.Sprintf(`allow if operation($op), %s("*")`, api.FactMCPServer)
 	baselineRule2, err = parser.FromStringPolicy(rule2Str)
 	if err != nil {
 		panic(fmt.Sprintf("failed to parse baseline rule 2: %v", err))
@@ -71,7 +70,8 @@ type RequestContext struct {
 	PeerID   peer.ID
 	User     string
 	Group    string
-	Protocol protocol.ID
+	Protocol string
+	Target   string
 }
 
 // WithBiscuitAuth enforces a Protobuf handshake on a stream before calling the next handler.
@@ -107,7 +107,8 @@ func (n *SamNode) WithBiscuitAuth(next network.StreamHandler) network.StreamHand
 		reqCtx := RequestContext{
 			PeerID:   remotePeer,
 			User:     "", // Not used in Authorize
-			Protocol: s.Protocol(),
+			Protocol: string(s.Protocol()),
+			Target:   authFrame.TargetService,
 		}
 
 		writer := msgio.NewVarintWriter(s)
@@ -274,10 +275,14 @@ func (n *SamNode) Authorize(rawToken []byte, req RequestContext, pubKey ed25519.
 	}
 
 	// Inject the current action context (Standard Vocabulary)
+	op := req.Protocol
+	if req.Target != "" {
+		op = req.Target
+	}
 	authorizer.AddFact(biscuit.Fact{
 		Predicate: biscuit.Predicate{
 			Name: "operation",
-			IDs:  []biscuit.Term{biscuit.String(req.Protocol)},
+			IDs:  []biscuit.Term{biscuit.String(op)},
 		},
 	})
 
@@ -306,9 +311,15 @@ func (n *SamNode) Authorize(rawToken []byte, req RequestContext, pubKey ed25519.
 	}
 
 	// Baseline Rules
-	authorizer.AddPolicy(baselineRule1)
-	authorizer.AddPolicy(baselineRule2)
-	authorizer.AddPolicy(baselineRule3)
+	if n.TrustHubRBAC {
+		authorizer.AddPolicy(baselineRule1)
+		authorizer.AddPolicy(baselineRule2)
+		authorizer.AddPolicy(baselineRule3)
+	}
 
-	return authorizer.Authorize()
+	err = authorizer.Authorize()
+	if err != nil {
+		logger.Errorf("Authorizer failure: %v\nState: %s", err, authorizer.PrintWorld())
+	}
+	return err
 }

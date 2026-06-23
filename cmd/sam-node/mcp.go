@@ -196,9 +196,16 @@ func (n *SamNode) callMCPToolOnce(ctx context.Context, targetPeer peer.ID, toolN
 		return nil, fmt.Errorf("failed to load identity biscuit: %w", err)
 	}
 
+	// Extract target service if it's a federated tool call (service.tool)
+	targetService := toolName
+	if parts := strings.SplitN(toolName, ".", 2); len(parts) == 2 {
+		targetService = parts[0]
+	}
+
 	// Marshal AuthFrame
 	authFrame := api.AuthFrame{
-		Biscuit: biscuitBytes,
+		Biscuit:       biscuitBytes,
+		TargetService: targetService,
 	}
 	authBytes, _ := proto.Marshal(&authFrame)
 

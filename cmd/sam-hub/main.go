@@ -480,9 +480,9 @@ func (h *Hub) mintBiscuitToken(claims jwt.MapClaims, token *oidc.IDToken, remote
 
 		if h.Policy != nil {
 			if rolePolicy, ok := h.Policy.Roles[role]; ok {
-				for _, tool := range rolePolicy.MCP.AllowedTools {
+				for _, tool := range rolePolicy.MCP.AllowedServers {
 					if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
-						Name: api.FactMCPTool,
+						Name: api.FactMCPServer,
 						IDs:  []biscuit.Term{biscuit.String(tool)},
 					}}); err != nil {
 						logger.Errorw("Failed to add MCP tool fact to biscuit", "peer_id", remotePeer, "tool", tool, "error", err)

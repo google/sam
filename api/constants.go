@@ -32,6 +32,6 @@ const (
 	FactGroup         = "group"
 	FactRole          = "role"
 	FactUser          = "user"
-	FactMCPTool       = "allow_mcp_tool"
+	FactMCPServer     = "allow_mcp_server"
 	FactNetworkTarget = "allow_network_target"
 )

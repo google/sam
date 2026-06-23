@@ -20,6 +20,7 @@ option go_package = "github.com/google/sam/api";
 
 message AuthFrame {
   bytes biscuit = 1;
+  string target_service = 2; // Optional: specific service requested
 }
 
 message AuthResponse {

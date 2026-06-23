@@ -21,6 +21,7 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -93,9 +94,14 @@ func TestServiceDiscovery(t *testing.T) {
 		t.Fatalf("DHT not ready on Node A (size 0)")
 	}
 
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "Not found", http.StatusNotFound)
+	}))
+	defer mockServer.Close()
+
 	// Agent A registers a service
 	serviceName := "mcp:github-tools"
-	registerService(t, actualApiAddrA, apiToken, serviceName, "http://localhost:8080")
+	registerService(t, actualApiAddrA, apiToken, serviceName, mockServer.URL)
 
 	// Wait for DHT propagation
 	t.Log("Waiting for DHT propagation...")
@@ -191,9 +197,14 @@ func TestServiceDiscoveryStreaming(t *testing.T) {
 		t.Fatalf("DHT not ready on Node A")
 	}
 
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "Not found", http.StatusNotFound)
+	}))
+	defer mockServer.Close()
+
 	// Agent A registers a service
 	serviceName := "mcp:github-tools"
-	registerService(t, actualApiAddrA, apiToken, serviceName, "http://localhost:8080")
+	registerService(t, actualApiAddrA, apiToken, serviceName, mockServer.URL)
 
 	// Wait for DHT propagation
 	t.Log("Waiting for DHT propagation...")

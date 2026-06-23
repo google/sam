@@ -114,6 +114,7 @@ type SamNode struct {
 	services          *ServiceRegistry
 	BoundHTTPAddr     string
 	AllowLoopback     bool
+	TrustHubRBAC      bool
 	authSuccess       chan struct{}
 	authOnce          sync.Once
 	currentRelays     []peer.AddrInfo
@@ -152,6 +153,7 @@ type SamNodeConfig struct {
 	AutoRelayMinInterval time.Duration
 	AutoRelayBootDelay   time.Duration
 	AutoRelayBackoff     time.Duration
+	TrustHubRBAC         bool
 }
 
 // NewSamNode creates a new Agent instance secured with the 4-layer pipeline.
@@ -169,6 +171,7 @@ func NewSamNode(ctx context.Context, cfg SamNodeConfig) (*SamNode, error) {
 		topics:            make(map[string]*pubsub.Topic),
 		LocalPolicy:       cfg.NodeConfig,
 		AllowLoopback:     cfg.AllowLoopback,
+		TrustHubRBAC:      cfg.TrustHubRBAC,
 		authSuccess:       make(chan struct{}),
 	}
 

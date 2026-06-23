@@ -7,7 +7,9 @@ data:
   sam-node.yaml: |
     version: "v1alpha1"
     attenuation:
-      policies: []
+      policies:
+        - 'allow if operation("mcp:openclaw");'
+        - 'allow if operation("/sam/catalog");'
       checks: []
       rules: []
     services:

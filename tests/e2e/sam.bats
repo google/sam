@@ -26,7 +26,7 @@ teardown() {
 
 
 
-@test "sam-node run without identity fails" {
+@test "sam-node run --trust-hub-rbac without identity fails" {
   run "$SAM_NODE_BINARY" run
   [[ "$status" -ne 0 ]]
   [[ "$output" == *"No JWT or stored identity found"* ]]

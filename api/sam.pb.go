@@ -133,6 +133,7 @@ func (MeshEvent_Type) EnumDescriptor() ([]byte, []int) {
 type AuthFrame struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Biscuit       []byte                 `protobuf:"bytes,1,opt,name=biscuit,proto3" json:"biscuit,omitempty"`
+	TargetService string                 `protobuf:"bytes,2,opt,name=target_service,json=targetService,proto3" json:"target_service,omitempty"` // Optional: specific service requested
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -172,6 +173,13 @@ func (x *AuthFrame) GetBiscuit() []byte {
 		return x.Biscuit
 	}
 	return nil
+}
+
+func (x *AuthFrame) GetTargetService() string {
+	if x != nil {
+		return x.TargetService
+	}
+	return ""
 }
 
 type AuthResponse struct {
@@ -772,9 +780,10 @@ var File_api_sam_proto protoreflect.FileDescriptor
 
 const file_api_sam_proto_rawDesc = "" +
 	"\n" +
-	"\rapi/sam.proto\x12\x06sam.v1\"%\n" +
+	"\rapi/sam.proto\x12\x06sam.v1\"L\n" +
 	"\tAuthFrame\x12\x18\n" +
-	"\abiscuit\x18\x01 \x01(\fR\abiscuit\">\n" +
+	"\abiscuit\x18\x01 \x01(\fR\abiscuit\x12%\n" +
+	"\x0etarget_service\x18\x02 \x01(\tR\rtargetService\">\n" +
 	"\fAuthResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x14\n" +
 	"\x05error\x18\x02 \x01(\tR\x05error\"\xd8\x01\n" +

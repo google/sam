@@ -20,7 +20,7 @@ import (
 )
 
 // buildAndSaveBiscuit builds a biscuit signed with rootPriv that identifies
-// node as caller, grants allow_mcp_tool("*"), and saves it to node's store.
+// node as caller, grants allow_mcp_server("*"), and saves it to node's store.
 func buildAndSaveBiscuit(node *SamNode, rootPriv ed25519.PrivateKey) error {
 	callerID := node.Host.ID().String()
 	builder := biscuit.NewBuilder(rootPriv)
@@ -37,7 +37,7 @@ func buildAndSaveBiscuit(node *SamNode, rootPriv ed25519.PrivateKey) error {
 		return err
 	}
 	if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
-		Name: api.FactMCPTool,
+		Name: api.FactMCPServer,
 		IDs:  []biscuit.Term{biscuit.String("*")},
 	}}); err != nil {
 		return err
