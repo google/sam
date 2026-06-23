@@ -83,7 +83,7 @@ func TestFallbackReEnrollment(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	toolFact, _ := parser.FromStringFact(`allow_mcp_tool("*")`)
+	toolFact, _ := parser.FromStringFact(`allow_mcp_server("*")`)
 	if err := builder.AddAuthorityFact(toolFact); err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +119,7 @@ func TestFallbackReEnrollment(t *testing.T) {
 	}
 
 	// 5. Run Node in background
-	cmd := exec.Command(nodeBin, "run", "--hub", hubAddr, "--listen", "/ip4/127.0.0.1/tcp/0", "--jwt-path", jwtPath, "--bind-addr", "127.0.0.1:0", "--api-token", "dummy-token", "--allow-loopback")
+	cmd := exec.Command(nodeBin, "run", "--trust-hub-rbac", "--hub", hubAddr, "--listen", "/ip4/127.0.0.1/tcp/0", "--jwt-path", jwtPath, "--bind-addr", "127.0.0.1:0", "--api-token", "dummy-token", "--allow-loopback")
 	cmd.Dir = repoRoot(t)
 	cmd.Env = env
 
@@ -482,7 +482,7 @@ func TestSelfHealingHTTPFallback(t *testing.T) {
 	mu.Unlock()
 
 	// Step 3: Start sam-node run
-	runCmd := exec.Command(nodeBin, "run", "--listen", "/ip4/127.0.0.1/tcp/0")
+	runCmd := exec.Command(nodeBin, "run", "--trust-hub-rbac", "--listen", "/ip4/127.0.0.1/tcp/0")
 	runCmd.Env = env
 	var stdout safeBuffer
 	runCmd.Stdout = &stdout

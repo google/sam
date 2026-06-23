@@ -128,7 +128,7 @@ func TestAuthorize(t *testing.T) {
 
 	// Add fact to match baseline rule
 	err = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
-		Name: api.FactMCPTool,
+		Name: api.FactMCPServer,
 		IDs:  []biscuit.Term{biscuit.String("/test/proto")},
 	}})
 	if err != nil {
@@ -146,8 +146,9 @@ func TestAuthorize(t *testing.T) {
 	}
 
 	node := &SamNode{
-		Store:       store,
-		trustedKeys: []TrustedKey{{Key: pub, ReceivedAt: time.Now()}},
+		Store:        store,
+		trustedKeys:  []TrustedKey{{Key: pub, ReceivedAt: time.Now()}},
+		TrustHubRBAC: true,
 	}
 
 	req := RequestContext{
@@ -178,7 +179,7 @@ func TestEnterprisePolicyEngine(t *testing.T) {
 		{
 			name: "Case 1 (Happy Path)",
 			mintToken: func(t *testing.T, builder biscuit.Builder) {
-				fact, err := parser.FromStringFact(`allow_mcp_tool("query_db")`)
+				fact, err := parser.FromStringFact(`allow_mcp_server("query_db")`)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -192,7 +193,7 @@ func TestEnterprisePolicyEngine(t *testing.T) {
 		{
 			name: "Case 2 (Unauthorized Tool)",
 			mintToken: func(t *testing.T, builder biscuit.Builder) {
-				fact, err := parser.FromStringFact(`allow_mcp_tool("query_db")`)
+				fact, err := parser.FromStringFact(`allow_mcp_server("query_db")`)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -206,7 +207,7 @@ func TestEnterprisePolicyEngine(t *testing.T) {
 		{
 			name: "Case 3 (Wildcard Access)",
 			mintToken: func(t *testing.T, builder biscuit.Builder) {
-				fact, err := parser.FromStringFact(`allow_mcp_tool("*")`)
+				fact, err := parser.FromStringFact(`allow_mcp_server("*")`)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -220,7 +221,7 @@ func TestEnterprisePolicyEngine(t *testing.T) {
 		{
 			name: "Case 4 (Local Attenuation Override)",
 			mintToken: func(t *testing.T, builder biscuit.Builder) {
-				fact1, err := parser.FromStringFact(`allow_mcp_tool("*")`)
+				fact1, err := parser.FromStringFact(`allow_mcp_server("*")`)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -294,13 +295,14 @@ attenuation:
 			}
 
 			node := &SamNode{
-				trustedKeys: []TrustedKey{{Key: pub, ReceivedAt: time.Now()}},
-				LocalPolicy: localPolicy,
+				trustedKeys:  []TrustedKey{{Key: pub, ReceivedAt: time.Now()}},
+				LocalPolicy:  localPolicy,
+				TrustHubRBAC: true,
 			}
 
 			req := RequestContext{
 				PeerID:   dummyPeer,
-				Protocol: protocol.ID(tt.operation),
+				Protocol: string(tt.operation),
 			}
 
 			err = node.Authorize(tokenBytes, req, pub)
@@ -369,7 +371,7 @@ func TestRevocation(t *testing.T) {
 
 	// Run handler in goroutine
 	go func() {
-		handler := node.WithBiscuitAuth(func(s network.Stream) {
+		handler := node.WithBiscuitAuth(func(s network.Stream, reqCtx RequestContext) {
 			t.Error("Handler should not be called for revoked peer")
 		})
 		handler(serverStream)

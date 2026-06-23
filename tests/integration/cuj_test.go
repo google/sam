@@ -39,7 +39,7 @@ func TestSamNodeRunWithManualTokenStarts(t *testing.T) {
 		env,
 		"",
 		nodeBin,
-		"run",
+		"run", "--trust-hub-rbac",
 		"--hub", hubAddr,
 		"--jwt", "test-jwt",
 		"--listen", "/ip4/127.0.0.1/udp/0/quic-v1",

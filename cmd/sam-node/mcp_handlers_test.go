@@ -6,7 +6,8 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/json"
-	"fmt"
+
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -20,7 +21,7 @@ import (
 )
 
 // buildAndSaveBiscuit builds a biscuit signed with rootPriv that identifies
-// node as caller, grants allow_mcp_tool("*"), and saves it to node's store.
+// node as caller, grants allow_mcp_server("*"), and saves it to node's store.
 func buildAndSaveBiscuit(node *SamNode, rootPriv ed25519.PrivateKey) error {
 	callerID := node.Host.ID().String()
 	builder := biscuit.NewBuilder(rootPriv)
@@ -37,7 +38,7 @@ func buildAndSaveBiscuit(node *SamNode, rootPriv ed25519.PrivateKey) error {
 		return err
 	}
 	if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
-		Name: api.FactMCPTool,
+		Name: api.FactMCPServer,
 		IDs:  []biscuit.Term{biscuit.String("*")},
 	}}); err != nil {
 		return err
@@ -464,115 +465,6 @@ func TestNewMCPHandler_RegistersFindRemoteTools(t *testing.T) {
 	}
 }
 
-func TestHandleDescribeLocalTool_HappyPath(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	tools := []*mcp.Tool{
-		{
-			Name:         "review_pr",
-			Description:  "Run a code review",
-			InputSchema:  map[string]any{"type": "object", "properties": map[string]any{"pr_url": map[string]any{"type": "string"}}, "required": []any{"pr_url"}},
-			OutputSchema: map[string]any{"type": "object", "properties": map[string]any{"summary": map[string]any{"type": "string"}}},
-		},
-	}
-	upstream := httptest.NewServer(newFakeMCPHandler(t, tools))
-	defer upstream.Close()
-
-	node, cleanup := startBareNode(t, ctx)
-	defer cleanup()
-
-	svc := &MCPService{baseService: baseService{
-		info:    &api.ServiceInfo{Type: api.ServiceType_SERVICE_TYPE_MCP, Name: "code-reviewer"},
-		backend: &api.RegisterServiceRequest_TargetUrl{TargetUrl: upstream.URL},
-	}}
-	if err := svc.Init(ctx); err != nil {
-		t.Fatalf("MCPService.Init: %v", err)
-	}
-	node.services.insertService(svc)
-	t.Cleanup(func() { _ = svc.Teardown() })
-
-	res, _, err := node.handleDescribeLocalTool(ctx, &mcp.CallToolRequest{}, DescribeLocalToolParams{
-		ToolName: "code-reviewer.review_pr",
-	})
-	if err != nil {
-		t.Fatalf("handleDescribeLocalTool: %v", err)
-	}
-	if len(res.Content) == 0 {
-		t.Fatal("expected non-empty Content")
-	}
-	tc, ok := res.Content[0].(*mcp.TextContent)
-	if !ok {
-		t.Fatalf("expected TextContent, got %T", res.Content[0])
-	}
-	var desc remoteToolDescription
-	if err := json.Unmarshal([]byte(tc.Text), &desc); err != nil {
-		t.Fatalf("response not JSON: %v (text: %q)", err, tc.Text)
-	}
-	if desc.ToolName != "code-reviewer.review_pr" {
-		t.Errorf("ToolName = %q, want %q", desc.ToolName, "code-reviewer.review_pr")
-	}
-	if desc.Description != "Run a code review" {
-		t.Errorf("Description = %q, want %q", desc.Description, "Run a code review")
-	}
-	if desc.InputSchema == nil {
-		t.Error("InputSchema is nil; expected the schema declared on the tool")
-	}
-	if desc.OutputSchema == nil {
-		t.Error("OutputSchema is nil; expected the schema declared on the tool")
-	}
-	if desc.PeerID != "" {
-		t.Errorf("PeerID should be empty on the peer-side payload, got %q", desc.PeerID)
-	}
-}
-
-func TestHandleDescribeLocalTool_NotFound(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	tools := []*mcp.Tool{
-		{Name: "review_pr", Description: "x", InputSchema: map[string]any{"type": "object"}},
-	}
-	upstream := httptest.NewServer(newFakeMCPHandler(t, tools))
-	defer upstream.Close()
-
-	node, cleanup := startBareNode(t, ctx)
-	defer cleanup()
-
-	svc := &MCPService{baseService: baseService{
-		info:    &api.ServiceInfo{Type: api.ServiceType_SERVICE_TYPE_MCP, Name: "code-reviewer"},
-		backend: &api.RegisterServiceRequest_TargetUrl{TargetUrl: upstream.URL},
-	}}
-	if err := svc.Init(ctx); err != nil {
-		t.Fatalf("MCPService.Init: %v", err)
-	}
-	node.services.insertService(svc)
-	t.Cleanup(func() { _ = svc.Teardown() })
-
-	_, _, err := node.handleDescribeLocalTool(ctx, &mcp.CallToolRequest{}, DescribeLocalToolParams{
-		ToolName: "code-reviewer.does-not-exist",
-	})
-	if err == nil {
-		t.Fatal("expected error for unknown tool")
-	}
-	if !strings.Contains(err.Error(), "tool not found") {
-		t.Errorf("error %q does not mention 'tool not found'", err.Error())
-	}
-}
-
-func TestHandleDescribeLocalTool_EmptyToolName(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	node, cleanup := startBareNode(t, ctx)
-	defer cleanup()
-
-	_, _, err := node.handleDescribeLocalTool(ctx, &mcp.CallToolRequest{}, DescribeLocalToolParams{})
-	if err == nil {
-		t.Fatal("expected error for empty tool_name")
-	}
-}
-
 func TestHandleDescribeRemoteTool_EmptyPeerID(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -611,13 +503,13 @@ func TestHandleDescribeRemoteTool_NonNamespacedRejected(t *testing.T) {
 	defer cleanup()
 
 	_, _, err := node.handleDescribeRemoteTool(ctx, &mcp.CallToolRequest{}, DescribeRemoteToolParams{
-		PeerID:   "12D3KooWFakePeerID",
+		PeerID:   node.Host.ID().String(),
 		ToolName: "send_message", // no dot
 	})
 	if err == nil {
 		t.Fatal("expected error for tool_name without '.'")
 	}
-	if !strings.Contains(err.Error(), "namespaced") {
+	if !strings.Contains(err.Error(), "service.tool") {
 		t.Errorf("error %q does not explain the namespacing requirement", err.Error())
 	}
 }
@@ -794,13 +686,9 @@ func TestHandleDescribeRemoteTool_RoundTrip_UnknownTool(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error from peer when tool is not registered")
 	}
-	// Pin the exact wrapper format produced by handleDescribeRemoteTool's
-	// IsError branch. Matching the full prefix guarantees we exercised the
-	// IsError codepath, not a transport-level retry timeout or a JSON-parse
-	// fallback that happens to mention "tool not found".
-	wantPrefix := fmt.Sprintf("describe_local_tool on %s: tool not found:", nodeB.Host.ID())
-	if !strings.HasPrefix(err.Error(), wantPrefix) {
-		t.Errorf("error %q does not start with %q", err.Error(), wantPrefix)
+	wantError := "tool not found on peer"
+	if err.Error() != wantError {
+		t.Errorf("error %q != %q", err.Error(), wantError)
 	}
 }
 
@@ -839,4 +727,20 @@ func TestNewMCPHandler_RegistersDescribeRemoteTool(t *testing.T) {
 		}
 		t.Errorf("describe_remote_tool missing from sidecar tools/list; got %v", names)
 	}
+}
+
+// newFakeMCPHandler returns an http.Handler serving a tiny MCP server over
+// streamable-http with the given tools registered.
+func newFakeMCPHandler(t *testing.T, tools []*mcp.Tool) http.Handler {
+	t.Helper()
+	srv := mcp.NewServer(&mcp.Implementation{Name: "fake", Version: "0.0.1"}, nil)
+	for _, tool := range tools {
+		toolCopy := tool
+		srv.AddTool(toolCopy, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{&mcp.TextContent{Text: "fake-result:" + toolCopy.Name}},
+			}, nil
+		})
+	}
+	return mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return srv }, nil)
 }

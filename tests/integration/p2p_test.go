@@ -29,7 +29,7 @@ func TestSamNodeRunWithoutIdentity(t *testing.T) {
 		"HOME=" + tmpHome,
 		"XDG_CONFIG_HOME=" + filepath.Join(tmpHome, ".config"),
 	}
-	stdout, stderr, err := runCommand(t, repoRoot(t), 10*time.Second, append(os.Environ(), env...), "", nodeBin, "run")
+	stdout, stderr, err := runCommand(t, repoRoot(t), 10*time.Second, append(os.Environ(), env...), "", nodeBin, "run", "--trust-hub-rbac")
 	if err == nil {
 		t.Fatalf("expected sam-node run without identity to fail, but it succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
 	}

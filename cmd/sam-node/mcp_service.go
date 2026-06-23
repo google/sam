@@ -16,149 +16,107 @@ package main
 
 import (
 	"context"
-	"fmt"
-	"strings"
-	"time"
 
 	"github.com/google/sam/api"
+	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// MCPService extends baseService with an MCP ClientSession used to aggregate
-// the backend's tools at Init time. Other parts of the codebase reach the
-// tool list via type assertion (svc.(*MCPService)).
+// MCPService extends baseService to handle MCP protocol proxying.
 type MCPService struct {
 	baseService
-	session         *mcp.ClientSession
-	aggregatedTools []*mcp.Tool
 }
 
-// Init builds the ingress handler via baseService.Init, then opens an MCP
-// session over the appropriate native transport (StreamableClient for URL,
-// bridgeTransport for stdio). ListTools is best-effort: failures are logged
-// and the service still registers.
+// Init initializes the base service.
 func (m *MCPService) Init(ctx context.Context) error {
-	if err := m.baseService.Init(ctx); err != nil {
-		return err
-	}
-	success := false
-	defer func() {
-		if !success {
-			_ = m.baseService.Teardown()
-		}
-	}()
-
-	var transport mcp.Transport
-	switch x := m.backend.(type) {
-	case *api.RegisterServiceRequest_TargetUrl:
-		// TODO: Consider routing URL-backed MCP ingress through the session
-		// (as the stdio path effectively does via the bridge) so we can
-		// decode/inspect MCP payloads and add per-tool-call observability
-		// or policy enforcement at this boundary.
-		transport = &mcp.StreamableClientTransport{Endpoint: x.TargetUrl}
-	case *api.RegisterServiceRequest_Command:
-		bridge, ok := m.handler.(*StdioBridge)
-		if !ok {
-			return fmt.Errorf("expected *StdioBridge handler for command-backed MCP service, got %T", m.handler)
-		}
-		transport = newBridgeTransport(bridge)
-	default:
-		return fmt.Errorf("unsupported backend type %T", m.backend)
-	}
-
-	client := mcp.NewClient(&mcp.Implementation{Name: "sam-node-aggregator", Version: "0.1.0"}, nil)
-
-	var s *mcp.ClientSession
-	var err error
-
-	// Retry connection for up to 60 seconds to handle slow-starting sidecars like OpenClaw.
-	// We only retry on "connection refused" which indicates the server hasn't bound the port yet.
-	deadline := time.Now().Add(60 * time.Second)
-	delay := 500 * time.Millisecond
-	for {
-		s, err = client.Connect(ctx, transport, nil)
-		if err == nil {
-			break
-		}
-		if time.Now().After(deadline) || ctx.Err() != nil {
-			break
-		}
-		if !strings.Contains(err.Error(), "connection refused") {
-			break
-		}
-		select {
-		case <-ctx.Done():
-		case <-time.After(delay):
-		}
-		delay *= 2
-		if delay > 10*time.Second {
-			delay = 10 * time.Second
-		}
-	}
-
-	if err != nil {
-		// Best-effort: backend may not speak MCP (e.g. a plain HTTP service,
-		// or `cat` used as a stdio echo). Ingress proxy still works.
-		logger.Warnf("[MCPService] %s: mcp connect failed, registering without tool aggregation: %v", m.info.Name, err)
-		success = true
-		return nil
-	}
-	m.session = s
-
-	listCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	res, err := s.ListTools(listCtx, nil)
-	if err != nil {
-		logger.Warnf("[MCPService] %s: tools/list failed: %v", m.info.Name, err)
-		success = true
-		return nil
-	}
-	aggregated := make([]*mcp.Tool, 0, len(res.Tools))
-	for _, tool := range res.Tools {
-		namespaced := *tool
-		namespaced.Name = fmt.Sprintf("%s.%s", m.info.Name, tool.Name)
-		aggregated = append(aggregated, &namespaced)
-	}
-	m.aggregatedTools = aggregated
-
-	success = true
-	return nil
+	return m.baseService.Init(ctx)
 }
 
-// Teardown closes the MCP session and chains to baseService.Teardown.
+// Teardown chains to baseService.Teardown.
 func (m *MCPService) Teardown() error {
-	if m.session != nil {
-		_ = m.session.Close()
-		m.session = nil
-	}
-	m.aggregatedTools = nil
 	return m.baseService.Teardown()
 }
 
-// Tools returns the namespaced aggregated tool list.
-func (m *MCPService) Tools() []*mcp.Tool { return m.aggregatedTools }
+// HandleStreamPassThrough connects to the backend and proxies JSON-RPC messages.
+func (m *MCPService) HandleStreamPassThrough(s network.Stream) {
+	defer func() {
+		if err := s.Close(); err != nil {
+			logger.Debugf("[MCPService] Failed to close MCP stream: %v", err)
+		}
+	}()
 
-// RegisterAggregatedTools adds this service's aggregated tools to the given
-// MCP server. Each tool's invocation is forwarded to the underlying session
-// with the service-name prefix stripped. No-op if aggregation produced
-// nothing (e.g. ListTools failed at Init time).
-func (m *MCPService) RegisterAggregatedTools(server *mcp.Server) {
-	if m.session == nil {
+	var backendTransport mcp.Transport
+	var closeTransport func()
+
+	switch x := m.backend.(type) {
+	case *api.RegisterServiceRequest_TargetUrl:
+		backendTransport = &mcp.StreamableClientTransport{Endpoint: x.TargetUrl}
+		closeTransport = func() {} // ClientTransport Close is handled by Connect's returned Connection
+	case *api.RegisterServiceRequest_Command:
+		bridge, ok := m.handler.(*StdioBridge)
+		if !ok {
+			logger.Errorf("[MCPService] %s: expected *StdioBridge handler for command-backed MCP service, got %T", m.info.Name, m.handler)
+			return
+		}
+		backendTransport = newBridgeTransport(bridge)
+		closeTransport = func() {} // Do not close the shared bridge
+	default:
+		logger.Errorf("[MCPService] %s: unsupported backend type %T", m.info.Name, m.backend)
 		return
 	}
-	sess := m.session
-	for _, tool := range m.aggregatedTools {
-		toolCopy := tool
-		parts := strings.SplitN(toolCopy.Name, ".", 2)
-		if len(parts) != 2 {
-			continue
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	defer func() {
+		if closeTransport != nil {
+			closeTransport()
 		}
-		originalName := parts[1]
-		server.AddTool(toolCopy, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			return sess.CallTool(ctx, &mcp.CallToolParams{
-				Name:      originalName,
-				Arguments: req.Params.Arguments,
-			})
-		})
+	}()
+
+	backendConn, err := backendTransport.Connect(ctx)
+	if err != nil {
+		logger.Errorf("[MCPService] %s: failed to connect to backend: %v", m.info.Name, err)
+		return
 	}
+	defer func() { _ = backendConn.Close() }()
+
+	clientTransport := NewStreamTransport(s)
+	clientConn, err := clientTransport.Connect(ctx)
+	if err != nil {
+		logger.Errorf("[MCPService] %s: failed to connect to client: %v", m.info.Name, err)
+		return
+	}
+
+	// Dumb pipe: Proxy JSON-RPC messages between client and backend
+	errc := make(chan error, 2)
+
+	go func() {
+		for {
+			msg, err := clientConn.Read(ctx)
+			if err != nil {
+				errc <- err
+				return
+			}
+			if err := backendConn.Write(ctx, msg); err != nil {
+				errc <- err
+				return
+			}
+		}
+	}()
+
+	go func() {
+		for {
+			msg, err := backendConn.Read(ctx)
+			if err != nil {
+				errc <- err
+				return
+			}
+			if err := clientConn.Write(ctx, msg); err != nil {
+				errc <- err
+				return
+			}
+		}
+	}()
+
+	<-errc
 }

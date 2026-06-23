@@ -155,7 +155,7 @@ import urllib.request
 import json
 data = {
     'service': {
-        'type': 3,
+        'type': 'SERVICE_TYPE_MCP',
         'name': 'echo-tool',
         'description': 'test'
     },
@@ -178,7 +178,7 @@ with urllib.request.urlopen(req) as response:
   local output
   local i
   for ((i=0; i<60; i++)); do
-    output=$(docker run --rm --network container:external-sam-node alpine wget -q -O- --timeout=2 --header="Authorization: Bearer secret-token" "http://127.0.0.1:8080/sam/${cluster_node_peer_id}/a2a/echo-tool" || true)
+    output=$(docker run --rm --network container:external-sam-node alpine wget -q -O- --timeout=2 --header="Authorization: Bearer secret-token" "http://127.0.0.1:8080/sam/${cluster_node_peer_id}/mcp/echo-tool" || true)
     if [ "$output" == "OK" ]; then
       break
     fi

@@ -15,7 +15,7 @@ roles:
     network:
       allowed_targets: ["db-agent.data-mesh"]
     mcp:
-      allowed_tools: ["query_database"]
+      allowed_servers: ["query_database"]
     custom_datalog:
       - 'department("analytics");'
 `
@@ -39,8 +39,8 @@ roles:
 	if len(role.Network.AllowedTargets) != 1 || role.Network.AllowedTargets[0] != "db-agent.data-mesh" {
 		t.Errorf("unexpected allowed targets: %v", role.Network.AllowedTargets)
 	}
-	if len(role.MCP.AllowedTools) != 1 || role.MCP.AllowedTools[0] != "query_database" {
-		t.Errorf("unexpected allowed tools: %v", role.MCP.AllowedTools)
+	if len(role.MCP.AllowedServers) != 1 || role.MCP.AllowedServers[0] != "query_database" {
+		t.Errorf("unexpected allowed tools: %v", role.MCP.AllowedServers)
 	}
 	if len(role.CustomDatalog) != 1 || role.CustomDatalog[0] != `department("analytics");` {
 		t.Errorf("unexpected custom datalog: %v", role.CustomDatalog)

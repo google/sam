@@ -24,7 +24,7 @@ type NetworkPolicy struct {
 }
 
 type MCPPolicy struct {
-	AllowedTools []string `yaml:"allowed_tools"`
+	AllowedServers []string `yaml:"allowed_servers"`
 }
 
 type ServiceConfig struct {

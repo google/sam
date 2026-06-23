@@ -41,7 +41,6 @@ const (
 	ServiceType_SERVICE_TYPE_UNSPECIFIED ServiceType = 0
 	ServiceType_SERVICE_TYPE_MCP         ServiceType = 1
 	ServiceType_SERVICE_TYPE_INFERENCE   ServiceType = 2
-	ServiceType_SERVICE_TYPE_A2A         ServiceType = 3
 )
 
 // Enum value maps for ServiceType.
@@ -50,13 +49,11 @@ var (
 		0: "SERVICE_TYPE_UNSPECIFIED",
 		1: "SERVICE_TYPE_MCP",
 		2: "SERVICE_TYPE_INFERENCE",
-		3: "SERVICE_TYPE_A2A",
 	}
 	ServiceType_value = map[string]int32{
 		"SERVICE_TYPE_UNSPECIFIED": 0,
 		"SERVICE_TYPE_MCP":         1,
 		"SERVICE_TYPE_INFERENCE":   2,
-		"SERVICE_TYPE_A2A":         3,
 	}
 )
 
@@ -136,6 +133,7 @@ func (MeshEvent_Type) EnumDescriptor() ([]byte, []int) {
 type AuthFrame struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Biscuit       []byte                 `protobuf:"bytes,1,opt,name=biscuit,proto3" json:"biscuit,omitempty"`
+	TargetService string                 `protobuf:"bytes,2,opt,name=target_service,json=targetService,proto3" json:"target_service,omitempty"` // Optional: specific service requested
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -175,6 +173,13 @@ func (x *AuthFrame) GetBiscuit() []byte {
 		return x.Biscuit
 	}
 	return nil
+}
+
+func (x *AuthFrame) GetTargetService() string {
+	if x != nil {
+		return x.TargetService
+	}
+	return ""
 }
 
 type AuthResponse struct {
@@ -775,9 +780,10 @@ var File_api_sam_proto protoreflect.FileDescriptor
 
 const file_api_sam_proto_rawDesc = "" +
 	"\n" +
-	"\rapi/sam.proto\x12\x06sam.v1\"%\n" +
+	"\rapi/sam.proto\x12\x06sam.v1\"L\n" +
 	"\tAuthFrame\x12\x18\n" +
-	"\abiscuit\x18\x01 \x01(\fR\abiscuit\">\n" +
+	"\abiscuit\x18\x01 \x01(\fR\abiscuit\x12%\n" +
+	"\x0etarget_service\x18\x02 \x01(\tR\rtargetService\">\n" +
 	"\fAuthResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x14\n" +
 	"\x05error\x18\x02 \x01(\tR\x05error\"\xd8\x01\n" +
@@ -828,12 +834,11 @@ const file_api_sam_proto_rawDesc = "" +
 	"oidcIssuer\x12\x1b\n" +
 	"\tclient_id\x18\x02 \x01(\tR\bclientId\x12\x1a\n" +
 	"\baudience\x18\x03 \x01(\tR\baudience\x12#\n" +
-	"\rhub_addresses\x18\x04 \x03(\tR\fhubAddresses*s\n" +
+	"\rhub_addresses\x18\x04 \x03(\tR\fhubAddresses*]\n" +
 	"\vServiceType\x12\x1c\n" +
 	"\x18SERVICE_TYPE_UNSPECIFIED\x10\x00\x12\x14\n" +
 	"\x10SERVICE_TYPE_MCP\x10\x01\x12\x1a\n" +
-	"\x16SERVICE_TYPE_INFERENCE\x10\x02\x12\x14\n" +
-	"\x10SERVICE_TYPE_A2A\x10\x03B\x1bZ\x19github.com/google/sam/apib\x06proto3"
+	"\x16SERVICE_TYPE_INFERENCE\x10\x02B\x1bZ\x19github.com/google/sam/apib\x06proto3"
 
 var (
 	file_api_sam_proto_rawDescOnce sync.Once

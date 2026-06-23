@@ -35,7 +35,7 @@ bindings:
 roles:
   admin:
     mcp:
-      allowed_tools: 
+      allowed_servers: 
         - "/sam/mcp/1.0.0"
         - "list_local_services"
         - "discover_remote_services"
@@ -118,7 +118,7 @@ roles:
 
 	// Node A connects to Hub A
 	apiPortA := getFreePort(t)
-	nodeACmd := exec.Command(nodeBin, "run",
+	nodeACmd := exec.Command(nodeBin, "run", "--trust-hub-rbac",
 		"--hub", fmt.Sprintf("http://127.0.0.1:%d", portA),
 		"--data-dir", filepath.Join(tmpDir, "nodeA"),
 		"--bind-addr", fmt.Sprintf("127.0.0.1:%d", apiPortA),
@@ -140,7 +140,7 @@ roles:
 
 	// Node B connects to Hub B
 	apiPortB := getFreePort(t)
-	nodeBCmd := exec.Command(nodeBin, "run",
+	nodeBCmd := exec.Command(nodeBin, "run", "--trust-hub-rbac",
 		"--hub", fmt.Sprintf("http://127.0.0.1:%d", portB),
 		"--data-dir", filepath.Join(tmpDir, "nodeB"),
 		"--bind-addr", fmt.Sprintf("127.0.0.1:%d", apiPortB),

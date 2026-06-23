@@ -116,7 +116,7 @@ data:
     roles:
       sam-canary:
         mcp:
-          allowed_tools:
+          allowed_servers:
             - "/sam/mcp/1.0.0"
             - "/sam/catalog"
 

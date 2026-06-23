@@ -71,7 +71,7 @@ func ValidatePolicyConfig(config *api.PolicyConfig) error {
 				return fmt.Errorf("wildcard target '*' is not allowed in role %q", role)
 			}
 		}
-		for _, tool := range rolePolicy.MCP.AllowedTools {
+		for _, tool := range rolePolicy.MCP.AllowedServers {
 			if tool == "*" {
 				return fmt.Errorf("wildcard tool '*' is not allowed in role %q", role)
 			}

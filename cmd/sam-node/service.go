@@ -117,8 +117,6 @@ func NewServiceFromRequest(req *api.RegisterServiceRequest) (Service, error) {
 		return &MCPService{baseService: baseService{info: info, backend: req.Backend}}, nil
 	case api.ServiceType_SERVICE_TYPE_INFERENCE:
 		return &InferenceService{baseService: baseService{info: info, backend: req.Backend}}, nil
-	case api.ServiceType_SERVICE_TYPE_A2A:
-		return &A2AService{baseService: baseService{info: info, backend: req.Backend}}, nil
 	default:
 		return nil, fmt.Errorf("unspecified or unsupported service type: %v", info.Type)
 	}
@@ -160,8 +158,6 @@ func serviceTypeToString(t api.ServiceType) (string, error) {
 		return "mcp", nil
 	case api.ServiceType_SERVICE_TYPE_INFERENCE:
 		return "inference", nil
-	case api.ServiceType_SERVICE_TYPE_A2A:
-		return "a2a", nil
 	default:
 		return "", fmt.Errorf("invalid or unspecified service type")
 	}
@@ -173,8 +169,6 @@ func parseServiceType(s string) (api.ServiceType, error) {
 		return api.ServiceType_SERVICE_TYPE_MCP, nil
 	case "inference":
 		return api.ServiceType_SERVICE_TYPE_INFERENCE, nil
-	case "a2a":
-		return api.ServiceType_SERVICE_TYPE_A2A, nil
 	default:
 		return api.ServiceType_SERVICE_TYPE_UNSPECIFIED, fmt.Errorf("invalid service type: %s", s)
 	}

@@ -101,7 +101,7 @@ func TestSamNodeJoin(t *testing.T) {
 		env,
 		"",
 		nodeBin,
-		"run",
+		"run", "--trust-hub-rbac",
 		"--hub", hubAddr,
 		"--listen", "/ip4/127.0.0.1/udp/0/quic-v1",
 		"--listen", "/ip4/127.0.0.1/tcp/0",

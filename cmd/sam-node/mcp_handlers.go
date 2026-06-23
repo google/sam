@@ -190,13 +190,13 @@ func (n *SamNode) handleGetMeshInfo(ctx context.Context, req *mcp.CallToolReques
 
 // CallRemoteToolParams defines the parameters for the call_remote_tool tool.
 //
-// Arguments is a JSON object whose shape matches the target tool's
+// Arguments is a JSON object whose shape matches the target server's
 // input_schema (use describe_remote_tool to fetch it). Earlier revisions
 // took a stringified JSON blob here; that footgun is gone.
 type CallRemoteToolParams struct {
 	PeerID    string         `json:"peer_id" jsonschema:"The Peer ID of the target agent"`
-	ToolName  string         `json:"tool_name" jsonschema:"The name of the tool to call"`
-	Arguments map[string]any `json:"arguments,omitempty" jsonschema:"Tool arguments as a JSON object whose keys match the target tool's input_schema. Call describe_remote_tool first to learn the schema."`
+	ToolName  string         `json:"tool_name" jsonschema:"The name of the server to call"`
+	Arguments map[string]any `json:"arguments,omitempty" jsonschema:"Server arguments as a JSON object whose keys match the target server's input_schema. Call describe_remote_tool first to learn the schema."`
 }
 
 // handleCallRemoteTool implements the call_remote_tool tool.
@@ -322,59 +322,75 @@ func (n *SamNode) handleFindRemoteTools(ctx context.Context, req *mcp.CallToolRe
 	}, nil, nil
 }
 
-// fetchRemoteToolCatalogue opens a libp2p MCP stream to the target peer
-// (with the same auth handshake callMCPToolOnce uses), calls tools/list,
-// and returns the result.
+// fetchRemoteToolCatalogue gets the remote node's service catalogue,
+// then opens a separate libp2p stream to each MCP service to fetch its tools.
 func (n *SamNode) fetchRemoteToolCatalogue(ctx context.Context, targetPeer peer.ID) ([]*mcp.Tool, error) {
-	s, err := n.Host.NewStream(ctx, targetPeer, api.MCPProtocolID)
+	services, err := n.fetchRemoteServiceCatalog(ctx, targetPeer, "MCP")
 	if err != nil {
-		return nil, fmt.Errorf("open stream: %w", err)
+		return nil, fmt.Errorf("fetch remote service catalog: %w", err)
 	}
-	defer func() {
-		_ = s.Close()
-	}()
 
+	var allTools []*mcp.Tool
 	biscuitBytes, err := n.Store.LoadIdentity()
 	if err != nil {
 		return nil, fmt.Errorf("load identity: %w", err)
 	}
-	authFrame := api.AuthFrame{Biscuit: biscuitBytes}
-	authBytes, _ := proto.Marshal(&authFrame)
 
-	writer := msgio.NewVarintWriter(s)
-	if err := writer.WriteMsg(authBytes); err != nil {
-		return nil, fmt.Errorf("write auth frame: %w", err)
+	for _, svc := range services {
+		if svc.Type != api.ServiceType_SERVICE_TYPE_MCP {
+			continue
+		}
+
+		s, err := n.Host.NewStream(ctx, targetPeer, api.MCPProtocolID)
+		if err != nil {
+			logger.Debugf("Failed to open stream for service %s: %v", svc.Name, err)
+			continue
+		}
+
+		authFrame := api.AuthFrame{Biscuit: biscuitBytes, TargetService: svc.Name}
+		authBytes, _ := proto.Marshal(&authFrame)
+
+		writer := msgio.NewVarintWriter(s)
+		if err := writer.WriteMsg(authBytes); err != nil {
+			_ = s.Close()
+			continue
+		}
+
+		reader := msgio.NewVarintReaderSize(s, 1024*64)
+		respMsg, err := reader.ReadMsg()
+		if err != nil {
+			_ = s.Close()
+			continue
+		}
+		defer reader.ReleaseMsg(respMsg)
+
+		var resp api.AuthResponse
+		if err := proto.Unmarshal(respMsg, &resp); err != nil || !resp.Success {
+			_ = s.Close()
+			continue
+		}
+
+		transport := NewStreamTransport(s)
+		client := mcp.NewClient(&mcp.Implementation{Name: "sam-node-find", Version: "0.1.0"}, nil)
+		session, err := client.Connect(ctx, transport, nil)
+		if err != nil {
+			_ = s.Close()
+			continue
+		}
+
+		listRes, err := session.ListTools(ctx, nil)
+		if err == nil {
+			for _, t := range listRes.Tools {
+				t.Name = svc.Name + "." + t.Name
+				allTools = append(allTools, t)
+			}
+		}
+
+		_ = session.Close()
+		_ = s.Close()
 	}
 
-	// TODO: Consider increasing this to 1MB to allocate large MCP tool catalogues
-	reader := msgio.NewVarintReaderSize(s, 1024*64)
-	respMsg, err := reader.ReadMsg()
-	if err != nil {
-		return nil, fmt.Errorf("read auth response: %w", err)
-	}
-	defer reader.ReleaseMsg(respMsg)
-
-	var resp api.AuthResponse
-	if err := proto.Unmarshal(respMsg, &resp); err != nil {
-		return nil, fmt.Errorf("parse auth response: %w", err)
-	}
-	if !resp.Success {
-		return nil, fmt.Errorf("auth rejected by %s: %s", targetPeer, resp.Error)
-	}
-
-	transport := NewStreamTransport(s)
-	client := mcp.NewClient(&mcp.Implementation{Name: "sam-node-find", Version: "0.1.0"}, nil)
-	session, err := client.Connect(ctx, transport, nil)
-	if err != nil {
-		return nil, fmt.Errorf("mcp connect: %w", err)
-	}
-	defer func() { _ = session.Close() }()
-
-	listRes, err := session.ListTools(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("list tools: %w", err)
-	}
-	return listRes.Tools, nil
+	return allTools, nil
 }
 
 // appendFilteredRows appends rows for tools that have a namespaced name
@@ -452,70 +468,14 @@ type remoteToolDescription struct {
 	OutputSchema any    `json:"output_schema,omitempty"`
 }
 
-// DescribeLocalToolParams defines parameters for the describe_local_tool
-// peer-facing infra tool.
-type DescribeLocalToolParams struct {
-	ToolName string `json:"tool_name" jsonschema:"Namespaced tool name (e.g. 'code-reviewer.review_pr'). Required."`
-}
-
-// handleDescribeLocalTool implements the describe_local_tool peer-facing
-// infra tool. It scans MCP-typed services in the registry for an aggregated
-// tool whose namespaced Name matches params.ToolName and returns its
-// description + schemas as JSON in a TextContent.
-//
-// Errors: empty tool name → invalid argument; no match → "tool not found".
-// Both surface to the caller as MCP errors.
-func (n *SamNode) handleDescribeLocalTool(ctx context.Context, req *mcp.CallToolRequest, params DescribeLocalToolParams) (*mcp.CallToolResult, any, error) {
-	if params.ToolName == "" {
-		return nil, nil, fmt.Errorf("tool_name is required")
-	}
-	svcInfos := n.services.List(api.ServiceType_SERVICE_TYPE_MCP)
-	for _, info := range svcInfos {
-		svc, ok := n.services.Get(info.Name)
-		if !ok {
-			continue
-		}
-		mcpSvc, ok := svc.(*MCPService)
-		if !ok {
-			continue
-		}
-		for _, tool := range mcpSvc.Tools() {
-			if tool == nil || tool.Name != params.ToolName {
-				continue
-			}
-			payload := remoteToolDescription{
-				ToolName:     tool.Name,
-				Description:  tool.Description,
-				InputSchema:  tool.InputSchema,
-				OutputSchema: tool.OutputSchema,
-			}
-			body, err := json.Marshal(payload)
-			if err != nil {
-				return nil, nil, fmt.Errorf("marshal description: %w", err)
-			}
-			return &mcp.CallToolResult{
-				Content: []mcp.Content{&mcp.TextContent{Text: string(body)}},
-			}, nil, nil
-		}
-	}
-	return nil, nil, fmt.Errorf("tool not found: %s", params.ToolName)
-}
-
 // DescribeRemoteToolParams defines parameters for the describe_remote_tool
 // sidecar tool.
 type DescribeRemoteToolParams struct {
-	PeerID   string `json:"peer_id" jsonschema:"Peer ID of the node hosting the tool. Required."`
-	ToolName string `json:"tool_name" jsonschema:"Namespaced tool name as returned by find_remote_tools (e.g. 'code-reviewer.review_pr'). Required."`
+	PeerID   string `json:"peer_id" jsonschema:"Peer ID of the node hosting the server. Required."`
+	ToolName string `json:"tool_name" jsonschema:"Namespaced server name as returned by find_remote_tools (e.g. 'code-reviewer.review_pr'). Required."`
 }
 
-// handleDescribeRemoteTool implements the describe_remote_tool sidecar
-// tool: validate inputs, open a libp2p MCP stream to the peer, call its
-// describe_local_tool, decorate the response with peer_id, and return.
-//
-// Validation: peer_id and tool_name must both be set; peer_id cannot equal
-// this node's own peer ID; tool_name must contain "." (describe_remote_tool
-// is for namespaced aggregated tools only); peer_id must parse as a libp2p
-// peer.ID.
+// handleDescribeRemoteTool implements the describe_remote_tool client-facing tool.
 func (n *SamNode) handleDescribeRemoteTool(ctx context.Context, req *mcp.CallToolRequest, params DescribeRemoteToolParams) (*mcp.CallToolResult, any, error) {
 	if params.PeerID == "" {
 		return nil, nil, fmt.Errorf("peer_id is required")
@@ -523,59 +483,81 @@ func (n *SamNode) handleDescribeRemoteTool(ctx context.Context, req *mcp.CallToo
 	if params.ToolName == "" {
 		return nil, nil, fmt.Errorf("tool_name is required")
 	}
-	if !strings.Contains(params.ToolName, ".") {
-		return nil, nil, fmt.Errorf("tool_name %q must be namespaced (contain '.'); describe_remote_tool is for aggregated tools only", params.ToolName)
-	}
-	selfID := n.Host.ID().String()
-	if params.PeerID == selfID {
-		return nil, nil, fmt.Errorf("peer_id %q is this node; cross-mesh describe cannot target self", params.PeerID)
-	}
-	targetPeer, err := peer.Decode(params.PeerID)
+
+	pid, err := peer.Decode(params.PeerID)
 	if err != nil {
-		return nil, nil, fmt.Errorf("invalid peer_id %q: %w", params.PeerID, err)
+		return nil, nil, fmt.Errorf("invalid peer_id: %w", err)
 	}
 
-	res, err := n.CallMCPTool(ctx, targetPeer, "describe_local_tool", DescribeLocalToolParams{
-		ToolName: params.ToolName,
-	})
+	parts := strings.SplitN(params.ToolName, ".", 2)
+	if len(parts) != 2 {
+		return nil, nil, fmt.Errorf("invalid tool_name format, expected 'service.tool'")
+	}
+	serviceName := parts[0]
+	actualToolName := parts[1]
+
+	biscuitBytes, err := n.Store.LoadIdentity()
 	if err != nil {
-		return nil, nil, fmt.Errorf("describe_local_tool on %s: %w", targetPeer, err)
+		return nil, nil, err
 	}
-	if res == nil {
-		return nil, nil, fmt.Errorf("nil response from %s", targetPeer)
+
+	s, err := n.Host.NewStream(ctx, pid, api.MCPProtocolID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("open stream: %w", err)
 	}
-	// The Go SDK packs handler-returned errors into CallToolResult.IsError
-	// rather than propagating them as Go errors from session.CallTool. Check
-	// IsError before the empty-content guard so an errored response with no
-	// body still surfaces as a describe_local_tool error rather than an
-	// ambiguous "empty response".
-	if res.IsError {
-		errText := "(no detail)"
-		if len(res.Content) > 0 {
-			if tc, ok := res.Content[0].(*mcp.TextContent); ok && tc.Text != "" {
-				errText = tc.Text
+	defer func() { _ = s.Close() }()
+
+	authFrame := api.AuthFrame{Biscuit: biscuitBytes, TargetService: serviceName}
+	authBytes, _ := proto.Marshal(&authFrame)
+
+	writer := msgio.NewVarintWriter(s)
+	if err := writer.WriteMsg(authBytes); err != nil {
+		return nil, nil, err
+	}
+
+	reader := msgio.NewVarintReaderSize(s, 1024*64)
+	respMsg, err := reader.ReadMsg()
+	if err != nil {
+		return nil, nil, err
+	}
+	defer reader.ReleaseMsg(respMsg)
+
+	var authResp api.AuthResponse
+	if err := proto.Unmarshal(respMsg, &authResp); err != nil || !authResp.Success {
+		return nil, nil, fmt.Errorf("auth rejected")
+	}
+
+	transport := NewStreamTransport(s)
+	client := mcp.NewClient(&mcp.Implementation{Name: "sam-node-describe", Version: "0.1.0"}, nil)
+	session, err := client.Connect(ctx, transport, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer func() { _ = session.Close() }()
+
+	listRes, err := session.ListTools(ctx, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	for _, t := range listRes.Tools {
+		if t.Name == actualToolName {
+			payload := remoteToolDescription{
+				PeerID:       pid.String(),
+				ToolName:     params.ToolName,
+				Description:  t.Description,
+				InputSchema:  t.InputSchema,
+				OutputSchema: t.OutputSchema,
 			}
+			data, err := json.Marshal(payload)
+			if err != nil {
+				return nil, nil, err
+			}
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{&mcp.TextContent{Text: string(data)}},
+			}, nil, nil
 		}
-		return nil, nil, fmt.Errorf("describe_local_tool on %s: %s", targetPeer, errText)
 	}
-	if len(res.Content) == 0 {
-		return nil, nil, fmt.Errorf("empty response from %s", targetPeer)
-	}
-	tc, ok := res.Content[0].(*mcp.TextContent)
-	if !ok {
-		return nil, nil, fmt.Errorf("unexpected content type from %s: %T", targetPeer, res.Content[0])
-	}
-	var remoteToolDesc remoteToolDescription
-	if err := json.Unmarshal([]byte(tc.Text), &remoteToolDesc); err != nil {
-		return nil, nil, fmt.Errorf("parse describe response from %s: %w", targetPeer, err)
-	}
-	remoteToolDesc.PeerID = params.PeerID
 
-	mRemoteToolDesc, err := json.Marshal(remoteToolDesc)
-	if err != nil {
-		return nil, nil, fmt.Errorf("marshal description: %w", err)
-	}
-	return &mcp.CallToolResult{
-		Content: []mcp.Content{&mcp.TextContent{Text: string(mRemoteToolDesc)}},
-	}, nil, nil
+	return nil, nil, fmt.Errorf("tool not found on peer")
 }

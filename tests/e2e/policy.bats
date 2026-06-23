@@ -150,7 +150,7 @@ bindings:
 roles:
   mesh-member:
     mcp:
-      allowed_tools:
+      allowed_servers:
         - \"query_database\"
         - \"delete_tables\""
 
