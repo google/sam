@@ -155,7 +155,7 @@ import urllib.request
 import json
 data = {
     'service': {
-        'type': 1,
+        'type': 'SERVICE_TYPE_MCP',
         'name': 'echo-tool',
         'description': 'test'
     },

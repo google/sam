@@ -89,7 +89,7 @@ import json
 
 data = {
     \"service\": {
-        \"type\": 1,
+        \"type\": \"SERVICE_TYPE_MCP\",
         \"name\": \"http-tool\",
         \"description\": \"test http service\"
     },
@@ -120,7 +120,7 @@ import json
 
 data = {
     'service': {
-        'type': 1,
+        'type': 'SERVICE_TYPE_MCP',
         'name': 'stdio-tool',
         'description': 'test stdio service'
     },
