@@ -167,8 +167,8 @@ func TestHandleFindRemoteTools_SinglePeer(t *testing.T) {
 		if row.PeerID != nodeB.Host.ID().String() {
 			t.Errorf("row has peer_id %q, want %q", row.PeerID, nodeB.Host.ID().String())
 		}
-		if _, ok := wantNames[row.ToolName]; ok {
-			wantNames[row.ToolName] = true
+		if _, ok := wantNames[row.ServerName]; ok {
+			wantNames[row.ServerName] = true
 		}
 	}
 	for name, found := range wantNames {
@@ -307,7 +307,7 @@ func TestHandleFindRemoteTools_MeshWideViaHandler(t *testing.T) {
 
 	found := false
 	for _, r := range rows {
-		if r.ToolName == "code-reviewer.review_pr" && r.PeerID == nodeB.Host.ID().String() {
+		if r.ServerName == "code-reviewer.review_pr" && r.PeerID == nodeB.Host.ID().String() {
 			found = true
 		}
 	}
@@ -329,7 +329,7 @@ func TestAppendFilteredRows_ServiceNameFilter(t *testing.T) {
 		t.Errorf("service filter: got %d rows, want 2; rows=%+v", len(rows), rows)
 	}
 	for _, r := range rows {
-		if !strings.HasPrefix(r.ToolName, "code-reviewer.") {
+		if !strings.HasPrefix(r.ServerName, "code-reviewer.") {
 			t.Errorf("row %+v doesn't match service prefix", r)
 		}
 	}
@@ -347,8 +347,8 @@ func TestAppendFilteredRows_AggregatedOnly(t *testing.T) {
 	if len(rows) != 1 {
 		t.Errorf("aggregated-only filter: got %d rows, want 1; rows=%+v", len(rows), rows)
 	}
-	if rows[0].ToolName != "code-reviewer.review_pr" {
-		t.Errorf("unexpected name %q", rows[0].ToolName)
+	if rows[0].ServerName != "code-reviewer.review_pr" {
+		t.Errorf("unexpected name %q", rows[0].ServerName)
 	}
 }
 
@@ -360,7 +360,7 @@ func TestAppendFilteredRows_PartialPrefixMatch(t *testing.T) {
 		{Name: "code.something"},
 	}
 	rows := appendFilteredRows(nil, "peerB", tools, "code")
-	if len(rows) != 1 || rows[0].ToolName != "code.something" {
+	if len(rows) != 1 || rows[0].ServerName != "code.something" {
 		t.Errorf("expected exactly one row 'code.something'; got %+v", rows)
 	}
 }
@@ -419,7 +419,7 @@ func TestHandleFindRemoteTools_PartialFailure(t *testing.T) {
 
 	gotSummarizer := false
 	for _, r := range rows {
-		if r.ToolName == "summarizer.summarize" {
+		if r.ServerName == "summarizer.summarize" {
 			gotSummarizer = true
 		}
 	}
@@ -473,14 +473,14 @@ func TestHandleDescribeRemoteTool_EmptyPeerID(t *testing.T) {
 	defer cleanup()
 
 	_, _, err := node.handleDescribeRemoteServer(ctx, &mcp.CallToolRequest{}, DescribeRemoteToolParams{
-		ToolName: "code-reviewer.review_pr",
+		ServerName: "code-reviewer.review_pr",
 	})
 	if err == nil {
 		t.Fatal("expected error for empty peer_id")
 	}
 }
 
-func TestHandleDescribeRemoteTool_EmptyToolName(t *testing.T) {
+func TestHandleDescribeRemoteTool_EmptyServerName(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
@@ -491,7 +491,7 @@ func TestHandleDescribeRemoteTool_EmptyToolName(t *testing.T) {
 		PeerID: "12D3KooWFakePeerID",
 	})
 	if err == nil {
-		t.Fatal("expected error for empty tool_name")
+		t.Fatal("expected error for empty server_name")
 	}
 }
 
@@ -504,10 +504,10 @@ func TestHandleDescribeRemoteTool_NonNamespacedRejected(t *testing.T) {
 
 	_, _, err := node.handleDescribeRemoteServer(ctx, &mcp.CallToolRequest{}, DescribeRemoteToolParams{
 		PeerID:   node.Host.ID().String(),
-		ToolName: "send_message", // no dot
+		ServerName: "send_message", // no dot
 	})
 	if err == nil {
-		t.Fatal("expected error for tool_name without '.'")
+		t.Fatal("expected error for server_name without '.'")
 	}
 	if !strings.Contains(err.Error(), "service.tool") {
 		t.Errorf("error %q does not explain the namespacing requirement", err.Error())
@@ -523,7 +523,7 @@ func TestHandleDescribeRemoteTool_SelfPeerRejected(t *testing.T) {
 
 	_, _, err := node.handleDescribeRemoteServer(ctx, &mcp.CallToolRequest{}, DescribeRemoteToolParams{
 		PeerID:   node.Host.ID().String(),
-		ToolName: "code-reviewer.review_pr",
+		ServerName: "code-reviewer.review_pr",
 	})
 	if err == nil {
 		t.Fatal("expected error when peer_id equals self peer ID")
@@ -539,7 +539,7 @@ func TestHandleDescribeRemoteTool_InvalidPeerID(t *testing.T) {
 
 	_, _, err := node.handleDescribeRemoteServer(ctx, &mcp.CallToolRequest{}, DescribeRemoteToolParams{
 		PeerID:   "not-a-valid-peer-id",
-		ToolName: "code-reviewer.review_pr",
+		ServerName: "code-reviewer.review_pr",
 	})
 	if err == nil {
 		t.Fatal("expected error for malformed peer_id")
@@ -603,7 +603,7 @@ func TestHandleDescribeRemoteTool_RoundTrip(t *testing.T) {
 
 	res, _, err := nodeA.handleDescribeRemoteServer(ctx, &mcp.CallToolRequest{}, DescribeRemoteToolParams{
 		PeerID:   nodeB.Host.ID().String(),
-		ToolName: "code-reviewer.review_pr",
+		ServerName: "code-reviewer.review_pr",
 	})
 	if err != nil {
 		t.Fatalf("handleDescribeRemoteServer: %v", err)
@@ -620,8 +620,8 @@ func TestHandleDescribeRemoteTool_RoundTrip(t *testing.T) {
 	if desc.PeerID != nodeB.Host.ID().String() {
 		t.Errorf("PeerID = %q, want %q", desc.PeerID, nodeB.Host.ID().String())
 	}
-	if desc.ToolName != "code-reviewer.review_pr" {
-		t.Errorf("ToolName = %q, want %q", desc.ToolName, "code-reviewer.review_pr")
+	if desc.ServerName != "code-reviewer.review_pr" {
+		t.Errorf("ServerName = %q, want %q", desc.ServerName, "code-reviewer.review_pr")
 	}
 	if desc.Description != "Run a code review" {
 		t.Errorf("Description = %q, want %q", desc.Description, "Run a code review")
@@ -681,7 +681,7 @@ func TestHandleDescribeRemoteTool_RoundTrip_UnknownTool(t *testing.T) {
 
 	_, _, err = nodeA.handleDescribeRemoteServer(ctx, &mcp.CallToolRequest{}, DescribeRemoteToolParams{
 		PeerID:   nodeB.Host.ID().String(),
-		ToolName: "code-reviewer.does-not-exist",
+		ServerName: "code-reviewer.does-not-exist",
 	})
 	if err == nil {
 		t.Fatal("expected error from peer when tool is not registered")

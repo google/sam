@@ -83,8 +83,8 @@ jobs:
           echo "== discover services / find calculator (poll) =="
           peer=""
           for _ in $(seq 1 30); do
-            tools=$(mcp -tool find_remote_tools -args '{}' || true)
-            peer=$(printf '%s' "$tools" | jq -r '.[]? | select(.tool_name=="calculator.add") | .peer_id' 2>/dev/null | head -n1)
+            tools=$(mcp -tool find_remote_servers -args '{}' || true)
+            peer=$(printf '%s' "$tools" | jq -r '.[]? | select(.server_name=="calculator.add") | .peer_id' 2>/dev/null | head -n1)
             [ -n "$peer" ] && break
             sleep 1
           done
@@ -92,8 +92,8 @@ jobs:
           echo "calculator host: $peer"
 
           echo "== call calculator.add(2,3) =="
-          result=$(mcp -tool call_remote_tool \
-            -args "{\"peer_id\":\"$peer\",\"tool_name\":\"calculator.add\",\"arguments\":{\"a\":2,\"b\":3}}")
+          result=$(mcp -tool call_remote_server \
+            -args "{\"peer_id\":\"$peer\",\"server_name\":\"calculator.add\",\"arguments\":{\"a\":2,\"b\":3}}")
           echo "result: $result"
           printf '%s' "$result" | grep -q 5 || { echo "calculator.add did not return 5"; exit 1; }
           echo "OK: calculator.add(2,3) == 5"

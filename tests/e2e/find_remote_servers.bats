@@ -32,7 +32,7 @@ teardown() {
   mesh_cleanup_env
 }
 
-@test "find_remote_tools surfaces aggregated tools from a remote peer" {
+@test "find_remote_servers surfaces aggregated tools from a remote peer" {
   run mesh_start_mock_oidc
   [[ "$status" -eq 0 ]]
 
@@ -64,13 +64,13 @@ teardown() {
   [[ "$status" -eq 0 ]]
   mesh_wait_for_peer_connection 1 "${node2_peer_id}" 20
 
-  echo "[$(date +%T)] Calling find_remote_tools from Node 1, targeting Node 2"
+  echo "[$(date +%T)] Calling find_remote_servers from Node 1, targeting Node 2"
   run docker run --rm --network "${MESH_NETWORK}" \
     "${MESH_RUNTIME_IMAGE}" mcp-client \
     -url "http://sam-node-1:8080/mcp/events" \
-    -tool "find_remote_tools" \
+    -tool "find_remote_servers" \
     -args "{\"peer_id\":\"${node2_peer_id}\"}"
-  echo "find_remote_tools output: $output"
+  echo "find_remote_servers output: $output"
   [[ "$status" -eq 0 ]]
 
   # mcp-client prints each text-content line; the catalog JSON is the last non-empty line.
@@ -80,13 +80,13 @@ teardown() {
   local match_count
   match_count=$(echo "$catalog" | jq --arg pid "${node2_peer_id}" '
     [.[] | select(.peer_id == $pid
-                 and (.tool_name | startswith("calculator.")))] | length
+                 and (.server_name | startswith("calculator.")))] | length
   ')
   echo "Matching calculator tool entries: ${match_count}"
   [[ "${match_count}" -ge 1 ]]
 }
 
-@test "call_remote_tool invokes an aggregated hosted-service tool end to end" {
+@test "call_remote_server invokes an aggregated hosted-service tool end to end" {
   run mesh_start_mock_oidc
   [[ "$status" -eq 0 ]]
 
@@ -122,22 +122,22 @@ teardown() {
   [[ "$status" -eq 0 ]]
   mesh_wait_for_peer_connection 1 "${node2_peer_id}" 20
 
-  echo "[$(date +%T)] Calling call_remote_tool for calculator.add"
+  echo "[$(date +%T)] Calling call_remote_server for calculator.add"
   local call_args
-  call_args="{\"peer_id\":\"${node2_peer_id}\",\"tool_name\":\"calculator.add\",\"arguments\":{\"a\":2,\"b\":3}}"
+  call_args="{\"peer_id\":\"${node2_peer_id}\",\"server_name\":\"calculator.add\",\"arguments\":{\"a\":2,\"b\":3}}"
   run docker run --rm --network "${MESH_NETWORK}" \
     "${MESH_RUNTIME_IMAGE}" mcp-client \
     -url "http://sam-node-1:8080/mcp/events" \
-    -tool "call_remote_tool" \
+    -tool "call_remote_server" \
     -args "${call_args}"
-  echo "call_remote_tool output: $output"
+  echo "call_remote_server output: $output"
   [[ "$status" -eq 0 ]]
 
   # calc-mcp returns add(2,3)=5 as a TextContent string; "5" must appear in the response.
   [[ "$output" == *"5"* ]]
 }
 
-@test "describe_remote_tool returns input schema for an aggregated tool" {
+@test "describe_remote_server returns input schema for an aggregated tool" {
   run mesh_start_mock_oidc
   [[ "$status" -eq 0 ]]
 
@@ -173,28 +173,28 @@ teardown() {
   [[ "$status" -eq 0 ]]
   mesh_wait_for_peer_connection 1 "${node2_peer_id}" 20
 
-  echo "[$(date +%T)] Calling describe_remote_tool for calculator.add"
+  echo "[$(date +%T)] Calling describe_remote_server for calculator.add"
   local describe_args
-  describe_args="{\"peer_id\":\"${node2_peer_id}\",\"tool_name\":\"calculator.add\"}"
+  describe_args="{\"peer_id\":\"${node2_peer_id}\",\"server_name\":\"calculator.add\"}"
   run docker run --rm --network "${MESH_NETWORK}" \
     "${MESH_RUNTIME_IMAGE}" mcp-client \
     -url "http://sam-node-1:8080/mcp/events" \
-    -tool "describe_remote_tool" \
+    -tool "describe_remote_server" \
     -args "${describe_args}"
-  echo "describe_remote_tool output: $output"
+  echo "describe_remote_server output: $output"
   [[ "$status" -eq 0 ]]
 
   # mcp-client prints each TextContent line; the JSON payload is the last non-empty line.
   local payload
   payload=$(echo "$output" | tail -n 1)
 
-  # Assert peer_id, namespaced tool_name, and an input_schema with an object type.
+  # Assert peer_id, namespaced server_name, and an input_schema with an object type.
   local got_peer
   got_peer=$(echo "$payload" | jq -r '.peer_id')
   [[ "${got_peer}" == "${node2_peer_id}" ]]
 
   local got_name
-  got_name=$(echo "$payload" | jq -r '.tool_name')
+  got_name=$(echo "$payload" | jq -r '.server_name')
   [[ "${got_name}" == "calculator.add" ]]
 
   local got_input_type
@@ -202,7 +202,7 @@ teardown() {
   [[ "${got_input_type}" == "object" ]]
 }
 
-@test "describe_remote_tool surfaces an error for an unknown tool" {
+@test "describe_remote_server surfaces an error for an unknown tool" {
   run mesh_start_mock_oidc
   [[ "$status" -eq 0 ]]
 
@@ -238,15 +238,15 @@ teardown() {
   [[ "$status" -eq 0 ]]
   mesh_wait_for_peer_connection 1 "${node2_peer_id}" 20
 
-  echo "[$(date +%T)] Calling describe_remote_tool for an unknown tool"
+  echo "[$(date +%T)] Calling describe_remote_server for an unknown tool"
   local describe_args
-  describe_args="{\"peer_id\":\"${node2_peer_id}\",\"tool_name\":\"calculator.does-not-exist\"}"
+  describe_args="{\"peer_id\":\"${node2_peer_id}\",\"server_name\":\"calculator.does-not-exist\"}"
   run docker run --rm --network "${MESH_NETWORK}" \
     "${MESH_RUNTIME_IMAGE}" mcp-client \
     -url "http://sam-node-1:8080/mcp/events" \
-    -tool "describe_remote_tool" \
+    -tool "describe_remote_server" \
     -args "${describe_args}"
-  echo "describe_remote_tool output: $output"
+  echo "describe_remote_server output: $output"
 
   # The peer's describe_local_tool handler returns "tool not found: <name>";
   # handleDescribeRemoteTool wraps it as "describe_local_tool on <peer>: tool
