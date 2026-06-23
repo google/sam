@@ -61,9 +61,9 @@ func TestHandleFindRemoteTools_EmptyMesh_ReturnsEmptyArray(t *testing.T) {
 	node, cleanup := startBareNode(t, ctx)
 	defer cleanup()
 
-	res, _, err := node.handleFindRemoteServers(ctx, &mcp.CallToolRequest{}, FindRemoteServersParams{})
+	res, _, err := node.handleFindRemoteTools(ctx, &mcp.CallToolRequest{}, FindRemoteToolsParams{})
 	if err != nil {
-		t.Fatalf("handleFindRemoteServers: %v", err)
+		t.Fatalf("handleFindRemoteTools: %v", err)
 	}
 	if len(res.Content) == 0 {
 		t.Fatal("expected non-empty result content")
@@ -88,7 +88,7 @@ func TestHandleFindRemoteTools_SelfPeerRejected(t *testing.T) {
 	node, cleanup := startBareNode(t, ctx)
 	defer cleanup()
 
-	_, _, err := node.handleFindRemoteServers(ctx, &mcp.CallToolRequest{}, FindRemoteServersParams{
+	_, _, err := node.handleFindRemoteTools(ctx, &mcp.CallToolRequest{}, FindRemoteToolsParams{
 		PeerID: node.Host.ID().String(),
 	})
 	if err == nil {
@@ -144,17 +144,17 @@ func TestHandleFindRemoteTools_SinglePeer(t *testing.T) {
 		t.Fatalf("RegisterService: %v", err)
 	}
 
-	res, _, err := nodeA.handleFindRemoteServers(ctx, &mcp.CallToolRequest{}, FindRemoteServersParams{
+	res, _, err := nodeA.handleFindRemoteTools(ctx, &mcp.CallToolRequest{}, FindRemoteToolsParams{
 		PeerID: nodeB.Host.ID().String(),
 	})
 	if err != nil {
-		t.Fatalf("handleFindRemoteServers: %v", err)
+		t.Fatalf("handleFindRemoteTools: %v", err)
 	}
 	tc, ok := res.Content[0].(*mcp.TextContent)
 	if !ok {
 		t.Fatalf("expected TextContent, got %T", res.Content[0])
 	}
-	var rows []remoteServerRow
+	var rows []remoteToolRow
 	if err := json.Unmarshal([]byte(tc.Text), &rows); err != nil {
 		t.Fatalf("unmarshal: %v (text: %q)", err, tc.Text)
 	}
@@ -167,8 +167,8 @@ func TestHandleFindRemoteTools_SinglePeer(t *testing.T) {
 		if row.PeerID != nodeB.Host.ID().String() {
 			t.Errorf("row has peer_id %q, want %q", row.PeerID, nodeB.Host.ID().String())
 		}
-		if _, ok := wantNames[row.ServerName]; ok {
-			wantNames[row.ServerName] = true
+		if _, ok := wantNames[row.ToolName]; ok {
+			wantNames[row.ToolName] = true
 		}
 	}
 	for name, found := range wantNames {
@@ -295,19 +295,19 @@ func TestHandleFindRemoteTools_MeshWideViaHandler(t *testing.T) {
 	// Give the DHT a moment to record the provider.
 	time.Sleep(5 * time.Second)
 
-	res, _, err := nodeA.handleFindRemoteServers(ctx, &mcp.CallToolRequest{}, FindRemoteServersParams{})
+	res, _, err := nodeA.handleFindRemoteTools(ctx, &mcp.CallToolRequest{}, FindRemoteToolsParams{})
 	if err != nil {
 		t.Fatalf("handler: %v", err)
 	}
 	tc := res.Content[0].(*mcp.TextContent)
-	var rows []remoteServerRow
+	var rows []remoteToolRow
 	if err := json.Unmarshal([]byte(tc.Text), &rows); err != nil {
 		t.Fatal(err)
 	}
 
 	found := false
 	for _, r := range rows {
-		if r.ServerName == "code-reviewer.review_pr" && r.PeerID == nodeB.Host.ID().String() {
+		if r.ToolName == "code-reviewer.review_pr" && r.PeerID == nodeB.Host.ID().String() {
 			found = true
 		}
 	}
@@ -329,7 +329,7 @@ func TestAppendFilteredRows_ServiceNameFilter(t *testing.T) {
 		t.Errorf("service filter: got %d rows, want 2; rows=%+v", len(rows), rows)
 	}
 	for _, r := range rows {
-		if !strings.HasPrefix(r.ServerName, "code-reviewer.") {
+		if !strings.HasPrefix(r.ToolName, "code-reviewer.") {
 			t.Errorf("row %+v doesn't match service prefix", r)
 		}
 	}
@@ -347,8 +347,8 @@ func TestAppendFilteredRows_AggregatedOnly(t *testing.T) {
 	if len(rows) != 1 {
 		t.Errorf("aggregated-only filter: got %d rows, want 1; rows=%+v", len(rows), rows)
 	}
-	if rows[0].ServerName != "code-reviewer.review_pr" {
-		t.Errorf("unexpected name %q", rows[0].ServerName)
+	if rows[0].ToolName != "code-reviewer.review_pr" {
+		t.Errorf("unexpected name %q", rows[0].ToolName)
 	}
 }
 
@@ -360,7 +360,7 @@ func TestAppendFilteredRows_PartialPrefixMatch(t *testing.T) {
 		{Name: "code.something"},
 	}
 	rows := appendFilteredRows(nil, "peerB", tools, "code")
-	if len(rows) != 1 || rows[0].ServerName != "code.something" {
+	if len(rows) != 1 || rows[0].ToolName != "code.something" {
 		t.Errorf("expected exactly one row 'code.something'; got %+v", rows)
 	}
 }
@@ -419,7 +419,7 @@ func TestHandleFindRemoteTools_PartialFailure(t *testing.T) {
 
 	gotSummarizer := false
 	for _, r := range rows {
-		if r.ServerName == "summarizer.summarize" {
+		if r.ToolName == "summarizer.summarize" {
 			gotSummarizer = true
 		}
 	}
@@ -452,7 +452,7 @@ func TestNewMCPHandler_RegistersFindRemoteTools(t *testing.T) {
 	}
 	found := false
 	for _, tl := range res.Tools {
-		if tl.Name == "find_remote_servers" {
+		if tl.Name == "find_remote_tools" {
 			found = true
 		}
 	}
@@ -461,7 +461,7 @@ func TestNewMCPHandler_RegistersFindRemoteTools(t *testing.T) {
 		for _, tl := range res.Tools {
 			names = append(names, tl.Name)
 		}
-		t.Errorf("find_remote_servers missing from sidecar tools/list; got %v", names)
+		t.Errorf("find_remote_tools missing from sidecar tools/list; got %v", names)
 	}
 }
 
@@ -472,26 +472,26 @@ func TestHandleDescribeRemoteTool_EmptyPeerID(t *testing.T) {
 	node, cleanup := startBareNode(t, ctx)
 	defer cleanup()
 
-	_, _, err := node.handleDescribeRemoteServer(ctx, &mcp.CallToolRequest{}, DescribeRemoteToolParams{
-		ServerName: "code-reviewer.review_pr",
+	_, _, err := node.handleDescribeRemoteTool(ctx, &mcp.CallToolRequest{}, DescribeRemoteToolParams{
+		ToolName: "code-reviewer.review_pr",
 	})
 	if err == nil {
 		t.Fatal("expected error for empty peer_id")
 	}
 }
 
-func TestHandleDescribeRemoteTool_EmptyServerName(t *testing.T) {
+func TestHandleDescribeRemoteTool_EmptyToolName(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
 	node, cleanup := startBareNode(t, ctx)
 	defer cleanup()
 
-	_, _, err := node.handleDescribeRemoteServer(ctx, &mcp.CallToolRequest{}, DescribeRemoteToolParams{
+	_, _, err := node.handleDescribeRemoteTool(ctx, &mcp.CallToolRequest{}, DescribeRemoteToolParams{
 		PeerID: "12D3KooWFakePeerID",
 	})
 	if err == nil {
-		t.Fatal("expected error for empty server_name")
+		t.Fatal("expected error for empty tool_name")
 	}
 }
 
@@ -502,12 +502,12 @@ func TestHandleDescribeRemoteTool_NonNamespacedRejected(t *testing.T) {
 	node, cleanup := startBareNode(t, ctx)
 	defer cleanup()
 
-	_, _, err := node.handleDescribeRemoteServer(ctx, &mcp.CallToolRequest{}, DescribeRemoteToolParams{
+	_, _, err := node.handleDescribeRemoteTool(ctx, &mcp.CallToolRequest{}, DescribeRemoteToolParams{
 		PeerID:   node.Host.ID().String(),
-		ServerName: "send_message", // no dot
+		ToolName: "send_message", // no dot
 	})
 	if err == nil {
-		t.Fatal("expected error for server_name without '.'")
+		t.Fatal("expected error for tool_name without '.'")
 	}
 	if !strings.Contains(err.Error(), "service.tool") {
 		t.Errorf("error %q does not explain the namespacing requirement", err.Error())
@@ -521,9 +521,9 @@ func TestHandleDescribeRemoteTool_SelfPeerRejected(t *testing.T) {
 	node, cleanup := startBareNode(t, ctx)
 	defer cleanup()
 
-	_, _, err := node.handleDescribeRemoteServer(ctx, &mcp.CallToolRequest{}, DescribeRemoteToolParams{
+	_, _, err := node.handleDescribeRemoteTool(ctx, &mcp.CallToolRequest{}, DescribeRemoteToolParams{
 		PeerID:   node.Host.ID().String(),
-		ServerName: "code-reviewer.review_pr",
+		ToolName: "code-reviewer.review_pr",
 	})
 	if err == nil {
 		t.Fatal("expected error when peer_id equals self peer ID")
@@ -537,9 +537,9 @@ func TestHandleDescribeRemoteTool_InvalidPeerID(t *testing.T) {
 	node, cleanup := startBareNode(t, ctx)
 	defer cleanup()
 
-	_, _, err := node.handleDescribeRemoteServer(ctx, &mcp.CallToolRequest{}, DescribeRemoteToolParams{
+	_, _, err := node.handleDescribeRemoteTool(ctx, &mcp.CallToolRequest{}, DescribeRemoteToolParams{
 		PeerID:   "not-a-valid-peer-id",
-		ServerName: "code-reviewer.review_pr",
+		ToolName: "code-reviewer.review_pr",
 	})
 	if err == nil {
 		t.Fatal("expected error for malformed peer_id")
@@ -601,12 +601,12 @@ func TestHandleDescribeRemoteTool_RoundTrip(t *testing.T) {
 	}
 	defer func() { _ = nodeB.UnregisterService(ctx, "code-reviewer") }()
 
-	res, _, err := nodeA.handleDescribeRemoteServer(ctx, &mcp.CallToolRequest{}, DescribeRemoteToolParams{
+	res, _, err := nodeA.handleDescribeRemoteTool(ctx, &mcp.CallToolRequest{}, DescribeRemoteToolParams{
 		PeerID:   nodeB.Host.ID().String(),
-		ServerName: "code-reviewer.review_pr",
+		ToolName: "code-reviewer.review_pr",
 	})
 	if err != nil {
-		t.Fatalf("handleDescribeRemoteServer: %v", err)
+		t.Fatalf("handleDescribeRemoteTool: %v", err)
 	}
 	tc, ok := res.Content[0].(*mcp.TextContent)
 	if !ok {
@@ -620,8 +620,8 @@ func TestHandleDescribeRemoteTool_RoundTrip(t *testing.T) {
 	if desc.PeerID != nodeB.Host.ID().String() {
 		t.Errorf("PeerID = %q, want %q", desc.PeerID, nodeB.Host.ID().String())
 	}
-	if desc.ServerName != "code-reviewer.review_pr" {
-		t.Errorf("ServerName = %q, want %q", desc.ServerName, "code-reviewer.review_pr")
+	if desc.ToolName != "code-reviewer.review_pr" {
+		t.Errorf("ToolName = %q, want %q", desc.ToolName, "code-reviewer.review_pr")
 	}
 	if desc.Description != "Run a code review" {
 		t.Errorf("Description = %q, want %q", desc.Description, "Run a code review")
@@ -679,9 +679,9 @@ func TestHandleDescribeRemoteTool_RoundTrip_UnknownTool(t *testing.T) {
 	}
 	defer func() { _ = nodeB.UnregisterService(ctx, "code-reviewer") }()
 
-	_, _, err = nodeA.handleDescribeRemoteServer(ctx, &mcp.CallToolRequest{}, DescribeRemoteToolParams{
+	_, _, err = nodeA.handleDescribeRemoteTool(ctx, &mcp.CallToolRequest{}, DescribeRemoteToolParams{
 		PeerID:   nodeB.Host.ID().String(),
-		ServerName: "code-reviewer.does-not-exist",
+		ToolName: "code-reviewer.does-not-exist",
 	})
 	if err == nil {
 		t.Fatal("expected error from peer when tool is not registered")
@@ -716,7 +716,7 @@ func TestNewMCPHandler_RegistersDescribeRemoteTool(t *testing.T) {
 	}
 	found := false
 	for _, tl := range res.Tools {
-		if tl.Name == "describe_remote_server" {
+		if tl.Name == "describe_remote_tool" {
 			found = true
 		}
 	}
@@ -725,7 +725,7 @@ func TestNewMCPHandler_RegistersDescribeRemoteTool(t *testing.T) {
 		for _, tl := range res.Tools {
 			names = append(names, tl.Name)
 		}
-		t.Errorf("describe_remote_server missing from sidecar tools/list; got %v", names)
+		t.Errorf("describe_remote_tool missing from sidecar tools/list; got %v", names)
 	}
 }
 

@@ -146,9 +146,9 @@ func TestHandleCallRemoteServer(t *testing.T) {
 	node, cleanup := startBareNode(t, ctx)
 	defer cleanup()
 	
-	_, _, err := node.handleCallRemoteServer(context.Background(), &mcp.CallToolRequest{}, CallRemoteServerParams{
+	_, _, err := node.handleCallRemoteTool(context.Background(), &mcp.CallToolRequest{}, CallRemoteToolParams{
 		PeerID: "invalid_peer_id",
-		ServerName: "test",
+		ToolName: "test",
 	})
 	if err == nil {
 		t.Errorf("expected error for invalid peer id")

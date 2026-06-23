@@ -124,14 +124,14 @@ EOF
     mesh_wait_for_log "${name}" "Mock OIDC server ready" 30
 }
 
-mesh_call_remote_server() {
+mesh_call_remote_tool() {
   local caller_idx="$1"
   local target_peer_id="$2"
-  local server_name="$3"
+  local tool_name="$3"
   
-  local args="{\"peer_id\":\"${target_peer_id}\",\"server_name\":\"${server_name}\",\"arguments\":{}}"
+  local args="{\"peer_id\":\"${target_peer_id}\",\"tool_name\":\"${tool_name}\",\"arguments\":{}}"
   
-  docker run --rm --network "${MESH_NETWORK}" "${MESH_RUNTIME_IMAGE}" mcp-client -url "http://sam-node-${caller_idx}:8080/mcp/events" -tool "call_remote_server" -args "${args}"
+  docker run --rm --network "${MESH_NETWORK}" "${MESH_RUNTIME_IMAGE}" mcp-client -url "http://sam-node-${caller_idx}:8080/mcp/events" -tool "call_remote_tool" -args "${args}"
 }
 
 setup() {
@@ -272,19 +272,19 @@ teardown() {
 }
 
 @test "Policy E2E: Positive Path (Allowed by Hub, Not blocked by Node)" {
-  run mesh_call_remote_server 2 "${TARGET_PEER_ID}" "query_database"
+  run mesh_call_remote_tool 2 "${TARGET_PEER_ID}" "query_database"
   echo "Output: $output"
   [ "$status" -eq 0 ]
 }
 
 @test "Policy E2E: Negative Path (Denied by Hub)" {
-  run mesh_call_remote_server 2 "${TARGET_PEER_ID}" "reboot_server"
+  run mesh_call_remote_tool 2 "${TARGET_PEER_ID}" "reboot_server"
   echo "Output: $output"
   [[ "$output" == *"denied"* ]]
 }
 
 @test "Policy E2E: Attenuation Path (Allowed by Hub, Blocked by Node)" {
-  run mesh_call_remote_server 2 "${TARGET_PEER_ID}" "delete_tables"
+  run mesh_call_remote_tool 2 "${TARGET_PEER_ID}" "delete_tables"
   echo "Output: $output"
   [[ "$output" == *"denied"* ]]
 }
