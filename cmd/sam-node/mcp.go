@@ -342,15 +342,6 @@ func (n *SamNode) fetchRemoteServiceCatalog(ctx context.Context, peerID peer.ID,
 	return services, nil
 }
 
-func hasCircuit(addr multiaddr.Multiaddr) bool {
-	for _, proto := range addr.Protocols() {
-		if proto.Code == multiaddr.P_CIRCUIT {
-			return true
-		}
-	}
-	return false
-}
-
 // preparePeerAddrs scans the target peer's addresses, filters out unroutable private IPs,
 // and ensures relay circuits are available. This prevents dial backoff errors when the
 // relay is behind a load-balanced DNS address or when pods advertise internal IPs.
@@ -392,12 +383,14 @@ func (n *SamNode) preparePeerAddrs(ctx context.Context, targetPeer peer.ID) {
 	seen := make(map[string]struct{})
 	changed := false
 
-	addUnique := func(ma multiaddr.Multiaddr) {
+	addUnique := func(ma multiaddr.Multiaddr) bool {
 		str := ma.String()
 		if _, ok := seen[str]; !ok {
 			seen[str] = struct{}{}
 			validAddrs = append(validAddrs, ma)
+			return true
 		}
+		return false
 	}
 
 	for _, ma := range addrs {
@@ -438,16 +431,7 @@ func (n *SamNode) preparePeerAddrs(ctx context.Context, targetPeer peer.ID) {
 
 		circuitAddr, err := multiaddr.NewMultiaddr(fmt.Sprintf("/p2p/%s/p2p-circuit", relayID.String()))
 		if err == nil {
-			// Check if we already have this address
-			hasIt := false
-			for _, existing := range validAddrs {
-				if existing.Equal(circuitAddr) {
-					hasIt = true
-					break
-				}
-			}
-			if !hasIt {
-				addUnique(circuitAddr)
+			if addUnique(circuitAddr) {
 				changed = true
 			}
 		}
