@@ -125,6 +125,7 @@ func startBareNode(t *testing.T, ctx context.Context) (*SamNode, func()) {
 		MonitorBootstrap:  2 * time.Minute,
 		MonitorInterval:   1 * time.Minute,
 		TrustHubRBAC:      true,
+		BiscuitTimeout:    500 * time.Millisecond,
 	})
 	if err != nil {
 		t.Fatal(err)

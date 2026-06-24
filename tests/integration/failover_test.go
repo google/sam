@@ -190,12 +190,12 @@ roles: {}
 	// Wait for Node B's AutoRelay to get updated
 	for i := 0; i < 150; i++ {
 		out = stdoutNode.String() + stderrNode.String()
-		if strings.Contains(out, "Successfully reconnected to Hub via HTTP fallback.") {
+		if strings.Contains(out, "Successfully reconnected to Hub via HTTP fallback") {
 			break
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	if !strings.Contains(out, "Successfully reconnected to Hub via HTTP fallback.") {
+	if !strings.Contains(out, "Successfully reconnected to Hub via HTTP fallback") {
 		t.Fatalf("Node B failed to detect failover and reconnect.\nOutput:\n%s", out)
 	}
 	t.Log("Node B successfully reconnected to Hub B!")
