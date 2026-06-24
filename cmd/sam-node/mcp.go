@@ -384,7 +384,7 @@ func (n *SamNode) preparePeerAddrs(ctx context.Context, targetPeer peer.ID) {
 		addrInfo, err := n.DHT.FindPeer(findCtx, targetPeer)
 		cancel()
 		if err != nil {
-			logger.Errorf("[Discovery] Failed to find peer %s on DHT: %v", targetPeer, err)
+			logger.Debugf("[Discovery] Failed to find peer %s on DHT: %v", targetPeer, err)
 		} else {
 			addrs = addrInfo.Addrs
 			if len(addrs) > 0 {
@@ -445,9 +445,11 @@ func (n *SamNode) preparePeerAddrs(ctx context.Context, targetPeer peer.ID) {
 
 		if len(n.Host.Peerstore().Addrs(relayID)) == 0 {
 			logger.Debugf("[Discovery] No addresses for relay %s, resolving via DHT...", relayID)
-			addrInfo, err := n.DHT.FindPeer(ctx, relayID)
+			findCtx, cancel := context.WithTimeout(ctx, dhtLookupTimeout)
+			addrInfo, err := n.DHT.FindPeer(findCtx, relayID)
+			cancel()
 			if err != nil {
-				logger.Errorf("[Discovery] Failed to find relay %s on DHT: %v", relayID, err)
+				logger.Debugf("[Discovery] Failed to find relay %s on DHT: %v", relayID, err)
 			} else {
 				n.Host.Peerstore().AddAddrs(relayID, addrInfo.Addrs, peerstore.TempAddrTTL)
 			}
@@ -465,6 +467,6 @@ func (n *SamNode) preparePeerAddrs(ctx context.Context, targetPeer peer.ID) {
 		// Clear existing addresses to prevent libp2p from hanging on dead private IPs
 		n.Host.Peerstore().ClearAddrs(targetPeer)
 		n.Host.Peerstore().AddAddrs(targetPeer, validAddrs, peerstore.TempAddrTTL)
-		logger.Infof("[Discovery] Replaced addrs for %s with %d routable/circuit addrs", targetPeer, len(validAddrs))
+		logger.Debugf("[Discovery] Replaced addrs for %s with %d routable/circuit addrs", targetPeer, len(validAddrs))
 	}
 }
