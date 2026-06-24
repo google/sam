@@ -362,7 +362,7 @@ func (n *SamNode) preparePeerAddrs(ctx context.Context, targetPeer peer.ID) {
 			// and we know from a previous dial that private IPs are unreachable for this peer.
 			if isPrivateIP(ma) && !n.AllowLoopback {
 				val, err := n.Host.Peerstore().Get(targetPeer, PeerstoreKeyPrivateIPFailed)
-				if err == nil && val.(bool) {
+				if failed, ok := val.(bool); err == nil && ok && failed {
 					changed = true
 					logger.Debugf("[Discovery] Skipping private IP %s for %s due to previous failure", ma, targetPeer)
 					continue
