@@ -376,21 +376,26 @@ func (n *SamNode) preparePeerAddrs(ctx context.Context, targetPeer peer.ID) {
 		}
 	}
 
+	changed := false
 	addrs := n.Host.Peerstore().Addrs(targetPeer)
 	if len(addrs) == 0 {
 		logger.Debugf("[Discovery] No addresses in peerstore for %s, querying DHT...", targetPeer)
-		addrInfo, err := n.DHT.FindPeer(ctx, targetPeer)
+		findCtx, cancel := context.WithTimeout(ctx, dhtLookupTimeout)
+		addrInfo, err := n.DHT.FindPeer(findCtx, targetPeer)
+		cancel()
 		if err != nil {
 			logger.Errorf("[Discovery] Failed to find peer %s on DHT: %v", targetPeer, err)
 		} else {
 			addrs = addrInfo.Addrs
+			if len(addrs) > 0 {
+				changed = true
+			}
 		}
 	}
 	logger.Debugf("[Discovery] preparePeerAddrs for %s: found %d addrs in peerstore", targetPeer, len(addrs))
 
 	var validAddrs []multiaddr.Multiaddr
 	seen := make(map[string]struct{})
-	changed := false
 
 	addUnique := func(ma multiaddr.Multiaddr) bool {
 		str := ma.String()
