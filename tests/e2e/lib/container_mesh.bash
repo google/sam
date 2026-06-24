@@ -262,6 +262,7 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
       "${MESH_RUNTIME_IMAGE}" \
       /usr/local/bin/sam-node run \
       ${flags} \
+      --discovery-interval 2s \
       --hub "http://sam-hub:9090" \
       --client-id "sam-mesh-audience" \
       --client-secret "sam-e2e-secret" \

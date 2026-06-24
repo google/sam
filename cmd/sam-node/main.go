@@ -40,7 +40,7 @@ import (
 
 const (
 	DefaultMeshName          = "public-mesh"
-	DefaultDiscoveryInterval = "2s"
+	DefaultDiscoveryInterval = "30s"
 	DefaultHubURL            = "http://localhost:8080"
 	DefaultConfigFile        = "sam-node.yaml"
 

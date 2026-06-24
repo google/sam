@@ -376,12 +376,26 @@ func (n *SamNode) preparePeerAddrs(ctx context.Context, targetPeer peer.ID) {
 		}
 	}
 
+	changed := false
 	addrs := n.Host.Peerstore().Addrs(targetPeer)
+	if len(addrs) == 0 {
+		logger.Debugf("[Discovery] No addresses in peerstore for %s, querying DHT...", targetPeer)
+		findCtx, cancel := context.WithTimeout(ctx, dhtLookupTimeout)
+		addrInfo, err := n.DHT.FindPeer(findCtx, targetPeer)
+		cancel()
+		if err != nil {
+			logger.Debugf("[Discovery] Failed to find peer %s on DHT: %v", targetPeer, err)
+		} else {
+			addrs = addrInfo.Addrs
+			if len(addrs) > 0 {
+				changed = true
+			}
+		}
+	}
 	logger.Debugf("[Discovery] preparePeerAddrs for %s: found %d addrs in peerstore", targetPeer, len(addrs))
 
 	var validAddrs []multiaddr.Multiaddr
 	seen := make(map[string]struct{})
-	changed := false
 
 	addUnique := func(ma multiaddr.Multiaddr) bool {
 		str := ma.String()
@@ -429,6 +443,18 @@ func (n *SamNode) preparePeerAddrs(ctx context.Context, targetPeer peer.ID) {
 			continue
 		}
 
+		if len(n.Host.Peerstore().Addrs(relayID)) == 0 {
+			logger.Debugf("[Discovery] No addresses for relay %s, resolving via DHT...", relayID)
+			findCtx, cancel := context.WithTimeout(ctx, dhtLookupTimeout)
+			addrInfo, err := n.DHT.FindPeer(findCtx, relayID)
+			cancel()
+			if err != nil {
+				logger.Debugf("[Discovery] Failed to find relay %s on DHT: %v", relayID, err)
+			} else {
+				n.Host.Peerstore().AddAddrs(relayID, addrInfo.Addrs, peerstore.TempAddrTTL)
+			}
+		}
+
 		circuitAddr, err := multiaddr.NewMultiaddr(fmt.Sprintf("/p2p/%s/p2p-circuit", relayID.String()))
 		if err == nil {
 			if addUnique(circuitAddr) {
@@ -441,6 +467,6 @@ func (n *SamNode) preparePeerAddrs(ctx context.Context, targetPeer peer.ID) {
 		// Clear existing addresses to prevent libp2p from hanging on dead private IPs
 		n.Host.Peerstore().ClearAddrs(targetPeer)
 		n.Host.Peerstore().AddAddrs(targetPeer, validAddrs, peerstore.TempAddrTTL)
-		logger.Infof("[Discovery] Replaced addrs for %s with %d routable/circuit addrs", targetPeer, len(validAddrs))
+		logger.Debugf("[Discovery] Replaced addrs for %s with %d routable/circuit addrs", targetPeer, len(validAddrs))
 	}
 }

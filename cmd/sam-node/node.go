@@ -45,6 +45,7 @@ import (
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/crypto"
+	"github.com/libp2p/go-libp2p/core/discovery"
 	"github.com/libp2p/go-libp2p/core/event"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
@@ -65,6 +66,10 @@ import (
 // This allows the node to "try once and remember", avoiding a 15-second timeout on
 // subsequent discovery or tool calls when dialing unroutable private networks.
 const PeerstoreKeyPrivateIPFailed = "private_ip_failed"
+
+// maxMeshProactiveConnections is the target maximum number of active mesh connections.
+// If active connections count reaches this threshold, the node skips periodic DHT peer discovery.
+const maxMeshProactiveConnections = 30
 
 const (
 	// Cache sizes
@@ -914,12 +919,20 @@ func (n *SamNode) startDiscovery(ctx context.Context, meshID string, interval ti
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
+	sem := make(chan struct{}, 8)
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			peers, err := routingDiscovery.FindPeers(ctx, meshID)
+			connectedCount := len(n.Host.Network().Peers())
+			if connectedCount >= maxMeshProactiveConnections {
+				logger.Debugf("[Discovery] Connected peers (%d) >= target (%d). Skipping peer discovery tick.", connectedCount, maxMeshProactiveConnections)
+				continue
+			}
+
+			peers, err := routingDiscovery.FindPeers(ctx, meshID, discovery.Limit(maxMeshProactiveConnections))
 			if err != nil {
 				logger.Errorf("[Discovery] Failed to find peers: %v", err)
 				continue
@@ -933,18 +946,31 @@ func (n *SamNode) startDiscovery(ctx context.Context, meshID string, interval ti
 				if cond != network.Connected && cond != network.Limited {
 					logger.Debugf("[Discovery] Found peer not connected via DHT: %s (state: %s)", p.ID, cond)
 
-					// Log the addresses returned by DHT to confirm they include p2p-circuit paths
-					for _, addr := range p.Addrs {
-						logger.Debugf("[Discovery] Peer %s advertised address: %s", p.ID, addr)
+					n.Host.Peerstore().AddAddrs(p.ID, p.Addrs, peerstore.TempAddrTTL)
+					n.preparePeerAddrs(ctx, p.ID)
+
+					filteredAddrInfo := n.Host.Peerstore().PeerInfo(p.ID)
+					if len(filteredAddrInfo.Addrs) == 0 {
+						logger.Debugf("[Discovery] Skipping connection to %s: no valid addresses after filtering", p.ID)
+						continue
 					}
 
-					go func(pi peer.AddrInfo) {
-						dialCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-						defer cancel()
-						if err := n.Host.Connect(dialCtx, pi); err != nil {
-							logger.Debugf("[Discovery] Failed to connect to %s: %v", pi.ID, err)
-						}
-					}(p)
+					select {
+					case sem <- struct{}{}:
+						go func(pi peer.AddrInfo) {
+							defer func() { <-sem }()
+							dialCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+							defer cancel()
+							if err := n.Host.Connect(dialCtx, pi); err != nil {
+								logger.Debugf("[Discovery] Failed to connect to %s: %v", pi.ID, err)
+								if putErr := n.Host.Peerstore().Put(pi.ID, PeerstoreKeyPrivateIPFailed, true); putErr != nil {
+									logger.Errorf("[Discovery] Failed to put peerstore private IP failed key: %v", putErr)
+								}
+							}
+						}(filteredAddrInfo)
+					case <-ctx.Done():
+						return
+					}
 				}
 			}
 		}
