@@ -351,7 +351,6 @@ func NewSamNode(ctx context.Context, cfg SamNodeConfig) (*SamNode, error) {
 			}
 		} else {
 			authenticated = true
-			break
 		}
 	}
 
