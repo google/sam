@@ -438,6 +438,16 @@ func (n *SamNode) preparePeerAddrs(ctx context.Context, targetPeer peer.ID) {
 			continue
 		}
 
+		if len(n.Host.Peerstore().Addrs(relayID)) == 0 {
+			logger.Debugf("[Discovery] No addresses for relay %s, resolving via DHT...", relayID)
+			addrInfo, err := n.DHT.FindPeer(ctx, relayID)
+			if err != nil {
+				logger.Errorf("[Discovery] Failed to find relay %s on DHT: %v", relayID, err)
+			} else {
+				n.Host.Peerstore().AddAddrs(relayID, addrInfo.Addrs, peerstore.TempAddrTTL)
+			}
+		}
+
 		circuitAddr, err := multiaddr.NewMultiaddr(fmt.Sprintf("/p2p/%s/p2p-circuit", relayID.String()))
 		if err == nil {
 			if addUnique(circuitAddr) {
