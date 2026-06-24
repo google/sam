@@ -145,7 +145,19 @@ func main() {
 	}, nil)
 
 	// Connect to server using the URL
-	session, err := client.Connect(ctx, &mcp.SSEClientTransport{Endpoint: *serverURL}, nil)
+	var sseTransport mcp.Transport = &mcp.SSEClientTransport{Endpoint: *serverURL}
+	if *tokenOpt != "" {
+		sseTransport = &mcp.SSEClientTransport{
+			Endpoint: *serverURL,
+			HTTPClient: &http.Client{
+				Transport: &authTransport{
+					token:      *tokenOpt,
+					underlying: http.DefaultTransport,
+				},
+			},
+		}
+	}
+	session, err := client.Connect(ctx, sseTransport, nil)
 	if err != nil {
 		log.Fatalf("Failed to connect: %v", err)
 	}
@@ -187,4 +199,16 @@ func main() {
 			fmt.Println(textContent.Text)
 		}
 	}
+}
+
+type authTransport struct {
+	token      string
+	underlying http.RoundTripper
+}
+
+func (t *authTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	// Clone request to avoid mutating original request if shared/retried
+	reqCopy := req.Clone(req.Context())
+	reqCopy.Header.Set("Authorization", "Bearer "+t.token)
+	return t.underlying.RoundTrip(reqCopy)
 }
