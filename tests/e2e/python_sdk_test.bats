@@ -21,7 +21,7 @@ teardown() {
   run mesh_start_hub
   [[ "$status" -eq 0 ]]
 
-  run mesh_start_node 1 "--discovery-interval 100ms --log-level debug"
+  run mesh_start_node 1 "--log-level debug"
   [[ "$status" -eq 0 ]]
   
   local node1_name="${MESH_PREFIX}-node-1"
