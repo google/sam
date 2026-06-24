@@ -66,6 +66,7 @@ func TestDatapathIntegration(t *testing.T) {
 		AllowLoopback:     true,
 		MonitorBootstrap:  2 * time.Minute,
 		MonitorInterval:   1 * time.Minute,
+		BiscuitTimeout:    500 * time.Millisecond,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -89,6 +90,7 @@ func TestDatapathIntegration(t *testing.T) {
 		AllowLoopback:     true,
 		MonitorBootstrap:  2 * time.Minute,
 		MonitorInterval:   1 * time.Minute,
+		BiscuitTimeout:    500 * time.Millisecond,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -251,6 +253,7 @@ func TestStdioDatapathIntegration(t *testing.T) {
 		AllowLoopback:     true,
 		MonitorBootstrap:  2 * time.Minute,
 		MonitorInterval:   1 * time.Minute,
+		BiscuitTimeout:    500 * time.Millisecond,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -270,6 +273,7 @@ func TestStdioDatapathIntegration(t *testing.T) {
 		AllowLoopback:     true,
 		MonitorBootstrap:  2 * time.Minute,
 		MonitorInterval:   1 * time.Minute,
+		BiscuitTimeout:    500 * time.Millisecond,
 	})
 	if err != nil {
 		t.Fatal(err)

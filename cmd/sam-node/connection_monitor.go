@@ -44,12 +44,16 @@ func checkHubConnection(ctx context.Context, mgr hubConnectionManager) (stable b
 		}
 	}
 
+	var connectedAddrs []multiaddr.Multiaddr
 	for _, addr := range p2pAddrs {
 		if err := mgr.ConnectAndAuthWithHub(ctx, addr); err == nil {
-			logger.Infof("[Monitor] Successfully reconnected to Hub via P2P.")
-			mgr.UpdateRelays([]multiaddr.Multiaddr{addr})
-			return false, true
+			logger.Infof("[Monitor] Successfully reconnected to Hub via P2P: %s", addr)
+			connectedAddrs = append(connectedAddrs, addr)
 		}
+	}
+	if len(connectedAddrs) > 0 {
+		mgr.UpdateRelays(connectedAddrs)
+		return false, true
 	}
 
 	hubURL, err := mgr.LoadHubURL()
@@ -80,12 +84,16 @@ func checkHubConnection(ctx context.Context, mgr hubConnectionManager) (stable b
 		}
 	}
 
+	var connectedAddrsFallback []multiaddr.Multiaddr
 	for _, addr := range newHubAddrs {
 		if err := mgr.ConnectAndAuthWithHub(ctx, addr); err == nil {
-			logger.Infof("[Monitor] Successfully reconnected to Hub via HTTP fallback.")
-			mgr.UpdateRelays(newHubAddrs)
-			return false, true
+			logger.Infof("[Monitor] Successfully reconnected to Hub via HTTP fallback: %s", addr)
+			connectedAddrsFallback = append(connectedAddrsFallback, addr)
 		}
+	}
+	if len(connectedAddrsFallback) > 0 {
+		mgr.UpdateRelays(newHubAddrs)
+		return false, true
 	}
 
 	return false, false

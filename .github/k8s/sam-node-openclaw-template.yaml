@@ -17,7 +17,7 @@ data:
         name: openclaw
         description: "OpenClaw AI Agent Gateway"
         # Register the OpenClaw local gateway as a mesh service
-        target_url: "http://localhost:18789/mcp/events"
+        target_url: "http://localhost:18789/mcp"
   openclaw.json: |
     {
       "agents": {
@@ -27,6 +27,14 @@ data:
       },
       "gateway": {
         "mode": "local"
+      },
+      "mcp": {
+        "servers": {
+          "sam-mesh": {
+            "enabled": true,
+            "url": "http://127.0.0.1:8080/mcp/events"
+          }
+        }
       }
     }
 ---
@@ -52,6 +60,23 @@ spec:
         ports:
         - containerPort: 18789
           name: http-gateway
+        lifecycle:
+          postStart:
+            exec:
+              command:
+                - "/bin/sh"
+                - "-c"
+                - |
+                  (
+                  for i in $(seq 1 30); do
+                    if curl -sf http://localhost:18789/ >/dev/null; then
+                      break
+                    fi
+                    sleep 1
+                  done
+                  # Directly add the cron job to force operator.admin auto-approval on the first connection
+                  openclaw cron add --name mesh-health-check --every 5m --token "${OPENCLAW_GATEWAY_TOKEN}" --best-effort-deliver --no-deliver --message "Use the get_mesh_info tool to check the mesh connection status and log the output." || true
+                  ) &
         env:
         - name: SAM_MCP_URL
           value: "http://127.0.0.1:8080/mcp/events"

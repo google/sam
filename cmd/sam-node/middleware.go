@@ -24,6 +24,7 @@ import (
 	"strings"
 
 	"github.com/biscuit-auth/biscuit-go/v2"
+	"github.com/biscuit-auth/biscuit-go/v2/datalog"
 	"github.com/biscuit-auth/biscuit-go/v2/parser"
 	"github.com/google/sam/api"
 	"github.com/libp2p/go-libp2p/core/network"
@@ -260,7 +261,11 @@ func (n *SamNode) Authorize(rawToken []byte, req RequestContext, pubKey ed25519.
 		return fmt.Errorf("invalid biscuit: %w", err)
 	}
 
-	authorizer, err := b.Authorizer(pubKey)
+	var authOpts []biscuit.AuthorizerOption
+	if n.BiscuitTimeout > 0 {
+		authOpts = append(authOpts, biscuit.WithWorldOptions(datalog.WithMaxDuration(n.BiscuitTimeout)))
+	}
+	authorizer, err := b.Authorizer(pubKey, authOpts...)
 	if err != nil {
 		return err
 	}

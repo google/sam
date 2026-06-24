@@ -133,6 +133,7 @@ type SamNode struct {
 	authOnce          sync.Once
 	currentRelays     []peer.AddrInfo
 	reprovideTrigger  chan struct{}
+	BiscuitTimeout    time.Duration
 }
 
 // UpdateRelays updates the current relays used by AutoRelay.
@@ -169,6 +170,7 @@ type SamNodeConfig struct {
 	AutoRelayBootDelay   time.Duration
 	AutoRelayBackoff     time.Duration
 	TrustHubRBAC         bool
+	BiscuitTimeout       time.Duration
 }
 
 // NewSamNode creates a new Agent instance secured with the 4-layer pipeline.
@@ -190,6 +192,8 @@ func NewSamNode(ctx context.Context, cfg SamNodeConfig) (*SamNode, error) {
 		authSuccess:       make(chan struct{}),
 		reprovideTrigger:  make(chan struct{}, 1),
 	}
+
+	node.BiscuitTimeout = cfg.BiscuitTimeout
 
 	var err error
 	node.rateLimiter, err = NewPeerRateLimiter(RateLimiterSize)
@@ -351,7 +355,6 @@ func NewSamNode(ctx context.Context, cfg SamNodeConfig) (*SamNode, error) {
 			}
 		} else {
 			authenticated = true
-			break
 		}
 	}
 
@@ -524,7 +527,11 @@ func (n *SamNode) startConnectionMonitor(ctx context.Context, bootstrapDuration,
 				}
 
 				if reconnected {
-					logger.Infof("[Monitor] Reconnected successfully. Reproviding services to DHT...")
+					logger.Infof("[Monitor] Reconnected successfully. Bootstrapping DHT...")
+					if err := n.DHT.Bootstrap(ctx); err != nil {
+						logger.Warnf("[DHT] Failed to trigger DHT bootstrap on reconnect: %v", err)
+					}
+					logger.Infof("[Monitor] Reproviding services to DHT...")
 					n.services.ReprovideAll(ctx)
 					consecutiveFailures = 0
 					continue
