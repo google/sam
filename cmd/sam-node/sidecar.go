@@ -30,6 +30,7 @@ import (
 
 	"github.com/google/sam/api"
 	libp2phttp "github.com/libp2p/go-libp2p-http"
+	"github.com/libp2p/go-libp2p/core/peer"
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
@@ -352,6 +353,10 @@ func createEgressProxy(node *SamNode) http.Handler {
 				return
 			}
 			peerID := parts[2]
+			pid, err := peer.Decode(peerID)
+			if err == nil {
+				node.preparePeerAddrs(req.Context(), pid)
+			}
 			serviceType := parts[3]
 			serviceName := parts[4]
 			upstreamPath := ""

@@ -916,8 +916,9 @@ func (n *SamNode) startDiscovery(ctx context.Context, meshID string, interval ti
 					continue
 				}
 
-				if n.Host.Network().Connectedness(p.ID) != network.Connected {
-					logger.Debugf("[Discovery] Found peer not connected via DHT: %s", p.ID)
+				cond := n.Host.Network().Connectedness(p.ID)
+				if cond != network.Connected && cond != network.Limited {
+					logger.Debugf("[Discovery] Found peer not connected via DHT: %s (state: %s)", p.ID, cond)
 
 					// Log the addresses returned by DHT to confirm they include p2p-circuit paths
 					for _, addr := range p.Addrs {
