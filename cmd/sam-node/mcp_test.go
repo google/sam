@@ -131,7 +131,7 @@ func TestResolveRelayAddresses(t *testing.T) {
 	localHost.Peerstore().AddAddr(targetID, circuitAddr, peerstore.PermanentAddrTTL)
 
 	// Run the function
-	node.resolveRelayAddresses(ctx, targetID)
+	node.preparePeerAddrs(ctx, targetID)
 
 	// Verify that the direct IP circuit address was added to the target's peerstore
 	addrs := localHost.Peerstore().Addrs(targetID)
