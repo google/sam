@@ -524,7 +524,11 @@ func (n *SamNode) startConnectionMonitor(ctx context.Context, bootstrapDuration,
 				}
 
 				if reconnected {
-					logger.Infof("[Monitor] Reconnected successfully. Reproviding services to DHT...")
+					logger.Infof("[Monitor] Reconnected successfully. Bootstrapping DHT...")
+					if err := n.DHT.Bootstrap(ctx); err != nil {
+						logger.Warnf("[DHT] Failed to trigger DHT bootstrap on reconnect: %v", err)
+					}
+					logger.Infof("[Monitor] Reproviding services to DHT...")
 					n.services.ReprovideAll(ctx)
 					consecutiveFailures = 0
 					continue
