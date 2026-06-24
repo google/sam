@@ -10,10 +10,8 @@ import (
 
 	"github.com/google/sam/api"
 	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/libp2p/go-msgio"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/multiformats/go-multiaddr"
-	"google.golang.org/protobuf/proto"
 )
 
 // SendMessageParams defines the parameters for the send_message tool.
@@ -331,50 +329,16 @@ func (n *SamNode) fetchRemoteToolCatalogue(ctx context.Context, targetPeer peer.
 	}
 
 	var allTools []*mcp.Tool
-	biscuitBytes, err := n.Store.LoadIdentity()
-	if err != nil {
-		return nil, fmt.Errorf("load identity: %w", err)
-	}
 
 	for _, svc := range services {
 		if svc.Type != api.ServiceType_SERVICE_TYPE_MCP {
 			continue
 		}
 
-		s, err := n.Host.NewStream(ctx, targetPeer, api.MCPProtocolID)
+		n.preparePeerAddrs(ctx, targetPeer)
+		session, cleanup, err := n.ConnectMCPSession(ctx, targetPeer, svc.Name)
 		if err != nil {
-			logger.Debugf("Failed to open stream for service %s: %v", svc.Name, err)
-			continue
-		}
-
-		authFrame := api.AuthFrame{Biscuit: biscuitBytes, TargetService: svc.Name}
-		authBytes, _ := proto.Marshal(&authFrame)
-
-		writer := msgio.NewVarintWriter(s)
-		if err := writer.WriteMsg(authBytes); err != nil {
-			_ = s.Close()
-			continue
-		}
-
-		reader := msgio.NewVarintReaderSize(s, 1024*64)
-		respMsg, err := reader.ReadMsg()
-		if err != nil {
-			_ = s.Close()
-			continue
-		}
-		defer reader.ReleaseMsg(respMsg)
-
-		var resp api.AuthResponse
-		if err := proto.Unmarshal(respMsg, &resp); err != nil || !resp.Success {
-			_ = s.Close()
-			continue
-		}
-
-		transport := NewStreamTransport(s)
-		client := mcp.NewClient(&mcp.Implementation{Name: "sam-node-find", Version: "0.1.0"}, nil)
-		session, err := client.Connect(ctx, transport, nil)
-		if err != nil {
-			_ = s.Close()
+			logger.Debugf("Failed to connect MCP session for service %s: %v", svc.Name, err)
 			continue
 		}
 
@@ -386,8 +350,7 @@ func (n *SamNode) fetchRemoteToolCatalogue(ctx context.Context, targetPeer peer.
 			}
 		}
 
-		_ = session.Close()
-		_ = s.Close()
+		cleanup()
 	}
 
 	return allTools, nil
@@ -495,45 +458,13 @@ func (n *SamNode) handleDescribeRemoteTool(ctx context.Context, req *mcp.CallToo
 	}
 	serviceName := parts[0]
 	actualToolName := parts[1]
+	n.preparePeerAddrs(ctx, pid)
 
-	biscuitBytes, err := n.Store.LoadIdentity()
+	session, cleanup, err := n.ConnectMCPSession(ctx, pid, serviceName)
 	if err != nil {
 		return nil, nil, err
 	}
-
-	s, err := n.Host.NewStream(ctx, pid, api.MCPProtocolID)
-	if err != nil {
-		return nil, nil, fmt.Errorf("open stream: %w", err)
-	}
-	defer func() { _ = s.Close() }()
-
-	authFrame := api.AuthFrame{Biscuit: biscuitBytes, TargetService: serviceName}
-	authBytes, _ := proto.Marshal(&authFrame)
-
-	writer := msgio.NewVarintWriter(s)
-	if err := writer.WriteMsg(authBytes); err != nil {
-		return nil, nil, err
-	}
-
-	reader := msgio.NewVarintReaderSize(s, 1024*64)
-	respMsg, err := reader.ReadMsg()
-	if err != nil {
-		return nil, nil, err
-	}
-	defer reader.ReleaseMsg(respMsg)
-
-	var authResp api.AuthResponse
-	if err := proto.Unmarshal(respMsg, &authResp); err != nil || !authResp.Success {
-		return nil, nil, fmt.Errorf("auth rejected")
-	}
-
-	transport := NewStreamTransport(s)
-	client := mcp.NewClient(&mcp.Implementation{Name: "sam-node-describe", Version: "0.1.0"}, nil)
-	session, err := client.Connect(ctx, transport, nil)
-	if err != nil {
-		return nil, nil, err
-	}
-	defer func() { _ = session.Close() }()
+	defer cleanup()
 
 	listRes, err := session.ListTools(ctx, nil)
 	if err != nil {

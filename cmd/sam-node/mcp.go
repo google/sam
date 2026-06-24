@@ -145,9 +145,8 @@ func (n *SamNode) CallMCPTool(ctx context.Context, targetPeer peer.ID, toolName 
 	maxRetries := 3
 	backoff := 1 * time.Second
 
-	// Attempt to resolve direct IPs for any relay nodes in the target's addresses.
-	// This helps avoid dial backoff issues when using shared DNS addresses for hubs.
-	n.resolveRelayAddresses(ctx, targetPeer)
+	// Attempt to filter private IPs and resolve direct IPs for relay nodes.
+	n.preparePeerAddrs(ctx, targetPeer)
 
 	for i := 0; i < maxRetries; i++ {
 		res, err = n.callMCPToolOnce(ctx, targetPeer, toolName, params)
@@ -171,37 +170,45 @@ func (n *SamNode) CallMCPTool(ctx context.Context, targetPeer peer.ID, toolName 
 	return nil, fmt.Errorf("failed after %d retries: %w", maxRetries, err)
 }
 
-func (n *SamNode) callMCPToolOnce(ctx context.Context, targetPeer peer.ID, toolName string, params any) (*mcp.CallToolResult, error) {
+func (n *SamNode) ConnectMCPSession(ctx context.Context, targetPeer peer.ID, targetService string) (*mcp.ClientSession, func(), error) {
 	// Open stream
 	logger.Debugf("Dialing %s for MCP...\n", targetPeer)
+	// For discovery, we want a fast failure, but for tool calls, we can wait a bit. We'll use the context's deadline,
+	// but bound it to 15s max for the dial itself to prevent hanging.
 	dialCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-	// Allow limited connections (like circuit relays) to be used for this stream.
-	// Otherwise libp2p will hang waiting for a direct connection!
 	dialCtx = network.WithAllowLimitedConn(dialCtx, "mcp")
 	defer cancel()
+
 	s, err := n.Host.NewStream(dialCtx, targetPeer, api.MCPProtocolID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open stream to %s: %w", targetPeer, err)
+		// If dial failed completely, mark private IP failed so we skip it next time
+		_ = n.Host.Peerstore().Put(targetPeer, PeerstoreKeyPrivateIPFailed, true)
+		return nil, nil, fmt.Errorf("failed to open stream to %s: %w", targetPeer, err)
+	}
+
+	if remoteAddr := s.Conn().RemoteMultiaddr(); remoteAddr != nil {
+		parts := multiaddr.Split(remoteAddr)
+		isCircuit := len(parts) >= 2 && parts[len(parts)-1].Protocol().Code == multiaddr.P_CIRCUIT
+
+		if isCircuit || !isPrivateIP(remoteAddr) {
+			_ = n.Host.Peerstore().Put(targetPeer, PeerstoreKeyPrivateIPFailed, true)
+		} else {
+			_ = n.Host.Peerstore().Put(targetPeer, PeerstoreKeyPrivateIPFailed, false)
+		}
 	}
 	logger.Debugf("Opened stream to %s for MCP\n", targetPeer)
-	defer func() {
+
+	cleanup := func() {
 		if err := s.Close(); err != nil {
 			logger.Debugf("[MCP] Failed to close stream: %v", err)
 		}
-	}()
+	}
 
 	// Load this node's biscuit
 	biscuitBytes, err := n.Store.LoadIdentity()
 	if err != nil {
-		return nil, fmt.Errorf("failed to load identity biscuit: %w", err)
-	}
-
-	// Extract target service if it's a federated tool call (service.tool)
-	targetService := "/sam/catalog"
-	originalToolName := toolName
-	if parts := strings.SplitN(toolName, ".", 2); len(parts) == 2 {
-		targetService = parts[0]
-		originalToolName = parts[1]
+		cleanup()
+		return nil, nil, fmt.Errorf("failed to load identity biscuit: %w", err)
 	}
 
 	// Marshal AuthFrame
@@ -218,7 +225,8 @@ func (n *SamNode) callMCPToolOnce(ctx context.Context, targetPeer peer.ID, toolN
 	logger.Debugf("Writing auth frame to %s...\n", targetPeer)
 	writer := msgio.NewVarintWriter(s)
 	if err := writer.WriteMsg(authBytes); err != nil {
-		return nil, fmt.Errorf("failed to write auth frame to %s: %w", targetPeer, err)
+		cleanup()
+		return nil, nil, fmt.Errorf("failed to write auth frame to %s: %w", targetPeer, err)
 	}
 
 	// Read ACK
@@ -226,7 +234,8 @@ func (n *SamNode) callMCPToolOnce(ctx context.Context, targetPeer peer.ID, toolN
 	reader := msgio.NewVarintReaderSize(s, 1024*64)
 	msg, err := reader.ReadMsg()
 	if err != nil {
-		return nil, fmt.Errorf("failed to read auth response from %s: %w", targetPeer, err)
+		cleanup()
+		return nil, nil, fmt.Errorf("failed to read auth response from %s: %w", targetPeer, err)
 	}
 	defer reader.ReleaseMsg(msg)
 
@@ -235,11 +244,13 @@ func (n *SamNode) callMCPToolOnce(ctx context.Context, targetPeer peer.ID, toolN
 
 	var resp api.AuthResponse
 	if err := proto.Unmarshal(msg, &resp); err != nil {
-		return nil, fmt.Errorf("invalid auth response from %s: %w", targetPeer, err)
+		cleanup()
+		return nil, nil, fmt.Errorf("invalid auth response from %s: %w", targetPeer, err)
 	}
 
 	if !resp.Success {
-		return nil, fmt.Errorf("auth rejected by %s: %s", targetPeer, resp.Error)
+		cleanup()
+		return nil, nil, fmt.Errorf("auth rejected by %s: %s", targetPeer, resp.Error)
 	}
 
 	// Handoff to SDK using custom transport
@@ -248,9 +259,31 @@ func (n *SamNode) callMCPToolOnce(ctx context.Context, targetPeer peer.ID, toolN
 
 	session, err := mcpClient.Connect(ctx, transport, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect client: %w", err)
+		cleanup()
+		return nil, nil, fmt.Errorf("failed to connect client: %w", err)
 	}
-	defer func() { _ = session.Close() }()
+
+	fullCleanup := func() {
+		_ = session.Close()
+		cleanup()
+	}
+
+	return session, fullCleanup, nil
+}
+
+func (n *SamNode) callMCPToolOnce(ctx context.Context, targetPeer peer.ID, toolName string, params any) (*mcp.CallToolResult, error) {
+	targetService := "/sam/catalog"
+	originalToolName := toolName
+	if parts := strings.SplitN(toolName, ".", 2); len(parts) == 2 {
+		targetService = parts[0]
+		originalToolName = parts[1]
+	}
+
+	session, cleanup, err := n.ConnectMCPSession(ctx, targetPeer, targetService)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
 
 	// We don't need to marshall the params, the SDK takes care of it
 	// Passing pre-marshaled []byte triggers encoding/json's base64 which gets rejected
@@ -270,10 +303,24 @@ func (n *SamNode) callMCPToolOnce(ctx context.Context, targetPeer peer.ID, toolN
 // fetchRemoteServiceCatalog calls the remote peer's list_local_services
 // MCP tool with the type filter and returns the parsed catalog.
 func (n *SamNode) fetchRemoteServiceCatalog(ctx context.Context, peerID peer.ID, typeStr string) ([]*api.ServiceInfo, error) {
-	res, err := n.CallMCPTool(ctx, peerID, "list_local_services", map[string]string{"type": typeStr})
+	n.preparePeerAddrs(ctx, peerID)
+
+	session, cleanup, err := n.ConnectMCPSession(ctx, peerID, "/sam/catalog")
 	if err != nil {
 		return nil, err
 	}
+	defer cleanup()
+
+	callParams := &mcp.CallToolParams{
+		Name:      "list_local_services",
+		Arguments: map[string]string{"type": typeStr},
+	}
+
+	res, err := session.CallTool(ctx, callParams)
+	if err != nil {
+		return nil, fmt.Errorf("failed to call tool list_local_services: %w", err)
+	}
+
 	if res == nil || len(res.Content) == 0 {
 		return nil, fmt.Errorf("empty response")
 	}
@@ -289,32 +336,46 @@ func (n *SamNode) fetchRemoteServiceCatalog(ctx context.Context, peerID peer.ID,
 	return services, nil
 }
 
-// resolveRelayAddresses scans the target peer's addresses for any p2p-circuit relays,
-// looks up the relay's direct IPs via the DHT, and adds them to the target's peerstore.
-// This prevents dial backoff errors when the relay is behind a load-balanced DNS address.
-func (n *SamNode) resolveRelayAddresses(ctx context.Context, targetPeer peer.ID) {
+// preparePeerAddrs scans the target peer's addresses, filters out unroutable private IPs,
+// and ensures relay circuits are available. This prevents dial backoff errors when the
+// relay is behind a load-balanced DNS address or when pods advertise internal IPs.
+func (n *SamNode) preparePeerAddrs(ctx context.Context, targetPeer peer.ID) {
 	if n.Host == nil || n.DHT == nil {
 		logger.Debugf("[Discovery] Host or DHT is nil")
 		return
 	}
 	addrs := n.Host.Peerstore().Addrs(targetPeer)
-	logger.Debugf("[Discovery] resolveRelayAddresses for %s: found %d addrs in peerstore", targetPeer, len(addrs))
+	logger.Debugf("[Discovery] preparePeerAddrs for %s: found %d addrs in peerstore", targetPeer, len(addrs))
 
-	var validCircuitAddrs []multiaddr.Multiaddr
+	var validAddrs []multiaddr.Multiaddr
+	changed := false
 
 	for _, ma := range addrs {
 		parts := multiaddr.Split(ma)
-		if len(parts) < 2 {
-			continue
-		}
 
-		if parts[len(parts)-1].Protocol().Code != multiaddr.P_CIRCUIT {
+		// If it's a circuit relay, we always keep the generic /p2p-circuit form.
+		// We'll reconstruct it below. But we must also check if the address itself is routable.
+		isCircuit := len(parts) >= 2 && parts[len(parts)-1].Protocol().Code == multiaddr.P_CIRCUIT
+
+		if !isCircuit {
+			// Regular address (not a circuit relay). Filter private IPs if loopback isn't allowed,
+			// and we know from a previous dial that private IPs are unreachable for this peer.
+			if isPrivateIP(ma) && !n.AllowLoopback {
+				val, err := n.Host.Peerstore().Get(targetPeer, PeerstoreKeyPrivateIPFailed)
+				if err == nil && val.(bool) {
+					changed = true
+					logger.Debugf("[Discovery] Skipping private IP %s for %s due to previous failure", ma, targetPeer)
+					continue
+				}
+			}
+			validAddrs = append(validAddrs, ma)
 			continue
 		}
 
 		// Keep the advertised circuit address
-		validCircuitAddrs = append(validCircuitAddrs, ma)
+		validAddrs = append(validAddrs, ma)
 
+		// Also synthesize a generic /p2p-circuit using the relay's peer ID.
 		p2pPart := parts[len(parts)-2]
 		if p2pPart.Protocol().Code != multiaddr.P_P2P {
 			continue
@@ -322,25 +383,20 @@ func (n *SamNode) resolveRelayAddresses(ctx context.Context, targetPeer peer.ID)
 
 		relayID, err := peer.Decode(p2pPart.Value())
 		if err != nil {
-			logger.Debugf("[Discovery] Failed to decode relayID: %v", err)
 			continue
 		}
 
-		logger.Debugf("[Discovery] Found relay %s for target %s", relayID, targetPeer)
-
 		circuitAddr, err := multiaddr.NewMultiaddr(fmt.Sprintf("/p2p/%s/p2p-circuit", relayID.String()))
 		if err == nil {
-			logger.Debugf("[Discovery] Added generic relay circuit address for %s: %s", targetPeer, circuitAddr.String())
-			validCircuitAddrs = append(validCircuitAddrs, circuitAddr)
-		} else {
-			logger.Errorf("[Discovery] Failed to create circuit addr: %v", err)
+			validAddrs = append(validAddrs, circuitAddr)
+			changed = true
 		}
 	}
 
-	if len(validCircuitAddrs) > 0 {
+	if changed && len(validAddrs) > 0 {
 		// Clear existing addresses to prevent libp2p from hanging on dead private IPs
 		n.Host.Peerstore().ClearAddrs(targetPeer)
-		n.Host.Peerstore().AddAddrs(targetPeer, validCircuitAddrs, peerstore.TempAddrTTL)
-		logger.Infof("[Discovery] Replaced addrs for %s with %d circuit addrs", targetPeer, len(validCircuitAddrs))
+		n.Host.Peerstore().AddAddrs(targetPeer, validAddrs, peerstore.TempAddrTTL)
+		logger.Infof("[Discovery] Replaced addrs for %s with %d routable/circuit addrs", targetPeer, len(validAddrs))
 	}
 }

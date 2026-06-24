@@ -60,6 +60,12 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+// PeerstoreKeyPrivateIPFailed is the key used in the libp2p Peerstore to track
+// if a peer's private IP was previously found to be unreachable or slower than a relay.
+// This allows the node to "try once and remember", avoiding a 15-second timeout on
+// subsequent discovery or tool calls when dialing unroutable private networks.
+const PeerstoreKeyPrivateIPFailed = "private_ip_failed"
+
 const (
 	// Cache sizes
 	RateLimiterSize       = 1000
@@ -71,6 +77,9 @@ const (
 
 	// Key pruning
 	KeyPruningInterval = 1 * time.Hour
+
+	// Reprovide interval
+	ReprovideInterval = 5 * time.Minute
 )
 
 var ErrFatalAuth = errors.New("fatal authentication error")
@@ -118,6 +127,7 @@ type SamNode struct {
 	authSuccess       chan struct{}
 	authOnce          sync.Once
 	currentRelays     []peer.AddrInfo
+	reprovideTrigger  chan struct{}
 }
 
 // UpdateRelays updates the current relays used by AutoRelay.
@@ -173,6 +183,7 @@ func NewSamNode(ctx context.Context, cfg SamNodeConfig) (*SamNode, error) {
 		AllowLoopback:     cfg.AllowLoopback,
 		TrustHubRBAC:      cfg.TrustHubRBAC,
 		authSuccess:       make(chan struct{}),
+		reprovideTrigger:  make(chan struct{}, 1),
 	}
 
 	var err error
@@ -309,10 +320,6 @@ func NewSamNode(ctx context.Context, cfg SamNodeConfig) (*SamNode, error) {
 	}
 	node.DHT = kdht
 
-	if err := kdht.Bootstrap(ctx); err != nil {
-		return nil, fmt.Errorf("failed to bootstrap DHT: %w", err)
-	}
-
 	node.services = NewServiceRegistry(node.DHT)
 
 	var authenticated bool
@@ -335,6 +342,13 @@ func NewSamNode(ctx context.Context, cfg SamNodeConfig) (*SamNode, error) {
 			return nil, fmt.Errorf("fatal auth failure: %w", fatalAuthErr)
 		}
 		return nil, fmt.Errorf("failed to authenticate with any hub: all connection attempts failed")
+	}
+
+	if authenticated {
+		logger.Infof("[DHT] Bootstrapping DHT with connected hub...")
+		if err := node.DHT.Bootstrap(ctx); err != nil {
+			logger.Warnf("[DHT] Failed to trigger DHT bootstrap: %v", err)
+		}
 	}
 
 	// Initialize Gossipsub for Hub Events
@@ -369,10 +383,13 @@ func NewSamNode(ctx context.Context, cfg SamNodeConfig) (*SamNode, error) {
 					}
 					logger.Infof("[Network] Local addresses updated: %v", addrs)
 
-					// Debounce or reprovide immediately
+					// Debounce and trigger unified reprovide loop
 					go func() {
 						time.Sleep(2 * time.Second) // Small debounce
-						node.services.ReprovideAll(ctx)
+						select {
+						case node.reprovideTrigger <- struct{}{}:
+						default:
+						}
 					}()
 				}
 			}
@@ -408,7 +425,36 @@ func NewSamNode(ctx context.Context, cfg SamNodeConfig) (*SamNode, error) {
 	// Start connection monitor
 	node.startConnectionMonitor(ctx, cfg.MonitorBootstrap, cfg.MonitorInterval, 3)
 
+	// Periodically and on-demand reprovide registered services to the DHT
+	node.startReprovideLoop(ctx, ReprovideInterval)
+
 	return node, nil
+}
+
+func (n *SamNode) startReprovideLoop(ctx context.Context, interval time.Duration) {
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		// Run an initial reprovide after a short delay to let DHT bootstrap stabilize
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(5 * time.Second):
+			n.services.ReprovideAll(ctx)
+		}
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				n.services.ReprovideAll(ctx)
+			case <-n.reprovideTrigger:
+				n.services.ReprovideAll(ctx)
+			}
+		}
+	}()
 }
 
 func (n *SamNode) IsConnected() bool {
@@ -1336,16 +1382,39 @@ func (n *SamNode) StartIngressServer(ctx context.Context) error {
 
 func isLoopbackOrLinkLocal(addr multiaddr.Multiaddr) bool {
 	for _, proto := range addr.Protocols() {
-		if proto.Code == multiaddr.P_IP4 || proto.Code == multiaddr.P_IP6 {
-			value, err := addr.ValueForProtocol(proto.Code)
-			if err == nil {
-				ip := net.ParseIP(value)
-				if ip != nil {
-					if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
-						return true
-					}
-				}
-			}
+		if proto.Code != multiaddr.P_IP4 && proto.Code != multiaddr.P_IP6 {
+			continue
+		}
+		value, err := addr.ValueForProtocol(proto.Code)
+		if err != nil {
+			continue
+		}
+		ip := net.ParseIP(value)
+		if ip == nil {
+			continue
+		}
+		if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+			return true
+		}
+	}
+	return false
+}
+
+func isPrivateIP(addr multiaddr.Multiaddr) bool {
+	for _, proto := range addr.Protocols() {
+		if proto.Code != multiaddr.P_IP4 && proto.Code != multiaddr.P_IP6 {
+			continue
+		}
+		value, err := addr.ValueForProtocol(proto.Code)
+		if err != nil {
+			continue
+		}
+		ip := net.ParseIP(value)
+		if ip == nil {
+			continue
+		}
+		if ip.IsPrivate() {
+			return true
 		}
 	}
 	return false
