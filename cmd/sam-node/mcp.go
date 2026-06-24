@@ -182,7 +182,9 @@ func (n *SamNode) ConnectMCPSession(ctx context.Context, targetPeer peer.ID, tar
 	s, err := n.Host.NewStream(dialCtx, targetPeer, api.MCPProtocolID)
 	if err != nil {
 		// If dial failed completely, mark private IP failed so we skip it next time
-		_ = n.Host.Peerstore().Put(targetPeer, PeerstoreKeyPrivateIPFailed, true)
+		if putErr := n.Host.Peerstore().Put(targetPeer, PeerstoreKeyPrivateIPFailed, true); putErr != nil {
+			logger.Errorf("[Discovery] Failed to put peerstore private IP failed key: %v", putErr)
+		}
 		return nil, nil, fmt.Errorf("failed to open stream to %s: %w", targetPeer, err)
 	}
 
@@ -190,10 +192,14 @@ func (n *SamNode) ConnectMCPSession(ctx context.Context, targetPeer peer.ID, tar
 		parts := multiaddr.Split(remoteAddr)
 		isCircuit := len(parts) >= 2 && parts[len(parts)-1].Protocol().Code == multiaddr.P_CIRCUIT
 
+		var putVal bool
 		if isCircuit || !isPrivateIP(remoteAddr) {
-			_ = n.Host.Peerstore().Put(targetPeer, PeerstoreKeyPrivateIPFailed, true)
+			putVal = true
 		} else {
-			_ = n.Host.Peerstore().Put(targetPeer, PeerstoreKeyPrivateIPFailed, false)
+			putVal = false
+		}
+		if putErr := n.Host.Peerstore().Put(targetPeer, PeerstoreKeyPrivateIPFailed, putVal); putErr != nil {
+			logger.Errorf("[Discovery] Failed to put peerstore private IP failed key: %v", putErr)
 		}
 	}
 	logger.Debugf("Opened stream to %s for MCP\n", targetPeer)
@@ -344,11 +350,48 @@ func (n *SamNode) preparePeerAddrs(ctx context.Context, targetPeer peer.ID) {
 		logger.Debugf("[Discovery] Host or DHT is nil")
 		return
 	}
+	logger.Debugf("[Discovery] connectedness for %s: %s (conns: %d)", targetPeer, n.Host.Network().Connectedness(targetPeer), len(n.Host.Network().ConnsToPeer(targetPeer)))
+
+	// If we are currently connected to the peer, examine active connections to see if any are direct private IPs.
+	cond := n.Host.Network().Connectedness(targetPeer)
+	if cond == network.Connected || cond == network.Limited {
+		conns := n.Host.Network().ConnsToPeer(targetPeer)
+		hasDirectPrivateIP := false
+		for _, c := range conns {
+			remoteAddr := c.RemoteMultiaddr()
+			if isPrivateIP(remoteAddr) && !hasCircuit(remoteAddr) {
+				hasDirectPrivateIP = true
+				break
+			}
+		}
+		if !hasDirectPrivateIP {
+			if err := n.Host.Peerstore().Put(targetPeer, PeerstoreKeyPrivateIPFailed, true); err != nil {
+				logger.Errorf("[Discovery] Failed to put peerstore private IP failed key: %v", err)
+			}
+			logger.Debugf("[Discovery] Peer %s is connected via relay, marking private IP as failed", targetPeer)
+		} else {
+			if err := n.Host.Peerstore().Put(targetPeer, PeerstoreKeyPrivateIPFailed, false); err != nil {
+				logger.Errorf("[Discovery] Failed to put peerstore private IP failed key: %v", err)
+			}
+		}
+	}
+
 	addrs := n.Host.Peerstore().Addrs(targetPeer)
 	logger.Debugf("[Discovery] preparePeerAddrs for %s: found %d addrs in peerstore", targetPeer, len(addrs))
 
 	var validAddrs []multiaddr.Multiaddr
+	seen := make(map[string]struct{})
 	changed := false
+
+	addUnique := func(ma multiaddr.Multiaddr) bool {
+		str := ma.String()
+		if _, ok := seen[str]; !ok {
+			seen[str] = struct{}{}
+			validAddrs = append(validAddrs, ma)
+			return true
+		}
+		return false
+	}
 
 	for _, ma := range addrs {
 		parts := multiaddr.Split(ma)
@@ -368,12 +411,12 @@ func (n *SamNode) preparePeerAddrs(ctx context.Context, targetPeer peer.ID) {
 					continue
 				}
 			}
-			validAddrs = append(validAddrs, ma)
+			addUnique(ma)
 			continue
 		}
 
 		// Keep the advertised circuit address
-		validAddrs = append(validAddrs, ma)
+		addUnique(ma)
 
 		// Also synthesize a generic /p2p-circuit using the relay's peer ID.
 		p2pPart := parts[len(parts)-2]
@@ -388,8 +431,9 @@ func (n *SamNode) preparePeerAddrs(ctx context.Context, targetPeer peer.ID) {
 
 		circuitAddr, err := multiaddr.NewMultiaddr(fmt.Sprintf("/p2p/%s/p2p-circuit", relayID.String()))
 		if err == nil {
-			validAddrs = append(validAddrs, circuitAddr)
-			changed = true
+			if addUnique(circuitAddr) {
+				changed = true
+			}
 		}
 	}
 

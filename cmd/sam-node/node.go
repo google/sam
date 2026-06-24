@@ -300,6 +300,19 @@ func NewSamNode(ctx context.Context, cfg SamNodeConfig) (*SamNode, error) {
 	}
 	node.Host = h
 
+	h.Network().Notify(&network.NotifyBundle{
+		ConnectedF: func(n network.Network, c network.Conn) {
+			remotePeer := c.RemotePeer()
+			remoteAddr := c.RemoteMultiaddr()
+			if hasCircuit(remoteAddr) || !isPrivateIP(remoteAddr) {
+				if err := h.Peerstore().Put(remotePeer, PeerstoreKeyPrivateIPFailed, true); err != nil {
+					logger.Errorf("[Discovery] Failed to put peerstore private IP failed key: %v", err)
+				}
+				logger.Debugf("[Discovery] Peer %s connected via relay/public IP (%s), marking private IP as failed", remotePeer, remoteAddr)
+			}
+		},
+	})
+
 	// Permanently add the static relay address to the peerstore so we can build relay paths later
 	for _, pi := range staticRelays {
 		h.Peerstore().AddAddrs(pi.ID, pi.Addrs, peerstore.PermanentAddrTTL)
@@ -916,8 +929,9 @@ func (n *SamNode) startDiscovery(ctx context.Context, meshID string, interval ti
 					continue
 				}
 
-				if n.Host.Network().Connectedness(p.ID) != network.Connected {
-					logger.Debugf("[Discovery] Found peer not connected via DHT: %s", p.ID)
+				cond := n.Host.Network().Connectedness(p.ID)
+				if cond != network.Connected && cond != network.Limited {
+					logger.Debugf("[Discovery] Found peer not connected via DHT: %s (state: %s)", p.ID, cond)
 
 					// Log the addresses returned by DHT to confirm they include p2p-circuit paths
 					for _, addr := range p.Addrs {
@@ -1414,6 +1428,15 @@ func isPrivateIP(addr multiaddr.Multiaddr) bool {
 			continue
 		}
 		if ip.IsPrivate() {
+			return true
+		}
+	}
+	return false
+}
+
+func hasCircuit(addr multiaddr.Multiaddr) bool {
+	for _, proto := range addr.Protocols() {
+		if proto.Code == multiaddr.P_CIRCUIT {
 			return true
 		}
 	}

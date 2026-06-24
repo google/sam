@@ -30,6 +30,8 @@ import (
 
 	"github.com/google/sam/api"
 	libp2phttp "github.com/libp2p/go-libp2p-http"
+	"github.com/libp2p/go-libp2p/core/network"
+	"github.com/libp2p/go-libp2p/core/peer"
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
@@ -347,11 +349,21 @@ func createEgressProxy(node *SamNode) http.Handler {
 
 	proxy := &httputil.ReverseProxy{
 		Director: func(req *http.Request) {
+			ctx := req.Context()
+			ctx = network.WithAllowLimitedConn(ctx, "egress-proxy")
+			*req = *req.WithContext(ctx)
+
 			parts := strings.SplitN(req.URL.Path, "/", 6)
 			if len(parts) < 5 {
 				return
 			}
 			peerID := parts[2]
+			pid, err := peer.Decode(peerID)
+			if err == nil {
+				if cond := node.Host.Network().Connectedness(pid); cond != network.Connected && cond != network.Limited {
+					node.preparePeerAddrs(ctx, pid)
+				}
+			}
 			serviceType := parts[3]
 			serviceName := parts[4]
 			upstreamPath := ""
