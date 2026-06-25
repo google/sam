@@ -1,77 +1,20 @@
 # Quick Start
 
-## Prerequisites
+This guide gets you up and running with a SAM node connected to the public `bananas.sam-mesh.dev` mesh using Docker.
 
-- Go toolchain
-- Docker (for containerized e2e tests)
-- BATS (`bats-core`)
+---
 
-## Build
+## 1. Join the Mesh
 
-```bash
-git clone https://github.com/google/sam.git
-cd sam
-make build
-```
+To register your node with the mesh and obtain a cryptographic identity token (Biscuit), run the OIDC device authorization flow. 
 
-This creates:
-
-- `./bin/sam-hub`
-- `./bin/sam-node`
-
-## Start Hub
-
-`sam-hub` requires OIDC issuer settings and a 32-byte hex key seed.
+Create a local directory on your host to persist your node identity:
 
 ```bash
-SAM_OIDC_ISSUER=https://issuer.example.com \
-SAM_OIDC_ID=sam-client \
-SAM_OIDC_SECRET=sam-secret \
-SAM_HUB_KEY=$(openssl rand -hex 32) \
-./bin/sam-hub
+mkdir -p $(pwd)/sam-data
 ```
 
-## Join Mesh (Enroll Node)
-
-To register the node's cryptographic identity with the hub:
-
-```bash
-./bin/sam-node join http://localhost:8080
-```
-
-This initiates an interactive OIDC Device Authorization flow. It prints a verification URL for you to navigate to in your browser. Once authenticated, the hub registers your node ID and responds with the cryptographic Biscuit identity token. This token, along with the derived node private key and hub discovery addresses, is stored in your local data directory.
-
-## Run Node
-
-### Using Stored Identity
-
-If the node has already joined a mesh, start it simply by running (note that `--api-token` is mandatory to protect the local API when not using mTLS):
-
-```bash
-./bin/sam-node run --api-token my-secret-token
-```
-
-This automatically loads the private key and authorized Biscuit token from the persistent local store.
-
-### Using explicit OIDC Credentials
-
-Alternatively, you can skip the manual `join` step and pass OIDC client credentials directly on startup so the node registers and enrolls dynamically:
-
-```bash
-./bin/sam-node run \
-  --oidc-issuer https://issuer.example.com \
-  --client-id <id> \
-  --client-secret <secret> \
-  --api-token my-secret-token
-```
-
-## Docker Quick Start
-
-You can fully manage and run your SAM node using Docker. To persist the node identity, cryptographic keys, and peer authorization store, mount a local directory as a volume to the container.
-
-### 1. Join the Mesh
-
-Enroll your node interactively into the testnet mesh (e.g. `https://bananas.sam-mesh.dev`):
+Enroll your node:
 
 ```bash
 docker run -it \
@@ -80,13 +23,18 @@ docker run -it \
   join --data-dir /data https://bananas.sam-mesh.dev
 ```
 
-1. The CLI will output a Device Authorization URL.
-2. Visit the URL in your browser to authenticate.
-3. Upon successful login, the container will complete registration, save the credentials inside `/data/agent.db` (persisted at `./sam-data/agent.db` on your host), and terminate.
+1. The container will output a Device Authorization URL and a validation code.
+2. Open the URL in your web browser and sign in.
+3. Once authenticated, the container registers the node, saves the identity to `/data/agent.db` (persisted on your host at `./sam-data/agent.db`), and exits.
 
-### 2. Run the Node
+---
 
-Start your node as a background container using the stored configuration and credentials. Make sure to bind the internal HTTP server to `0.0.0.0:8080` so that you can access the local MCP/Sidecar API from outside the container, publish the libp2p network ports, and set the required `--api-token` parameter:
+## 2. Run the Node
+
+Start your node in the background. We set a security `--api-token` to protect access to the local control plane API and map the required ports:
+
+- `5001/udp` and `5002/tcp`: Libp2p swarm connection ports.
+- `8080/tcp`: Local MCP SSE HTTP API.
 
 ```bash
 docker run -d \
@@ -99,12 +47,65 @@ docker run -d \
   run --data-dir /data --bind-addr 0.0.0.0:8080 --api-token my-secret-token
 ```
 
-## Test
+To verify the node is running and connected to the testnet, check the logs:
 
 ```bash
-make test
-make test-e2e
-make test-e2e-container
+docker logs sam-node
 ```
 
-`make test-e2e-container` runs hub + multiple node containers with a mock OIDC provider.
+You should see:
+```text
+INFO  sam-node  [AuthN] Successfully authenticated with hub via libp2p: ...
+SAM Node Online.
+PeerID: 12D3KooW...
+```
+
+---
+
+## 3. Query the Local MCP API
+
+Your SAM node exposes a standard Model Context Protocol (MCP) server over HTTP Server-Sent Events (SSE) at `http://localhost:8080/mcp/message`. You can interact with it using simple `curl` commands.
+
+### List Local Control Plane Tools
+Query the list of tools available on your local node (e.g. peer discovery, message broadcast, and remote tool execution):
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer my-secret-token" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","method":"tools/list","id":1}' \
+  http://localhost:8080/mcp/message
+```
+
+### Discover Remote Services in the Mesh
+List active MCP services currently registered across the public mesh network:
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer my-secret-token" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"discover_remote_services","arguments":{"type":"mcp"}},"id":2}' \
+  http://localhost:8080/mcp/message
+```
+
+### Find Remote Tools on a Peer
+Using a `peer_id` returned from the service discovery, find the tools available on that peer:
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer my-secret-token" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"find_remote_tools","arguments":{"peer_id":"<target-peer-id>"}},"id":3}' \
+  http://localhost:8080/mcp/message
+```
+
+### Call a Remote Tool
+Call a tool hosted on a remote peer through your local node's P2P stream reverse proxy:
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer my-secret-token" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"call_remote_tool","arguments":{"peer_id":"<target-peer-id>","tool_name":"everything.get-sum","arguments":{"a":12.5,"b":7.5}}},"id":4}' \
+  http://localhost:8080/mcp/message
+```
