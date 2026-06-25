@@ -19,6 +19,7 @@ class SamClient:
         self.token = token
         self.session: Optional[ClientSession] = None
         self._sse_cm = None
+        self.lock = asyncio.Lock()
 
     async def connect(self):
         headers = {"Accept": "application/json, text/event-stream"}
@@ -41,14 +42,16 @@ class SamClient:
     async def get_tools(self) -> List[Dict[str, Any]]:
         if not self.session:
             raise RuntimeError("Not connected")
-        resp = await self.session.list_tools()
-        return [t.model_dump() if hasattr(t, "model_dump") else t for t in resp.tools]
+        async with self.lock:
+            resp = await self.session.list_tools()
+            return [t.model_dump() if hasattr(t, "model_dump") else t for t in resp.tools]
 
     async def call_tool(self, name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
         if not self.session:
             raise RuntimeError("Not connected")
-        resp = await self.session.call_tool(name, arguments)
-        return resp.model_dump() if hasattr(resp, "model_dump") else resp
+        async with self.lock:
+            resp = await self.session.call_tool(name, arguments)
+            return resp.model_dump() if hasattr(resp, "model_dump") else resp
 
     async def __aenter__(self):
         await self.connect()
@@ -59,6 +62,7 @@ class SamClient:
 
 CHAT_TOPIC = "mesh-chat-playground"
 MODEL_NAME = "gemini-flash-latest"
+NEW_CHATS_BUFFER = []
 
 SYSTEM_INSTRUCTION = (
     "You are the Banana Bot (also known as the Mesh Police), a friendly, banana-themed AI bot "
@@ -175,6 +179,7 @@ class FallbackAgent:
             async with httpx.AsyncClient() as http_client:
                 resp = await http_client.post(url, json=payload, headers=headers, timeout=25.0)
                 if resp.status_code != 200:
+                    print(f"[-] Mesh Model HTTP Error {resp.status_code}: {resp.text}")
                     return None
                 
                 data = resp.json()
@@ -238,7 +243,8 @@ class FallbackAgent:
             async with httpx.AsyncClient() as http_client:
                 resp = await http_client.post(url, json=payload, timeout=25.0)
                 if resp.status_code != 200:
-                    return {"text": "Gemini error.", "calls": []}
+                    print(f"[-] Gemini HTTP Error {resp.status_code}: {resp.text}")
+                    return {"text": f"Gemini error {resp.status_code}.", "calls": []}
                 
                 data = resp.json()
                 candidates = data.get("candidates", [])
@@ -296,6 +302,11 @@ async def poll_chat_messages(client: SamClient):
             text = res.get("content", [{}])[0].get("text", "")
             if "Messages on topic" in text and "[]" not in text:
                 print(f"\n📢 [Mesh Chat Channel] {text.strip()}")
+                prefix = f"Messages on topic {CHAT_TOPIC}: "
+                raw_msgs = text[len(prefix):].strip()
+                NEW_CHATS_BUFFER.append(raw_msgs)
+                if len(NEW_CHATS_BUFFER) > 10:
+                    NEW_CHATS_BUFFER.pop(0)
         except Exception as e:
             pass
         await asyncio.sleep(2.0)
@@ -340,10 +351,15 @@ async def run_banana_bot():
                 except Exception:
                     peers = []
 
+                # Extract and clear chats buffer
+                chats_snapshot = list(NEW_CHATS_BUFFER)
+                NEW_CHATS_BUFFER.clear()
+
                 mesh_status = (
-                    f"Current active remote peers in the mesh: {json.dumps(peers)}\n\n"
+                    f"Current active remote peers in the mesh: {json.dumps(peers)}\n"
+                    f"Incoming chat messages on GKE GossipSub topic '{CHAT_TOPIC}' since last scan: {json.dumps(chats_snapshot)}\n\n"
                     "Select a peer to inspect, fetch its tools, run a tool, or broadcast "
-                    "a fun message or banana joke to the chat channel."
+                    "a reply/reaction to the incoming chat messages to the chat channel."
                 )
 
                 print(f"[*] Discovered {len(peers)} remote peer(s). Prompting Banana Bot...")
