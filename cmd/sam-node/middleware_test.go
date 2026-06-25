@@ -295,9 +295,10 @@ attenuation:
 			}
 
 			node := &SamNode{
-				trustedKeys:  []TrustedKey{{Key: pub, ReceivedAt: time.Now()}},
-				LocalPolicy:  localPolicy,
-				TrustHubRBAC: true,
+				trustedKeys:    []TrustedKey{{Key: pub, ReceivedAt: time.Now()}},
+				LocalPolicy:    localPolicy,
+				TrustHubRBAC:   true,
+				BiscuitTimeout: 500 * time.Millisecond,
 			}
 
 			req := RequestContext{
