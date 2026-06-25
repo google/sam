@@ -317,7 +317,8 @@ async def poll_chat_messages(client: SamClient):
                 if len(NEW_CHATS_BUFFER) > 10:
                     NEW_CHATS_BUFFER.pop(0)
         except Exception as e:
-            pass
+            print(f"[-] poll_messages error: {e}")
+            await asyncio.sleep(2.0)
         await asyncio.sleep(2.0)
 
 async def run_banana_bot():
