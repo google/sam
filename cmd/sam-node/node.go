@@ -143,7 +143,7 @@ func (n *SamNode) UpdateRelays(addrs []multiaddr.Multiaddr) {
 	defer n.mu.Unlock()
 	var newRelays []peer.AddrInfo
 	for _, addr := range addrs {
-		resolvedAddrs, err := madns.DefaultResolver.Resolve(context.Background(), stripP2pFromDnsaddr(addr))
+		resolvedAddrs, err := resolveAddrIfNeeded(context.Background(), addr)
 		if err != nil {
 			resolvedAddrs = []multiaddr.Multiaddr{addr}
 		}
@@ -174,6 +174,14 @@ func stripP2pFromDnsaddr(addr multiaddr.Multiaddr) multiaddr.Multiaddr {
 		return multiaddr.Join(components...)
 	}
 	return addr
+}
+
+func resolveAddrIfNeeded(ctx context.Context, addr multiaddr.Multiaddr) ([]multiaddr.Multiaddr, error) {
+	_, err := addr.ValueForProtocol(multiaddr.P_DNSADDR)
+	if err != nil {
+		return []multiaddr.Multiaddr{addr}, nil
+	}
+	return madns.DefaultResolver.Resolve(ctx, stripP2pFromDnsaddr(addr))
 }
 
 // SamNodeConfig holds all configuration options for a SamNode.
@@ -241,7 +249,7 @@ func NewSamNode(ctx context.Context, cfg SamNodeConfig) (*SamNode, error) {
 	// Convert Hub multiaddrs to peer.AddrInfo to use as static relays
 	var staticRelays []peer.AddrInfo
 	for _, addr := range cfg.HubAddrs {
-		resolvedAddrs, err := madns.DefaultResolver.Resolve(ctx, stripP2pFromDnsaddr(addr))
+		resolvedAddrs, err := resolveAddrIfNeeded(ctx, addr)
 		if err != nil {
 			resolvedAddrs = []multiaddr.Multiaddr{addr}
 		}
@@ -620,7 +628,7 @@ dhtLoop:
 }
 
 func (n *SamNode) ConnectAndAuthWithHub(ctx context.Context, addr multiaddr.Multiaddr) error {
-	resolvedAddrs, err := madns.DefaultResolver.Resolve(ctx, stripP2pFromDnsaddr(addr))
+	resolvedAddrs, err := resolveAddrIfNeeded(ctx, addr)
 	if err != nil {
 		resolvedAddrs = []multiaddr.Multiaddr{addr}
 	}
