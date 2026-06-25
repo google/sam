@@ -710,7 +710,7 @@ func (n *SamNode) StartRenewalLoop(ctx context.Context, issuerURL, clientID, cli
 						newJWT = strings.TrimSpace(string(data))
 					}
 				} else {
-					fetchErr = fmt.Errorf("no credentials available for renewal")
+					newJWT, fetchErr = n.renewWithRefreshToken(ctx, clientSecret)
 				}
 
 				if fetchErr == nil {
@@ -733,6 +733,43 @@ func (n *SamNode) StartRenewalLoop(ctx context.Context, issuerURL, clientID, cli
 			}
 		}
 	}()
+}
+
+func (n *SamNode) renewWithRefreshToken(ctx context.Context, clientSecret string) (string, error) {
+	if n.Store == nil {
+		return "", fmt.Errorf("store is not initialized")
+	}
+
+	refreshToken, err := n.Store.LoadRefreshToken()
+	if err != nil {
+		return "", fmt.Errorf("no refresh token available for renewal: %w", err)
+	}
+
+	storedIssuer, storedClientID, _, err := n.Store.LoadOIDCConfig()
+	if err != nil {
+		return "", fmt.Errorf("failed to load OIDC configuration: %w", err)
+	}
+	if storedIssuer == "" || storedClientID == "" {
+		return "", fmt.Errorf("OIDC configuration is incomplete (issuer or client ID is empty)")
+	}
+
+	tokenURL, err := n.DiscoverTokenURL(ctx, storedIssuer)
+	if err != nil {
+		return "", fmt.Errorf("failed to discover OIDC endpoints for renewal: %w", err)
+	}
+
+	newJWT, newRefreshToken, err := n.RefreshJWT(ctx, tokenURL, storedClientID, clientSecret, refreshToken)
+	if err != nil {
+		return "", fmt.Errorf("failed to refresh JWT: %w", err)
+	}
+
+	if newRefreshToken != "" {
+		if err := n.Store.SaveRefreshToken(newRefreshToken); err != nil {
+			logger.Warnf("Failed to save updated refresh token: %v", err)
+		}
+	}
+
+	return newJWT, nil
 }
 
 // listenForHubEvents listens to the topic established by the Hub

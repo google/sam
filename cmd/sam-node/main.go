@@ -74,6 +74,7 @@ var (
 	dataDirFlag              string
 	allowLoopbackFlag        bool
 	headlessFlag             bool
+	offlineAccessFlag        bool
 	autoRelayMinIntervalFlag time.Duration
 	autoRelayBootDelayFlag   time.Duration
 	autoRelayBackoffFlag     time.Duration
@@ -400,7 +401,7 @@ func main() {
 				logger.Fatalf("Failed to discover OIDC endpoints: %v", err)
 			}
 
-			jwtStr, err := dummyNode.InteractiveLogin(ctx, authURL, tokenURL, hubInfo.ClientId, hubInfo.Audience)
+			jwtStr, err := dummyNode.InteractiveLogin(ctx, authURL, tokenURL, hubInfo.ClientId, hubInfo.Audience, offlineAccessFlag)
 			if err != nil {
 				logger.Fatalf("Failed to get token: %v", err)
 			}
@@ -465,6 +466,9 @@ func main() {
 			if err := store.SaveHubURL(targetHub); err != nil {
 				logger.Warnf("Failed to save hub URL: %v", err)
 			}
+			if err := store.SaveOIDCConfig(hubInfo.OidcIssuer, hubInfo.ClientId, hubInfo.Audience); err != nil {
+				logger.Warnf("Failed to save OIDC config: %v", err)
+			}
 
 			fmt.Println("Successfully joined the Sovereign Agent Mesh!")
 		},
@@ -490,6 +494,7 @@ func main() {
 	runCmd.Flags().DurationVar(&keyGracePeriodFlag, "key-grace-period", 24*time.Hour, "Key grace period for old keys (e.g. 24h)")
 	runCmd.Flags().BoolVar(&allowLoopbackFlag, "allow-loopback", false, "Allow publishing and connecting to loopback/link-local addresses")
 	joinCmd.Flags().BoolVar(&allowLoopbackFlag, "allow-loopback", false, "Allow publishing and connecting to loopback/link-local addresses")
+	joinCmd.Flags().BoolVar(&offlineAccessFlag, "offline-access", false, "Request OIDC offline access/refresh token for automatic renewal")
 	runCmd.Flags().StringVar(&apiTokenFlag, "api-token", "", "Static Bearer token for API authorization")
 	runCmd.Flags().StringVar(&tlsCertFlag, "tls-cert", "", "Path to TLS certificate for sidecar API")
 	runCmd.Flags().StringVar(&tlsKeyFlag, "tls-key", "", "Path to TLS key for sidecar API")
