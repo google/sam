@@ -282,8 +282,9 @@ func TestVerifyBiscuit_Expiration(t *testing.T) {
 	defer func() { _ = kr.Close() }()
 
 	hub := &Hub{
-		KeyRing: kr,
-		Policy:  &api.PolicyConfig{},
+		KeyRing:        kr,
+		Policy:         &api.PolicyConfig{},
+		BiscuitTimeout: 500 * time.Millisecond,
 	}
 
 	priv, _, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
