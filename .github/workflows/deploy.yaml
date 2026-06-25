@@ -310,6 +310,13 @@ jobs:
           envsubst < .github/k8s/sam-node-openclaw-template.yaml | kubectl apply -f -
           envsubst < .github/k8s/sam-node-vllm-template.yaml | kubectl apply -f -
           envsubst < .github/k8s/sam-node-everything-template.yaml | kubectl apply -f -
+          envsubst < .github/k8s/sam-node-cop-template.yaml | kubectl apply -f -
+
+          kubectl rollout status deployment/cop-canary-${ENV_NAME} -n ${CANARY_NAMESPACE} --timeout=120s || {
+            echo "Cop Canary Deployment failed!"
+            print_rollout_diagnostics "${CANARY_NAMESPACE}" "cop-canary-${ENV_NAME}" "app=cop-canary-${ENV_NAME}"
+            exit 1
+          }
 
           
           kubectl rollout status deployment/sam-canary-${ENV_NAME} -n ${CANARY_NAMESPACE} --timeout=120s || {
