@@ -239,37 +239,46 @@ class FallbackAgent:
         if function_declarations:
             payload["tools"] = [{"functionDeclarations": function_declarations}]
 
-        try:
-            async with httpx.AsyncClient() as http_client:
-                resp = await http_client.post(url, json=payload, timeout=25.0)
-                if resp.status_code != 200:
-                    print(f"[-] Gemini HTTP Error {resp.status_code}: {resp.text}")
-                    return {"text": f"Gemini error {resp.status_code}.", "calls": []}
-                
-                data = resp.json()
-                candidates = data.get("candidates", [])
-                if not candidates:
-                    return {"text": "No response from Gemini.", "calls": []}
-                
-                candidate = candidates[0]
-                content = candidate.get("content", {})
-                parts = content.get("parts", [])
-                
-                text_response = ""
-                calls = []
-                for part in parts:
-                    if "text" in part:
-                        text_response += part["text"]
-                    if "functionCall" in part:
-                        calls.append(part["functionCall"])
+        for attempt in range(3):
+            try:
+                async with httpx.AsyncClient() as http_client:
+                    resp = await http_client.post(url, json=payload, timeout=25.0)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        candidates = data.get("candidates", [])
+                        if not candidates:
+                            return {"text": "No response from Gemini.", "calls": []}
+                        
+                        candidate = candidates[0]
+                        content = candidate.get("content", {})
+                        parts = content.get("parts", [])
+                        
+                        text_response = ""
+                        calls = []
+                        for part in parts:
+                            if "text" in part:
+                                text_response += part["text"]
+                            if "functionCall" in part:
+                                calls.append(part["functionCall"])
 
-                self.gemini_history.append(content)
-                return {
-                    "text": text_response,
-                    "calls": calls
-                }
-        except Exception as e:
-            return {"text": f"Gemini error: {e}", "calls": []}
+                        self.gemini_history.append(content)
+                        return {
+                            "text": text_response,
+                            "calls": calls
+                        }
+                    elif resp.status_code in [429, 503]:
+                        print(f"[-] Gemini returned {resp.status_code}, retrying in 3s (attempt {attempt+1}/3)...")
+                        await asyncio.sleep(3.0)
+                        continue
+                    else:
+                        print(f"[-] Gemini HTTP Error {resp.status_code}: {resp.text}")
+                        return {"text": f"Gemini error {resp.status_code}.", "calls": []}
+            except Exception as e:
+                if attempt == 2:
+                    return {"text": f"Gemini error: {e}", "calls": []}
+                print(f"[-] Gemini connection exception: {e}, retrying in 3s...")
+                await asyncio.sleep(3.0)
+        return {"text": "Gemini error: Max retries exceeded.", "calls": []}
 
     def add_tool_response(self, function_name: str, response_data: dict):
         if self.current_model == "mesh":
