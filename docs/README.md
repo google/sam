@@ -19,10 +19,11 @@ The documentation here is intentionally small and aligned with what is implement
 
 ## Start Here
 
-- [Quick Start](quickstart.md)
-- [CLI Reference](cli/reference.md)
-- [Testing](testing.md)
-- [Testnet Validation](testnet-validation.md)
+- [Quick Start](quickstart.md) - User Quick Start using Docker.
+- [CLI Reference](cli/reference.md) - CLI command usage reference.
+- [Developer Guide](development.md) - Building from source, local testing, and Kind setups.
+- [Testing Guide](testing.md) - Detailed test layer and troubleshooting information.
+- [Testnet Validation Tutorial](testnet-validation.md) - Real-time integration and MCP verification with public testnets.
 
 ## Notes
 
