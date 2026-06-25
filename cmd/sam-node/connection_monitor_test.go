@@ -11,7 +11,6 @@ import (
 
 type mockHubConnectionManager struct {
 	connected      bool
-	peerID         string
 	hubConfigErr   error
 	storedAddrs    []string
 	hubURLErr      error

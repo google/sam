@@ -661,7 +661,11 @@ func (n *SamNode) ConnectAndAuthWithHub(ctx context.Context, addr multiaddr.Mult
 			continue
 		}
 
-		if err := n.Host.Connect(ctx, *addrInfo); err != nil {
+		// Create a per-replica timeout context to prevent blocking on offline replicas
+		replicaCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+
+		if err := n.Host.Connect(replicaCtx, *addrInfo); err != nil {
+			cancel()
 			if strings.Contains(err.Error(), "peer id mismatch") {
 				lastFatalErr = fmt.Errorf("%w: %w", ErrFatalAuth, err)
 			}
@@ -670,15 +674,18 @@ func (n *SamNode) ConnectAndAuthWithHub(ctx context.Context, addr multiaddr.Mult
 		}
 
 		// Open auth stream
-		s, err := n.Host.NewStream(ctx, addrInfo.ID, api.AuthProtocolID)
+		s, err := n.Host.NewStream(replicaCtx, addrInfo.ID, api.AuthProtocolID)
 		if err != nil {
+			cancel()
 			errs = append(errs, fmt.Errorf("failed to open auth stream to hub %s: %w", resolved, err))
 			continue
 		}
+		_ = s.SetDeadline(time.Now().Add(5 * time.Second))
 
 		success, err := n.performHubAuthHandshake(s, biscuitBytes)
 		if err != nil {
 			_ = s.Reset()
+			cancel()
 			errs = append(errs, fmt.Errorf("handshake failed with hub %s: %w", resolved, err))
 			if errors.Is(err, ErrFatalAuth) {
 				lastFatalErr = err
@@ -686,12 +693,13 @@ func (n *SamNode) ConnectAndAuthWithHub(ctx context.Context, addr multiaddr.Mult
 			continue
 		}
 		_ = s.Close()
+		cancel()
 
 		if success {
 			n.mu.Lock()
 			n.authenticatedHubs[addrInfo.ID] = true
-			n.mu.Unlock()
 			n.HubPeerID = addrInfo.ID
+			n.mu.Unlock()
 			logger.Infof("[AuthN] Successfully authenticated with hub via libp2p: %s", addrInfo.ID)
 			connected = true
 		}
