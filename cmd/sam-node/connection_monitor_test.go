@@ -11,7 +11,6 @@ import (
 
 type mockHubConnectionManager struct {
 	connected      bool
-	peerID         string
 	hubConfigErr   error
 	storedAddrs    []string
 	hubURLErr      error
@@ -26,10 +25,6 @@ type mockHubConnectionManager struct {
 
 func (m *mockHubConnectionManager) IsConnected() bool {
 	return m.connected
-}
-
-func (m *mockHubConnectionManager) HubPeerIDString() string {
-	return m.peerID
 }
 
 func (m *mockHubConnectionManager) LoadHubConfig() ([]byte, []string, error) {

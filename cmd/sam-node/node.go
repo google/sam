@@ -58,6 +58,7 @@ import (
 	libp2ptls "github.com/libp2p/go-libp2p/p2p/security/tls"
 	"github.com/libp2p/go-msgio"
 	"github.com/multiformats/go-multiaddr"
+	madns "github.com/multiformats/go-multiaddr-dns"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -114,6 +115,7 @@ type SamNode struct {
 	PubSub            *pubsub.PubSub
 	Store             *Store
 	HubPeerID         peer.ID
+	authenticatedHubs map[peer.ID]bool
 	peerLastEventTime map[string]int64
 	receivedMsgs      map[string][]string
 	topics            map[string]*pubsub.Topic
@@ -142,13 +144,45 @@ func (n *SamNode) UpdateRelays(addrs []multiaddr.Multiaddr) {
 	defer n.mu.Unlock()
 	var newRelays []peer.AddrInfo
 	for _, addr := range addrs {
-		if addrInfo, err := peer.AddrInfoFromP2pAddr(addr); err == nil && addrInfo.ID != "" {
-			newRelays = append(newRelays, *addrInfo)
-			n.Host.Peerstore().AddAddrs(addrInfo.ID, addrInfo.Addrs, peerstore.PermanentAddrTTL)
+		resolvedAddrs, err := resolveAddrIfNeeded(context.Background(), addr)
+		if err != nil {
+			resolvedAddrs = []multiaddr.Multiaddr{addr}
+		}
+		for _, resolved := range resolvedAddrs {
+			if addrInfo, err := peer.AddrInfoFromP2pAddr(resolved); err == nil && addrInfo.ID != "" {
+				newRelays = append(newRelays, *addrInfo)
+				n.Host.Peerstore().AddAddrs(addrInfo.ID, addrInfo.Addrs, peerstore.PermanentAddrTTL)
+			}
 		}
 	}
 	n.currentRelays = newRelays
 	logger.Infof("[Relay] Updated current relays for AutoRelay: %v", newRelays)
+}
+
+func stripP2pFromDnsaddr(addr multiaddr.Multiaddr) multiaddr.Multiaddr {
+	_, err := addr.ValueForProtocol(multiaddr.P_DNSADDR)
+	if err != nil {
+		return addr
+	}
+	parts := multiaddr.Split(addr)
+	var components []multiaddr.Multiaddrer
+	for _, p := range parts {
+		if _, err := p.ValueForProtocol(multiaddr.P_P2P); err != nil {
+			components = append(components, multiaddr.Multiaddr{p})
+		}
+	}
+	if len(components) > 0 {
+		return multiaddr.Join(components...)
+	}
+	return addr
+}
+
+func resolveAddrIfNeeded(ctx context.Context, addr multiaddr.Multiaddr) ([]multiaddr.Multiaddr, error) {
+	_, err := addr.ValueForProtocol(multiaddr.P_DNSADDR)
+	if err != nil {
+		return []multiaddr.Multiaddr{addr}, nil
+	}
+	return madns.DefaultResolver.Resolve(ctx, stripP2pFromDnsaddr(addr))
 }
 
 // SamNodeConfig holds all configuration options for a SamNode.
@@ -186,6 +220,7 @@ func NewSamNode(ctx context.Context, cfg SamNodeConfig) (*SamNode, error) {
 		peerLastEventTime: make(map[string]int64),
 		receivedMsgs:      make(map[string][]string),
 		topics:            make(map[string]*pubsub.Topic),
+		authenticatedHubs: make(map[peer.ID]bool),
 		LocalPolicy:       cfg.NodeConfig,
 		AllowLoopback:     cfg.AllowLoopback,
 		TrustHubRBAC:      cfg.TrustHubRBAC,
@@ -216,15 +251,19 @@ func NewSamNode(ctx context.Context, cfg SamNodeConfig) (*SamNode, error) {
 	// Convert Hub multiaddrs to peer.AddrInfo to use as static relays
 	var staticRelays []peer.AddrInfo
 	for _, addr := range cfg.HubAddrs {
-		if addrInfo, err := peer.AddrInfoFromP2pAddr(addr); err == nil && addrInfo.ID != "" {
-			staticRelays = append(staticRelays, *addrInfo)
-			if node.HubPeerID == "" {
-				node.HubPeerID = addrInfo.ID
+		resolvedAddrs, err := resolveAddrIfNeeded(ctx, addr)
+		if err != nil {
+			resolvedAddrs = []multiaddr.Multiaddr{addr}
+		}
+		for _, resolved := range resolvedAddrs {
+			if addrInfo, err := peer.AddrInfoFromP2pAddr(resolved); err == nil && addrInfo.ID != "" {
+				staticRelays = append(staticRelays, *addrInfo)
+				if node.HubPeerID == "" {
+					node.HubPeerID = addrInfo.ID
+				}
+			} else {
+				logger.Warnf("Failed to parse static relay addr %s: %v", resolved, err)
 			}
-			// Permanently add the static relay address to the peerstore so we can build relay paths later
-			// The node doesn't exist yet! We need to add it after New() returns.
-		} else {
-			logger.Warnf("Failed to parse static relay addr %s: %v", addr, err)
 		}
 	}
 	logger.Infof("Configured %d static relays: %v", len(staticRelays), staticRelays)
@@ -479,11 +518,17 @@ func (n *SamNode) startReprovideLoop(ctx context.Context, interval time.Duration
 }
 
 func (n *SamNode) IsConnected() bool {
-	return n.HubPeerID != "" && n.Host.Network().Connectedness(n.HubPeerID) == network.Connected
-}
-
-func (n *SamNode) HubPeerIDString() string {
-	return n.HubPeerID.String()
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if len(n.authenticatedHubs) == 0 {
+		return false
+	}
+	for pid := range n.authenticatedHubs {
+		if n.Host.Network().Connectedness(pid) == network.Connected {
+			return true
+		}
+	}
+	return false
 }
 
 func (n *SamNode) LoadHubConfig() ([]byte, []string, error) {
@@ -591,22 +636,12 @@ dhtLoop:
 }
 
 func (n *SamNode) ConnectAndAuthWithHub(ctx context.Context, addr multiaddr.Multiaddr) error {
-	addrInfo, err := peer.AddrInfoFromP2pAddr(addr)
+	resolvedAddrs, err := resolveAddrIfNeeded(ctx, addr)
 	if err != nil {
-		return fmt.Errorf("failed to get AddrInfo from multiaddr: %w", err)
+		resolvedAddrs = []multiaddr.Multiaddr{addr}
 	}
 
-	if err := n.Host.Connect(ctx, *addrInfo); err != nil {
-		if strings.Contains(err.Error(), "peer id mismatch") {
-			return fmt.Errorf("%w: %w", ErrFatalAuth, err)
-		}
-		return fmt.Errorf("failed to connect to hub %s: %w", addr, err)
-	}
-
-	n.HubPeerID = addrInfo.ID
-	logger.Infof("[AuthN] Connected to hub: %s", addrInfo.ID)
-
-	// Load biscuit from store
+	// Load biscuit from store once before the loop
 	biscuitBytes, err := n.Store.LoadIdentity()
 	if err != nil {
 		return fmt.Errorf("%w: failed to load identity from store: %w", ErrFatalAuth, err)
@@ -615,48 +650,102 @@ func (n *SamNode) ConnectAndAuthWithHub(ctx context.Context, addr multiaddr.Mult
 		return fmt.Errorf("%w: no identity biscuit found in store", ErrFatalAuth)
 	}
 
-	// Open auth stream
-	s, err := n.Host.NewStream(ctx, addrInfo.ID, api.AuthProtocolID)
-	if err != nil {
-		return fmt.Errorf("failed to open auth stream to hub: %w", err)
-	}
-	defer func() {
-		if err := s.Close(); err != nil {
-			logger.Debugf("failed to close stream: %v", err)
-		}
-	}()
+	var connected bool
+	var lastFatalErr error
+	var errs []error
 
+	for _, resolved := range resolvedAddrs {
+		addrInfo, err := peer.AddrInfoFromP2pAddr(resolved)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("failed to get AddrInfo from multiaddr %s: %w", resolved, err))
+			continue
+		}
+
+		// Create a per-replica timeout context to prevent blocking on offline replicas
+		replicaCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+
+		if err := n.Host.Connect(replicaCtx, *addrInfo); err != nil {
+			cancel()
+			if strings.Contains(err.Error(), "peer id mismatch") {
+				lastFatalErr = fmt.Errorf("%w: %w", ErrFatalAuth, err)
+			}
+			errs = append(errs, fmt.Errorf("failed to connect to hub %s: %w", resolved, err))
+			continue
+		}
+
+		// Open auth stream
+		s, err := n.Host.NewStream(replicaCtx, addrInfo.ID, api.AuthProtocolID)
+		if err != nil {
+			cancel()
+			errs = append(errs, fmt.Errorf("failed to open auth stream to hub %s: %w", resolved, err))
+			continue
+		}
+		_ = s.SetDeadline(time.Now().Add(5 * time.Second))
+
+		success, err := n.performHubAuthHandshake(s, biscuitBytes)
+		if err != nil {
+			_ = s.Reset()
+			cancel()
+			errs = append(errs, fmt.Errorf("handshake failed with hub %s: %w", resolved, err))
+			if errors.Is(err, ErrFatalAuth) {
+				lastFatalErr = err
+			}
+			continue
+		}
+		_ = s.Close()
+		cancel()
+
+		if success {
+			n.mu.Lock()
+			n.authenticatedHubs[addrInfo.ID] = true
+			n.HubPeerID = addrInfo.ID
+			n.mu.Unlock()
+			logger.Infof("[AuthN] Successfully authenticated with hub via libp2p: %s", addrInfo.ID)
+			connected = true
+		}
+	}
+
+	if connected {
+		n.authOnce.Do(func() {
+			close(n.authSuccess)
+		})
+		return nil
+	}
+
+	if lastFatalErr != nil {
+		return lastFatalErr
+	}
+	return fmt.Errorf("failed to authenticate with any hub addresses: %w", errors.Join(errs...))
+}
+
+func (n *SamNode) performHubAuthHandshake(s network.Stream, biscuitBytes []byte) (bool, error) {
 	writer := msgio.NewVarintWriter(s)
 	authFrame := &api.AuthFrame{Biscuit: biscuitBytes}
 	data, err := proto.Marshal(authFrame)
 	if err != nil {
-		return fmt.Errorf("failed to marshal auth frame: %w", err)
+		return false, fmt.Errorf("marshal auth frame: %w", err)
 	}
 	if err := writer.WriteMsg(data); err != nil {
-		return fmt.Errorf("failed to write auth frame: %w", err)
+		return false, fmt.Errorf("write auth frame: %w", err)
 	}
 
 	reader := msgio.NewVarintReaderSize(s, 1024*64)
 	respMsg, err := reader.ReadMsg()
 	if err != nil {
-		return fmt.Errorf("failed to read auth response: %w", err)
+		return false, fmt.Errorf("read auth response: %w", err)
 	}
 	defer reader.ReleaseMsg(respMsg)
 
 	var resp api.AuthResponse
 	if err := proto.Unmarshal(respMsg, &resp); err != nil {
-		return fmt.Errorf("failed to unmarshal auth response: %w", err)
+		return false, fmt.Errorf("unmarshal auth response: %w", err)
 	}
 
 	if !resp.Success {
-		return fmt.Errorf("%w: auth failed: %s", ErrFatalAuth, resp.Error)
+		return false, fmt.Errorf("%w: auth failed: %s", ErrFatalAuth, resp.Error)
 	}
 
-	logger.Infof("[AuthN] Successfully authenticated with hub via libp2p")
-	n.authOnce.Do(func() {
-		close(n.authSuccess)
-	})
-	return nil
+	return true, nil
 }
 
 func (n *SamNode) StartRenewalLoop(ctx context.Context, issuerURL, clientID, clientSecret, jwtPath string) {
