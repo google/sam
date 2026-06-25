@@ -78,7 +78,9 @@ spec:
             --enforce-eager \
             --host 0.0.0.0 \
             --port 8000 \
-            --trust-remote-code
+            --trust-remote-code \
+            --enable-auto-tool-choice \
+            --tool-call-parser hermes
         ports:
         - containerPort: 8000
           name: http
