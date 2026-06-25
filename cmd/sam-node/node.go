@@ -1029,14 +1029,19 @@ func (n *SamNode) subscribeToTopic(ctx context.Context, topicName string) error 
 
 	n.topics[topicName] = topic
 
-	bgCtx := context.Background()
+	logger.Infof("[PubSub] Started subscription background loop for topic: %s", topicName)
 	go func() {
-		defer sub.Cancel()
+		defer func() {
+			sub.Cancel()
+			logger.Infof("[PubSub] Exited subscription background loop for topic: %s", topicName)
+		}()
 		for {
-			msg, err := sub.Next(bgCtx)
+			msg, err := sub.Next(context.Background())
 			if err != nil {
+				logger.Errorf("[PubSub] subscription Next() error for topic %s: %v", topicName, err)
 				return
 			}
+			logger.Debugf("[PubSub] Received message on topic %s from %s: %s", topicName, msg.ReceivedFrom, string(msg.Data))
 			n.mu.Lock()
 			n.receivedMsgs[topicName] = append(n.receivedMsgs[topicName], string(msg.Data))
 			n.mu.Unlock()
