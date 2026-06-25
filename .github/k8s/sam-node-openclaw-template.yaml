@@ -12,12 +12,7 @@ data:
         - 'allow if operation("/sam/catalog");'
       checks: []
       rules: []
-    services:
-      - type: mcp
-        name: openclaw
-        description: "OpenClaw AI Agent Gateway"
-        # Register the OpenClaw local gateway as a mesh service
-        target_url: "http://localhost:18789/mcp"
+    services: []
   openclaw.json: |
     {
       "agents": {

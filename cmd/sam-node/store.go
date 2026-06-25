@@ -28,10 +28,14 @@ import (
 )
 
 const (
-	bucketIdentity = "identity"
-	keyBiscuit     = "identity_biscuit"
-	keyPrivKey     = "node_private_key"
-	keyIdentityExp = "identity_expiration"
+	bucketIdentity  = "identity"
+	keyBiscuit      = "identity_biscuit"
+	keyPrivKey      = "node_private_key"
+	keyIdentityExp  = "identity_expiration"
+	keyRefreshToken = "refresh_token"
+	keyOidcIssuer   = "oidc_issuer"
+	keyOidcClientID = "oidc_client_id"
+	keyOidcAudience = "oidc_audience"
 )
 
 type Store struct {
@@ -116,6 +120,51 @@ func (s *Store) LoadIdentityExpiration() (int64, error) {
 		return 0, err
 	}
 	return exp, nil
+}
+
+func (s *Store) SaveRefreshToken(token string) error {
+	return s.db.Update(func(tx *bbolt.Tx) error {
+		b := tx.Bucket([]byte(bucketIdentity))
+		return b.Put([]byte(keyRefreshToken), []byte(token))
+	})
+}
+
+func (s *Store) LoadRefreshToken() (string, error) {
+	var val []byte
+	_ = s.db.View(func(tx *bbolt.Tx) error {
+		b := tx.Bucket([]byte(bucketIdentity))
+		val = b.Get([]byte(keyRefreshToken))
+		return nil
+	})
+	if len(val) == 0 {
+		return "", fmt.Errorf("no refresh token found")
+	}
+	return string(val), nil
+}
+
+func (s *Store) SaveOIDCConfig(issuer, clientID, audience string) error {
+	return s.db.Update(func(tx *bbolt.Tx) error {
+		b := tx.Bucket([]byte(bucketIdentity))
+		if err := b.Put([]byte(keyOidcIssuer), []byte(issuer)); err != nil {
+			return err
+		}
+		if err := b.Put([]byte(keyOidcClientID), []byte(clientID)); err != nil {
+			return err
+		}
+		return b.Put([]byte(keyOidcAudience), []byte(audience))
+	})
+}
+
+func (s *Store) LoadOIDCConfig() (string, string, string, error) {
+	var issuer, clientID, audience []byte
+	err := s.db.View(func(tx *bbolt.Tx) error {
+		b := tx.Bucket([]byte(bucketIdentity))
+		issuer = b.Get([]byte(keyOidcIssuer))
+		clientID = b.Get([]byte(keyOidcClientID))
+		audience = b.Get([]byte(keyOidcAudience))
+		return nil
+	})
+	return string(issuer), string(clientID), string(audience), err
 }
 
 func (s *Store) SaveKey(key []byte) error {

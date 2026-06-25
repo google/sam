@@ -1,0 +1,85 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sam-canary-everything-config-${ENV_NAME}
+  namespace: sam-canary-${ENV_NAME}
+data:
+  sam-node.yaml: |
+    version: "v1alpha1"
+    attenuation:
+      policies:
+        - 'allow if operation("mcp:everything");'
+        - 'allow if operation("/sam/catalog");'
+      checks: []
+      rules: []
+    services:
+      - type: mcp
+        name: everything
+        description: "MCP everything test server (tools, resources, prompts)"
+        target_url: "http://localhost:3001/mcp"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: everything-canary-${ENV_NAME}
+  namespace: sam-canary-${ENV_NAME}
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: everything-canary-${ENV_NAME}
+  template:
+    metadata:
+      labels:
+        app: everything-canary-${ENV_NAME}
+    spec:
+      serviceAccountName: sam-node-sa
+      containers:
+      - name: server-everything
+        image: node:22-slim
+        command: ["npx", "-y", "@modelcontextprotocol/server-everything", "streamableHttp"]
+        ports:
+        - containerPort: 3001
+          name: http-mcp
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 256Mi
+      - name: sam-node
+        image: ghcr.io/google/sam-node:${IMAGE_TAG}
+        args: 
+          - "run"
+          - "--config=/etc/sam/sam-node.yaml"
+          - "--hub=http://sam-hub-${ENV_NAME}.${NAMESPACE}.svc.cluster.local:9090"
+          - "--jwt-path=/var/run/secrets/tokens/sam-token"
+          - "--api-token=secret-token"
+          - "--bind-addr=127.0.0.1:8080"
+        ports:
+        - containerPort: 8080
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 256Mi
+        volumeMounts:
+        - name: config-volume
+          mountPath: /etc/sam
+        - name: sam-token
+          mountPath: /var/run/secrets/tokens
+          readOnly: true
+      volumes:
+      - name: config-volume
+        configMap:
+          name: sam-canary-everything-config-${ENV_NAME}
+      - name: sam-token
+        projected:
+          sources:
+          - serviceAccountToken:
+              path: sam-token
+              expirationSeconds: 3600
+              audience: "sam-hub-audience"

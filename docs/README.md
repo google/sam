@@ -22,6 +22,7 @@ The documentation here is intentionally small and aligned with what is implement
 - [Quick Start](quickstart.md)
 - [CLI Reference](cli/reference.md)
 - [Testing](testing.md)
+- [Testnet Validation](testnet-validation.md)
 
 ## Notes
 

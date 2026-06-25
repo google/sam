@@ -61,7 +61,7 @@ func (n *SamNode) FetchJWT(ctx context.Context, tokenURL, clientID, clientSecret
 }
 
 // InteractiveLogin prompts the user to go to a URL and enter a code.
-func (n *SamNode) InteractiveLogin(ctx context.Context, authURL, tokenURL, clientID, audience string) (string, error) {
+func (n *SamNode) InteractiveLogin(ctx context.Context, authURL, tokenURL, clientID, audience string, requestRefresh bool) (string, error) {
 	if authURL == "" {
 		return "", fmt.Errorf("authorization URL is required")
 	}
@@ -110,7 +110,13 @@ func (n *SamNode) InteractiveLogin(ctx context.Context, authURL, tokenURL, clien
 	q.Add("response_type", "code")
 	q.Add("client_id", clientID)
 	q.Add("redirect_uri", redirectURI)
-	q.Add("scope", "openid email profile")
+	scope := "openid email profile"
+	if requestRefresh {
+		scope += " offline_access"
+		q.Add("access_type", "offline")
+		q.Add("prompt", "consent")
+	}
+	q.Add("scope", scope)
 	q.Add("state", state)
 	q.Add("code_challenge", challenge)
 	q.Add("code_challenge_method", "S256")
@@ -264,11 +270,18 @@ func (n *SamNode) InteractiveLogin(ctx context.Context, authURL, tokenURL, clien
 	}
 
 	var tokenResp struct {
-		AccessToken string `json:"access_token"`
-		IdToken     string `json:"id_token"`
+		AccessToken  string `json:"access_token"`
+		IdToken      string `json:"id_token"`
+		RefreshToken string `json:"refresh_token"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
 		return "", err
+	}
+
+	if tokenResp.RefreshToken != "" && n.Store != nil {
+		if err := n.Store.SaveRefreshToken(tokenResp.RefreshToken); err != nil {
+			logger.Warnf("Failed to save refresh token: %v", err)
+		}
 	}
 
 	if tokenResp.IdToken != "" {
@@ -333,4 +346,61 @@ func openBrowser(targetURL string) {
 	if cmdErr != nil {
 		logger.Debugf("Failed to open browser: %v", cmdErr)
 	}
+}
+
+// RefreshJWT refreshes the OIDC token using the stored refresh token.
+func (n *SamNode) RefreshJWT(ctx context.Context, tokenURL, clientID, clientSecret, refreshToken string) (string, string, error) {
+	tokenData := url.Values{}
+	tokenData.Set("grant_type", "refresh_token")
+	tokenData.Set("client_id", clientID)
+	tokenData.Set("refresh_token", refreshToken)
+	if clientSecret != "" {
+		tokenData.Set("client_secret", clientSecret)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", tokenURL, strings.NewReader(tokenData.Encode()))
+	if err != nil {
+		return "", "", err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", "", err
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			logger.Errorf("Failed to close response body: %v", err)
+		}
+	}()
+
+	if resp.StatusCode != http.StatusOK {
+		var errResp struct {
+			Error            string `json:"error"`
+			ErrorDescription string `json:"error_description"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&errResp); err == nil && errResp.Error != "" {
+			return "", "", fmt.Errorf("refresh token request failed (status %s): %s - %s", resp.Status, errResp.Error, errResp.ErrorDescription)
+		}
+		return "", "", fmt.Errorf("refresh token request failed with status: %s", resp.Status)
+	}
+
+	var tokenResp struct {
+		AccessToken  string `json:"access_token"`
+		IdToken      string `json:"id_token"`
+		RefreshToken string `json:"refresh_token"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
+		return "", "", err
+	}
+
+	jwtStr := tokenResp.AccessToken
+	if tokenResp.IdToken != "" {
+		jwtStr = tokenResp.IdToken
+	}
+	if jwtStr == "" {
+		return "", "", fmt.Errorf("token response did not contain an access_token or id_token")
+	}
+	return jwtStr, tokenResp.RefreshToken, nil
 }

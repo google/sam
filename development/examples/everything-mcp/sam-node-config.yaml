@@ -1,0 +1,10 @@
+version: "v1alpha1"
+attenuation:
+  policies:
+    - 'allow if operation("mcp:everything");'
+    - 'allow if operation("/sam/catalog");'
+services:
+  - type: "mcp"
+    name: "everything"
+    description: "MCP everything test server (tools, resources, prompts)"
+    target_url: "http://127.0.0.1:3001/mcp"
