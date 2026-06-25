@@ -71,7 +71,7 @@ spec:
                   done
                   # Directly add the cron job to force operator.admin auto-approval on the first connection
                   openclaw cron add --name mesh-health-check --every 5m --token "${OPENCLAW_GATEWAY_TOKEN}" --best-effort-deliver --no-deliver --message "Use the get_mesh_info tool to check the mesh connection status and log the output." || true
-                  ) &
+                  ) >/dev/null 2>&1 </dev/null &
         env:
         - name: SAM_MCP_URL
           value: "http://127.0.0.1:8080/mcp/events"
