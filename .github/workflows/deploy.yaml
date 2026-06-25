@@ -309,6 +309,7 @@ jobs:
           envsubst < .github/k8s/sam-node-template.yaml | kubectl apply -f -
           envsubst < .github/k8s/sam-node-openclaw-template.yaml | kubectl apply -f -
           envsubst < .github/k8s/sam-node-vllm-template.yaml | kubectl apply -f -
+          envsubst < .github/k8s/sam-node-everything-template.yaml | kubectl apply -f -
 
           
           kubectl rollout status deployment/sam-canary-${ENV_NAME} -n ${CANARY_NAMESPACE} --timeout=120s || {
@@ -338,5 +339,15 @@ jobs:
             echo "Rolling back vLLM Canary deployment..."
             kubectl rollout undo deployment/vllm-canary-${ENV_NAME} -n ${CANARY_NAMESPACE}
             kubectl rollout status deployment/vllm-canary-${ENV_NAME} -n ${CANARY_NAMESPACE} || true
+            exit 1
+          }
+
+          kubectl rollout status deployment/everything-canary-${ENV_NAME} -n ${CANARY_NAMESPACE} --timeout=120s || {
+            echo "Everything Canary Deployment failed!"
+            print_rollout_diagnostics "${CANARY_NAMESPACE}" "everything-canary-${ENV_NAME}" "app=everything-canary-${ENV_NAME}"
+
+            echo "Rolling back Everything Canary deployment..."
+            kubectl rollout undo deployment/everything-canary-${ENV_NAME} -n ${CANARY_NAMESPACE}
+            kubectl rollout status deployment/everything-canary-${ENV_NAME} -n ${CANARY_NAMESPACE} || true
             exit 1
           }
