@@ -380,8 +380,10 @@ func (n *SamNode) RefreshJWT(ctx context.Context, tokenURL, clientID, clientSecr
 			Error            string `json:"error"`
 			ErrorDescription string `json:"error_description"`
 		}
-		_ = json.NewDecoder(resp.Body).Decode(&errResp)
-		return "", "", fmt.Errorf("refresh token request failed: %s - %s", errResp.Error, errResp.ErrorDescription)
+		if err := json.NewDecoder(resp.Body).Decode(&errResp); err == nil && errResp.Error != "" {
+			return "", "", fmt.Errorf("refresh token request failed (status %s): %s - %s", resp.Status, errResp.Error, errResp.ErrorDescription)
+		}
+		return "", "", fmt.Errorf("refresh token request failed with status: %s", resp.Status)
 	}
 
 	var tokenResp struct {
@@ -396,6 +398,9 @@ func (n *SamNode) RefreshJWT(ctx context.Context, tokenURL, clientID, clientSecr
 	jwtStr := tokenResp.AccessToken
 	if tokenResp.IdToken != "" {
 		jwtStr = tokenResp.IdToken
+	}
+	if jwtStr == "" {
+		return "", "", fmt.Errorf("token response did not contain an access_token or id_token")
 	}
 	return jwtStr, tokenResp.RefreshToken, nil
 }
