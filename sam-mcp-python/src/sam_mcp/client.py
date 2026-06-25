@@ -7,16 +7,22 @@ from mcp.client.sse import sse_client
 class SamClient:
     """High-level developer interface for SAM MCP using official SDK."""
     
-    def __init__(self, server_url: Optional[str] = None):
+    def __init__(self, server_url: Optional[str] = None, token: Optional[str] = None):
         if server_url is None:
-            server_url = os.environ.get("SAM_MCP_URL", "http://localhost:8080/sse")
+            server_url = os.environ.get("SAM_MCP_URL", "http://localhost:8080/mcp/events")
+        if token is None:
+            token = os.environ.get("SAM_API_TOKEN")
         self.server_url = server_url
+        self.token = token
         self.session: Optional[ClientSession] = None
         self._sse_cm = None
 
     async def connect(self):
         """Connects to the SAM node via SSE."""
-        self._sse_cm = sse_client(self.server_url, headers={"Accept": "application/json, text/event-stream"})
+        headers = {"Accept": "application/json, text/event-stream"}
+        if self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
+        self._sse_cm = sse_client(self.server_url, headers=headers)
         read_stream, write_stream = await self._sse_cm.__aenter__()
         self.session = ClientSession(read_stream, write_stream)
         await self.session.__aenter__()

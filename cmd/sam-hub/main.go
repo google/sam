@@ -39,6 +39,7 @@ import (
 	"time"
 
 	"github.com/biscuit-auth/biscuit-go/v2"
+	"github.com/biscuit-auth/biscuit-go/v2/datalog"
 	"github.com/biscuit-auth/biscuit-go/v2/parser"
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/golang-jwt/jwt/v5"
@@ -162,6 +163,7 @@ type Hub struct {
 	ExternalAddrs      []string
 	AllowedAudiences   []string
 	AllowLoopback      bool
+	BiscuitTimeout     time.Duration
 	authenticatedPeers sync.Map
 }
 
@@ -856,10 +858,15 @@ func (h *Hub) verifyBiscuit(biscuitData []byte, remotePeer peer.ID) (*biscuit.Bi
 		return nil, fmt.Errorf("malformed biscuit: %w", err)
 	}
 
+	var authOpts []biscuit.AuthorizerOption
+	if h.BiscuitTimeout > 0 {
+		authOpts = append(authOpts, biscuit.WithWorldOptions(datalog.WithMaxDuration(h.BiscuitTimeout)))
+	}
+
 	keys := h.KeyRing.GetAllValidPublicKeys()
 	var lastErr error
 	for _, pubKey := range keys {
-		authorizer, err := b.Authorizer(pubKey)
+		authorizer, err := b.Authorizer(pubKey, authOpts...)
 		if err != nil {
 			lastErr = err
 			continue

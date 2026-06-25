@@ -293,6 +293,8 @@ jobs:
           export GEMINI_API_KEY="${{ secrets.GEMINI_API_KEY }}"
           export HF_TOKEN="${{ secrets.HF_TOKEN }}"
           
+          # Read and indent banana bot playground script for the ConfigMap template
+          export BANANA_BOT_SCRIPT=$(cat docs/snippets/banana_bot_playground.py | sed 's/^/    /')
           # Provision the openclaw-secret, preserving the gateway-token if it exists
           GATEWAY_TOKEN=$(kubectl get secret openclaw-secret-${ENV_NAME} -n ${CANARY_NAMESPACE} -o jsonpath="{.data.gateway-token}" 2>/dev/null | base64 -d || openssl rand -hex 16)
           kubectl create secret generic openclaw-secret-${ENV_NAME} \
@@ -310,6 +312,13 @@ jobs:
           envsubst < .github/k8s/sam-node-openclaw-template.yaml | kubectl apply -f -
           envsubst < .github/k8s/sam-node-vllm-template.yaml | kubectl apply -f -
           envsubst < .github/k8s/sam-node-everything-template.yaml | kubectl apply -f -
+          envsubst < .github/k8s/sam-node-cop-template.yaml | kubectl apply -f -
+
+          kubectl rollout status deployment/cop-canary-${ENV_NAME} -n ${CANARY_NAMESPACE} --timeout=120s || {
+            echo "Cop Canary Deployment failed!"
+            print_rollout_diagnostics "${CANARY_NAMESPACE}" "cop-canary-${ENV_NAME}" "app=cop-canary-${ENV_NAME}"
+            exit 1
+          }
 
           
           kubectl rollout status deployment/sam-canary-${ENV_NAME} -n ${CANARY_NAMESPACE} --timeout=120s || {

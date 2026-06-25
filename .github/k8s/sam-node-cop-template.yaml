@@ -1,0 +1,95 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sam-canary-cop-config-${ENV_NAME}
+  namespace: sam-canary-${ENV_NAME}
+data:
+  sam-node.yaml: |
+    version: "v1alpha1"
+    attenuation:
+      policies:
+        - 'allow if operation("mcp:cop");'
+        - 'allow if operation("/sam/catalog");'
+      checks: []
+      rules: []
+    services: []
+  banana_bot_playground.py: |
+${BANANA_BOT_SCRIPT}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cop-canary-${ENV_NAME}
+  namespace: sam-canary-${ENV_NAME}
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: cop-canary-${ENV_NAME}
+  template:
+    metadata:
+      labels:
+        app: cop-canary-${ENV_NAME}
+    spec:
+      serviceAccountName: sam-node-sa
+      containers:
+      - name: cop-agent
+        image: python:3.11-slim
+        ports:
+        - containerPort: 18790
+          name: http
+        command:
+        - "/bin/bash"
+        - "-c"
+        - |
+          pip install --no-cache-dir httpx mcp &&
+          python -u /app/banana_bot_playground.py
+        env:
+        - name: SAM_MCP_URL
+          value: "http://127.0.0.1:8080/mcp/events"
+        - name: SAM_API_TOKEN
+          value: "secret-token"
+        - name: GEMINI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: openclaw-secret-${ENV_NAME}
+              key: gemini-api-key
+        volumeMounts:
+        - name: config-volume
+          mountPath: /app/banana_bot_playground.py
+          subPath: banana_bot_playground.py
+      - name: sam-node
+        image: ghcr.io/google/sam-node:${IMAGE_TAG}
+        args: 
+          - "run"
+          - "--config=/etc/sam/sam-node.yaml"
+          - "--hub=http://sam-hub-${ENV_NAME}.${NAMESPACE}.svc.cluster.local:9090"
+          - "--jwt-path=/var/run/secrets/tokens/sam-token"
+          - "--api-token=secret-token"
+          - "--bind-addr=127.0.0.1:8080"
+        ports:
+        - containerPort: 8080
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 256Mi
+        volumeMounts:
+        - name: config-volume
+          mountPath: /etc/sam
+        - name: sam-token
+          mountPath: /var/run/secrets/tokens
+          readOnly: true
+      volumes:
+      - name: config-volume
+        configMap:
+          name: sam-canary-cop-config-${ENV_NAME}
+      - name: sam-token
+        projected:
+          sources:
+          - serviceAccountToken:
+              path: sam-token
+              expirationSeconds: 3600
+              audience: "sam-hub-audience"
