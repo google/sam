@@ -8,7 +8,6 @@ import (
 
 type hubConnectionManager interface {
 	IsConnected() bool
-	HubPeerIDString() string
 	LoadHubConfig() ([]byte, []string, error)
 	ConnectAndAuthWithHub(ctx context.Context, addr multiaddr.Multiaddr) error
 	LoadHubURL() (string, error)
@@ -33,7 +32,7 @@ func checkHubConnection(ctx context.Context, mgr hubConnectionManager) (stable b
 		return true, false
 	}
 
-	logger.Warnf("[Monitor] Disconnected from Hub %s. Attempting to reconnect...", mgr.HubPeerIDString())
+	logger.Warn("[Monitor] Disconnected from Hub. Attempting to reconnect...")
 
 	var p2pAddrs []multiaddr.Multiaddr
 	if _, storedAddrs, err := mgr.LoadHubConfig(); err == nil {

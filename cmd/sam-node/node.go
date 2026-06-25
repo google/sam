@@ -115,6 +115,7 @@ type SamNode struct {
 	PubSub            *pubsub.PubSub
 	Store             *Store
 	HubPeerID         peer.ID
+	authenticatedHubs map[peer.ID]bool
 	peerLastEventTime map[string]int64
 	receivedMsgs      map[string][]string
 	topics            map[string]*pubsub.Topic
@@ -166,7 +167,7 @@ func stripP2pFromDnsaddr(addr multiaddr.Multiaddr) multiaddr.Multiaddr {
 	parts := multiaddr.Split(addr)
 	var components []multiaddr.Multiaddrer
 	for _, p := range parts {
-		if p.Protocol().Code != multiaddr.P_P2P {
+		if _, err := p.ValueForProtocol(multiaddr.P_P2P); err != nil {
 			components = append(components, multiaddr.Multiaddr{p})
 		}
 	}
@@ -219,6 +220,7 @@ func NewSamNode(ctx context.Context, cfg SamNodeConfig) (*SamNode, error) {
 		peerLastEventTime: make(map[string]int64),
 		receivedMsgs:      make(map[string][]string),
 		topics:            make(map[string]*pubsub.Topic),
+		authenticatedHubs: make(map[peer.ID]bool),
 		LocalPolicy:       cfg.NodeConfig,
 		AllowLoopback:     cfg.AllowLoopback,
 		TrustHubRBAC:      cfg.TrustHubRBAC,
@@ -516,11 +518,17 @@ func (n *SamNode) startReprovideLoop(ctx context.Context, interval time.Duration
 }
 
 func (n *SamNode) IsConnected() bool {
-	return n.HubPeerID != "" && n.Host.Network().Connectedness(n.HubPeerID) == network.Connected
-}
-
-func (n *SamNode) HubPeerIDString() string {
-	return n.HubPeerID.String()
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if len(n.authenticatedHubs) == 0 {
+		return false
+	}
+	for pid := range n.authenticatedHubs {
+		if n.Host.Network().Connectedness(pid) == network.Connected {
+			return true
+		}
+	}
+	return false
 }
 
 func (n *SamNode) LoadHubConfig() ([]byte, []string, error) {
@@ -633,6 +641,15 @@ func (n *SamNode) ConnectAndAuthWithHub(ctx context.Context, addr multiaddr.Mult
 		resolvedAddrs = []multiaddr.Multiaddr{addr}
 	}
 
+	// Load biscuit from store once before the loop
+	biscuitBytes, err := n.Store.LoadIdentity()
+	if err != nil {
+		return fmt.Errorf("%w: failed to load identity from store: %w", ErrFatalAuth, err)
+	}
+	if len(biscuitBytes) == 0 {
+		return fmt.Errorf("%w: no identity biscuit found in store", ErrFatalAuth)
+	}
+
 	var connected bool
 	var lastFatalErr error
 	var errs []error
@@ -652,19 +669,6 @@ func (n *SamNode) ConnectAndAuthWithHub(ctx context.Context, addr multiaddr.Mult
 			continue
 		}
 
-		// Load biscuit from store
-		biscuitBytes, err := n.Store.LoadIdentity()
-		if err != nil {
-			lastFatalErr = fmt.Errorf("%w: failed to load identity from store: %w", ErrFatalAuth, err)
-			errs = append(errs, lastFatalErr)
-			continue
-		}
-		if len(biscuitBytes) == 0 {
-			lastFatalErr = fmt.Errorf("%w: no identity biscuit found in store", ErrFatalAuth)
-			errs = append(errs, lastFatalErr)
-			continue
-		}
-
 		// Open auth stream
 		s, err := n.Host.NewStream(ctx, addrInfo.ID, api.AuthProtocolID)
 		if err != nil {
@@ -674,7 +678,7 @@ func (n *SamNode) ConnectAndAuthWithHub(ctx context.Context, addr multiaddr.Mult
 
 		success, err := n.performHubAuthHandshake(s, biscuitBytes)
 		if err != nil {
-			_ = s.Close()
+			_ = s.Reset()
 			errs = append(errs, fmt.Errorf("handshake failed with hub %s: %w", resolved, err))
 			if errors.Is(err, ErrFatalAuth) {
 				lastFatalErr = err
@@ -684,6 +688,9 @@ func (n *SamNode) ConnectAndAuthWithHub(ctx context.Context, addr multiaddr.Mult
 		_ = s.Close()
 
 		if success {
+			n.mu.Lock()
+			n.authenticatedHubs[addrInfo.ID] = true
+			n.mu.Unlock()
 			n.HubPeerID = addrInfo.ID
 			logger.Infof("[AuthN] Successfully authenticated with hub via libp2p: %s", addrInfo.ID)
 			connected = true

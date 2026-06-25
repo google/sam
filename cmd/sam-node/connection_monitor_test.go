@@ -28,10 +28,6 @@ func (m *mockHubConnectionManager) IsConnected() bool {
 	return m.connected
 }
 
-func (m *mockHubConnectionManager) HubPeerIDString() string {
-	return m.peerID
-}
-
 func (m *mockHubConnectionManager) LoadHubConfig() ([]byte, []string, error) {
 	return nil, m.storedAddrs, m.hubConfigErr
 }
