@@ -412,7 +412,7 @@ metadata:
   name: cop-canary-${ENV_NAME}
   namespace: sam-canary-${ENV_NAME}
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
       app: cop-canary-${ENV_NAME}
