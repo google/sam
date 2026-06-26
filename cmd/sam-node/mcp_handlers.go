@@ -508,6 +508,7 @@ func (n *SamNode) handleCheckConnectivity(ctx context.Context, req *mcp.CallTool
 	if params.PeerID != "" {
 		pid, err := peer.Decode(params.PeerID)
 		if err == nil {
+			n.preparePeerAddrs(ctx, pid)
 			start := time.Now()
 			err := n.Host.Connect(ctx, peer.AddrInfo{ID: pid})
 			stats["ping_latency_ms"] = time.Since(start).Milliseconds()
