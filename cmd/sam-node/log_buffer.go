@@ -53,7 +53,7 @@ func GetRecentLogs() []string {
 	globalLogBuffer.mu.Lock()
 	defer globalLogBuffer.mu.Unlock()
 
-	var logs []string
+	logs := []string{}
 	globalLogBuffer.buffer.Do(func(p any) {
 		if p != nil {
 			logs = append(logs, p.(string))
