@@ -54,3 +54,4 @@ data:
       - 'http://localhost/callback'
       - 'https://auth.sam-mesh.dev/device/callback'
       - 'urn:ietf:wg:oauth:2.0:oob'
+      - '/device/callback'
