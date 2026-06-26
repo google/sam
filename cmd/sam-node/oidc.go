@@ -94,21 +94,22 @@ func (n *SamNode) InteractiveLogin(ctx context.Context, authURL, tokenURL, clien
 		var err error
 		// Try a few known ports to satisfy Dex which doesn't support RFC 8252 dynamic loopback
 		// Since Dex strictly matches redirect URIs (Dex Issue #4836), we can't use `localhost:0`.
-		// Instead, we try a small set of pre-registered fixed ports, falling back to port 0
-		// in case they are all taken (which will work with IDPs that do support RFC 8252).
-		for _, p := range []string{"13000", "13001", "13002", "0"} {
+		// Instead, we try a small set of pre-registered fixed ports.
+		for _, p := range []string{"13000", "13001", "13002"} {
 			listener, err = net.Listen("tcp", "127.0.0.1:"+p)
 			if err == nil {
 				break
 			}
 		}
-		if err != nil || listener == nil {
-			return "", fmt.Errorf("failed to start local server: %w", err)
+		if listener == nil {
+			logger.Warn("Could not bind local OIDC listener (ports 13000-13002 busy). Falling back to headless (OOB) authorization.")
+			isHeadless = true
+			redirectURI = "urn:ietf:wg:oauth:2.0:oob"
+		} else {
+			defer func() { _ = listener.Close() }()
+			port := listener.Addr().(*net.TCPAddr).Port
+			redirectURI = fmt.Sprintf("http://127.0.0.1:%d/callback", port)
 		}
-		defer func() { _ = listener.Close() }()
-
-		port := listener.Addr().(*net.TCPAddr).Port
-		redirectURI = fmt.Sprintf("http://127.0.0.1:%d/callback", port)
 	}
 
 	authReq, err := http.NewRequest("GET", authURL, nil)
