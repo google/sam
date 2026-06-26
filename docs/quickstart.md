@@ -1,41 +1,74 @@
 # Quick Start
 
-This guide gets you up and running with a SAM node connected to the public `bananas.sam-mesh.dev` mesh using Docker.
+This guide gets you up and running with a SAM node connected to the public `bananas.sam-mesh.dev` mesh. You can run SAM either directly via a binary or using Docker.
+
+## 1. Install SAM
+
+### Option A: Install Script (macOS / Linux)
+The easiest way to install the latest binaries directly:
+```bash
+curl -sL https://raw.githubusercontent.com/google/sam/main/install.sh | bash
+```
+
+### Option B: Go Install (macOS / Linux / Windows)
+If you have Go installed, you can compile and install directly from the repository:
+```bash
+go install github.com/google/sam/cmd/sam-node@latest
+go install github.com/google/sam/cmd/sam-hub@latest
+```
+
+### Option C: PowerShell (Windows)
+For Windows users without WSL, you can download the latest release using PowerShell:
+```powershell
+$Release = Invoke-RestMethod -Uri "https://api.github.com/repos/google/sam/releases/latest"
+$Version = $Release.tag_name
+$Url = "https://github.com/google/sam/releases/download/$Version/sam_Windows_x86_64.zip"
+Invoke-WebRequest -Uri $Url -OutFile "sam.zip"
+Expand-Archive -Path "sam.zip" -DestinationPath "$env:ProgramFiles\sam"
+```
 
 ---
 
-## 1. Join the Mesh
+## 2. Join the Mesh
 
-To register your node with the mesh and obtain a cryptographic identity token (Biscuit), run the OIDC device authorization flow. 
+To register your node with the mesh and obtain a cryptographic identity token (Biscuit), run the OIDC authorization flow. 
 
-Create a local directory on your host to persist your node identity:
-
+### Using the Binary
 ```bash
-mkdir -p $(pwd)/sam-data
+sam-node join https://bananas.sam-mesh.dev
 ```
 
-Enroll your node:
-
+### Using Docker
+Create a local directory to persist your node identity:
 ```bash
+mkdir -p $(pwd)/sam-data
 docker run -it \
   -v $(pwd)/sam-data:/data \
   ghcr.io/google/sam-node:latest \
   join --data-dir /data https://bananas.sam-mesh.dev
 ```
 
-1. The container will output a Device Authorization URL and a validation code.
-2. Open the URL in your web browser and sign in.
-3. Once authenticated, the container registers the node, saves the identity to `/data/agent.db` (persisted on your host at `./sam-data/agent.db`), and exits.
+The CLI will output a Device Authorization URL (if headless/Docker) or open your browser (if using the binary natively). Once authenticated, the node registers and saves the identity to `~/.config/sam-mesh/agent.db` (or `/data/agent.db` in Docker).
 
 ---
 
-## 2. Run the Node
+## 3. Run the Node
 
-Start your node in the background. We set a security `--api-token` to protect access to the local control plane API and map the required ports:
+Start your node in the background. We set a security `--api-token` to protect access to the local control plane API.
 
-- `5001/udp` and `5002/tcp`: Libp2p swarm connection ports.
-- `8080/tcp`: Local MCP SSE HTTP API.
+### Using the Binary
+```bash
+sam-node run --bind-addr 127.0.0.1:8080 --api-token my-secret-token
+```
+You should see in the logs:
+```text
+INFO  sam-node  [AuthN] Successfully authenticated with hub via libp2p: ...
+SAM Node Online.
+PeerID: 12D3KooW...
+```
 
+### Using Docker
+Map the required ports (`5001/udp`, `5002/tcp` for libp2p, and `8080/tcp` for the local API):
 ```bash
 docker run -d \
   --name sam-node \
@@ -46,23 +79,11 @@ docker run -d \
   ghcr.io/google/sam-node:latest \
   run --data-dir /data --bind-addr 0.0.0.0:8080 --api-token my-secret-token
 ```
-
-To verify the node is running and connected to the testnet, check the logs:
-
-```bash
-docker logs sam-node
-```
-
-You should see:
-```text
-INFO  sam-node  [AuthN] Successfully authenticated with hub via libp2p: ...
-SAM Node Online.
-PeerID: 12D3KooW...
-```
+Verify the node is running with `docker logs sam-node`.
 
 ---
 
-## 3. Query the Local MCP API
+## 4. Query the Local MCP API
 
 Your SAM node exposes a standard Model Context Protocol (MCP) server over HTTP Server-Sent Events (SSE) at `http://localhost:8080/mcp/message`. You can interact with it using simple `curl` commands.
 
