@@ -83,7 +83,7 @@ func (n *SamNode) InteractiveLogin(ctx context.Context, authURL, tokenURL, clien
 		return "", fmt.Errorf("failed to generate PKCE: %w", err)
 	}
 
-	isHeadless := headlessFlag || os.Getenv("SSH_CLIENT") != "" || os.Getenv("SSH_TTY") != "" || isRunningInContainer()
+	isHeadless := headlessFlag || os.Getenv("SSH_CLIENT") != "" || os.Getenv("SSH_TTY") != ""
 
 	var redirectURI string
 	var listener net.Listener
@@ -331,22 +331,6 @@ func (n *SamNode) DiscoverEndpoints(ctx context.Context, issuerURL string) (toke
 		return "", "", fmt.Errorf("failed to extract claims: %w", err)
 	}
 	return claims.TokenURL, claims.AuthURL, nil
-}
-
-func isRunningInContainer() bool {
-	if _, err := os.Stat("/.dockerenv"); err == nil {
-		return true
-	}
-	if _, err := os.Stat("/run/.containerenv"); err == nil {
-		return true
-	}
-	if b, err := os.ReadFile("/proc/1/cgroup"); err == nil {
-		s := string(b)
-		if strings.Contains(s, "docker") || strings.Contains(s, "containerd") {
-			return true
-		}
-	}
-	return false
 }
 
 var openBrowserFunc = openBrowser
