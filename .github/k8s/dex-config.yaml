@@ -21,6 +21,7 @@ data:
       grantTypes:
         - "authorization_code"
         - "refresh_token"
+        - "urn:ietf:params:oauth:grant-type:device_code"
       skipApprovalScreen: true
       
     connectors:
@@ -46,6 +47,11 @@ data:
       name: 'SAM Mesh CLI'
       public: true # Allows PKCE flow for CLIs without exposing the secret
       redirectURIs:
+      - 'http://127.0.0.1:13000/callback'
+      - 'http://127.0.0.1:13001/callback'
+      - 'http://127.0.0.1:13002/callback'
       - 'http://127.0.0.1/callback'
       - 'http://localhost/callback'
+      - 'https://auth.sam-mesh.dev/device/callback'
+      - '/device/callback'
       - 'urn:ietf:wg:oauth:2.0:oob'
