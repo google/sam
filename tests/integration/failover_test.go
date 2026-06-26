@@ -170,7 +170,7 @@ roles: {}
 				nodePeerID = strings.TrimSpace(parts[0])
 			}
 		}
-		if strings.Contains(out, "Yielding static relays to AutoRelay") {
+		if nodePeerID != "" && strings.Contains(out, "Yielding static relays to AutoRelay") {
 			break
 		}
 		time.Sleep(100 * time.Millisecond)

@@ -492,3 +492,120 @@ func (n *SamNode) handleDescribeRemoteTool(ctx context.Context, req *mcp.CallToo
 
 	return nil, nil, fmt.Errorf("tool not found on peer")
 }
+
+// CheckConnectivityParams defines the parameters for the check_connectivity tool.
+type CheckConnectivityParams struct {
+	PeerID string `json:"peer_id,omitempty" jsonschema:"Optional peer ID to ping."`
+}
+
+// handleCheckConnectivity implements the check_connectivity tool.
+func (n *SamNode) handleCheckConnectivity(ctx context.Context, req *mcp.CallToolRequest, params CheckConnectivityParams) (*mcp.CallToolResult, any, error) {
+	stats := map[string]any{
+		"connected_peers":   len(n.Host.Network().Peers()),
+		"total_known_peers": len(n.Host.Peerstore().Peers()),
+	}
+
+	if params.PeerID != "" {
+		pid, err := peer.Decode(params.PeerID)
+		if err == nil {
+			n.preparePeerAddrs(ctx, pid)
+			start := time.Now()
+			err := n.Host.Connect(ctx, peer.AddrInfo{ID: pid})
+			stats["ping_latency_ms"] = time.Since(start).Milliseconds()
+			stats["ping_error"] = err != nil
+			if err != nil {
+				stats["ping_error_msg"] = err.Error()
+			}
+		} else {
+			stats["ping_error"] = true
+			stats["ping_error_msg"] = "invalid peer id"
+		}
+	} else if n.HubPeerID != "" {
+		start := time.Now()
+		err := n.Host.Connect(ctx, peer.AddrInfo{ID: n.HubPeerID})
+		stats["hub_latency_ms"] = time.Since(start).Milliseconds()
+		stats["hub_error"] = err != nil
+		if err != nil {
+			stats["hub_error_msg"] = err.Error()
+		}
+	}
+
+	data, err := json.Marshal(stats)
+	if err != nil {
+		return nil, nil, err
+	}
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{&mcp.TextContent{Text: string(data)}},
+	}, nil, nil
+}
+
+// GetTokenInfoParams defines parameters for the get_token_info tool.
+type GetTokenInfoParams struct{}
+
+// handleGetTokenInfo implements the get_token_info tool.
+func (n *SamNode) handleGetTokenInfo(ctx context.Context, req *mcp.CallToolRequest, params GetTokenInfoParams) (*mcp.CallToolResult, any, error) {
+	info := map[string]any{
+		"has_token": false,
+	}
+
+	token, err := n.Store.LoadIdentity()
+	if err == nil && len(token) > 0 {
+		info["has_token"] = true
+		exp, err := n.Store.LoadIdentityExpiration()
+		if err == nil {
+			info["expires_in_seconds"] = time.Until(time.Unix(exp, 0)).Seconds()
+			info["is_expired"] = time.Now().Unix() > exp
+		}
+	}
+
+	data, err := json.Marshal(info)
+	if err != nil {
+		return nil, nil, err
+	}
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{&mcp.TextContent{Text: string(data)}},
+	}, nil, nil
+}
+
+// GetNetworkInfoParams defines parameters for the get_network_info tool.
+type GetNetworkInfoParams struct{}
+
+// handleGetNetworkInfo implements the get_network_info tool.
+func (n *SamNode) handleGetNetworkInfo(ctx context.Context, req *mcp.CallToolRequest, params GetNetworkInfoParams) (*mcp.CallToolResult, any, error) {
+	listenAddrs := []string{}
+	for _, a := range n.Host.Network().ListenAddresses() {
+		listenAddrs = append(listenAddrs, a.String())
+	}
+
+	observedAddrs := []string{}
+	for _, a := range n.Host.Addrs() {
+		observedAddrs = append(observedAddrs, a.String())
+	}
+
+	info := map[string]any{
+		"listen_addresses":   listenAddrs,
+		"observed_addresses": observedAddrs,
+	}
+	data, err := json.Marshal(info)
+	if err != nil {
+		return nil, nil, err
+	}
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{&mcp.TextContent{Text: string(data)}},
+	}, nil, nil
+}
+
+// GetRecentLogsParams defines parameters for the get_recent_logs tool.
+type GetRecentLogsParams struct{}
+
+// handleGetRecentLogs implements the get_recent_logs tool.
+func (n *SamNode) handleGetRecentLogs(ctx context.Context, req *mcp.CallToolRequest, params GetRecentLogsParams) (*mcp.CallToolResult, any, error) {
+	logs := GetRecentLogs()
+	data, err := json.Marshal(map[string]any{"logs": logs})
+	if err != nil {
+		return nil, nil, err
+	}
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{&mcp.TextContent{Text: string(data)}},
+	}, nil, nil
+}
