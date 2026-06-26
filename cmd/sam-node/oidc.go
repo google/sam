@@ -83,7 +83,7 @@ func (n *SamNode) InteractiveLogin(ctx context.Context, authURL, tokenURL, clien
 		return "", fmt.Errorf("failed to generate PKCE: %w", err)
 	}
 
-	isHeadless := headlessFlag || os.Getenv("SSH_CLIENT") != "" || os.Getenv("SSH_TTY") != ""
+	isHeadless := headlessFlag || os.Getenv("SSH_CLIENT") != "" || os.Getenv("SSH_TTY") != "" || isRunningInContainer()
 
 	var redirectURI string
 	var listener net.Listener
@@ -92,8 +92,17 @@ func (n *SamNode) InteractiveLogin(ctx context.Context, authURL, tokenURL, clien
 		redirectURI = "urn:ietf:wg:oauth:2.0:oob"
 	} else {
 		var err error
-		listener, err = net.Listen("tcp", "127.0.0.1:0")
-		if err != nil {
+		// Try a few known ports to satisfy Dex which doesn't support RFC 8252 dynamic loopback
+		// Since Dex strictly matches redirect URIs (Dex Issue #4836), we can't use `localhost:0`.
+		// Instead, we try a small set of pre-registered fixed ports, falling back to port 0
+		// in case they are all taken (which will work with IDPs that do support RFC 8252).
+		for _, p := range []string{"13000", "13001", "13002", "0"} {
+			listener, err = net.Listen("tcp", "127.0.0.1:"+p)
+			if err == nil {
+				break
+			}
+		}
+		if err != nil || listener == nil {
 			return "", fmt.Errorf("failed to start local server: %w", err)
 		}
 		defer func() { _ = listener.Close() }()
@@ -322,6 +331,22 @@ func (n *SamNode) DiscoverEndpoints(ctx context.Context, issuerURL string) (toke
 		return "", "", fmt.Errorf("failed to extract claims: %w", err)
 	}
 	return claims.TokenURL, claims.AuthURL, nil
+}
+
+func isRunningInContainer() bool {
+	if _, err := os.Stat("/.dockerenv"); err == nil {
+		return true
+	}
+	if _, err := os.Stat("/run/.containerenv"); err == nil {
+		return true
+	}
+	if b, err := os.ReadFile("/proc/1/cgroup"); err == nil {
+		s := string(b)
+		if strings.Contains(s, "docker") || strings.Contains(s, "containerd") {
+			return true
+		}
+	}
+	return false
 }
 
 var openBrowserFunc = openBrowser
