@@ -100,6 +100,11 @@ func main() {
 		Short: "Start the sovereign mesh node",
 		Run: func(cmd *cobra.Command, args []string) {
 			ctx := cmd.Context()
+			// Configure logging to duplicate to ring buffer
+			cfg := golog.GetConfig()
+			cfg.URL = "ringbuffer://"
+			golog.SetupLogging(cfg)
+
 			// Initialize logging
 			golog.SetAllLoggers(golog.LevelInfo)
 			if logLevelFlag != "" {
@@ -108,6 +113,7 @@ func main() {
 					golog.SetAllLoggers(lvl)
 				}
 			}
+
 			// Suppress noisy DHT logs
 			_ = golog.SetLogLevel("dht", "fatal")
 			_ = golog.SetLogLevel("dht/RtRefreshManager", "fatal")

@@ -120,6 +120,30 @@ func NewMCPHandler(node *SamNode) http.Handler {
 		Description: "Return the description, input schema, and output schema for a specific aggregated tool on a specific peer. peer_id and tool_name are both required; tool_name must be a namespaced '<service>.<tool>' name as returned by find_remote_tools.",
 	}, node.handleDescribeRemoteTool)
 
+	// Add the check_connectivity tool.
+	mcp.AddTool(mcpServer, &mcp.Tool{
+		Name:        "check_connectivity",
+		Description: "Diagnose the node's ability to communicate with the SAM hub and the broader mesh network.",
+	}, node.handleCheckConnectivity)
+
+	// Add the get_token_info tool.
+	mcp.AddTool(mcpServer, &mcp.Tool{
+		Name:        "get_token_info",
+		Description: "Inspects the local auth token, returns its expiration time and status.",
+	}, node.handleGetTokenInfo)
+
+	// Add the get_network_info tool.
+	mcp.AddTool(mcpServer, &mcp.Tool{
+		Name:        "get_network_info",
+		Description: "Returns local network interfaces and listener addresses.",
+	}, node.handleGetNetworkInfo)
+
+	// Add the get_recent_logs tool.
+	mcp.AddTool(mcpServer, &mcp.Tool{
+		Name:        "get_recent_logs",
+		Description: "Returns the last few lines of the node's log output.",
+	}, node.handleGetRecentLogs)
+
 	// Create the SSE handler using the SDK
 	sseHandler := mcp.NewSSEHandler(func(request *http.Request) *mcp.Server {
 		return mcpServer
