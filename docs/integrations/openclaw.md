@@ -38,13 +38,15 @@ Once configured, restart your OpenClaw gateway to initialize the bridge. You can
 
 ## Discovering and Invoking Remote Tools
 
-OpenClaw is a generic MCP client and exposes no SAM-specific CLI flags. Once the bridge is active, the tools that `sam-node` provides — `discover_remote_services`, `find_remote_tools`, and `call_remote_tool` — are surfaced directly to your agent, which calls them like any other tool. The flow mirrors the local MCP API:
+OpenClaw is a generic MCP client and exposes no SAM-specific CLI flags. Once the bridge is active, the tools that `sam-node` provides — `discover_remote_services`, `find_remote_tools`, `describe_remote_tool`, and `call_remote_tool` — are surfaced directly to your agent, which calls them like any other tool. The flow mirrors the local MCP API:
 
 1. **Discover services**: the agent calls `discover_remote_services` (e.g. with `{"type": "mcp"}`) to list active MCP services on the mesh and obtain their `peer_id`s.
 
 2. **Find remote tools**: the agent calls `find_remote_tools`, passing the target `peer_id`, to list the tools that peer hosts.
 
-3. **Invoke a remote tool**: the agent calls `call_remote_tool`, passing the target `peer_id`, the namespaced `tool_name` (e.g. `everything.get-sum`), and the tool's `arguments`. Your local `sam-node` proxies the call across the P2P mesh and returns the result.
+3. **Describe a remote tool**: the agent calls `describe_remote_tool`, passing the target `peer_id` and the namespaced `tool_name`, to fetch the tool's `input_schema`. This is required to learn the expected argument structure before invoking it.
+
+4. **Invoke a remote tool**: the agent calls `call_remote_tool`, passing the target `peer_id`, the namespaced `tool_name` (e.g. `everything.get-sum`), and the tool's `arguments` (matching the schema from the previous step). Your local `sam-node` proxies the call across the P2P mesh and returns the result.
 
 Because these tools are surfaced automatically, no remote tool needs to be registered individually in OpenClaw.
 
