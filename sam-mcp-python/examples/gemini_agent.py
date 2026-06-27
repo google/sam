@@ -93,7 +93,7 @@ async def run_agent():
 
     while True:
         try:
-            user_input = input("\nYou > ")
+            user_input = await asyncio.to_thread(input, "\nYou > ")
             if user_input.lower() in ["exit", "quit"]:
                 break
             if not user_input.strip():
