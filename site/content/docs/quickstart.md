@@ -89,7 +89,7 @@ Your SAM node exposes a standard Model Context Protocol (MCP) server. The easies
 Query the list of tools available on your local node (e.g. peer discovery, message broadcast, and remote tool execution):
 
 ```bash
-mcp-client -url http://localhost:8080/mcp/events -list
+mcp-client -url http://localhost:8080/mcp/events -token my-secret-token -list
 ```
 
 ### Discover Remote Services in the Mesh
