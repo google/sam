@@ -1,0 +1,28 @@
+.td-navbar {
+  border-bottom: 2px solid $primary-light;
+}
+
+// Homepage cover block with SAM logo background
+.td-cover-block {
+  background-color: #ffffff !important;
+  background-image: url('/sam_logo.png') !important;
+  background-repeat: no-repeat !important;
+  background-position: center 30% !important; // Pushes image slightly higher to leave room for buttons
+  background-size: contain !important;
+  
+  // Set minimum height to display the logo nicely
+  min-height: 75vh !important;
+  
+  // Layout to push buttons to the bottom
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: flex-end !important;
+  padding-bottom: 4rem !important;
+}
+
+// Remove the default dark overlay shadow on the cover block
+.td-overlay::before {
+  background: transparent !important;
+  opacity: 0 !important;
+}
+

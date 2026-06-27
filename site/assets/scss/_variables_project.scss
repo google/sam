@@ -1,0 +1,13 @@
+// SAM Logo Theme Color Overrides
+$primary: #0a7080;         // Deep teal (base of SAM text)
+$primary-light: #00f0ff;   // Cyberpunk glowing cyan (bananas' visors & wiring)
+$yellow: #f6c344;          // Banana yellow
+$dark: #07131e;            // Deep navy/charcoal (shield background and text)
+$light: #f8fafc;           // Off-white slate for body/sidebar backgrounds
+
+// Docsy theme mappings
+$td-brand: $primary;
+$td-sidebar-bg-color: $light;
+$td-footer-bg-color: $dark;
+$link-color: $primary;
+$link-hover-color: lighten($primary, 15%);
