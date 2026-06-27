@@ -1,0 +1,200 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>SAM</title><link>https://sam-mesh.dev/docs/</link><description>Recent content on SAM</description><generator>Hugo</generator><language>en-us</language><atom:link href="https://sam-mesh.dev/docs/index.xml" rel="self" type="application/rss+xml"/><item><title/><link>https://sam-mesh.dev/docs/agent_integration/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://sam-mesh.dev/docs/agent_integration/</guid><description>&lt;h1 id="agent-integration-guide">Agent Integration Guide&lt;/h1>
+&lt;p>SAM is designed to be the networking layer for autonomous AI agents. The easiest way for your agent to interact with the mesh is through the &lt;strong>Model Context Protocol (MCP)&lt;/strong> exposed locally by your node.&lt;/p>
+&lt;p>Every &lt;code>sam-node&lt;/code> runs a local MCP server that allows agents to:&lt;/p>
+&lt;ul>
+&lt;li>Discover tools available on the mesh.&lt;/li>
+&lt;li>Connect to remote peers securely.&lt;/li>
+&lt;li>Query mesh information (e.g. &lt;code>get_mesh_info&lt;/code>).&lt;/li>
+&lt;li>Call tools remotely (via &lt;code>call_remote_tool&lt;/code>).&lt;/li>
+&lt;/ul>
+&lt;h2 id="supported-agent-integrations">Supported Agent Integrations&lt;/h2>
+&lt;p>Explore the step-by-step guides to integrate SAM with your favorite AI Agent systems:&lt;/p></description></item><item><title/><link>https://sam-mesh.dev/docs/cli/reference/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://sam-mesh.dev/docs/cli/reference/</guid><description>&lt;h1 id="cli-reference">CLI Reference&lt;/h1>
+&lt;p>The current repository exposes two CLIs:&lt;/p>
+&lt;ul>
+&lt;li>&lt;code>sam-node&lt;/code>&lt;/li>
+&lt;li>&lt;code>sam-hub&lt;/code>&lt;/li>
+&lt;/ul>
+&lt;h2 id="sam-node">sam-node&lt;/h2>
+&lt;div class="highlight">&lt;pre tabindex="0" class="chroma">&lt;code class="language-bash" data-lang="bash">&lt;span class="line">&lt;span class="cl">sam-node --help
+&lt;/span>&lt;/span>&lt;/code>&lt;/pre>&lt;/div>&lt;h3 id="sam-node-join">sam-node join&lt;/h3>
+&lt;p>Join the Sovereign Agent Mesh hub and enroll the node.&lt;/p>
+&lt;div class="highlight">&lt;pre tabindex="0" class="chroma">&lt;code class="language-bash" data-lang="bash">&lt;span class="line">&lt;span class="cl">sam-node join &lt;span class="o">[&lt;/span>hub_url&lt;span class="o">]&lt;/span> &lt;span class="o">[&lt;/span>flags&lt;span class="o">]&lt;/span>
+&lt;/span>&lt;/span>&lt;/code>&lt;/pre>&lt;/div>&lt;p>If &lt;code>hub_url&lt;/code> is omitted, you will be prompted to join the default community testing network (&lt;code>https://bananas.sam-mesh.dev&lt;/code>). This command initiates an interactive OIDC device login flow and stores the returned identity Biscuit token and generated keypair in the database.&lt;/p>
+&lt;p>Flags:&lt;/p>
+&lt;ul>
+&lt;li>&lt;code>--data-dir&lt;/code>: Override directory for the agent store (defaults to OS user config dir).&lt;/li>
+&lt;/ul>
+&lt;h3 id="sam-node-run">sam-node run&lt;/h3>
+&lt;p>Start the sovereign mesh node.&lt;/p></description></item><item><title/><link>https://sam-mesh.dev/docs/development/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://sam-mesh.dev/docs/development/</guid><description>&lt;h1 id="developer-guide--repository-setup">Developer Guide &amp;amp; Repository Setup&lt;/h1>
+&lt;p>This document is for developers who want to compile SAM from source, run a local development mesh, run the test suites, or contribute to the repository.&lt;/p>
+&lt;hr>
+&lt;h2 id="prerequisites">Prerequisites&lt;/h2>
+&lt;p>To build and test the Go binaries natively:&lt;/p>
+&lt;ul>
+&lt;li>&lt;strong>Go Toolchain&lt;/strong>: Go 1.25+&lt;/li>
+&lt;li>&lt;strong>Docker&lt;/strong>: For running containerized integration tests and building local images.&lt;/li>
+&lt;li>&lt;strong>BATS&lt;/strong>: &lt;code>bats-core&lt;/code> framework for running E2E shell tests.&lt;/li>
+&lt;/ul>
+&lt;hr>
+&lt;h2 id="build-from-source">Build from Source&lt;/h2>
+&lt;p>Clone the repository and compile the binaries:&lt;/p></description></item><item><title/><link>https://sam-mesh.dev/docs/integrations/claude-code/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://sam-mesh.dev/docs/integrations/claude-code/</guid><description>&lt;h1 id="integrating-sam-with-claude-code">Integrating SAM with Claude Code&lt;/h1>
+&lt;p>You can connect your &lt;code>sam-node&lt;/code> to &lt;a href="https://claude.com/claude-code">Claude Code&lt;/a> as a remote MCP server, giving Claude Code agents the ability to discover and invoke tools across the SAM mesh.&lt;/p>
+&lt;h2 id="overview">Overview&lt;/h2>
+&lt;p>&lt;code>sam-node&lt;/code> exposes a standard Model Context Protocol (MCP) server over HTTP Server-Sent Events (SSE). Claude Code is a generic MCP client, so once the server is registered its tools — &lt;code>discover_remote_services&lt;/code>, &lt;code>find_remote_tools&lt;/code>, &lt;code>describe_remote_tool&lt;/code>, and &lt;code>call_remote_tool&lt;/code> — are surfaced directly to your agent.&lt;/p></description></item><item><title/><link>https://sam-mesh.dev/docs/integrations/claude-desktop/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://sam-mesh.dev/docs/integrations/claude-desktop/</guid><description>&lt;h1 id="integrating-sam-with-claude-desktop">Integrating SAM with Claude Desktop&lt;/h1>
+&lt;p>You can connect your &lt;code>sam-node&lt;/code> to the &lt;a href="https://claude.com/download">Claude Desktop&lt;/a> app as an MCP server. Unlike &lt;a href="./claude-code.md">Claude Code&lt;/a>, Claude Desktop has its own configuration and does &lt;strong>not&lt;/strong> read Claude Code&amp;rsquo;s MCP settings.&lt;/p>
+&lt;h2 id="overview">Overview&lt;/h2>
+&lt;p>Claude Desktop&amp;rsquo;s &lt;code>claude_desktop_config.json&lt;/code> natively launches &lt;strong>stdio&lt;/strong> MCP servers (a local command). &lt;code>sam-node&lt;/code> exposes an &lt;strong>SSE&lt;/strong> server, so you bridge the two with &lt;a href="https://www.npmjs.com/package/mcp-remote">&lt;code>mcp-remote&lt;/code>&lt;/a> — a small stdio-to-remote proxy that Claude Desktop launches locally and that connects to your node&amp;rsquo;s SSE endpoint.&lt;/p></description></item><item><title/><link>https://sam-mesh.dev/docs/integrations/gemini/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://sam-mesh.dev/docs/integrations/gemini/</guid><description>&lt;h1 id="running-a-gemini-ai-agent-on-the-mesh">Running a Gemini AI Agent on the Mesh&lt;/h1>
+&lt;p>This tutorial demonstrates how to connect a local AI Agent powered by Google Gemini (using the official &lt;code>google-genai&lt;/code> SDK) to your local SAM node.&lt;/p>
+&lt;p>By exposing the SAM Model Context Protocol (MCP) server to Gemini, the agent can dynamically discover tools hosted by other peers in the mesh, describe them, and execute them to solve tasks.&lt;/p>
+&lt;hr>
+&lt;h2 id="prerequisites">Prerequisites&lt;/h2>
+&lt;ol>
+&lt;li>&lt;strong>Python 3.10+&lt;/strong>: Ensure Python is installed on your host.&lt;/li>
+&lt;li>&lt;strong>SAM Node Running&lt;/strong>: A local SAM node should be running and enrolled on the testnet (see the &lt;a href="../quickstart.md">Quick Start Guide&lt;/a>).&lt;/li>
+&lt;li>&lt;strong>Gemini API Key&lt;/strong>: Obtain an API key from Google AI Studio and export it:
+&lt;div class="highlight">&lt;pre tabindex="0" class="chroma">&lt;code class="language-bash" data-lang="bash">&lt;span class="line">&lt;span class="cl">&lt;span class="nb">export&lt;/span> &lt;span class="nv">GEMINI_API_KEY&lt;/span>&lt;span class="o">=&lt;/span>&lt;span class="s2">&amp;#34;your-api-key-here&amp;#34;&lt;/span>
+&lt;/span>&lt;/span>&lt;/code>&lt;/pre>&lt;/div>&lt;/li>
+&lt;/ol>
+&lt;hr>
+&lt;h2 id="1-setup-the-python-client">1. Setup the Python Client&lt;/h2>
+&lt;p>Go to the &lt;code>sam-mcp-python&lt;/code> directory in the repository:&lt;/p></description></item><item><title/><link>https://sam-mesh.dev/docs/integrations/openclaw/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://sam-mesh.dev/docs/integrations/openclaw/</guid><description>&lt;h1 id="integrating-sam-with-openclaw">Integrating SAM with OpenClaw&lt;/h1>
+&lt;p>You can seamlessly integrate your &lt;code>sam-node&lt;/code> as a remote MCP server in &lt;a href="https://openclaw.ai">OpenClaw&lt;/a>, allowing your agents to dynamically discover and invoke tools across the mesh.&lt;/p>
+&lt;h2 id="overview">Overview&lt;/h2>
+&lt;p>By configuring your &lt;code>sam-node&lt;/code> as an MCP server, you enable your OpenClaw agents to access the P2P mesh, discovering tools from remote nodes and executing operations as if they were local.&lt;/p>
+&lt;h2 id="configuration">Configuration&lt;/h2>
+&lt;p>To bridge your local &lt;code>sam-node&lt;/code> into your OpenClaw agent runtime, use the &lt;code>openclaw mcp&lt;/code> CLI. Ensure your node is running and identify the API token configured in your &lt;code>sam-node&lt;/code> launch arguments.&lt;/p></description></item><item><title/><link>https://sam-mesh.dev/docs/kubernetes-deployment/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://sam-mesh.dev/docs/kubernetes-deployment/</guid><description>&lt;h1 id="kubernetes-deployment-and-local-testing-guide">Kubernetes Deployment and Local Testing Guide&lt;/h1>
+&lt;p>This guide explains how to deploy the &lt;code>sam-hub&lt;/code> in a Kubernetes cluster and how to test it locally using &lt;code>kind&lt;/code> and &lt;code>cloud-provider-kind&lt;/code>.&lt;/p>
+&lt;p>This guide supports using either &lt;strong>Google OIDC&lt;/strong> or a &lt;strong>Mock OIDC Provider&lt;/strong> for authentication. The mock provider is recommended for quick local testing as it does not require creating external credentials.&lt;/p>
+&lt;hr>
+&lt;h2 id="1-mock-oidc-provider-manifests-optional">1. Mock OIDC Provider Manifests (Optional)&lt;/h2>
+&lt;p>The manifests for the mock OIDC provider are available in &lt;a href="manifests/mock-oidc.yaml">mock-oidc.yaml&lt;/a>.&lt;/p></description></item><item><title/><link>https://sam-mesh.dev/docs/policy/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://sam-mesh.dev/docs/policy/</guid><description>&lt;h1 id="sam-policy--authorization-reference">SAM Policy &amp;amp; Authorization Reference&lt;/h1>
+&lt;p>SAM uses a decentralized authorization model powered by &lt;a href="https://www.biscuitsec.org/">Biscuit&lt;/a>.
+The &lt;code>sam-hub&lt;/code> authenticates users via OIDC and injects &lt;strong>Facts&lt;/strong> into their token based on &lt;code>policies.yaml&lt;/code>. The &lt;code>sam-node&lt;/code> operates offline, evaluating the token against baseline rules and optional local attenuation policies.&lt;/p>
+&lt;h2 id="1-oidc-to-biscuit-translation">1. OIDC to Biscuit Translation&lt;/h2>
+&lt;p>The Hub automatically translates OIDC claims into undeniable cryptographic facts:&lt;/p>
+&lt;table>
+ &lt;thead>
+ &lt;tr>
+ &lt;th style="text-align: left">OIDC Claim / Data&lt;/th>
+ &lt;th style="text-align: left">Biscuit Fact&lt;/th>
+ &lt;th style="text-align: left">Description&lt;/th>
+ &lt;/tr>
+ &lt;/thead>
+ &lt;tbody>
+ &lt;tr>
+ &lt;td style="text-align: left">&lt;code>sub&lt;/code>&lt;/td>
+ &lt;td style="text-align: left">&lt;code>user(&amp;quot;&amp;lt;sub-id&amp;gt;&amp;quot;)&lt;/code>&lt;/td>
+ &lt;td style="text-align: left">The unique subject ID from the identity provider.&lt;/td>
+ &lt;/tr>
+ &lt;tr>
+ &lt;td style="text-align: left">&lt;code>email&lt;/code>&lt;/td>
+ &lt;td style="text-align: left">&lt;code>email(&amp;quot;&amp;lt;email&amp;gt;&amp;quot;)&lt;/code>&lt;/td>
+ &lt;td style="text-align: left">The user&amp;rsquo;s email address (if present).&lt;/td>
+ &lt;/tr>
+ &lt;tr>
+ &lt;td style="text-align: left">&lt;code>groups&lt;/code> / &lt;code>roles&lt;/code>&lt;/td>
+ &lt;td style="text-align: left">&lt;code>role(&amp;quot;&amp;lt;role-name&amp;gt;&amp;quot;)&lt;/code>&lt;/td>
+ &lt;td style="text-align: left">One fact is injected for &lt;em>each&lt;/em> role/group the user possesses.&lt;/td>
+ &lt;/tr>
+ &lt;tr>
+ &lt;td style="text-align: left">Generated FQDN&lt;/td>
+ &lt;td style="text-align: left">&lt;code>name(&amp;quot;&amp;lt;fqdn&amp;gt;&amp;quot;)&lt;/code>&lt;/td>
+ &lt;td style="text-align: left">The collision-proof mesh name granted by the Hub.&lt;/td>
+ &lt;/tr>
+ &lt;tr>
+ &lt;td style="text-align: left">Peer ID&lt;/td>
+ &lt;td style="text-align: left">&lt;code>node(&amp;quot;&amp;lt;peer-id&amp;gt;&amp;quot;)&lt;/code>&lt;/td>
+ &lt;td style="text-align: left">Binds the token to the specific agent&amp;rsquo;s libp2p cryptographic identity.&lt;/td>
+ &lt;/tr>
+ &lt;tr>
+ &lt;td style="text-align: left">Expiration&lt;/td>
+ &lt;td style="text-align: left">&lt;code>time(&amp;lt;date&amp;gt;)&lt;/code>&lt;/td>
+ &lt;td style="text-align: left">The token expiration date based on the OIDC session.&lt;/td>
+ &lt;/tr>
+ &lt;/tbody>
+&lt;/table>
+&lt;h2 id="2-hub-policy-schema-policiesyaml">2. Hub Policy Schema (&lt;code>policies.yaml&lt;/code>)&lt;/h2>
+&lt;p>Admins define central permissions by mapping OIDC roles to specific capabilities.&lt;/p></description></item><item><title/><link>https://sam-mesh.dev/docs/quickstart/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://sam-mesh.dev/docs/quickstart/</guid><description>&lt;h1 id="quick-start">Quick Start&lt;/h1>
+&lt;p>This guide gets you up and running with a SAM node connected to the public &lt;code>bananas.sam-mesh.dev&lt;/code> mesh. You can run SAM either directly via a binary or using Docker.&lt;/p>
+&lt;h2 id="1-install-sam">1. Install SAM&lt;/h2>
+&lt;h3 id="option-a-install-script-macos--linux">Option A: Install Script (macOS / Linux)&lt;/h3>
+&lt;p>The easiest way to install the latest binaries directly:&lt;/p>
+&lt;div class="highlight">&lt;pre tabindex="0" class="chroma">&lt;code class="language-bash" data-lang="bash">&lt;span class="line">&lt;span class="cl">curl -sL https://raw.githubusercontent.com/google/sam/main/install.sh &lt;span class="p">|&lt;/span> bash
+&lt;/span>&lt;/span>&lt;/code>&lt;/pre>&lt;/div>&lt;h3 id="option-b-go-install-macos--linux--windows">Option B: Go Install (macOS / Linux / Windows)&lt;/h3>
+&lt;p>If you have Go installed, you can compile and install directly from the repository:&lt;/p></description></item><item><title/><link>https://sam-mesh.dev/docs/release-tracks/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://sam-mesh.dev/docs/release-tracks/</guid><description>&lt;h1 id="release-tracks-autoupdate-and-autoscaling">Release Tracks, Autoupdate, and Autoscaling&lt;/h1>
+&lt;p>Sovereign Agent Mesh (SAM) is deployed to public endpoints using automated environments, release tracks, and self-healing/scaling infrastructure.&lt;/p>
+&lt;hr>
+&lt;h2 id="1-release-tracks">1. Release Tracks&lt;/h2>
+&lt;p>The public deployment has two isolated release tracks:&lt;/p>
+&lt;h3 id="a-testnet-track-bananas">A. Testnet Track (Bananas)&lt;/h3>
+&lt;ul>
+&lt;li>&lt;strong>Domain Name:&lt;/strong> &lt;code>bananas.sam-mesh.dev&lt;/code>&lt;/li>
+&lt;li>&lt;strong>Source Branch:&lt;/strong> Tracks the &lt;code>main&lt;/code> branch.&lt;/li>
+&lt;li>&lt;strong>Deployment Trigger:&lt;/strong> Automatically deployed on every new push/commit to the &lt;code>main&lt;/code> branch.&lt;/li>
+&lt;li>&lt;strong>Target Tag:&lt;/strong> The deployment is tagged with the Git commit SHA (&lt;code>github.sha&lt;/code>).&lt;/li>
+&lt;li>&lt;strong>Purpose:&lt;/strong> Serves as the staging/testing playground for the latest features and continuous integration.&lt;/li>
+&lt;/ul>
+&lt;h3 id="b-production-track-hub">B. Production Track (Hub)&lt;/h3>
+&lt;ul>
+&lt;li>&lt;strong>Domain Name:&lt;/strong> &lt;code>hub.sam-mesh.dev&lt;/code>&lt;/li>
+&lt;li>&lt;strong>Source Branch:&lt;/strong> Tracks semantic version tags matching &lt;code>v*.*.*&lt;/code>.&lt;/li>
+&lt;li>&lt;strong>Deployment Trigger:&lt;/strong> Automatically deployed whenever a new version tag is pushed to GitHub.&lt;/li>
+&lt;li>&lt;strong>Target Tag:&lt;/strong> The deployment is tagged with the exact Git release tag (e.g. &lt;code>v1.0.0&lt;/code>).&lt;/li>
+&lt;li>&lt;strong>Purpose:&lt;/strong> Stable, audited release track for production workloads.&lt;/li>
+&lt;/ul>
+&lt;hr>
+&lt;h2 id="2-autoupdate-mechanism">2. Autoupdate Mechanism&lt;/h2>
+&lt;p>Updates to both release tracks are fully automated via a robust &lt;strong>Continuous Deployment&lt;/strong> pipeline:&lt;/p></description></item><item><title/><link>https://sam-mesh.dev/docs/testing/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://sam-mesh.dev/docs/testing/</guid><description>&lt;h1 id="testing">Testing&lt;/h1>
+&lt;p>Current testing is intentionally minimal and aligned with the current binaries.&lt;/p>
+&lt;h2 id="test-layers">Test Layers&lt;/h2>
+&lt;ol>
+&lt;li>Go tests: &lt;code>make test&lt;/code>&lt;/li>
+&lt;li>BATS CLI tests: &lt;code>make test-e2e&lt;/code>&lt;/li>
+&lt;li>Containerized BATS mesh tests: &lt;code>make test-e2e-container&lt;/code>&lt;/li>
+&lt;/ol>
+&lt;h2 id="commands">Commands&lt;/h2>
+&lt;div class="highlight">&lt;pre tabindex="0" class="chroma">&lt;code class="language-bash" data-lang="bash">&lt;span class="line">&lt;span class="cl">make build
+&lt;/span>&lt;/span>&lt;span class="line">&lt;span class="cl">make &lt;span class="nb">test&lt;/span>
+&lt;/span>&lt;/span>&lt;span class="line">&lt;span class="cl">make test-e2e
+&lt;/span>&lt;/span>&lt;span class="line">&lt;span class="cl">make test-e2e-container
+&lt;/span>&lt;/span>&lt;/code>&lt;/pre>&lt;/div>&lt;h2 id="go-tests">Go Tests&lt;/h2>
+&lt;p>Run all Go tests with race detection:&lt;/p>
+&lt;div class="highlight">&lt;pre tabindex="0" class="chroma">&lt;code class="language-bash" data-lang="bash">&lt;span class="line">&lt;span class="cl">make &lt;span class="nb">test&lt;/span>
+&lt;/span>&lt;/span>&lt;/code>&lt;/pre>&lt;/div>&lt;p>Run only integration package:&lt;/p>
+&lt;div class="highlight">&lt;pre tabindex="0" class="chroma">&lt;code class="language-bash" data-lang="bash">&lt;span class="line">&lt;span class="cl">go &lt;span class="nb">test&lt;/span> ./tests/integration/...
+&lt;/span>&lt;/span>&lt;/code>&lt;/pre>&lt;/div>&lt;h2 id="bats-cli-tests">BATS CLI Tests&lt;/h2>
+&lt;p>These tests validate current command behavior for:&lt;/p>
+&lt;ul>
+&lt;li>&lt;code>sam-node&lt;/code>&lt;/li>
+&lt;li>&lt;code>sam-hub&lt;/code>&lt;/li>
+&lt;/ul>
+&lt;p>Run:&lt;/p>
+&lt;div class="highlight">&lt;pre tabindex="0" class="chroma">&lt;code class="language-bash" data-lang="bash">&lt;span class="line">&lt;span class="cl">make test-e2e
+&lt;/span>&lt;/span>&lt;/code>&lt;/pre>&lt;/div>&lt;h2 id="containerized-mesh-bats">Containerized Mesh BATS&lt;/h2>
+&lt;p>The container framework is implemented in:&lt;/p></description></item><item><title/><link>https://sam-mesh.dev/docs/testnet-validation/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://sam-mesh.dev/docs/testnet-validation/</guid><description>&lt;h1 id="testnet--mesh-validation-tutorial">Testnet &amp;amp; Mesh Validation Tutorial&lt;/h1>
+&lt;p>This tutorial guides you through validating your local environment integration with the public Sovereign Agent Mesh (SAM) testnets (&lt;code>bananas.sam-mesh.dev&lt;/code> or &lt;code>hub.sam-mesh.dev&lt;/code>). You will learn how to verify your node&amp;rsquo;s connection, discover remote MCP services, and invoke remote tools.&lt;/p>
+&lt;hr>
+&lt;h2 id="prerequisites">Prerequisites&lt;/h2>
+&lt;p>Before starting, ensure you have:&lt;/p>
+&lt;ol>
+&lt;li>Compiled the local binaries (&lt;code>sam-node&lt;/code> and &lt;code>mcp-client&lt;/code>) by running:
+&lt;div class="highlight">&lt;pre tabindex="0" class="chroma">&lt;code class="language-bash" data-lang="bash">&lt;span class="line">&lt;span class="cl">make build
+&lt;/span>&lt;/span>&lt;/code>&lt;/pre>&lt;/div>&lt;/li>
+&lt;li>An active local &lt;code>sam-node&lt;/code> container or process running and successfully joined to the target public testnet.
+For example, join via:
+&lt;div class="highlight">&lt;pre tabindex="0" class="chroma">&lt;code class="language-bash" data-lang="bash">&lt;span class="line">&lt;span class="cl">bin/sam-node join https://bananas.sam-mesh.dev
+&lt;/span>&lt;/span>&lt;/code>&lt;/pre>&lt;/div>And run via:
+&lt;div class="highlight">&lt;pre tabindex="0" class="chroma">&lt;code class="language-bash" data-lang="bash">&lt;span class="line">&lt;span class="cl">docker run --name sam-node &lt;span class="se">\
+&lt;/span>&lt;/span>&lt;/span>&lt;span class="line">&lt;span class="cl">&lt;span class="se">&lt;/span> -v ~/.config/sam-mesh:/data &lt;span class="se">\
+&lt;/span>&lt;/span>&lt;/span>&lt;span class="line">&lt;span class="cl">&lt;span class="se">&lt;/span> -p 5001:5001/udp -p 5002:5002 -p 8080:8080 &lt;span class="se">\
+&lt;/span>&lt;/span>&lt;/span>&lt;span class="line">&lt;span class="cl">&lt;span class="se">&lt;/span> sam-node:local &lt;span class="se">\
+&lt;/span>&lt;/span>&lt;/span>&lt;span class="line">&lt;span class="cl">&lt;span class="se">&lt;/span> run --data-dir /data &lt;span class="se">\
+&lt;/span>&lt;/span>&lt;/span>&lt;span class="line">&lt;span class="cl">&lt;span class="se">&lt;/span> --hub https://bananas.sam-mesh.dev &lt;span class="se">\
+&lt;/span>&lt;/span>&lt;/span>&lt;span class="line">&lt;span class="cl">&lt;span class="se">&lt;/span> --bind-addr 0.0.0.0:8080 &lt;span class="se">\
+&lt;/span>&lt;/span>&lt;/span>&lt;span class="line">&lt;span class="cl">&lt;span class="se">&lt;/span> --api-token secret-token &lt;span class="se">\
+&lt;/span>&lt;/span>&lt;/span>&lt;span class="line">&lt;span class="cl">&lt;span class="se">&lt;/span> --log-level debug
+&lt;/span>&lt;/span>&lt;/code>&lt;/pre>&lt;/div>&lt;/li>
+&lt;/ol>
+&lt;hr>
+&lt;h2 id="step-1-verifying-local-connection-to-the-testnet">Step 1: Verifying Local Connection to the Testnet&lt;/h2>
+&lt;p>Check the logs of your local &lt;code>sam-node&lt;/code> to ensure it has successfully joined and is online:&lt;/p></description></item></channel></rss>
