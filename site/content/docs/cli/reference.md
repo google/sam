@@ -1,5 +1,7 @@
-# CLI Reference
-
+---
+title: "CLI Reference"
+linkTitle: "CLI Reference"
+---
 The current repository exposes two CLIs:
 
 - `sam-node`

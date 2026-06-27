@@ -1,3 +1,9 @@
+---
+title: "Quick Start"
+linkTitle: "Quick Start"
+weight: 10
+---
+
 # Quick Start
 
 This guide gets you up and running with a SAM node connected to the public `bananas.sam-mesh.dev` mesh. You can run SAM either directly via a binary or using Docker.

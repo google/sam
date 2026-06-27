@@ -1,5 +1,7 @@
-# Integrating SAM with Claude Code
-
+---
+title: "Integrating SAM with Claude Code"
+linkTitle: "Integrating SAM with Claude Code"
+---
 You can connect your `sam-node` to [Claude Code](https://claude.com/claude-code) as a remote MCP server, giving Claude Code agents the ability to discover and invoke tools across the SAM mesh.
 
 ## Overview

@@ -1,31 +1,63 @@
 <!doctype html>
 <html lang="{{ .Site.Language.Lang }}" class="no-js">
-  <head>
-    {{ partial "head.html" . }}
-  </head>
-  <body class="sam-landing-page">
-    <div class="mesh-grid"></div>
-    <div class="mesh-glow-cyan"></div>
-    <div class="mesh-glow-yellow"></div>
-    
-    <div class="landing-content">
-      <div class="logo-container">
-        <div class="logo-backdrop-glow"></div>
-        <img src="{{ "sam_logo.png" | relURL }}" alt="SAM Logo" class="sam-hero-logo">
-      </div>
-      
+
+<head>
+  {{ partial "head.html" . }}
+</head>
+
+<body class="sam-landing-page">
+  <div class="mesh-grid"></div>
+  <div class="mesh-glow-cyan"></div>
+  <div class="mesh-glow-yellow"></div>
+
+  <div class="landing-container">
+    <!-- Left Column: Hero Branding -->
+    <div class="hero-brand-col">
+
       <h1 class="landing-title">SAM</h1>
       <p class="landing-subtitle">Sovereign Agent Mesh</p>
       <p class="landing-description">
         A zero-config, zero-trust decentralized P2P network built specifically for autonomous AI agents.
       </p>
-      
+
       <div class="landing-actions">
         <a href="{{ "/docs/" | relURL }}" class="btn-sleek btn-cyan">Enter Mesh Docs</a>
         <a href="{{ .Site.Params.github_repo }}" target="_blank" rel="noopener" class="btn-sleek btn-dark">GitHub</a>
       </div>
     </div>
 
-    {{ partial "scripts.html" . }}
-  </body>
+    <!-- Right Column: Interactive Terminal Mockup -->
+    <div class="hero-terminal-col">
+      <div class="terminal-window">
+        <div class="terminal-header">
+          <div class="terminal-buttons">
+            <span class="btn-circle btn-red"></span>
+            <span class="btn-circle btn-yellow"></span>
+            <span class="btn-circle btn-green"></span>
+          </div>
+          <div class="terminal-title">bash - sam-node join</div>
+        </div>
+        <div class="terminal-body">
+          <div class="terminal-line"><span class="t-prompt">$</span> <span class="t-cmd">curl -sL
+              https://sam-mesh.dev/install.sh | bash</span></div>
+          <div class="terminal-line t-output">Installing SAM binaries... Done.</div>
+          <div class="terminal-line"><span class="t-prompt">$</span> <span class="t-cmd">sam-node join --hub
+              bananas.sam-mesh.dev</span></div>
+          <div class="terminal-line t-output">[Auth] Generating peer identity...</div>
+          <div class="terminal-line t-output">[DHT] Bootstrapping DHT with bananas.sam-mesh.dev...</div>
+          <div class="terminal-line"><span class="t-prompt">$</span> <span class="t-cmd">sam-node run --hub
+              bananas.sam-mesh.dev</span></div>
+          <div class="terminal-line t-output">[Auth] Generating peer identity...</div>
+          <div class="terminal-line t-output">[DHT] Bootstrapping DHT with bananas.sam-mesh.dev...</div>
+          <div class="terminal-line t-output">[Network] Connected to mesh. Protocol: /libp2p-http</div>
+          <div class="terminal-line t-success">SAM Node Online. PeerID: 12D3KooWAe79...</div>
+          <div class="terminal-line t-output">Local MCP server running at 127.0.0.1:5002</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {{ partial "scripts.html" . }}
+</body>
+
 </html>

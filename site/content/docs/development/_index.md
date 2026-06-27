@@ -1,5 +1,7 @@
-# Developer Guide & Repository Setup
-
+---
+title: "Developer Guide"
+linkTitle: "Developer Guide"
+---
 This document is for developers who want to compile SAM from source, run a local development mesh, run the test suites, or contribute to the repository.
 
 ---

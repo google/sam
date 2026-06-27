@@ -1,5 +1,7 @@
-# SAM Documentation
-
+---
+title: "SAM Documentation"
+linkTitle: "Documentation"
+---
 This repository currently provides a minimal SAM runtime with two binaries:
 
 - `sam-hub`: OIDC bridge and identity biscuit issuer
@@ -21,9 +23,9 @@ The documentation here is intentionally small and aligned with what is implement
 
 - [Quick Start](quickstart.md) - User Quick Start using Docker.
 - [CLI Reference](cli/reference.md) - CLI command usage reference.
-- [Developer Guide](development.md) - Building from source, local testing, and Kind setups.
-- [Testing Guide](testing.md) - Detailed test layer and troubleshooting information.
-- [Testnet Validation Tutorial](testnet-validation.md) - Real-time integration and MCP verification with public testnets.
+- [Developer Guide](development/_index.md) - Building from source, local testing, and Kind setups.
+- [Testing Guide](development/testing.md) - Detailed test layer and troubleshooting information.
+- [Testnet Validation Tutorial](development/testnet-validation.md) - Real-time integration and MCP verification with public testnets.
 
 ## Notes
 

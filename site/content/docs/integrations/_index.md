@@ -1,5 +1,7 @@
-# Agent Integration Guide
-
+---
+title: "Agent Integration Guide"
+linkTitle: "Agent Integration Guide"
+---
 SAM is designed to be the networking layer for autonomous AI agents. The easiest way for your agent to interact with the mesh is through the **Model Context Protocol (MCP)** exposed locally by your node.
 
 Every `sam-node` runs a local MCP server that allows agents to:
@@ -12,10 +14,10 @@ Every `sam-node` runs a local MCP server that allows agents to:
 
 Explore the step-by-step guides to integrate SAM with your favorite AI Agent systems:
 
-- [Google Gemini](integrations/gemini.md): Build an interactive client using the official `google-genai` Python SDK.
-- [Claude Code](integrations/claude-code.md): Connect your local node as a remote MCP server to Claude Code.
-- [Claude Desktop](integrations/claude-desktop.md): Use SAM to expose the P2P tool mesh to Claude Desktop.
-- [OpenClaw](integrations/openclaw.md): Integrate your node as a remote tool bridge for OpenClaw.
+- [Google Gemini](gemini.md): Build an interactive client using the official `google-genai` Python SDK.
+- [Claude Code](claude-code.md): Connect your local node as a remote MCP server to Claude Code.
+- [Claude Desktop](claude-desktop.md): Use SAM to expose the P2P tool mesh to Claude Desktop.
+- [OpenClaw](openclaw.md): Integrate your node as a remote tool bridge for OpenClaw.
 
 ## Connecting via MCP
 

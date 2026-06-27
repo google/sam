@@ -1,5 +1,7 @@
-# Integrating SAM with OpenClaw
-
+---
+title: "Integrating SAM with OpenClaw"
+linkTitle: "Integrating SAM with OpenClaw"
+---
 You can seamlessly integrate your `sam-node` as a remote MCP server in [OpenClaw](https://openclaw.ai), allowing your agents to dynamically discover and invoke tools across the mesh.
 
 ## Overview

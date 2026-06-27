@@ -1,5 +1,7 @@
-# Running a Gemini AI Agent on the Mesh
-
+---
+title: "Running a Gemini AI Agent on the Mesh"
+linkTitle: "Running a Gemini AI Agent on the Mesh"
+---
 This tutorial demonstrates how to connect a local AI Agent powered by Google Gemini (using the official `google-genai` SDK) to your local SAM node. 
 
 By exposing the SAM Model Context Protocol (MCP) server to Gemini, the agent can dynamically discover tools hosted by other peers in the mesh, describe them, and execute them to solve tasks.
