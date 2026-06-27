@@ -59,4 +59,4 @@ The tool flow is identical to the [Claude Code guide](./claude-code.md#discoveri
 * **Tools don't appear**: fully quit and reopen Claude Desktop, and make sure npx is on your PATH. On Windows, you may need to use "command": "npx.cmd" instead of "command": "npx" in your configuration.
 * **Connection errors**: verify `sam-node` is reachable at the configured URL and that the bearer token matches `--api-token`.
 * **Running `sam-node` in WSL or a container**: the `mcp-remote` bridge runs on the Claude Desktop host, so that host must be able to reach the node's bind address. Bind the node to an address the host can reach (e.g. `0.0.0.0`) or set up port forwarding, rather than a container-only `127.0.0.1`.
-* **Authentication header ignored**: pass the header as a single argument, `--header "Authorization: Bearer <YOUR_TOKEN>"`.
+* **Authentication header ignored**: if testing via the command line, the header value must be enclosed in quotes to be passed as a single argument (e.g., --header "Authorization: Bearer <YOUR_TOKEN>"). In the JSON configuration, they must remain as separate elements in the args array.
