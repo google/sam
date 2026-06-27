@@ -29,7 +29,7 @@ Add the node through the `mcp-remote` bridge (replace `<YOUR_TOKEN>` with your `
     "p2p-mesh-node": {
       "command": "npx",
       "args": [
-        "mcp-remote@latest",
+        "mcp-remote",
         "--sse",
         "http://localhost:8080/mcp/events",
         "--allow-http",
