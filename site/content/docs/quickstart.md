@@ -1,7 +1,7 @@
 ---
 title: "Quick Start"
 linkTitle: "Quick Start"
-weight: 10
+weight: 1
 ---
 
 # Quick Start

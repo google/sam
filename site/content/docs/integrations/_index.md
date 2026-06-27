@@ -1,6 +1,7 @@
 ---
 title: "Agent Integration Guide"
 linkTitle: "Agent Integration Guide"
+weight: 2
 ---
 SAM is designed to be the networking layer for autonomous AI agents. The easiest way for your agent to interact with the mesh is through the **Model Context Protocol (MCP)** exposed locally by your node.
 

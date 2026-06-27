@@ -25,14 +25,14 @@ Start exploring the Sovereign Agent Mesh:
 ### For Users & Operators
 Get a node running on the public testnet (`bananas.sam-mesh.dev`) in minutes:
 - 🚀 **[User Quick Start Guide](site/content/docs/quickstart.md)**: Connect and run a SAM node using binaries or Docker, and query the local MCP server.
-- 🤖 **[Agent Integration Guides](site/content/docs/agent_integration.md)**: Connect Google Gemini, Claude, and other AI agents to your SAM node to dynamically discover and call tools across the mesh.
+- 🤖 **[Agent Integration Guides](site/content/docs/integrations/_index.md)**: Connect Google Gemini, Claude, and other AI agents to your SAM node to dynamically discover and call tools across the mesh.
 - 📖 **[CLI Reference](site/content/docs/cli/reference.md)**: Comprehensive CLI reference and configurations.
-- 📡 **[Testnet Validation Tutorial](site/content/docs/testnet-validation.md)**: Real-time verification, remote tool invocation, and HTTP stream proxies.
+- 📡 **[Testnet Validation Tutorial](site/content/docs/development/testnet-validation.md)**: Real-time verification, remote tool invocation, and HTTP stream proxies.
 
 ### For Developers & Contributors
 Compile from source, run local clusters, or execute tests:
-- 🛠️ **[Developer Guide](site/content/docs/development.md)**: Prereqs, compilation, local hub setup, and Kubernetes Kind deployment.
-- 🧪 **[Testing Guide](site/content/docs/testing.md)**: Go tests, E2E BATS, and containerized mesh execution.
+- 🛠️ **[Developer Guide](site/content/docs/development/_index.md)**: Prereqs, compilation, local hub setup, and Kubernetes Kind deployment.
+- 🧪 **[Testing Guide](site/content/docs/development/testing.md)**: Go tests, E2E BATS, and containerized mesh execution.
 
 ---
 

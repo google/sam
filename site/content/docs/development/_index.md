@@ -1,6 +1,7 @@
 ---
 title: "Developer Guide"
 linkTitle: "Developer Guide"
+weight: 4
 ---
 This document is for developers who want to compile SAM from source, run a local development mesh, run the test suites, or contribute to the repository.
 
