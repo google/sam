@@ -31,13 +31,24 @@ Once configured, restart your OpenClaw gateway to initialize the bridge. You can
    openclaw mcp list
    ```
 
-2. Discover remote tools: From within your OpenClaw agent, you can now discover and invoke tools hosted on other nodes in the mesh.
+2. Inspect the bridged tools: Confirm the server entry and its connection details.
    ```bash
-   # List tools from a discovered remote peer
-   openclaw mcp tool-list --peer <PEER_ID>
+   openclaw mcp show p2p-mesh-node
    ```
 
-3. Remote invocation: Use the discovered tools directly in your agent's available toolset, enabling autonomous agents to invoke remote operations across the SAM mesh dynamically.
+## Discovering and Invoking Remote Tools
+
+OpenClaw is a generic MCP client and exposes no SAM-specific CLI flags. Once the bridge is active, the tools that `sam-node` provides — `discover_remote_services`, `find_remote_tools`, `describe_remote_tool`, and `call_remote_tool` — are surfaced directly to your agent, which calls them like any other tool. The flow mirrors the local MCP API:
+
+1. **Discover services**: the agent calls `discover_remote_services` (e.g. with `{"type": "mcp"}`) to list active MCP services on the mesh and obtain their `peer_id`s.
+
+2. **Find remote tools**: the agent calls `find_remote_tools`, passing the target `peer_id`, to list the tools that peer hosts.
+
+3. **Describe a remote tool**: the agent calls `describe_remote_tool`, passing the target `peer_id` and the namespaced `tool_name`, to fetch the tool's `input_schema`. This is required to learn the expected argument structure before invoking it.
+
+4. **Invoke a remote tool**: the agent calls `call_remote_tool`, passing the target `peer_id`, the namespaced `tool_name` (e.g. `everything.get-sum`), and the tool's `arguments` (matching the schema from the previous step). Your local `sam-node` proxies the call across the P2P mesh and returns the result.
+
+Because these tools are surfaced automatically, no remote tool needs to be registered individually in OpenClaw.
 
 ## Troubleshooting
 
