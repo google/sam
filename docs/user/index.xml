@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>User and Operator Guides on SAM</title><link>https://sam-mesh.dev/docs/user/</link><description>Recent content in User and Operator Guides on SAM</description><generator>Hugo</generator><language>en-us</language><atom:link href="https://sam-mesh.dev/docs/user/index.xml" rel="self" type="application/rss+xml"/><item><title>Hub Configuration Guide</title><link>https://sam-mesh.dev/docs/user/hub-configuration/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://sam-mesh.dev/docs/user/hub-configuration/</guid><description>&lt;p>The &lt;code>sam-hub&lt;/code> acts as the control plane for the Sovereign Agent Mesh. It is responsible for bridging user identities from OpenID Connect (OIDC) providers, issuing cryptographically signed Biscuit authorization tokens, and distributing network and tool policies to nodes.&lt;/p>
+&lt;hr>
+&lt;h2 id="1-core-services">1. Core Services&lt;/h2>
+&lt;p>When you run &lt;code>sam-hub&lt;/code>, it launches two core service endpoints:&lt;/p>
+&lt;ol>
+&lt;li>&lt;strong>libp2p P2P Endpoint&lt;/strong>: Used by &lt;code>sam-node&lt;/code> clients to execute cryptographic handshakes and perform DHT resource discovery.&lt;/li>
+&lt;li>&lt;strong>HTTP/HTTPS Service Endpoint&lt;/strong>: Used for health status checks (&lt;code>/healthz&lt;/code>), prometheus metrics (&lt;code>/metrics&lt;/code>), and administrative commands (like banning nodes).&lt;/li>
+&lt;/ol>
+&lt;hr>
+&lt;h2 id="2-command-line-arguments--environment-variables">2. Command-Line Arguments &amp;amp; Environment Variables&lt;/h2>
+&lt;p>The hub is highly configurable. Each setting can be passed as a command-line flag or bound to a corresponding environment variable:&lt;/p></description></item><item><title>Agent Usage &amp; Connectivity Guide</title><link>https://sam-mesh.dev/docs/user/agent-usage/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://sam-mesh.dev/docs/user/agent-usage/</guid><description>&lt;p>SAM nodes (&lt;code>sam-node&lt;/code>) act as local security gateways and tool proxies for your AI agents (such as Google Gemini, Claude Code, or Claude Desktop). This document explains how to authenticate a node to the mesh and configure your agents to use it.&lt;/p>
+&lt;hr>
+&lt;h2 id="1-node-lifecycle-overview">1. Node Lifecycle Overview&lt;/h2>
+&lt;p>Connecting your AI agent to the Sovereign Agent Mesh involves two phases:&lt;/p>
+&lt;pre class="mermaid">sequenceDiagram
+ actor User as Developer/Operator
+ participant Node as sam-node (Local)
+ participant Hub as sam-hub (Mesh)
+ participant Agent as AI Agent (Gemini/Claude)
+ 
+ Note over User,Hub: Phase 1: Mesh Join (OIDC Authorization)
+ User-&amp;gt;&amp;gt;Node: sam-node join --hub &amp;lt;hub-url&amp;gt;
+ Node-&amp;gt;&amp;gt;Hub: Get Hub OIDC Info
+ Hub--&amp;gt;&amp;gt;Node: OIDC Issuer, Client ID
+ Node-&amp;gt;&amp;gt;User: Display Login URL &amp;amp; Code
+ User-&amp;gt;&amp;gt;User: Login in Browser
+ Node-&amp;gt;&amp;gt;Hub: Exchange Code for Biscuit Identity
+ Node-&amp;gt;&amp;gt;Node: Persist Biscuit in Local Store
+
+ Note over User,Agent: Phase 2: Agent Tool Invocation
+ User-&amp;gt;&amp;gt;Node: sam-node run --api-token &amp;#34;secret-key&amp;#34;
+ Node-&amp;gt;&amp;gt;Node: Start local MCP server on 127.0.0.1:8080
+ Agent-&amp;gt;&amp;gt;Node: Connect to local MCP (with Bearer &amp;#34;secret-key&amp;#34;)
+ Agent-&amp;gt;&amp;gt;Node: Call Remote P2P Tool
+ Node-&amp;gt;&amp;gt;Hub: Verify Biscuit / Allowed Policies
+ Node--&amp;gt;&amp;gt;Agent: Execute tool and return result&lt;/pre>
+&lt;hr>
+&lt;h2 id="2-phase-1-joining-the-mesh-sam-node-join">2. Phase 1: Joining the Mesh (&lt;code>sam-node join&lt;/code>)&lt;/h2>
+&lt;p>Before starting the node daemon, you must authorize your node and obtain a cryptographic Biscuit identity.&lt;/p></description></item></channel></rss>
