@@ -36,4 +36,23 @@
  Node--&amp;gt;&amp;gt;Agent: Execute tool and return result&lt;/pre>
 &lt;hr>
 &lt;h2 id="2-phase-1-joining-the-mesh-sam-node-join">2. Phase 1: Joining the Mesh (&lt;code>sam-node join&lt;/code>)&lt;/h2>
-&lt;p>Before starting the node daemon, you must authorize your node and obtain a cryptographic Biscuit identity.&lt;/p></description></item></channel></rss>
+&lt;p>Before starting the node daemon, you must authorize your node and obtain a cryptographic Biscuit identity.&lt;/p></description></item><item><title>Production Kubernetes Deployment</title><link>https://sam-mesh.dev/docs/user/kubernetes-deployment/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://sam-mesh.dev/docs/user/kubernetes-deployment/</guid><description>&lt;p>This guide explains how to deploy a production-grade SAM cluster (Hub, DNS synchronizer, OIDC bridge, and Nodes) in a Kubernetes environment (like GKE, EKS, AKS, or custom bare-metal clusters), based on our official public testnet architectures.&lt;/p>
+&lt;hr>
+&lt;h2 id="1-architecture-overview">1. Architecture Overview&lt;/h2>
+&lt;p>A production SAM deployment consists of:&lt;/p>
+&lt;ul>
+&lt;li>&lt;strong>Dex (OIDC Provider)&lt;/strong>: Serves as the identity bridge, federation point, and login broker.&lt;/li>
+&lt;li>&lt;strong>SAM Hub (&lt;code>sam-hub&lt;/code>)&lt;/strong>: Runs as a &lt;strong>StatefulSet&lt;/strong> to maintain stable network identity. P2P nodes query these bootstrap pods to connect to the mesh.&lt;/li>
+&lt;li>&lt;strong>DNS Sync CronJob&lt;/strong>: Dynamically queries the StatefulSet pod IP addresses and updates DNS A/AAAA records for P2P bootstrap resolution.&lt;/li>
+&lt;li>&lt;strong>SAM Nodes (&lt;code>sam-node&lt;/code>)&lt;/strong>: Deployed as containerized gateways that authenticate securely to the hub using Kubernetes Workload Identity (ServiceAccount token projection).&lt;/li>
+&lt;/ul>
+&lt;pre class="mermaid">graph TD
+ User([User / Client]) --&amp;gt;|HTTPS / OIDC| Dex[Dex Identity Bridge]
+ Node[sam-node Gateway Pod] --&amp;gt;|ServiceAccount Token| Hub[sam-hub StatefulSet]
+ Hub --&amp;gt;|OIDC Discovery Check| Dex
+ Cron[DNS Sync CronJob] --&amp;gt;|Poll Pod IPs| K8sApi[Kubernetes API]
+ Cron --&amp;gt;|Update A Records| CloudDNS[Cloud DNS / DNS Registry]
+ Node --&amp;gt;|Bootstrap DNS Resolution| CloudDNS&lt;/pre>
+&lt;hr>
+&lt;h2 id="2-step-1-deploying-the-oidc-provider-dex">2. Step 1: Deploying the OIDC Provider (Dex)&lt;/h2>
+&lt;p>Dex maps external accounts (Google, GitHub, LDAP) to standard OIDC identities in the cluster.&lt;/p></description></item></channel></rss>

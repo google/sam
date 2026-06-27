@@ -43,7 +43,26 @@
  Node--&amp;gt;&amp;gt;Agent: Execute tool and return result&lt;/pre>
 &lt;hr>
 &lt;h2 id="2-phase-1-joining-the-mesh-sam-node-join">2. Phase 1: Joining the Mesh (&lt;code>sam-node join&lt;/code>)&lt;/h2>
-&lt;p>Before starting the node daemon, you must authorize your node and obtain a cryptographic Biscuit identity.&lt;/p></description></item><item><title>Integrating SAM with Claude Code</title><link>https://sam-mesh.dev/docs/integrations/claude-code/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://sam-mesh.dev/docs/integrations/claude-code/</guid><description>&lt;p>You can connect your &lt;code>sam-node&lt;/code> to &lt;a href="https://claude.com/claude-code">Claude Code&lt;/a> as a remote MCP server, giving Claude Code agents the ability to discover and invoke tools across the SAM mesh.&lt;/p>
+&lt;p>Before starting the node daemon, you must authorize your node and obtain a cryptographic Biscuit identity.&lt;/p></description></item><item><title>Production Kubernetes Deployment</title><link>https://sam-mesh.dev/docs/user/kubernetes-deployment/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://sam-mesh.dev/docs/user/kubernetes-deployment/</guid><description>&lt;p>This guide explains how to deploy a production-grade SAM cluster (Hub, DNS synchronizer, OIDC bridge, and Nodes) in a Kubernetes environment (like GKE, EKS, AKS, or custom bare-metal clusters), based on our official public testnet architectures.&lt;/p>
+&lt;hr>
+&lt;h2 id="1-architecture-overview">1. Architecture Overview&lt;/h2>
+&lt;p>A production SAM deployment consists of:&lt;/p>
+&lt;ul>
+&lt;li>&lt;strong>Dex (OIDC Provider)&lt;/strong>: Serves as the identity bridge, federation point, and login broker.&lt;/li>
+&lt;li>&lt;strong>SAM Hub (&lt;code>sam-hub&lt;/code>)&lt;/strong>: Runs as a &lt;strong>StatefulSet&lt;/strong> to maintain stable network identity. P2P nodes query these bootstrap pods to connect to the mesh.&lt;/li>
+&lt;li>&lt;strong>DNS Sync CronJob&lt;/strong>: Dynamically queries the StatefulSet pod IP addresses and updates DNS A/AAAA records for P2P bootstrap resolution.&lt;/li>
+&lt;li>&lt;strong>SAM Nodes (&lt;code>sam-node&lt;/code>)&lt;/strong>: Deployed as containerized gateways that authenticate securely to the hub using Kubernetes Workload Identity (ServiceAccount token projection).&lt;/li>
+&lt;/ul>
+&lt;pre class="mermaid">graph TD
+ User([User / Client]) --&amp;gt;|HTTPS / OIDC| Dex[Dex Identity Bridge]
+ Node[sam-node Gateway Pod] --&amp;gt;|ServiceAccount Token| Hub[sam-hub StatefulSet]
+ Hub --&amp;gt;|OIDC Discovery Check| Dex
+ Cron[DNS Sync CronJob] --&amp;gt;|Poll Pod IPs| K8sApi[Kubernetes API]
+ Cron --&amp;gt;|Update A Records| CloudDNS[Cloud DNS / DNS Registry]
+ Node --&amp;gt;|Bootstrap DNS Resolution| CloudDNS&lt;/pre>
+&lt;hr>
+&lt;h2 id="2-step-1-deploying-the-oidc-provider-dex">2. Step 1: Deploying the OIDC Provider (Dex)&lt;/h2>
+&lt;p>Dex maps external accounts (Google, GitHub, LDAP) to standard OIDC identities in the cluster.&lt;/p></description></item><item><title>Integrating SAM with Claude Code</title><link>https://sam-mesh.dev/docs/integrations/claude-code/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://sam-mesh.dev/docs/integrations/claude-code/</guid><description>&lt;p>You can connect your &lt;code>sam-node&lt;/code> to &lt;a href="https://claude.com/claude-code">Claude Code&lt;/a> as a remote MCP server, giving Claude Code agents the ability to discover and invoke tools across the SAM mesh.&lt;/p>
 &lt;h2 id="overview">Overview&lt;/h2>
 &lt;p>&lt;code>sam-node&lt;/code> exposes a standard Model Context Protocol (MCP) server over HTTP Server-Sent Events (SSE). Claude Code is a generic MCP client, so once the server is registered its tools — &lt;code>discover_remote_services&lt;/code>, &lt;code>find_remote_tools&lt;/code>, &lt;code>describe_remote_tool&lt;/code>, and &lt;code>call_remote_tool&lt;/code> — are surfaced directly to your agent.&lt;/p></description></item><item><title>Integrating SAM with Claude Desktop</title><link>https://sam-mesh.dev/docs/integrations/claude-desktop/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://sam-mesh.dev/docs/integrations/claude-desktop/</guid><description>&lt;p>You can connect your &lt;code>sam-node&lt;/code> to the &lt;a href="https://claude.com/download">Claude Desktop&lt;/a> app as an MCP server. Unlike &lt;a href="./claude-code.md">Claude Code&lt;/a>, Claude Desktop has its own configuration and does &lt;strong>not&lt;/strong> read Claude Code&amp;rsquo;s MCP settings.&lt;/p>
 &lt;h2 id="overview">Overview&lt;/h2>
@@ -52,11 +71,11 @@
 &lt;p>By configuring your &lt;code>sam-node&lt;/code> as an MCP server, you enable your OpenClaw agents to access the P2P mesh, discovering tools from remote nodes and executing operations as if they were local.&lt;/p>
 &lt;h2 id="configuration">Configuration&lt;/h2>
 &lt;p>To bridge your local &lt;code>sam-node&lt;/code> into your OpenClaw agent runtime, use the &lt;code>openclaw mcp&lt;/code> CLI. Ensure your node is running and identify the API token configured in your &lt;code>sam-node&lt;/code> launch arguments.&lt;/p></description></item><item><title>Kubernetes Deployment and Local Testing Guide</title><link>https://sam-mesh.dev/docs/development/kubernetes-deployment/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://sam-mesh.dev/docs/development/kubernetes-deployment/</guid><description>&lt;p>This guide explains how to deploy the &lt;code>sam-hub&lt;/code> in a Kubernetes cluster and how to test it locally using &lt;code>kind&lt;/code> and &lt;code>cloud-provider-kind&lt;/code>.&lt;/p>
-&lt;p>This guide supports using either &lt;strong>Google OIDC&lt;/strong> or a &lt;strong>Mock OIDC Provider&lt;/strong> for authentication. The mock provider is recommended for quick local testing as it does not require creating external credentials.&lt;/p>
-&lt;hr>
-&lt;h2 id="1-mock-oidc-provider-manifests-optional">1. Mock OIDC Provider Manifests (Optional)&lt;/h2>
-&lt;p>The manifests for the mock OIDC provider are available in &lt;a href="manifests/mock-oidc.yaml">mock-oidc.yaml&lt;/a>.&lt;/p>
-&lt;p>&lt;a href="manifests/mock-oidc.yaml" title=":include">mock-oidc.yaml&lt;/a>&lt;/p></description></item><item><title>Release Tracks, Autoupdate, and Autoscaling</title><link>https://sam-mesh.dev/docs/development/release-tracks/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://sam-mesh.dev/docs/development/release-tracks/</guid><description>&lt;p>Sovereign Agent Mesh (SAM) is deployed to public endpoints using automated environments, release tracks, and self-healing/scaling infrastructure.&lt;/p>
+&lt;blockquote>
+&lt;p>[!TIP]
+This guide focuses on local development sandboxing. For production-grade Kubernetes deployments (GKE, EKS, AKS), see the &lt;a href="../../user/kubernetes-deployment/">Production Kubernetes Deployment&lt;/a> guide.&lt;/p>
+&lt;/blockquote>
+&lt;p>This guide supports using either &lt;strong>Google OIDC&lt;/strong> or a &lt;strong>Mock OIDC Provider&lt;/strong> for authentication. The mock provider is recommended for quick local testing as it does not require creating external credentials.&lt;/p></description></item><item><title>Release Tracks, Autoupdate, and Autoscaling</title><link>https://sam-mesh.dev/docs/development/release-tracks/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://sam-mesh.dev/docs/development/release-tracks/</guid><description>&lt;p>Sovereign Agent Mesh (SAM) is deployed to public endpoints using automated environments, release tracks, and self-healing/scaling infrastructure.&lt;/p>
 &lt;hr>
 &lt;h2 id="1-release-tracks">1. Release Tracks&lt;/h2>
 &lt;p>The public deployment has two isolated release tracks:&lt;/p>
