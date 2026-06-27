@@ -1,0 +1,76 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+name: Deployment to GitHub Pages
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main 
+    paths: 
+      - 'site/**'
+      - 'docs/**'
+      - '.github/workflows/deploy-github-pages.yml'
+  pull_request:
+    paths:
+      - 'site/**'
+      - 'docs/**'
+      - '.github/workflows/deploy-github-pages.yml'
+
+permissions:
+  contents: write
+
+env:
+  REPO_NAME: ${{ github.event.repository.name }}
+  REPO_OWNER: ${{ github.repository_owner }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0         # Fetch all history for .GitInfo and .Lastmod
+          submodules: recursive  # Fetch any git submodules if configured
+
+      - name: Setup Hugo
+        uses: peaceiris/actions-hugo@v3
+        with:
+          hugo-version: '0.136.5' # Matching local Hugo version
+          extended: true
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          check-latest: true
+
+      - name: Install PostCSS dependencies
+        run: |
+          npm init --yes
+          npm install --save-dev autoprefixer postcss-cli postcss
+        working-directory: ./site
+
+      - name: Build Hugo Site
+        run: hugo --baseURL https://sam-mesh.dev --minify
+        working-directory: ./site
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        if: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' }}
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./site/public
+          cname: sam-mesh.dev

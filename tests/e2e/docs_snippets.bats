@@ -32,7 +32,7 @@ teardown() {
   run docker run --rm \
     --network "${MESH_NETWORK}" \
     -v "$(pwd)/sam-mcp-python:/sam-mcp-python" \
-    -v "$(pwd)/docs/snippets:/snippets" \
+    -v "$(pwd)/site/content/docs/snippets:/snippets" \
     -e PYTHONPATH=/sam-mcp-python/src \
     -e SAM_MCP_URL="http://sam-node-1:8080/mcp/events" \
     python:3.12 \

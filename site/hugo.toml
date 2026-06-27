@@ -1,0 +1,43 @@
+title = "SAM"
+baseURL = "https://sam-mesh.dev"
+languageCode = "en-us"
+
+enableRobotsTXT = true
+
+# Point to the content directory
+contentDir = "content"
+
+[markup]
+  [markup.highlight]
+    codeFences = true
+    hl_Lines = ""
+    lineNoStart = 1
+    lineNos = false
+    lineNumbersInTable = true
+    noClasses = false # Needed for dark mode theme switching
+    style = "vs"
+    tabWidth = 4
+
+  [markup.goldmark.renderer]
+    unsafe = true
+
+# Enable Docsy's navigation structure
+sectionPagesMenu = "main"
+
+[module]
+  [[module.imports]]
+    path = "github.com/google/docsy"
+  [[module.imports]]
+    path = "github.com/google/docsy/dependencies"
+
+[params]
+  privacy_policy = "https://policies.google.com/privacy"
+  github_repo = "https://github.com/google/sam"
+  github_subdir = "docs"
+  github_branch = "main"
+
+  # Logo & branding colors will be customized via project styles
+
+[services]
+  [services.googleAnalytics]
+    id = "G-F9G8NX0SBT"
