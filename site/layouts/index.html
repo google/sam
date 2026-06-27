@@ -38,20 +38,16 @@
           <div class="terminal-title">bash - sam-node join</div>
         </div>
         <div class="terminal-body">
-          <div class="terminal-line"><span class="t-prompt">$</span> <span class="t-cmd">curl -sL
-              https://sam-mesh.dev/install.sh | bash</span></div>
-          <div class="terminal-line t-output">Installing SAM binaries... Done.</div>
-          <div class="terminal-line"><span class="t-prompt">$</span> <span class="t-cmd">sam-node join --hub
-              bananas.sam-mesh.dev</span></div>
-          <div class="terminal-line t-output">[Auth] Generating peer identity...</div>
-          <div class="terminal-line t-output">[DHT] Bootstrapping DHT with bananas.sam-mesh.dev...</div>
-          <div class="terminal-line"><span class="t-prompt">$</span> <span class="t-cmd">sam-node run --hub
-              bananas.sam-mesh.dev</span></div>
-          <div class="terminal-line t-output">[Auth] Generating peer identity...</div>
-          <div class="terminal-line t-output">[DHT] Bootstrapping DHT with bananas.sam-mesh.dev...</div>
-          <div class="terminal-line t-output">[Network] Connected to mesh. Protocol: /libp2p-http</div>
-          <div class="terminal-line t-success">SAM Node Online. PeerID: 12D3KooWAe79...</div>
-          <div class="terminal-line t-output">Local MCP server running at 127.0.0.1:5002</div>
+          <div class="terminal-line"><span class="t-prompt">$</span> <span class="t-cmd">sam-node join --hub bananas.sam-mesh.dev</span></div>
+          <div class="terminal-line t-output">Discovering hub info from https://bananas.sam-mesh.dev...</div>
+          <div class="terminal-line t-output">... [OIDC Device Authorization Flow Completed] ...</div>
+          <div class="terminal-line t-output">Successfully joined the Sovereign Agent Mesh!</div>
+          <div class="terminal-line"><span class="t-prompt">$</span> <span class="t-cmd">sam-node run</span></div>
+          <div class="terminal-line t-output">Using stored identity.</div>
+          <div class="terminal-line t-output">... [Mesh and DHT Initialization] ...</div>
+          <div class="terminal-line t-output">[DHT] Bootstrapping DHT with connected hub...</div>
+          <div class="terminal-line t-success">SAM Node Online.</div>
+          <div class="terminal-line t-success">PeerID: 12D3KooWQPXLN3mZ2mfYtNJWqLr2BBMxjPcVhQxydJNkanYH78eR</div>
         </div>
       </div>
     </div>
