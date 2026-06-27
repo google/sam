@@ -13,7 +13,7 @@ This guide gets you up and running with a SAM node connected to the public `bana
 ### Option A: Install Script (macOS / Linux)
 The easiest way to install the latest binaries directly:
 ```bash
-curl -sL https://raw.githubusercontent.com/google/sam/main/install.sh | bash
+curl -sL https://sam-mesh.dev/install.sh | bash
 ```
 
 ### Option B: Go Install (macOS / Linux / Windows)
