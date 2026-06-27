@@ -1,28 +1,228 @@
+// Navbar override for documentation pages
 .td-navbar {
   border-bottom: 2px solid $primary-light;
 }
 
-// Homepage cover block with SAM logo background
-.td-cover-block {
-  background-color: #ffffff !important;
-  background-image: url('/sam_logo.png') !important;
-  background-repeat: no-repeat !important;
-  background-position: center 30% !important; // Pushes image slightly higher to leave room for buttons
-  background-size: contain !important;
-  
-  // Set minimum height to display the logo nicely
-  min-height: 75vh !important;
-  
-  // Layout to push buttons to the bottom
-  display: flex !important;
-  flex-direction: column !important;
-  justify-content: flex-end !important;
-  padding-bottom: 4rem !important;
-}
+// --- Custom Landing Page ---
+.sam-landing-page {
+  background-color: #040911; // Dark slate/navy space color
+  color: #f8fafc;
+  min-height: 100vh;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  position: relative;
+  overflow: hidden;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 
-// Remove the default dark overlay shadow on the cover block
-.td-overlay::before {
-  background: transparent !important;
-  opacity: 0 !important;
-}
+  // Ambient mesh network grid background
+  .mesh-grid {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-image: 
+      linear-gradient(rgba(0, 240, 255, 0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0, 240, 255, 0.04) 1px, transparent 1px);
+    background-size: 60px 60px;
+    background-position: center;
+    mask-image: radial-gradient(circle at center, black 30%, transparent 80%);
+    -webkit-mask-image: radial-gradient(circle at center, black 30%, transparent 80%);
+    z-index: 1;
+  }
 
+  // Soft glowing orbs in background to represent network nodes or hubs
+  .mesh-glow-cyan {
+    position: absolute;
+    width: 600px;
+    height: 600px;
+    background: radial-gradient(circle, rgba(0, 240, 255, 0.08) 0%, rgba(0, 240, 255, 0) 70%);
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 2;
+    pointer-events: none;
+    animation: pulseGlow 10s ease-in-out infinite alternate;
+  }
+
+  .mesh-glow-yellow {
+    position: absolute;
+    width: 400px;
+    height: 400px;
+    background: radial-gradient(circle, rgba(246, 195, 68, 0.05) 0%, rgba(246, 195, 68, 0) 70%);
+    top: 40%;
+    left: 35%;
+    z-index: 2;
+    pointer-events: none;
+    animation: floatGlow 12s ease-in-out infinite alternate;
+  }
+
+  // Main container
+  .landing-content {
+    position: relative;
+    z-index: 10;
+    text-align: center;
+    padding: 2rem;
+    max-width: 600px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  // Hero Logo styling
+  .logo-container {
+    position: relative;
+    margin-bottom: 2.5rem;
+    display: inline-block;
+    animation: floatHero 6s ease-in-out infinite;
+
+    .sam-hero-logo {
+      width: 260px;
+      height: auto;
+      display: block;
+      position: relative;
+      z-index: 5;
+      filter: drop-shadow(0 10px 20px rgba(0,0,0,0.5));
+    }
+
+    // Behind logo glow
+    .logo-backdrop-glow {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 220px;
+      height: 220px;
+      background: radial-gradient(circle, rgba(0, 240, 255, 0.25) 0%, rgba(246, 195, 68, 0.1) 50%, rgba(0,0,0,0) 70%);
+      filter: blur(15px);
+      z-index: 1;
+      border-radius: 50%;
+      animation: pulseLogoGlow 4s ease-in-out infinite alternate;
+    }
+  }
+
+  // Typography
+  .landing-title {
+    font-size: 3.5rem;
+    font-weight: 800;
+    letter-spacing: 0.25em;
+    margin: 0;
+    text-transform: uppercase;
+    background: linear-gradient(135deg, #ffffff 30%, #a5f3fc 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    text-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    line-height: 1.1;
+    margin-left: 0.25em; // Offset to center letter-spacing
+  }
+
+  .landing-subtitle {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: $primary-light; // Cyber cyan
+    letter-spacing: 0.4em;
+    text-transform: uppercase;
+    margin-top: 0.75rem;
+    margin-bottom: 1.5rem;
+    margin-left: 0.4em; // Offset to center letter-spacing
+    text-shadow: 0 0 10px rgba(0, 240, 255, 0.3);
+  }
+
+  .landing-description {
+    font-size: 1.1rem;
+    line-height: 1.7;
+    color: #94a3b8; // Slate-400
+    margin-bottom: 3rem;
+    max-width: 500px;
+  }
+
+  // Action Buttons
+  .landing-actions {
+    display: flex;
+    gap: 1.5rem;
+    justify-content: center;
+    width: 100%;
+
+    @media (max-width: 480px) {
+      flex-direction: column;
+      gap: 1rem;
+      align-items: stretch;
+    }
+  }
+
+  .btn-sleek {
+    display: inline-block;
+    padding: 0.9rem 2.2rem;
+    font-size: 1rem;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-decoration: none !important;
+    border-radius: 8px;
+    transition: all 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+
+    &.btn-cyan {
+      border: 1px solid rgba(0, 240, 255, 0.6);
+      color: #00f0ff;
+      background: rgba(0, 240, 255, 0.03);
+      box-shadow: 0 0 20px rgba(0, 240, 255, 0.05);
+
+      &:hover {
+        background: #00f0ff;
+        color: #040911;
+        box-shadow: 0 0 25px rgba(0, 240, 255, 0.4);
+        transform: translateY(-2px);
+      }
+
+      &:active {
+        transform: translateY(0);
+      }
+    }
+
+    &.btn-dark {
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      color: #e2e8f0;
+      background: rgba(255, 255, 255, 0.02);
+
+      &:hover {
+        background: rgba(255, 255, 255, 0.08);
+        border-color: rgba(255, 255, 255, 0.3);
+        color: #ffffff;
+        transform: translateY(-2px);
+      }
+
+      &:active {
+        transform: translateY(0);
+      }
+    }
+  }
+
+  // Animation definitions
+  @keyframes floatHero {
+    0% { transform: translateY(0px); }
+    50% { transform: translateY(-10px); }
+    100% { transform: translateY(0px); }
+  }
+
+  @keyframes pulseLogoGlow {
+    0% { opacity: 0.8; transform: translate(-50%, -50%) scale(0.95); }
+    100% { opacity: 1.2; transform: translate(-50%, -50%) scale(1.05); }
+  }
+
+  @keyframes pulseGlow {
+    0% { transform: translate(-50%, -50%) scale(0.9); opacity: 0.7; }
+    100% { transform: translate(-50%, -50%) scale(1.1); opacity: 1.1; }
+  }
+
+  @keyframes floatGlow {
+    0% { transform: translateY(0px) translateX(0px); }
+    50% { transform: translateY(-20px) translateX(15px); }
+    100% { transform: translateY(0px) translateX(0px); }
+  }
+}

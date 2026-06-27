@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="{{ .Site.Language.Lang }}" class="no-js">
+  <head>
+    {{ partial "head.html" . }}
+  </head>
+  <body class="sam-landing-page">
+    <div class="mesh-grid"></div>
+    <div class="mesh-glow-cyan"></div>
+    <div class="mesh-glow-yellow"></div>
+    
+    <div class="landing-content">
+      <div class="logo-container">
+        <div class="logo-backdrop-glow"></div>
+        <img src="{{ "sam_logo.png" | relURL }}" alt="SAM Logo" class="sam-hero-logo">
+      </div>
+      
+      <h1 class="landing-title">SAM</h1>
+      <p class="landing-subtitle">Sovereign Agent Mesh</p>
+      <p class="landing-description">
+        A zero-config, zero-trust decentralized P2P network built specifically for autonomous AI agents.
+      </p>
+      
+      <div class="landing-actions">
+        <a href="{{ "/docs/" | relURL }}" class="btn-sleek btn-cyan">Enter Mesh Docs</a>
+        <a href="{{ .Site.Params.github_repo }}" target="_blank" rel="noopener" class="btn-sleek btn-dark">GitHub</a>
+      </div>
+    </div>
+
+    {{ partial "scripts.html" . }}
+  </body>
+</html>
