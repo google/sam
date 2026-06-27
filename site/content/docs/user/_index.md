@@ -13,3 +13,6 @@ Welcome to the User & Operator Guides. This section provides detailed documentat
 
 2. **[Agent Usage & Connectivity](agent-usage.md)**
    Understand how nodes connect to the mesh via OIDC login, secure credentials, run local Model Context Protocol (MCP) servers, and expose secure remote tool access to agents (like Google Gemini and Claude).
+
+3. **[Production Kubernetes Deployment](kubernetes-deployment.md)**
+   Deploy a production-grade mesh cluster in Kubernetes, including Dex OIDC setups, StatefulSet P2P hubs, DNS A-record synchronizers, and Workload Identity ServiceAccount token projections.
