@@ -1,5 +1,7 @@
-# Kubernetes Deployment and Local Testing Guide
-
+---
+title: "Kubernetes Deployment and Local Testing Guide"
+linkTitle: "Kubernetes Deployment and Local Testing Guide"
+---
 This guide explains how to deploy the `sam-hub` in a Kubernetes cluster and how to test it locally using `kind` and `cloud-provider-kind`.
 
 This guide supports using either **Google OIDC** or a **Mock OIDC Provider** for authentication. The mock provider is recommended for quick local testing as it does not require creating external credentials.

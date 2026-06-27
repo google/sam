@@ -1,5 +1,7 @@
-# Release Tracks, Autoupdate, and Autoscaling
-
+---
+title: "Release Tracks, Autoupdate, and Autoscaling"
+linkTitle: "Release Tracks, Autoupdate, and Autoscaling"
+---
 Sovereign Agent Mesh (SAM) is deployed to public endpoints using automated environments, release tracks, and self-healing/scaling infrastructure.
 
 ---

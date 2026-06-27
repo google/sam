@@ -1,5 +1,7 @@
-# Testnet & Mesh Validation Tutorial
-
+---
+title: "Testnet & Mesh Validation Tutorial"
+linkTitle: "Testnet & Mesh Validation Tutorial"
+---
 This tutorial guides you through validating your local environment integration with the public Sovereign Agent Mesh (SAM) testnets (`bananas.sam-mesh.dev` or `hub.sam-mesh.dev`). You will learn how to verify your node's connection, discover remote MCP services, and invoke remote tools.
 
 ---

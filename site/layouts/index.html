@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="{{ .Site.Language.Lang }}" class="no-js">
+
+<head>
+  {{ partial "head.html" . }}
+</head>
+
+<body class="sam-landing-page">
+  <div class="mesh-grid"></div>
+  <div class="mesh-glow-cyan"></div>
+  <div class="mesh-glow-yellow"></div>
+
+  <div class="landing-container">
+    <!-- Left Column: Hero Branding -->
+    <div class="hero-brand-col">
+
+      <h1 class="landing-title">SAM</h1>
+      <p class="landing-subtitle">Sovereign Agent Mesh</p>
+      <p class="landing-description">
+        A zero-config, zero-trust decentralized P2P network built specifically for autonomous AI agents.
+      </p>
+
+      <div class="landing-actions">
+        <a href="{{ "/docs/" | relURL }}" class="btn-sleek btn-cyan">Enter Mesh Docs</a>
+        <a href="{{ .Site.Params.github_repo }}" target="_blank" rel="noopener" class="btn-sleek btn-dark">GitHub</a>
+      </div>
+    </div>
+
+    <!-- Right Column: Interactive Terminal Mockup -->
+    <div class="hero-terminal-col">
+      <div class="terminal-window">
+        <div class="terminal-header">
+          <div class="terminal-buttons">
+            <span class="btn-circle btn-red"></span>
+            <span class="btn-circle btn-yellow"></span>
+            <span class="btn-circle btn-green"></span>
+          </div>
+          <div class="terminal-title">bash - sam-node join</div>
+        </div>
+        <div class="terminal-body">
+          <div class="terminal-line"><span class="t-prompt">$</span> <span class="t-cmd">sam-node join --hub bananas.sam-mesh.dev</span></div>
+          <div class="terminal-line t-output">Discovering hub info from https://bananas.sam-mesh.dev...</div>
+          <div class="terminal-line t-output">... [OIDC Device Authorization Flow Completed] ...</div>
+          <div class="terminal-line t-output">Successfully joined the Sovereign Agent Mesh!</div>
+          <div class="terminal-line"><span class="t-prompt">$</span> <span class="t-cmd">sam-node run</span></div>
+          <div class="terminal-line t-output">Using stored identity.</div>
+          <div class="terminal-line t-output">... [Mesh and DHT Initialization] ...</div>
+          <div class="terminal-line t-output">[DHT] Bootstrapping DHT with connected hub...</div>
+          <div class="terminal-line t-success">SAM Node Online.</div>
+          <div class="terminal-line t-success">PeerID: 12D3KooWQPXLN3mZ2mfYtNJWqLr2BBMxjPcVhQxydJNkanYH78eR</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {{ partial "scripts.html" . }}
+</body>
+
+</html>

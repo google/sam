@@ -1,5 +1,7 @@
-# SAM Policy & Authorization Reference
-
+---
+title: "SAM Policy & Authorization Reference"
+linkTitle: "SAM Policy & Authorization Reference"
+---
 SAM uses a decentralized authorization model powered by [Biscuit](https://www.biscuitsec.org/). 
 The `sam-hub` authenticates users via OIDC and injects **Facts** into their token based on `policies.yaml`. The `sam-node` operates offline, evaluating the token against baseline rules and optional local attenuation policies.
 

@@ -30,11 +30,53 @@ sectionPagesMenu = "main"
   [[module.imports]]
     path = "github.com/google/docsy/dependencies"
 
+[menu]
+  [[menu.main]]
+    identifier = "docs"
+    name = "Overview"
+    title = "Overview"
+    url = "/docs/"
+    weight = 1
+
+  [[menu.main]]
+    identifier = "quickstart"
+    name = "Quick Start"
+    title = "Quick Start"
+    url = "/docs/quickstart/"
+    weight = 2
+
+  [[menu.main]]
+    identifier = "user"
+    name = "User Guides"
+    title = "User Guides"
+    url = "/docs/user/"
+    weight = 3
+
+  [[menu.main]]
+    identifier = "integrations"
+    name = "Agent Integrations"
+    title = "Agent Integrations"
+    url = "/docs/integrations/"
+    weight = 4
+
+  [[menu.main]]
+    identifier = "development"
+    name = "Developer Guides"
+    title = "Developer Guides"
+    url = "/docs/development/"
+    weight = 5
+
 [params]
   privacy_policy = "https://policies.google.com/privacy"
   github_repo = "https://github.com/google/sam"
   github_subdir = "docs"
   github_branch = "main"
+
+  [params.ui]
+    showLightDarkModeMenu = true
+    sidebar_menu_compact = true
+    sidebar_menu_foldable = true
+    ul_show = 1
 
   # Logo & branding colors will be customized via project styles
 

@@ -1,5 +1,7 @@
-# Integrating SAM with Claude Desktop
-
+---
+title: "Integrating SAM with Claude Desktop"
+linkTitle: "Integrating SAM with Claude Desktop"
+---
 You can connect your `sam-node` to the [Claude Desktop](https://claude.com/download) app as an MCP server. Unlike [Claude Code](./claude-code.md), Claude Desktop has its own configuration and does **not** read Claude Code's MCP settings.
 
 ## Overview

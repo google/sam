@@ -1,5 +1,7 @@
-# Testing
-
+---
+title: "Testing"
+linkTitle: "Testing"
+---
 Current testing is intentionally minimal and aligned with the current binaries.
 
 ## Test Layers
