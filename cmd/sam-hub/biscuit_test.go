@@ -421,6 +421,37 @@ func TestMintBiscuitToken_NilToken(t *testing.T) {
 	}
 }
 
+func TestMintBiscuitToken_NilClaims(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+
+	kr, err := NewKeyRing(dbPath, 24*time.Hour, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = kr.Close() }()
+
+	hub := &Hub{KeyRing: kr}
+
+	priv, _, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dummyPeer, err := peer.IDFromPrivateKey(priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	token := &oidc.IDToken{
+		Expiry: time.Now().Add(1 * time.Hour),
+	}
+
+	_, err = hub.mintBiscuitToken(nil, token, dummyPeer)
+	if err == nil {
+		t.Error("Expected mintBiscuitToken to fail with nil claims, got nil error")
+	}
+}
+
 func TestMintBiscuitToken_VariousClaimsTypes(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "test.db")

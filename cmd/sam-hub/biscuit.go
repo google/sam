@@ -16,6 +16,7 @@ package main
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -31,6 +32,9 @@ import (
 func (h *Hub) mintBiscuitToken(claims jwt.MapClaims, token *oidc.IDToken, remotePeer peer.ID) ([]byte, error) {
 	if token == nil {
 		return nil, fmt.Errorf("token cannot be nil")
+	}
+	if claims == nil {
+		return nil, fmt.Errorf("claims cannot be nil")
 	}
 
 	oidcRoles := toStringSlice(claims["roles"])
@@ -93,7 +97,13 @@ func (h *Hub) mintBiscuitToken(claims jwt.MapClaims, token *oidc.IDToken, remote
 	}
 
 	// Assert resolved authorized roles in the token
+	roles := make([]string, 0, len(resolvedRoles))
 	for role := range resolvedRoles {
+		roles = append(roles, role)
+	}
+	sort.Strings(roles)
+
+	for _, role := range roles {
 		if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
 			Name: api.FactRole,
 			IDs:  []biscuit.Term{biscuit.String(role)},
@@ -157,6 +167,23 @@ func (h *Hub) mintBiscuitToken(claims jwt.MapClaims, token *oidc.IDToken, remote
 	return biscuitData, nil
 }
 
+var (
+	staticTimeCheck   biscuit.Check
+	staticAllowPolicy biscuit.Policy
+)
+
+func init() {
+	var err error
+	staticTimeCheck, err = parser.FromStringCheck(`check if time($time), expiration($exp), $time <= $exp`)
+	if err != nil {
+		panic(fmt.Sprintf("failed to parse static time check: %v", err))
+	}
+	staticAllowPolicy, err = parser.FromStringPolicy("allow if true")
+	if err != nil {
+		panic(fmt.Sprintf("failed to parse static allow policy: %v", err))
+	}
+}
+
 func (h *Hub) verifyBiscuit(biscuitData []byte, remotePeer peer.ID) (*biscuit.Biscuit, error) {
 	b, err := biscuit.Unmarshal(biscuitData)
 	if err != nil {
@@ -166,16 +193,6 @@ func (h *Hub) verifyBiscuit(biscuitData []byte, remotePeer peer.ID) (*biscuit.Bi
 	var authOpts []biscuit.AuthorizerOption
 	if h.BiscuitTimeout > 0 {
 		authOpts = append(authOpts, biscuit.WithWorldOptions(datalog.WithMaxDuration(h.BiscuitTimeout)))
-	}
-
-	timeCheck, err := parser.FromStringCheck(`check if time($time), expiration($exp), $time <= $exp`)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse time check: %w", err)
-	}
-
-	rule, err := parser.FromStringPolicy("allow if true")
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse allow policy: %w", err)
 	}
 
 	keys := h.KeyRing.GetAllValidPublicKeys()
@@ -194,8 +211,8 @@ func (h *Hub) verifyBiscuit(biscuitData []byte, remotePeer peer.ID) (*biscuit.Bi
 			},
 		})
 
-		authorizer.AddCheck(timeCheck)
-		authorizer.AddPolicy(rule)
+		authorizer.AddCheck(staticTimeCheck)
+		authorizer.AddPolicy(staticAllowPolicy)
 
 		if err := authorizer.Authorize(); err == nil {
 			return b, nil
@@ -208,7 +225,14 @@ func (h *Hub) verifyBiscuit(biscuitData []byte, remotePeer peer.ID) (*biscuit.Bi
 }
 
 func translateClaimsToFacts(builder biscuit.Builder, claims map[string]any) error {
-	for claimKey, factName := range api.OIDCClaimToFact {
+	keys := make([]string, 0, len(api.OIDCClaimToFact))
+	for k := range api.OIDCClaimToFact {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	for _, claimKey := range keys {
+		factName := api.OIDCClaimToFact[claimKey]
 		val, ok := claims[claimKey]
 		if !ok || val == nil {
 			continue
