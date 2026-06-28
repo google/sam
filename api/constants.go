@@ -49,9 +49,9 @@ const (
 //  1. Define a constant for the Biscuit fact name in the "Biscuit fact names" block above
 //     (e.g., FactMyNewClaim = "my_new_fact").
 //  2. Add an entry to the OIDCClaimToFact map below (e.g., "my_oidc_claim": FactMyNewClaim).
-//  3. Update TranslateClaimsToFacts in api/translation.go to handle parsing/type conversion
+//  3. Update translateClaimsToFacts in cmd/sam-hub/biscuit.go to handle parsing/type conversion
 //     for the new fact if it uses a custom format (e.g. integer, date, list).
-//  4. Implement unit tests in api/translation_test.go covering the new mapping.
+//  4. Implement unit tests in cmd/sam-hub/biscuit_test.go covering the new mapping.
 var OIDCClaimToFact = map[string]string{
 	"sub":    FactUser,
 	"email":  FactEmail,
