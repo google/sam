@@ -392,3 +392,167 @@ func TestMintBiscuitToken_ClaimsTranslation(t *testing.T) {
 		t.Errorf("Authorization/Checks failed: %v\nWorld:\n%s", err, authorizer.PrintWorld())
 	}
 }
+
+func TestMintBiscuitToken_NilToken(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+
+	kr, err := NewKeyRing(dbPath, 24*time.Hour, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = kr.Close() }()
+
+	hub := &Hub{KeyRing: kr}
+
+	priv, _, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dummyPeer, err := peer.IDFromPrivateKey(priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	claims := jwt.MapClaims{"sub": "user-123"}
+	_, err = hub.mintBiscuitToken(claims, nil, dummyPeer)
+	if err == nil {
+		t.Error("Expected mintBiscuitToken to fail with nil token, got nil error")
+	}
+}
+
+func TestMintBiscuitToken_VariousClaimsTypes(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+
+	kr, err := NewKeyRing(dbPath, 24*time.Hour, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = kr.Close() }()
+
+	hub := &Hub{
+		KeyRing: kr,
+		Policy: &api.PolicyConfig{
+			Bindings: []api.Binding{
+				{
+					Group: "eng-group",
+					Role:  "eng-role",
+				},
+			},
+			Roles: map[string]api.RolePolicy{
+				"admin":    {},
+				"eng-role": {},
+			},
+		},
+	}
+
+	priv, _, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dummyPeer, err := peer.IDFromPrivateKey(priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	token := &oidc.IDToken{
+		Expiry: time.Now().Add(1 * time.Hour),
+	}
+
+	tests := []struct {
+		name           string
+		rolesClaim     any
+		groupsClaim    any
+		expectedRoles  []string
+		expectedGroups []string
+	}{
+		{
+			name:           "String slice (standard go code paths)",
+			rolesClaim:     []string{"admin"},
+			groupsClaim:    []string{"eng-group", "beta"},
+			expectedRoles:  []string{"admin", "eng-role"}, // eng-role comes from eng-group mapping
+			expectedGroups: []string{"eng-group", "beta"},
+		},
+		{
+			name:           "Interface slice (standard JSON unmarshalled jwt paths)",
+			rolesClaim:     []any{"admin"},
+			groupsClaim:    []any{"eng-group", "beta"},
+			expectedRoles:  []string{"admin", "eng-role"},
+			expectedGroups: []string{"eng-group", "beta"},
+		},
+		{
+			name:           "Single string claims",
+			rolesClaim:     "admin",
+			groupsClaim:    "eng-group",
+			expectedRoles:  []string{"admin", "eng-role"},
+			expectedGroups: []string{"eng-group"},
+		},
+		{
+			name:           "Missing or nil claims",
+			rolesClaim:     nil,
+			groupsClaim:    nil,
+			expectedRoles:  nil,
+			expectedGroups: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			claims := jwt.MapClaims{}
+			if tt.rolesClaim != nil {
+				claims["roles"] = tt.rolesClaim
+			}
+			if tt.groupsClaim != nil {
+				claims["groups"] = tt.groupsClaim
+			}
+
+			biscuitData, err := hub.mintBiscuitToken(claims, token, dummyPeer)
+			if err != nil {
+				t.Fatalf("mintBiscuitToken failed: %v", err)
+			}
+
+			b, err := biscuit.Unmarshal(biscuitData)
+			if err != nil {
+				t.Fatalf("Unmarshal biscuit failed: %v", err)
+			}
+
+			authorizer, err := b.Authorizer(kr.GetCurrentPublicKey())
+			if err != nil {
+				t.Fatalf("Authorizer failed: %v", err)
+			}
+
+			// Add checks to verify the output facts
+			for _, r := range tt.expectedRoles {
+				authorizer.AddCheck(biscuit.Check{Queries: []biscuit.Rule{
+					{
+						Body: []biscuit.Predicate{
+							{Name: "role", IDs: []biscuit.Term{biscuit.String(r)}},
+						},
+					},
+				}})
+			}
+
+			for _, g := range tt.expectedGroups {
+				authorizer.AddCheck(biscuit.Check{Queries: []biscuit.Rule{
+					{
+						Body: []biscuit.Predicate{
+							{Name: "group", IDs: []biscuit.Term{biscuit.String(g)}},
+						},
+					},
+				}})
+			}
+
+			authorizer.AddPolicy(biscuit.Policy{Queries: []biscuit.Rule{
+				{
+					Head: biscuit.Predicate{Name: "allow", IDs: []biscuit.Term{}},
+					Body: []biscuit.Predicate{},
+				},
+			}, Kind: biscuit.PolicyKindAllow})
+
+			if err := authorizer.Authorize(); err != nil {
+				t.Errorf("Verification failed for case: %v\nWorld:\n%s", err, authorizer.PrintWorld())
+			}
+		})
+	}
+}

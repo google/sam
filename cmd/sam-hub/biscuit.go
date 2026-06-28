@@ -29,24 +29,12 @@ import (
 )
 
 func (h *Hub) mintBiscuitToken(claims jwt.MapClaims, token *oidc.IDToken, remotePeer peer.ID) ([]byte, error) {
-	var oidcRoles []string
-	if rolesAny, ok := claims["roles"].([]any); ok {
-		for _, r := range rolesAny {
-			if str, ok := r.(string); ok && str != "" {
-				oidcRoles = append(oidcRoles, str)
-			}
-		}
+	if token == nil {
+		return nil, fmt.Errorf("token cannot be nil")
 	}
 
-	var oidcGroups []string
-	if groupsAny, ok := claims["groups"].([]any); ok {
-		for _, g := range groupsAny {
-			if str, ok := g.(string); ok && str != "" {
-				oidcGroups = append(oidcGroups, str)
-			}
-		}
-	}
-
+	oidcRoles := toStringSlice(claims["roles"])
+	oidcGroups := toStringSlice(claims["groups"])
 	oidcSub, _ := claims["sub"].(string)
 
 	// Resolve roles based on configured bindings and explicit OIDC roles
@@ -180,6 +168,16 @@ func (h *Hub) verifyBiscuit(biscuitData []byte, remotePeer peer.ID) (*biscuit.Bi
 		authOpts = append(authOpts, biscuit.WithWorldOptions(datalog.WithMaxDuration(h.BiscuitTimeout)))
 	}
 
+	timeCheck, err := parser.FromStringCheck(`check if time($time), expiration($exp), $time <= $exp`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse time check: %w", err)
+	}
+
+	rule, err := parser.FromStringPolicy("allow if true")
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse allow policy: %w", err)
+	}
+
 	keys := h.KeyRing.GetAllValidPublicKeys()
 	var lastErr error
 	for _, pubKey := range keys {
@@ -196,18 +194,7 @@ func (h *Hub) verifyBiscuit(biscuitData []byte, remotePeer peer.ID) (*biscuit.Bi
 			},
 		})
 
-		timeCheck, err := parser.FromStringCheck(`check if time($time), expiration($exp), $time <= $exp`)
-		if err != nil {
-			lastErr = err
-			continue
-		}
 		authorizer.AddCheck(timeCheck)
-
-		rule, err := parser.FromStringPolicy("allow if true")
-		if err != nil {
-			lastErr = err
-			continue
-		}
 		authorizer.AddPolicy(rule)
 
 		if err := authorizer.Authorize(); err == nil {
@@ -237,24 +224,44 @@ func translateClaimsToFacts(builder biscuit.Builder, claims map[string]any) erro
 				}
 			}
 		case api.FactGroup:
-			if sliceVal, ok := val.([]any); ok {
-				seen := make(map[string]bool)
-				for _, item := range sliceVal {
-					if strItem, ok := item.(string); ok && strItem != "" {
-						if seen[strItem] {
-							continue
-						}
-						seen[strItem] = true
-						if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
-							Name: factName,
-							IDs:  []biscuit.Term{biscuit.String(strItem)},
-						}}); err != nil {
-							return fmt.Errorf("failed to add %s fact: %w", factName, err)
-						}
-					}
+			groups := toStringSlice(val)
+			seen := make(map[string]bool)
+			for _, g := range groups {
+				if seen[g] {
+					continue
+				}
+				seen[g] = true
+				if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+					Name: factName,
+					IDs:  []biscuit.Term{biscuit.String(g)},
+				}}); err != nil {
+					return fmt.Errorf("failed to add %s fact: %w", factName, err)
 				}
 			}
 		}
+	}
+	return nil
+}
+
+func toStringSlice(val any) []string {
+	if val == nil {
+		return nil
+	}
+	switch v := val.(type) {
+	case string:
+		if v != "" {
+			return []string{v}
+		}
+	case []string:
+		return v
+	case []any:
+		var res []string
+		for _, item := range v {
+			if str, ok := item.(string); ok && str != "" {
+				res = append(res, str)
+			}
+		}
+		return res
 	}
 	return nil
 }
