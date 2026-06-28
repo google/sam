@@ -16,6 +16,7 @@ package main
 
 import (
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -586,4 +587,62 @@ func TestMintBiscuitToken_VariousClaimsTypes(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestVerifyBiscuit_Concurrent(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+
+	kr, err := NewKeyRing(dbPath, 24*time.Hour, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = kr.Close() }()
+
+	hub := &Hub{
+		KeyRing:        kr,
+		Policy:         &api.PolicyConfig{},
+		BiscuitTimeout: 500 * time.Millisecond,
+	}
+
+	priv, _, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dummyPeer, err := peer.IDFromPrivateKey(priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	token := &oidc.IDToken{
+		Expiry: time.Now().Add(1 * time.Hour),
+	}
+	claims := jwt.MapClaims{
+		"sub":   "user-123",
+		"roles": []any{"admin"},
+	}
+
+	biscuitData, err := hub.mintBiscuitToken(claims, token, dummyPeer)
+	if err != nil {
+		t.Fatalf("mintBiscuitToken failed: %v", err)
+	}
+
+	// Spin up 50 goroutines performing verification concurrently to detect any data races on static check/policy globals
+	const workers = 50
+	var wg sync.WaitGroup
+	wg.Add(workers)
+
+	for i := 0; i < workers; i++ {
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 100; j++ {
+				_, err := hub.verifyBiscuit(biscuitData, dummyPeer)
+				if err != nil {
+					t.Errorf("Concurrent verification failed: %v", err)
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
 }

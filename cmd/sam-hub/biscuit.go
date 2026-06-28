@@ -225,14 +225,15 @@ func (h *Hub) verifyBiscuit(biscuitData []byte, remotePeer peer.ID) (*biscuit.Bi
 }
 
 func translateClaimsToFacts(builder biscuit.Builder, claims map[string]any) error {
-	keys := make([]string, 0, len(api.OIDCClaimToFact))
-	for k := range api.OIDCClaimToFact {
+	claimMap := api.OIDCClaimToFact()
+	keys := make([]string, 0, len(claimMap))
+	for k := range claimMap {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
 
 	for _, claimKey := range keys {
-		factName := api.OIDCClaimToFact[claimKey]
+		factName := claimMap[claimKey]
 		val, ok := claims[claimKey]
 		if !ok || val == nil {
 			continue
