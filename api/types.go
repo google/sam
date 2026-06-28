@@ -26,6 +26,7 @@ const EnrollProtocolID protocol.ID = "/sam/enroll/1.0.0"
 const MCPProtocolID protocol.ID = "/sam/mcp/1.0.0"
 const GossipEvents = "/sam/mesh/events/v1"
 const GossipHubSync = "/sam/hub/sync/v1"
+const GossipServiceAnnounce = "/sam/service/announce/v1"
 const AuthProtocolID protocol.ID = "/sam/auth/1.0.0"
 
 // CatalogTarget is the special target service name used to retrieve tool catalogs from remote nodes.
@@ -101,6 +102,7 @@ func ParseServiceTarget(target string) (svcType, svcName string) {
 const (
 	ServiceTypeStringMCP       = "mcp"
 	ServiceTypeStringInference = "inference"
+	ServiceTypeStringCatalog   = "catalog"
 )
 
 // InferenceServicePrefix is the conventional prefix used for LLM gateway inference services.
@@ -113,6 +115,8 @@ func ParseServiceType(s string) (ServiceType, error) {
 		return ServiceType_SERVICE_TYPE_MCP, nil
 	case ServiceTypeStringInference:
 		return ServiceType_SERVICE_TYPE_INFERENCE, nil
+	case ServiceTypeStringCatalog:
+		return ServiceType_SERVICE_TYPE_CATALOG, nil
 	default:
 		return ServiceType_SERVICE_TYPE_UNSPECIFIED, fmt.Errorf("invalid service type: %s", s)
 	}
@@ -125,6 +129,8 @@ func ServiceTypeToString(t ServiceType) (string, error) {
 		return ServiceTypeStringMCP, nil
 	case ServiceType_SERVICE_TYPE_INFERENCE:
 		return ServiceTypeStringInference, nil
+	case ServiceType_SERVICE_TYPE_CATALOG:
+		return ServiceTypeStringCatalog, nil
 	default:
 		return "", fmt.Errorf("invalid or unspecified service type")
 	}

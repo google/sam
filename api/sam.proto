@@ -59,12 +59,23 @@ enum ServiceType {
   SERVICE_TYPE_UNSPECIFIED = 0;
   SERVICE_TYPE_MCP = 1;
   SERVICE_TYPE_INFERENCE = 2;
+  SERVICE_TYPE_CATALOG = 3;
 }
 
 message ServiceInfo {
   ServiceType type = 1;
   string name = 2;
   string description = 3;
+}
+
+message ServiceAnnounce {
+  ServiceType type = 1;
+  string name = 2;
+  string peer_id = 3;
+  repeated string addrs = 4;
+  int64 timestamp = 5;
+  int64 ttl_ms = 6;
+  bytes signature = 7;
 }
 
 message CommandBackend {

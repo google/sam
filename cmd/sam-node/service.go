@@ -152,7 +152,6 @@ func buildRegisterRequest(sCfg api.ServiceConfig) (*api.RegisterServiceRequest, 
 	return req, nil
 }
 
-
 // serviceKeyToCID hashes "sam:service[:part]..." into a DHT rendezvous CID.
 func serviceKeyToCID(parts ...string) (cid.Cid, error) {
 	srvKey := strings.Join(append([]string{"sam:service"}, parts...), ":")
