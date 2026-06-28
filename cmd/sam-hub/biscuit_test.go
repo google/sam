@@ -16,6 +16,7 @@ package main
 
 import (
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -645,4 +646,61 @@ func TestVerifyBiscuit_Concurrent(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+func TestMintBiscuitToken_ErrorAggregation(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+
+	kr, err := NewKeyRing(dbPath, 24*time.Hour, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = kr.Close() }()
+
+	hub := &Hub{
+		KeyRing: kr,
+		Policy: &api.PolicyConfig{
+			Roles: map[string]api.RolePolicy{
+				"admin": {
+					CustomDatalog: []string{
+						"invalid-datalog-fact(123", // syntax error
+						"another-bad-fact);",       // syntax error
+					},
+				},
+			},
+		},
+	}
+
+	priv, _, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dummyPeer, err := peer.IDFromPrivateKey(priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	token := &oidc.IDToken{
+		Expiry: time.Now().Add(1 * time.Hour),
+	}
+	claims := jwt.MapClaims{
+		"sub":   "user-123",
+		"roles": []any{"admin"},
+	}
+
+	_, err = hub.mintBiscuitToken(claims, token, dummyPeer)
+	if err == nil {
+		t.Fatal("Expected mintBiscuitToken to fail on custom datalog syntax errors, got nil error")
+	}
+
+	errStr := err.Error()
+	if !strings.Contains(errStr, "failed to parse custom fact") && !strings.Contains(errStr, "panic parsing custom fact") {
+		t.Errorf("Expected error message to contain parse failure info, got: %s", errStr)
+	}
+
+	// Verify that BOTH errors are aggregated in the error message
+	if !strings.Contains(errStr, "invalid-datalog-fact") || !strings.Contains(errStr, "another-bad-fact") {
+		t.Errorf("Expected error to aggregate both failures, got: %s", errStr)
+	}
 }

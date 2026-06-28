@@ -15,6 +15,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -103,12 +104,14 @@ func (h *Hub) mintBiscuitToken(claims jwt.MapClaims, token *oidc.IDToken, remote
 	}
 	sort.Strings(roles)
 
+	var errs []error
 	for _, role := range roles {
 		if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
 			Name: api.FactRole,
 			IDs:  []biscuit.Term{biscuit.String(role)},
 		}}); err != nil {
-			return nil, fmt.Errorf("failed to add role fact: %w", err)
+			errs = append(errs, fmt.Errorf("failed to add role fact for %s: %w", role, err))
+			continue
 		}
 
 		if h.Policy != nil {
@@ -118,7 +121,7 @@ func (h *Hub) mintBiscuitToken(claims jwt.MapClaims, token *oidc.IDToken, remote
 						Name: api.FactMCPServer,
 						IDs:  []biscuit.Term{biscuit.String(tool)},
 					}}); err != nil {
-						logger.Errorw("Failed to add MCP tool fact to biscuit", "peer_id", remotePeer, "tool", tool, "error", err)
+						errs = append(errs, fmt.Errorf("failed to add MCP tool fact for %s: %w", tool, err))
 					}
 				}
 				for _, target := range rolePolicy.Network.AllowedTargets {
@@ -126,7 +129,7 @@ func (h *Hub) mintBiscuitToken(claims jwt.MapClaims, token *oidc.IDToken, remote
 						Name: api.FactNetworkTarget,
 						IDs:  []biscuit.Term{biscuit.String(target)},
 					}}); err != nil {
-						logger.Errorw("Failed to add network target fact to biscuit", "peer_id", remotePeer, "target", target, "error", err)
+						errs = append(errs, fmt.Errorf("failed to add network target fact for %s: %w", target, err))
 					}
 				}
 				for _, customFact := range rolePolicy.CustomDatalog {
@@ -134,24 +137,32 @@ func (h *Hub) mintBiscuitToken(claims jwt.MapClaims, token *oidc.IDToken, remote
 					if trimmed == "" {
 						continue
 					}
+					var factErr error
 					func() {
 						defer func() {
 							if r := recover(); r != nil {
-								logger.Errorw("Panic parsing custom fact", "peer_id", remotePeer, "fact", trimmed, "recover", r)
+								factErr = fmt.Errorf("panic parsing custom fact %q: %v", trimmed, r)
 							}
 						}()
 						fact, err := parser.FromStringFact(trimmed)
 						if err != nil {
-							logger.Errorw("Failed to parse custom fact", "peer_id", remotePeer, "fact", trimmed, "error", err)
+							factErr = fmt.Errorf("failed to parse custom fact %q: %w", trimmed, err)
 							return
 						}
 						if err := builder.AddAuthorityFact(fact); err != nil {
-							logger.Errorw("Failed to add custom fact to biscuit", "peer_id", remotePeer, "fact", trimmed, "error", err)
+							factErr = fmt.Errorf("failed to add custom fact %q: %w", trimmed, err)
 						}
 					}()
+					if factErr != nil {
+						errs = append(errs, factErr)
+					}
 				}
 			}
 		}
+	}
+
+	if len(errs) > 0 {
+		return nil, fmt.Errorf("biscuit policy validation failed: %w", errors.Join(errs...))
 	}
 
 	t, err := builder.Build()
