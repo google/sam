@@ -130,7 +130,7 @@ func (n *SamNode) WithBiscuitAuth(next func(network.Stream, RequestContext)) net
 
 		// Check verification cache
 		tokenHash := sha256.Sum256(authFrame.Biscuit)
-		hashStr := hex.EncodeToString(tokenHash[:]) + ":" + remotePeer.String()
+		hashStr := hex.EncodeToString(tokenHash[:]) + ":" + remotePeer.String() + ":" + reqCtx.Protocol + ":" + reqCtx.Target
 
 		if pubKeyStr, ok := n.verificationCache.Get(hashStr); ok {
 			n.keysMu.RLock()
