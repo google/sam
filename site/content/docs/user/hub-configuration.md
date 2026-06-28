@@ -28,7 +28,7 @@ The hub is highly configurable. Each setting can be passed as a command-line fla
 | `--listen` | *None* | `[]` | Comma-separated libp2p multiaddrs to listen on (e.g. `/ip4/0.0.0.0/tcp/9090`). |
 | `--bind-address` | *None* | `:9090` | Host and port to listen on for the HTTP/HTTPS admin service. |
 | `--policy-file` | *None* | `policies.yaml` | Path to the YAML file defining authorization roles and bindings. |
-| `--allowed-audiences` | *None* | `sam-audience` | Comma-separated list of allowed JWT audiences. |
+| `--allowed-audiences` | *None* | `sam-mesh-audience` | Comma-separated list of allowed JWT audiences. |
 | `--insecure-skip-tls-verify` | *None* | `false` | Set to `true` to skip certificate validation for development/testing OIDC providers. |
 | `--keys-db` | *None* | `keys.db` | Path to the BoltDB file storing public/private keys for token validation. |
 | `--admin-token` | *None* | *None* | Secret token string required in the HTTP Header `Authorization: Bearer <token>` for admin operations. |
@@ -41,6 +41,9 @@ The hub is highly configurable. Each setting can be passed as a command-line fla
 
 The hub dynamically issues permissions inside the Biscuit token based on identity claims (users or groups) mapped to specific roles in the policy file.
 
+> [!IMPORTANT]
+> For security reasons, wildcards (e.g. `*`) are explicitly disallowed in policy definitions. All allowed network targets and MCP servers must be explicitly listed.
+
 ### Example Policy Mapping
 Create a `policies.yaml` file in the directory where you run `sam-hub`:
 
@@ -51,22 +54,25 @@ version: v1alpha1
 roles:
   developer-role:
     network:
-      allowedTargets:
+      allowed_targets:
         - "10.0.0.0/8"
         - "192.168.1.0/24"
     mcp:
-      allowedServers:
+      allowed_servers:
         - "local-shell-tools"
         - "git-helper"
   
   admin-role:
     network:
-      allowedTargets:
+      allowed_targets:
         - "10.0.0.0/8"
         - "172.16.0.0/12"
+        - "192.168.1.0/24"
     mcp:
-      allowedServers:
-        - "*" # Allow access to all MCP servers
+      allowed_servers:
+        - "local-shell-tools"
+        - "git-helper"
+        - "db-agent"
 
 # Bind OIDC user emails or group claims to roles
 bindings:

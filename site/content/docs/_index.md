@@ -24,7 +24,6 @@ The documentation here is intentionally small and aligned with what is implement
 - [Quick Start](quickstart.md) - User Quick Start using Docker.
 - [Hub Configuration](user/hub-configuration.md) - OIDC authentication, key rings, and custom policy rules in `policies.yaml`.
 - [Agent Usage](user/agent-usage.md) - Node authorization flows, MCP endpoints, and how agents connect.
-- [CLI Reference](cli/reference.md) - CLI command usage reference.
 - [Developer Guide](development/_index.md) - Building from source, local testing, and Kind setups.
 - [Testing Guide](development/testing.md) - Detailed test layer and troubleshooting information.
 - [Testnet Validation Tutorial](development/testnet-validation.md) - Real-time integration and MCP verification with public testnets.

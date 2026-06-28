@@ -67,6 +67,9 @@ allow if group("engineering");
 ## 2. Hub Policy Schema (`policies.yaml`)
 Admins define central permissions by mapping OIDC roles to specific capabilities.
 
+> [!IMPORTANT]
+> Wildcards (e.g. `*`) are explicitly disallowed in policy definitions. All allowed network targets and MCP servers must be explicitly listed.
+
 ```yaml
 version: "v1alpha1"
 roles:
@@ -74,7 +77,7 @@ roles:
     network:
       allowed_targets: ["db-agent.data-mesh"] # Who they can connect to
     mcp:
-      allowed_tools: ["query_database"] # What tools they can run
+      allowed_servers: ["db-agent"] # Allowed MCP server names
     custom_datalog:
       - 'department("analytics");' # Raw injected facts
 ```

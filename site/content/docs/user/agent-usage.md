@@ -19,13 +19,13 @@ sequenceDiagram
     participant Agent as AI Agent (Gemini/Claude)
     
     Note over User,Hub: Phase 1: Mesh Join (OIDC Authorization)
-    User->>Node: sam-node join --hub <hub-url>
+    User->>Node: sam-node join <hub-url>
     Node->>Hub: Get Hub OIDC Info
     Hub-->>Node: OIDC Issuer, Client ID
     Node->>User: Display Login URL & Code
     User->>User: Login in Browser
     Node->>Hub: Exchange Code for Biscuit Identity
-    Node->>Node: Persist Biscuit in Local Store
+    Node->>Node: Persist Biscuit in Local Store (agent.db)
 
     Note over User,Agent: Phase 2: Agent Tool Invocation
     User->>Node: sam-node run --api-token "secret-key"
@@ -45,23 +45,23 @@ Before starting the node daemon, you must authorize your node and obtain a crypt
 ### Standard Login
 Run the `join` command, pointing to the mesh control hub:
 ```bash
-sam-node join --hub https://bananas.sam-mesh.dev
+sam-node join https://bananas.sam-mesh.dev
 ```
 
 *   **Browser Flow**: The CLI will discover the OIDC credentials from the hub, print an OIDC authorization URL, and attempt to open your system's default web browser automatically.
-*   **Approval**: Log in with your corporate or identity credentials (e.g. Google Accounts), approve the authorization request, and return to the terminal. The node will automatically exchange the credentials for a Biscuit token and save it to `~/.config/sam-mesh/identity.json`.
+*   **Approval**: Log in with your corporate or identity credentials (e.g. Google Accounts), approve the authorization request, and return to the terminal. The node will automatically exchange the credentials for a Biscuit token and save it to `~/.config/sam-mesh/agent.db`.
 
 ### Headless (Server) Login
 If you are running the node on a remote server via SSH (without a web browser), force headless out-of-band mode:
 ```bash
-sam-node join --hub https://bananas.sam-mesh.dev --headless
+sam-node join https://bananas.sam-mesh.dev --headless
 ```
 The CLI will print a verification URL and code (e.g. `https://google.com/device` and `ABCD-EFGH`). Open this URL on your local laptop, enter the code, complete the login, and the remote terminal session will activate automatically.
 
 ### Automatic Token Renewal
 To allow long-lived nodes to automatically renew their tokens in the background, request offline access (refreshes the OIDC session):
 ```bash
-sam-node join --hub https://bananas.sam-mesh.dev --offline-access
+sam-node join https://bananas.sam-mesh.dev --offline-access
 ```
 
 ---
