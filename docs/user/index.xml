@@ -19,13 +19,13 @@
  participant Agent as AI Agent (Gemini/Claude)
  
  Note over User,Hub: Phase 1: Mesh Join (OIDC Authorization)
- User-&amp;gt;&amp;gt;Node: sam-node join --hub &amp;lt;hub-url&amp;gt;
+ User-&amp;gt;&amp;gt;Node: sam-node join &amp;lt;hub-url&amp;gt;
  Node-&amp;gt;&amp;gt;Hub: Get Hub OIDC Info
  Hub--&amp;gt;&amp;gt;Node: OIDC Issuer, Client ID
  Node-&amp;gt;&amp;gt;User: Display Login URL &amp;amp; Code
  User-&amp;gt;&amp;gt;User: Login in Browser
  Node-&amp;gt;&amp;gt;Hub: Exchange Code for Biscuit Identity
- Node-&amp;gt;&amp;gt;Node: Persist Biscuit in Local Store
+ Node-&amp;gt;&amp;gt;Node: Persist Biscuit in Local Store (agent.db)
 
  Note over User,Agent: Phase 2: Agent Tool Invocation
  User-&amp;gt;&amp;gt;Node: sam-node run --api-token &amp;#34;secret-key&amp;#34;

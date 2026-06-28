@@ -49,29 +49,29 @@ The &lt;code>sam-hub&lt;/code> authenticates users via OIDC and injects &lt;stro
  &lt;td style="text-align: left">The user&amp;rsquo;s email address (if present).&lt;/td>
  &lt;/tr>
  &lt;tr>
- &lt;td style="text-align: left">&lt;code>groups&lt;/code> / &lt;code>roles&lt;/code>&lt;/td>
- &lt;td style="text-align: left">&lt;code>role(&amp;quot;&amp;lt;role-name&amp;gt;&amp;quot;)&lt;/code>&lt;/td>
- &lt;td style="text-align: left">One fact is injected for &lt;em>each&lt;/em> role/group the user possesses.&lt;/td>
+ &lt;td style="text-align: left">&lt;code>groups&lt;/code>&lt;/td>
+ &lt;td style="text-align: left">&lt;code>group(&amp;quot;&amp;lt;group-name&amp;gt;&amp;quot;)&lt;/code>&lt;/td>
+ &lt;td style="text-align: left">One fact is injected for &lt;em>each&lt;/em> group the user possesses.&lt;/td>
  &lt;/tr>
  &lt;tr>
- &lt;td style="text-align: left">Generated FQDN&lt;/td>
- &lt;td style="text-align: left">&lt;code>name(&amp;quot;&amp;lt;fqdn&amp;gt;&amp;quot;)&lt;/code>&lt;/td>
- &lt;td style="text-align: left">The collision-proof mesh name granted by the Hub.&lt;/td>
+ &lt;td style="text-align: left">&lt;code>roles&lt;/code> / Resolved Roles&lt;/td>
+ &lt;td style="text-align: left">&lt;code>role(&amp;quot;&amp;lt;role-name&amp;gt;&amp;quot;)&lt;/code>&lt;/td>
+ &lt;td style="text-align: left">One fact is injected for &lt;em>each&lt;/em> role mapped or direct role.&lt;/td>
  &lt;/tr>
  &lt;tr>
  &lt;td style="text-align: left">Peer ID&lt;/td>
- &lt;td style="text-align: left">&lt;code>node(&amp;quot;&amp;lt;peer-id&amp;gt;&amp;quot;)&lt;/code>&lt;/td>
+ &lt;td style="text-align: left">&lt;code>node(&amp;quot;&amp;lt;peer-id&amp;gt;&amp;quot;)&lt;/code>, &lt;code>client_peer_id(&amp;quot;&amp;lt;peer-id&amp;gt;&amp;quot;)&lt;/code>&lt;/td>
  &lt;td style="text-align: left">Binds the token to the specific agent&amp;rsquo;s libp2p cryptographic identity.&lt;/td>
  &lt;/tr>
  &lt;tr>
  &lt;td style="text-align: left">Expiration&lt;/td>
- &lt;td style="text-align: left">&lt;code>time(&amp;lt;date&amp;gt;)&lt;/code>&lt;/td>
+ &lt;td style="text-align: left">&lt;code>expiration(&amp;lt;date&amp;gt;)&lt;/code>&lt;/td>
  &lt;td style="text-align: left">The token expiration date based on the OIDC session.&lt;/td>
  &lt;/tr>
  &lt;/tbody>
 &lt;/table>
-&lt;h2 id="2-hub-policy-schema-policiesyaml">2. Hub Policy Schema (&lt;code>policies.yaml&lt;/code>)&lt;/h2>
-&lt;p>Admins define central permissions by mapping OIDC roles to specific capabilities.&lt;/p></description></item><item><title>Testing</title><link>https://sam-mesh.dev/docs/development/testing/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://sam-mesh.dev/docs/development/testing/</guid><description>&lt;p>Current testing is intentionally minimal and aligned with the current binaries.&lt;/p>
+&lt;h3 id="11-translating-identity-to-capability-oidc-to-biscuit">1.1 Translating Identity to Capability: OIDC to Biscuit&lt;/h3>
+&lt;p>The core innovation of the SAM Network&amp;rsquo;s security model is translating standard web identity (OIDC JSON Web Tokens defined in &lt;a href="https://openid.net/specs/openid-connect-core-1_0.html#Claims">OpenID Connect Core 1.0&lt;/a>) into decentralized capability tokens (Biscuits). This translation happens securely at the &lt;code>sam-hub&lt;/code> during the authentication phase.&lt;/p></description></item><item><title>Testing</title><link>https://sam-mesh.dev/docs/development/testing/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://sam-mesh.dev/docs/development/testing/</guid><description>&lt;p>Current testing is intentionally minimal and aligned with the current binaries.&lt;/p>
 &lt;h2 id="test-layers">Test Layers&lt;/h2>
 &lt;ol>
 &lt;li>Go tests: &lt;code>make test&lt;/code>&lt;/li>
