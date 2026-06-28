@@ -27,6 +27,8 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/google/sam/api"
 )
 
 var _ connmgr.ConnectionGater = (*nodeConnGate)(nil)
@@ -75,7 +77,7 @@ func (g *nodeConnGate) InterceptSecured(dir network.Direction, p peer.ID, n netw
 func (n *SamNode) HandleMCPStream(s network.Stream, reqCtx RequestContext) {
 	// If the TargetService is for a registered local backend, dumb-pipe proxy to it.
 	target := reqCtx.Target
-	if target != "" && target != "/sam/catalog" {
+	if target != "" && target != api.CatalogTarget {
 		svc, ok := n.services.Get(target)
 		if ok {
 			mcpSvc, isMcp := svc.(*MCPService)

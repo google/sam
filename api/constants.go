@@ -26,6 +26,9 @@ const GossipEvents = "/sam/mesh/events/v1"
 const GossipHubSync = "/sam/hub/sync/v1"
 const AuthProtocolID protocol.ID = "/sam/auth/1.0.0"
 
+// CatalogTarget is the special target service name used to retrieve tool catalogs from remote nodes.
+const CatalogTarget = "/sam/catalog"
+
 const DefaultAudience = "sam-mesh-audience"
 
 // Biscuit fact names
