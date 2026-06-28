@@ -54,7 +54,8 @@ func init() {
 		panic(fmt.Sprintf("failed to parse baseline rule 2: %v", err))
 	}
 
-	baselineRule3, err = parser.FromStringPolicy(`allow if operation("/sam/catalog")`)
+	rule3Str := fmt.Sprintf(`allow if operation("%s")`, api.CatalogTarget)
+	baselineRule3, err = parser.FromStringPolicy(rule3Str)
 	if err != nil {
 		panic(fmt.Sprintf("failed to parse baseline rule 3: %v", err))
 	}

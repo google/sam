@@ -2,34 +2,24 @@
 title: "SAM Documentation"
 linkTitle: "Documentation"
 ---
-This repository currently provides a minimal SAM runtime with two binaries:
+SAM (Sovereign Agent Mesh) is a smart, zero-config, zero-trust P2P network built for autonomous AI agents.
 
-- `sam-hub`: OIDC bridge and identity biscuit issuer
-- `sam-node`: mesh node CLI with login and run commands
+## Architecture
 
-The documentation here is intentionally small and aligned with what is implemented today.
+*   **`sam-hub`**: The control plane for identity mapping, token issuing, and policy distribution.
+*   **`sam-node`**: The P2P nodes providing the mesh transport layer, self-healing connectivity, and local Model Context Protocol (MCP) HTTP interfaces.
 
-## What Works Today
+---
 
-1. Build and run `sam-node` and `sam-hub`
-2. Perform node login via hub OIDC flow
-3. Persist identity in local node store
-4. Run long-lived hub and node processes
-5. Run local and containerized BATS tests
-6. Expose local tools and mesh info via MCP server over HTTP SSE
-7. Automated peer discovery via DHT and GossipSub events
+## Where to Start
 
-## Start Here
+### For Users & Operators
+Get a node running on the public testnet (`bananas.sam-mesh.dev`) in minutes:
+- 🚀 **[User Quick Start Guide](quickstart.md)**: Connect and run a SAM node using binaries or Docker, and query the local MCP server.
+- 🤖 **[Agent Integration Guide](user/agent-usage.md)**: Connect Google Gemini, Claude, and other AI agents to your SAM node to call tools across the mesh.
+- 📡 **[Testnet Validation Tutorial](development/testnet-validation.md)**: Real-time verification, remote tool invocation, and HTTP stream proxies.
 
-- [Quick Start](quickstart.md) - User Quick Start using Docker.
-- [Hub Configuration](user/hub-configuration.md) - OIDC authentication, key rings, and custom policy rules in `policies.yaml`.
-- [Agent Usage](user/agent-usage.md) - Node authorization flows, MCP endpoints, and how agents connect.
-- [CLI Reference](cli/reference.md) - CLI command usage reference.
-- [Developer Guide](development/_index.md) - Building from source, local testing, and Kind setups.
-- [Testing Guide](development/testing.md) - Detailed test layer and troubleshooting information.
-- [Testnet Validation Tutorial](development/testnet-validation.md) - Real-time integration and MCP verification with public testnets.
-
-## Notes
-
-- Older architecture and feature-heavy docs were removed to avoid drift.
-- If a feature is not documented here, assume it is not part of the current minimal scope.
+### For Developers & Contributors
+Compile from source, run local clusters, or execute tests:
+- 🛠️ **[Developer Guide](development/_index.md)**: Prereqs, compilation, local hub setup, and Kubernetes Kind deployment.
+- 🧪 **[Testing Guide](development/testing.md)**: Go tests, E2E BATS, and containerized mesh execution.

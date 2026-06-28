@@ -47,7 +47,7 @@ spec:
         - "--mesh=public-mesh"
         - "--issuer=$(SAM_OIDC_ISSUER)"
         ports:
-        - containerPort: 8080
+        - containerPort: 9090
           name: public-port
         env:
         - name: SAM_HUB_KEY
@@ -81,7 +81,7 @@ spec:
     app: sam-hub
   ports:
   - protocol: TCP
-    port: 8080
-    targetPort: 8080
+    port: 9090
+    targetPort: 9090
     name: public-port
 

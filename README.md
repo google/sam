@@ -26,7 +26,6 @@ Start exploring the Sovereign Agent Mesh:
 Get a node running on the public testnet (`bananas.sam-mesh.dev`) in minutes:
 - 🚀 **[User Quick Start Guide](site/content/docs/quickstart.md)**: Connect and run a SAM node using binaries or Docker, and query the local MCP server.
 - 🤖 **[Agent Integration Guides](site/content/docs/integrations/_index.md)**: Connect Google Gemini, Claude, and other AI agents to your SAM node to dynamically discover and call tools across the mesh.
-- 📖 **[CLI Reference](site/content/docs/cli/reference.md)**: Comprehensive CLI reference and configurations.
 - 📡 **[Testnet Validation Tutorial](site/content/docs/development/testnet-validation.md)**: Real-time verification, remote tool invocation, and HTTP stream proxies.
 
 ### For Developers & Contributors

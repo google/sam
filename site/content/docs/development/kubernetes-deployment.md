@@ -90,31 +90,32 @@ To connect a `sam-node` to the hub, you just need the hub's external IP and port
 
 To connect a `sam-node` to the hub for the first time, you need to enroll it. The node needs to authenticate with the hub using a JWT token.
 
-If you are using the **Mock OIDC Provider**, the node can fetch the token automatically from the mock provider's token endpoint.
+If you are using the **Mock OIDC Provider**, the node can fetch the token using OIDC Client Credentials flow:
 
 1. **Get the Mock OIDC Service IP:**
    ```bash
    MOCK_IP=$(kubectl get svc mock-oidc -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
    ```
 
-2. **Run the Node with Token URL:**
+2. **Run the Node to enroll:**
    ```bash
    sam-node run \
-     --hub "$HUB_IP:4002" \
-     --token-url "http://$MOCK_IP:18080/token"
+     --hub "http://$HUB_IP:9090" \
+     --oidc-issuer "http://$MOCK_IP:18080" \
+     --client-id "sam-mesh-audience" \
+     --client-secret "sam-e2e-secret"
    ```
 
 If you are using **Google OIDC**, you must obtain a valid Google ID token for your user and pass it via the `--jwt` flag:
 ```bash
 sam-node run \
-  --hub "$HUB_IP:4002" \
+  --hub "http://$HUB_IP:9090" \
   --jwt "<your-google-id-token>"
 ```
 
-Once enrolled, identity is stored in the local database, and you can run without authentication flags:
+Once enrolled, the identity is stored in the local database (`agent.db`), and you can run subsequent times without OIDC credentials:
 ```bash
-sam-node run \
-  --hub "$HUB_IP:4002"
+sam-node run
 ```
 
 ---
@@ -148,9 +149,13 @@ spec:
         command: ["sam-node", "run"]
         args:
         - "--hub"
-        - "sam-hub:4002"
-        - "--token-url"
-        - "http://mock-oidc:18080/token"
+        - "http://sam-hub:9090"
+        - "--oidc-issuer"
+        - "http://mock-oidc:18080"
+        - "--client-id"
+        - "sam-mesh-audience"
+        - "--client-secret"
+        - "sam-e2e-secret"
         env:
         - name: HOME
           value: /data
@@ -169,25 +174,27 @@ The SAM project supports three primary flows for acquiring a JWT token to enroll
 #### 1. Client Credentials Flow (Machine-to-Machine)
 *   **Description:** Defined in OAuth 2.0 RFC 6749, section 4.4. An application exchanges its application credentials (such as Client ID and Client Secret) for an access token.
 *   **Use Case:** For unattended services or deployments connecting to a production OIDC provider.
-*   **How to use:** Pass the `--token-url`, `--client-id`, and `--client-secret` flags to `sam-node run`.
+*   **How to use:** Pass the `--oidc-issuer`, `--client-id`, and `--client-secret` flags to `sam-node run`.
 *   **Example:**
 ```bash
 sam-node run \
-  --hub "hub.example.com:4002" \
-  --token-url "https://oauth2.googleapis.com/token" \
+  --hub "http://hub.example.com:9090" \
+  --oidc-issuer "https://accounts.google.com" \
   --client-id "$SAM_OIDC_ID" \
   --client-secret "$SAM_OIDC_SECRET"
 ```
 
 #### 2. Native App Authorization Code Flow (Human Intervention)
-*   **Description:** For devices operated by humans, this uses the standard Authorization Code Flow with PKCE for native apps (RFC 8252). `sam-node` spins up a temporary local HTTP server, opens your browser, and receives the authentication token locally via an ephemeral loopback address.
+*   **Description:** For devices operated by humans, this uses the standard Authorization Code Flow with PKCE for native apps (RFC 8252). The human operator runs `sam-node join` to open a web browser (or get a verification code via `--headless`), completes the login, and obtains a Biscuit token which is stored in the local database (`agent.db`).
 *   **Use Case:** When a human operator is enrolling a node manually via their local terminal.
-*   **How to use:** When you omit the `--jwt` or `--token-url` flags (or pass the OIDC issuer flag interactively), the node opens the browser and completes the flow without needing to enter complex passwords in the CLI. Alternatively, you can obtain a token yourself and pass it via the `--jwt` flag.
+*   **How to use:** Run `sam-node join <hub-url>` before running the node daemon. Alternatively, you can obtain a token yourself and pass it via the `--jwt` flag to `sam-node run`.
 *   **Example:**
 ```bash
-sam-node run \
-  --hub "hub.example.com:4002" \
-  --jwt "eyJhbGciOiJSUzI1NiIs..."
+# First, join interactively:
+sam-node join https://hub.example.com
+
+# Then start the node daemon:
+sam-node run
 ```
 
 #### 3. Workload Identity Federation (Secretless Kubernetes)
@@ -198,7 +205,7 @@ sam-node run \
 *   **Example:**
 ```bash
 sam-node run \
-  --hub "hub.example.com:4002" \
+  --hub "http://hub.example.com:9090" \
   --jwt-path "/var/run/secrets/kubernetes.io/serviceaccount/token"
 ```
 > [!NOTE]
@@ -269,7 +276,7 @@ spec:
         command: ["sam-node", "run"]
         args:
         - "--hub"
-        - "sam-hub:4002"
+        - "http://sam-hub:9090"
         - "--jwt-path"
         - "/var/run/secrets/tokens/sam-token"
         volumeMounts:

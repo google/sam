@@ -302,7 +302,7 @@ func (n *SamNode) ConnectMCPSession(ctx context.Context, targetPeer peer.ID, tar
 }
 
 func (n *SamNode) callMCPToolOnce(ctx context.Context, targetPeer peer.ID, toolName string, params any) (*mcp.CallToolResult, error) {
-	targetService := "/sam/catalog"
+	targetService := api.CatalogTarget
 	originalToolName := toolName
 	if parts := strings.SplitN(toolName, ".", 2); len(parts) == 2 {
 		targetService = parts[0]
@@ -335,7 +335,7 @@ func (n *SamNode) callMCPToolOnce(ctx context.Context, targetPeer peer.ID, toolN
 func (n *SamNode) fetchRemoteServiceCatalog(ctx context.Context, peerID peer.ID, typeStr string) ([]*api.ServiceInfo, error) {
 	n.preparePeerAddrs(ctx, peerID)
 
-	session, cleanup, err := n.ConnectMCPSession(ctx, peerID, "/sam/catalog")
+	session, cleanup, err := n.ConnectMCPSession(ctx, peerID, api.CatalogTarget)
 	if err != nil {
 		return nil, err
 	}

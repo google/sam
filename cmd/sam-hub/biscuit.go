@@ -1,0 +1,303 @@
+// Copyright 2026 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package main
+
+import (
+	"errors"
+	"fmt"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/biscuit-auth/biscuit-go/v2"
+	"github.com/biscuit-auth/biscuit-go/v2/datalog"
+	"github.com/biscuit-auth/biscuit-go/v2/parser"
+	"github.com/coreos/go-oidc/v3/oidc"
+	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/sam/api"
+	"github.com/libp2p/go-libp2p/core/peer"
+)
+
+func (h *Hub) mintBiscuitToken(claims jwt.MapClaims, token *oidc.IDToken, remotePeer peer.ID) ([]byte, error) {
+	if token == nil {
+		return nil, fmt.Errorf("token cannot be nil")
+	}
+	if claims == nil {
+		return nil, fmt.Errorf("claims cannot be nil")
+	}
+
+	oidcRoles := toStringSlice(claims["roles"])
+	oidcGroups := toStringSlice(claims["groups"])
+	oidcSub, _ := claims["sub"].(string)
+
+	// Resolve roles based on configured bindings and explicit OIDC roles
+	resolvedRoles := make(map[string]bool)
+	if h.Policy != nil {
+		// 1. Map OIDC groups and users to roles via configured bindings (RBAC mapping)
+		for _, b := range h.Policy.Bindings {
+			if b.Group != "" {
+				for _, cg := range oidcGroups {
+					if b.Group == cg {
+						resolvedRoles[b.Role] = true
+					}
+				}
+			}
+			if b.User != "" && oidcSub != "" {
+				if b.User == oidcSub {
+					resolvedRoles[b.Role] = true
+				}
+			}
+		}
+
+		// 2. Validate and accept pre-resolved OIDC roles directly if defined in policy (Zero-Trust check)
+		for _, r := range oidcRoles {
+			if _, exists := h.Policy.Roles[r]; exists {
+				resolvedRoles[r] = true
+			}
+		}
+	}
+
+	builder := biscuit.NewBuilder(h.KeyRing.GetCurrentKey())
+
+	if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+		Name: api.FactExpiration,
+		IDs:  []biscuit.Term{biscuit.Date(token.Expiry)},
+	}}); err != nil {
+		return nil, fmt.Errorf("failed to add expiration fact: %w", err)
+	}
+
+	if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+		Name: api.FactNode,
+		IDs:  []biscuit.Term{biscuit.String(remotePeer.String())},
+	}}); err != nil {
+		return nil, fmt.Errorf("failed to add node fact: %w", err)
+	}
+
+	if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+		Name: api.FactClientPeerID,
+		IDs:  []biscuit.Term{biscuit.String(remotePeer.String())},
+	}}); err != nil {
+		return nil, fmt.Errorf("failed to add client_peer_id fact: %w", err)
+	}
+
+	// Dynamic claims to facts mapping using api.OIDCClaimToFact
+	if err := translateClaimsToFacts(builder, claims); err != nil {
+		return nil, err
+	}
+
+	// Assert resolved authorized roles in the token
+	roles := make([]string, 0, len(resolvedRoles))
+	for role := range resolvedRoles {
+		roles = append(roles, role)
+	}
+	sort.Strings(roles)
+
+	var errs []error
+	for _, role := range roles {
+		if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+			Name: api.FactRole,
+			IDs:  []biscuit.Term{biscuit.String(role)},
+		}}); err != nil {
+			errs = append(errs, fmt.Errorf("failed to add role fact for %s: %w", role, err))
+			continue
+		}
+
+		if h.Policy != nil {
+			if rolePolicy, ok := h.Policy.Roles[role]; ok {
+				for _, tool := range rolePolicy.MCP.AllowedServers {
+					if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+						Name: api.FactMCPServer,
+						IDs:  []biscuit.Term{biscuit.String(tool)},
+					}}); err != nil {
+						errs = append(errs, fmt.Errorf("failed to add MCP tool fact for %s: %w", tool, err))
+					}
+				}
+				for _, target := range rolePolicy.Network.AllowedTargets {
+					if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+						Name: api.FactNetworkTarget,
+						IDs:  []biscuit.Term{biscuit.String(target)},
+					}}); err != nil {
+						errs = append(errs, fmt.Errorf("failed to add network target fact for %s: %w", target, err))
+					}
+				}
+				for _, customFact := range rolePolicy.CustomDatalog {
+					trimmed := strings.TrimRight(strings.TrimSpace(customFact), ";")
+					if trimmed == "" {
+						continue
+					}
+					var factErr error
+					func() {
+						defer func() {
+							if r := recover(); r != nil {
+								factErr = fmt.Errorf("panic parsing custom fact %q: %v", trimmed, r)
+							}
+						}()
+						fact, err := parser.FromStringFact(trimmed)
+						if err != nil {
+							factErr = fmt.Errorf("failed to parse custom fact %q: %w", trimmed, err)
+							return
+						}
+						if err := builder.AddAuthorityFact(fact); err != nil {
+							factErr = fmt.Errorf("failed to add custom fact %q: %w", trimmed, err)
+						}
+					}()
+					if factErr != nil {
+						errs = append(errs, factErr)
+					}
+				}
+			}
+		}
+	}
+
+	if len(errs) > 0 {
+		return nil, fmt.Errorf("biscuit policy validation failed: %w", errors.Join(errs...))
+	}
+
+	t, err := builder.Build()
+	if err != nil {
+		return nil, fmt.Errorf("failed to build biscuit: %w", err)
+	}
+
+	biscuitData, err := t.Serialize()
+	if err != nil {
+		return nil, fmt.Errorf("failed to serialize biscuit: %w", err)
+	}
+
+	return biscuitData, nil
+}
+
+var (
+	staticTimeCheck   biscuit.Check
+	staticAllowPolicy biscuit.Policy
+)
+
+func init() {
+	var err error
+	staticTimeCheck, err = parser.FromStringCheck(`check if time($time), expiration($exp), $time <= $exp`)
+	if err != nil {
+		panic(fmt.Sprintf("failed to parse static time check: %v", err))
+	}
+	staticAllowPolicy, err = parser.FromStringPolicy("allow if true")
+	if err != nil {
+		panic(fmt.Sprintf("failed to parse static allow policy: %v", err))
+	}
+}
+
+func (h *Hub) verifyBiscuit(biscuitData []byte, remotePeer peer.ID) (*biscuit.Biscuit, error) {
+	b, err := biscuit.Unmarshal(biscuitData)
+	if err != nil {
+		return nil, fmt.Errorf("malformed biscuit: %w", err)
+	}
+
+	var authOpts []biscuit.AuthorizerOption
+	if h.BiscuitTimeout > 0 {
+		authOpts = append(authOpts, biscuit.WithWorldOptions(datalog.WithMaxDuration(h.BiscuitTimeout)))
+	}
+
+	keys := h.KeyRing.GetAllValidPublicKeys()
+	var lastErr error
+	for _, pubKey := range keys {
+		authorizer, err := b.Authorizer(pubKey, authOpts...)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		authorizer.AddFact(biscuit.Fact{
+			Predicate: biscuit.Predicate{
+				Name: "time",
+				IDs:  []biscuit.Term{biscuit.Date(time.Now())},
+			},
+		})
+
+		authorizer.AddCheck(staticTimeCheck)
+		authorizer.AddPolicy(staticAllowPolicy)
+
+		if err := authorizer.Authorize(); err == nil {
+			return b, nil
+		} else {
+			lastErr = err
+		}
+	}
+
+	return nil, fmt.Errorf("no valid key found for verification: %v", lastErr)
+}
+
+func translateClaimsToFacts(builder biscuit.Builder, claims map[string]any) error {
+	claimMap := api.OIDCClaimToFact()
+	keys := make([]string, 0, len(claimMap))
+	for k := range claimMap {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	for _, claimKey := range keys {
+		factName := claimMap[claimKey]
+		val, ok := claims[claimKey]
+		if !ok || val == nil {
+			continue
+		}
+		switch factName {
+		case api.FactUser, api.FactEmail:
+			if strVal, ok := val.(string); ok && strVal != "" {
+				if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+					Name: factName,
+					IDs:  []biscuit.Term{biscuit.String(strVal)},
+				}}); err != nil {
+					return fmt.Errorf("failed to add %s fact: %w", factName, err)
+				}
+			}
+		case api.FactGroup:
+			groups := toStringSlice(val)
+			seen := make(map[string]bool)
+			for _, g := range groups {
+				if seen[g] {
+					continue
+				}
+				seen[g] = true
+				if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+					Name: factName,
+					IDs:  []biscuit.Term{biscuit.String(g)},
+				}}); err != nil {
+					return fmt.Errorf("failed to add %s fact: %w", factName, err)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func toStringSlice(val any) []string {
+	if val == nil {
+		return nil
+	}
+	switch v := val.(type) {
+	case string:
+		if v != "" {
+			return []string{v}
+		}
+	case []string:
+		return v
+	case []any:
+		var res []string
+		for _, item := range v {
+			if str, ok := item.(string); ok && str != "" {
+				res = append(res, str)
+			}
+		}
+		return res
+	}
+	return nil
+}
