@@ -15,6 +15,7 @@
 package main
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -34,6 +35,18 @@ func newTestIdentity(t *testing.T) (crypto.PrivKey, peer.ID) {
 		t.Fatalf("IDFromPublicKey: %v", err)
 	}
 	return priv, pid
+}
+
+func TestAnnounceServicesNoPubSubIsSafe(t *testing.T) {
+	// A zero-value node has no PubSub/Host; announceServices must not panic,
+	// just log and return. Guards the nil paths.
+	n := &SamNode{}
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("announceServices panicked: %v", r)
+		}
+	}()
+	n.announceServices(context.Background())
 }
 
 func TestServiceAnnounceSignVerifyRoundTrip(t *testing.T) {

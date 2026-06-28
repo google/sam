@@ -504,6 +504,7 @@ func (n *SamNode) startReprovideLoop(ctx context.Context, interval time.Duration
 			return
 		case <-time.After(5 * time.Second):
 			n.services.ReprovideAll(ctx)
+			n.announceServices(ctx)
 		}
 
 		for {
@@ -512,8 +513,10 @@ func (n *SamNode) startReprovideLoop(ctx context.Context, interval time.Duration
 				return
 			case <-ticker.C:
 				n.services.ReprovideAll(ctx)
+				n.announceServices(ctx)
 			case <-n.reprovideTrigger:
 				n.services.ReprovideAll(ctx)
+				n.announceServices(ctx)
 			}
 		}
 	}()
