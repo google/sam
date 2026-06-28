@@ -32,6 +32,28 @@ const (
 	FactGroup         = "group"
 	FactRole          = "role"
 	FactUser          = "user"
+	FactEmail         = "email"
 	FactMCPServer     = "allow_mcp_server"
 	FactNetworkTarget = "allow_network_target"
 )
+
+// OIDCClaimToFact maps standard OIDC claims to their corresponding Biscuit facts.
+//
+// Specification References:
+//   - OIDC Claims: Standard JWT payload claims are defined in OpenID Connect Core 1.0 section 5.1:
+//     https://openid.net/specs/openid-connect-core-1_0.html#Claims
+//   - Biscuit Symbols / Facts: The Biscuit symbol table and fact specification is defined at:
+//     https://doc.biscuitsec.org/reference/specifications.html#symbol-table
+//
+// How to add a new translation:
+//  1. Define a constant for the Biscuit fact name in the "Biscuit fact names" block above
+//     (e.g., FactMyNewClaim = "my_new_fact").
+//  2. Add an entry to the OIDCClaimToFact map below (e.g., "my_oidc_claim": FactMyNewClaim).
+//  3. Update TranslateClaimsToFacts in api/translation.go to handle parsing/type conversion
+//     for the new fact if it uses a custom format (e.g. integer, date, list).
+//  4. Implement unit tests in api/translation_test.go covering the new mapping.
+var OIDCClaimToFact = map[string]string{
+	"sub":    FactUser,
+	"email":  FactEmail,
+	"groups": FactGroup,
+}
