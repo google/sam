@@ -15,13 +15,10 @@
 package main
 
 import (
-	"context"
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"os"
-	"strings"
 
 	"github.com/biscuit-auth/biscuit-go/v2"
 	"github.com/biscuit-auth/biscuit-go/v2/datalog"
@@ -180,52 +177,7 @@ func (n *SamNode) WithBiscuitAuth(next func(network.Stream, RequestContext)) net
 			}
 		}
 
-		if !authorized {
-			logger.Infof("[Auth] All keys failed, triggering re-enrollment fallback for %s", remotePeer)
-			var jwtStr string
-			var err error
 
-			if oidcIssuerFlag != "" {
-				tokenURL, err := n.DiscoverTokenURL(context.Background(), oidcIssuerFlag)
-				if err != nil {
-					logger.Errorf("[Auth] Failed to discover OIDC endpoints for fallback: %v", err)
-				} else {
-					jwtStr, err = n.FetchJWT(context.Background(), tokenURL, clientIDFlag, clientSecretFlag)
-					if err != nil {
-						logger.Errorf("[Auth] Failed to fetch JWT for fallback: %v", err)
-					}
-				}
-			} else if jwtPathFlag != "" {
-				data, err := os.ReadFile(jwtPathFlag)
-				if err != nil {
-					logger.Errorf("[Auth] Failed to read JWT file for fallback: %v", err)
-				} else {
-					jwtStr = strings.TrimSpace(string(data))
-				}
-			}
-
-			if jwtStr != "" {
-				err = n.Enroll(context.Background(), jwtStr)
-				if err != nil {
-					logger.Errorf("[Auth] Fallback enrollment failed: %v", err)
-				} else {
-					// Retry authorization with new keys
-					n.keysMu.RLock()
-					keys = n.trustedKeys
-					n.keysMu.RUnlock()
-
-					for _, pubKey := range keys {
-						logger.Infof("[Auth] Retrying with key: %x", pubKey.Key)
-						if err := n.Authorize(authFrame.Biscuit, reqCtx, pubKey.Key); err == nil {
-							authorized = true
-							break
-						} else {
-							lastErr = err
-						}
-					}
-				}
-			}
-		}
 
 		if !authorized {
 			logger.Warnf("[Auth] AuthZ Denied %s: %v", remotePeer, lastErr)
