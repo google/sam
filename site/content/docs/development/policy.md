@@ -93,3 +93,24 @@ attenuation:
   checks:
     - 'check if time($time), $time < 2026-12-31T00:00:00Z;'
 ```
+
+## 4. Node Baseline Security Rules
+
+Every `sam-node` enforces a set of baseline security rules (defined in Go code) to secure the transport layer. These rules run automatically before evaluating custom OIDC or local policies:
+
+### 4.1 Replay & Impersonation Prevention
+Every request must prove that the libp2p cryptographic peer ID of the connection matches the client peer ID embedded in the authorization token:
+```datalog
+check if client_peer_id($id), connection_peer_id($id);
+```
+
+### 4.2 The Catalog Service (`/sam/catalog`)
+To allow remote peers to discover tools and query connectivity, each node hosts a built-in catalog service at the special target `/sam/catalog`. This service exposes local metadata tools (e.g. `list_local_services`, `get_mesh_info`).
+
+To ensure tool discovery works out-of-the-box, the node automatically injects a baseline rule allowing all verified peers to access it:
+```datalog
+allow if operation("/sam/catalog");
+```
+> [!IMPORTANT]
+> Without this baseline rule (or if a custom local attenuation policy explicitly blocks it), remote nodes will not be able to retrieve this node's tool catalog. As a result, agents across the mesh will fail to discover or call any of this node's tools.
+
