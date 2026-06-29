@@ -12,7 +12,7 @@ async def test_client_get_tools():
          
         mock_cm = AsyncMock()
         mock_sh_client.return_value = mock_cm
-        mock_cm.__aenter__.return_value = (MagicMock(), MagicMock())
+        mock_cm.__aenter__.return_value = (MagicMock(), MagicMock(), MagicMock())
         mock_cm.__aexit__ = AsyncMock()
         
         mock_session = MockClientSession.return_value

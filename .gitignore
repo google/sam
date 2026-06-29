@@ -37,3 +37,4 @@ tests/e2e/logs/
 tests/integration/scratch/
 __pycache__/
 .venv/
+*.egg-info/

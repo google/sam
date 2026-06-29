@@ -19,11 +19,16 @@ class SamClient:
 
     async def connect(self):
         """Connects to the SAM node via Streamable HTTP."""
+        import httpx
         headers = {"Accept": "application/json, text/event-stream"}
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
-        self._sh_cm = streamable_http_client(self.server_url, headers=headers)
-        read_stream, write_stream = await self._sh_cm.__aenter__()
+        
+        self._http_client = httpx.AsyncClient(headers=headers)
+        self._sh_cm = streamable_http_client(self.server_url, http_client=self._http_client)
+        
+        read_stream, write_stream, _get_session_id = await self._sh_cm.__aenter__()
+        
         self.session = ClientSession(read_stream, write_stream)
         await self.session.__aenter__()
         await self.session.initialize()
@@ -34,8 +39,11 @@ class SamClient:
             await self.session.__aexit__(None, None, None)
         if self._sh_cm:
             await self._sh_cm.__aexit__(None, None, None)
+        if hasattr(self, '_http_client') and self._http_client:
+            await self._http_client.aclose()
         self.session = None
         self._sh_cm = None
+        self._http_client = None
 
     async def get_tools(self) -> List[Dict[str, Any]]:
         """Returns available mesh tools."""
