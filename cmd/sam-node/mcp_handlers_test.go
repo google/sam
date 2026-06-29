@@ -379,6 +379,100 @@ func TestHandleFindRemoteTools_PartialFailure(t *testing.T) {
 	}
 }
 
+func buildAndSaveCustomBiscuit(node *SamNode, rootPriv ed25519.PrivateKey, allowedServices []string) error {
+	callerID := node.Host.ID().String()
+	builder := biscuit.NewBuilder(rootPriv)
+	if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+		Name: "node",
+		IDs:  []biscuit.Term{biscuit.String(callerID)},
+	}}); err != nil {
+		return err
+	}
+	if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+		Name: "client_peer_id",
+		IDs:  []biscuit.Term{biscuit.String(callerID)},
+	}}); err != nil {
+		return err
+	}
+	for _, svc := range allowedServices {
+		if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+			Name: api.FactMCPServer,
+			IDs:  []biscuit.Term{biscuit.String(svc)},
+		}}); err != nil {
+			return err
+		}
+	}
+	bisc, err := builder.Build()
+	if err != nil {
+		return err
+	}
+	biscBytes, err := bisc.Serialize()
+	if err != nil {
+		return err
+	}
+	return node.Store.SaveIdentity(biscBytes)
+}
+
+func TestFetchRemoteToolCatalogue_AuthRejected(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	cSrv := httptest.NewServer(newFakeMCPHandler(t, []*mcp.Tool{
+		{Name: "summarize", Description: "x", InputSchema: map[string]any{"type": "object"}},
+	}))
+	defer cSrv.Close()
+
+	nodeA, cleanupA := startBareNode(t, ctx)
+	defer cleanupA()
+	nodeC, cleanupC := startBareNode(t, ctx)
+	defer cleanupC()
+
+	rootPubEd, rootPrivEd, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	
+	// Create a biscuit that DOES NOT allow "summarizer", only "some_other_service".
+	// By baseline rules, it will STILL allow the catalog fetch.
+	if err := buildAndSaveCustomBiscuit(nodeA, rootPrivEd, []string{"some_other_service"}); err != nil {
+		t.Fatalf("buildAndSaveCustomBiscuit: %v", err)
+	}
+
+	// Trust the key in Node C
+	nodeC.keysMu.Lock()
+	nodeC.trustedKeys = append(nodeC.trustedKeys, TrustedKey{Key: rootPubEd, ReceivedAt: time.Now()})
+	nodeC.keysMu.Unlock()
+
+	if err := nodeA.Host.Connect(ctx, peer.AddrInfo{ID: nodeC.Host.ID(), Addrs: nodeC.Host.Addrs()}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := nodeC.RegisterService(ctx, &api.RegisterServiceRequest{
+		Service: &api.ServiceInfo{Type: api.ServiceType_SERVICE_TYPE_MCP, Name: "summarizer"},
+		Backend: &api.RegisterServiceRequest_TargetUrl{TargetUrl: cSrv.URL},
+	}); err != nil {
+		t.Fatalf("RegisterService: %v", err)
+	}
+
+	// Fetching tools from C should succeed for the catalog, but fail auth for "summarizer"
+	rows, err := nodeA.fetchRemoteToolCatalogue(ctx, nodeC.Host.ID(), "")
+	if err != nil {
+		t.Fatalf("fetchRemoteToolCatalogue returned unexpected overall error: %v", err)
+	}
+
+	if len(rows) != 1 {
+		t.Fatalf("expected exactly 1 row with error, got %d: %+v", len(rows), rows)
+	}
+
+	row := rows[0]
+	if row.ToolName != "summarizer" {
+		t.Errorf("expected ToolName 'summarizer', got %q", row.ToolName)
+	}
+	if !strings.Contains(row.Error, "auth rejected") {
+		t.Errorf("expected Error to contain 'auth rejected', got %q", row.Error)
+	}
+}
+
 func TestNewMCPHandler_RegistersFindRemoteTools(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
