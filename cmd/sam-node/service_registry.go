@@ -135,8 +135,8 @@ func (r *ServiceRegistry) insertService(svc Service) {
 	r.services[svc.Info().Name] = svc
 }
 
-// localCatalogURL returns the target URL of a locally-hosted CATALOG service, if any.
-func (r *ServiceRegistry) localCatalogURL() (string, bool) {
+// hostedCatalogURL returns the target URL of a CATALOG service this node hosts, if any.
+func (r *ServiceRegistry) hostedCatalogURL() (string, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	for _, svc := range r.services {

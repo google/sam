@@ -81,73 +81,71 @@ func (n *SamNode) findCatalogProvider(ctx context.Context, forceRefresh bool) (p
 	return "", false
 }
 
-// queryLocalCatalog queries a catalog hosted on THIS node directly over HTTP MCP
-// (no libp2p / no self-dial). Returns (providers,true) only on a non-empty result.
-func (n *SamNode) queryLocalCatalog(ctx context.Context, baseURL, typeStr, serviceName string) ([]*api.DiscoveredProvider, bool) {
+// catalogEndpoint is a resolved catalog location: either a directly-reachable HTTP
+// URL (a catalog this node hosts) or a mesh peer. Exactly one field is set.
+type catalogEndpoint struct {
+	url  string  // non-empty -> reach over HTTP MCP
+	peer peer.ID // valid -> reach over libp2p
+}
+
+// resolveCatalogEndpoints returns the catalogs to try, in priority order. A catalog
+// this node hosts is reached directly over HTTP (no libp2p self-dial) and comes first;
+// a mesh peer is appended as a fallback. forceRefresh rediscovers the mesh peer.
+func (n *SamNode) resolveCatalogEndpoints(ctx context.Context, forceRefresh bool) []catalogEndpoint {
+	var eps []catalogEndpoint
+	if url, ok := n.services.hostedCatalogURL(); ok {
+		eps = append(eps, catalogEndpoint{url: url})
+	}
+	if p, ok := n.findCatalogProvider(ctx, forceRefresh); ok {
+		eps = append(eps, catalogEndpoint{peer: p})
+	}
+	return eps
+}
+
+// callCatalog invokes query_catalog on the endpoint over whichever transport it implies.
+func (n *SamNode) callCatalog(ctx context.Context, ep catalogEndpoint, args map[string]string) (*mcp.CallToolResult, error) {
+	if ep.url != "" {
+		client := mcp.NewClient(&mcp.Implementation{Name: "sam-node-catalog-client", Version: "0.1.0"}, nil)
+		session, err := client.Connect(ctx, &mcp.SSEClientTransport{Endpoint: strings.TrimRight(ep.url, "/") + "/mcp/events"}, nil)
+		if err != nil {
+			return nil, fmt.Errorf("connect %s: %w", ep.url, err)
+		}
+		defer func() { _ = session.Close() }()
+		return session.CallTool(ctx, &mcp.CallToolParams{Name: "query_catalog", Arguments: args})
+	}
+	return n.callMCPToolOnce(ctx, ep.peer, "catalog.query_catalog", args)
+}
+
+// queryCatalog asks a catalog to resolve the request over whichever transport its
+// endpoint implies. It walks the resolved endpoints in priority order; a transport
+// error moves on to the next, while a reachable catalog's empty/bad answer is
+// authoritative. A second pass rediscovers the mesh peer; exhaustion falls back to DHT.
+func (n *SamNode) queryCatalog(ctx context.Context, serviceType api.ServiceType, typeStr, serviceName string) ([]*api.DiscoveredProvider, bool) {
 	args := map[string]string{"type": typeStr}
 	if serviceName != "" {
 		args["name"] = serviceName
 	}
-	client := mcp.NewClient(&mcp.Implementation{Name: "sam-node-catalog-client", Version: "0.1.0"}, nil)
-	session, err := client.Connect(ctx, &mcp.SSEClientTransport{Endpoint: strings.TrimRight(baseURL, "/") + "/mcp/events"}, nil)
-	if err != nil {
-		logger.Warnf("[Catalog] local catalog connect %s failed: %v", baseURL, err)
-		return nil, false
-	}
-	defer func() { _ = session.Close() }()
-	res, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "query_catalog", Arguments: args})
-	if err != nil || res == nil || len(res.Content) == 0 {
-		return nil, false
-	}
-	text, ok := res.Content[0].(*mcp.TextContent)
-	if !ok {
-		return nil, false
-	}
-	providers, err := catalogEntriesToProviders(n, text.Text, typeStr)
-	if err != nil || len(providers) == 0 {
-		return nil, false
-	}
-	logger.Infof("[Catalog] resolved %d providers via local catalog", len(providers))
-	return providers, true
-}
-
-// queryCatalog asks a catalog to resolve the request; tries local-hosted first,
-// then a remote peer. Returns (providers, true) only on a successful non-empty result.
-func (n *SamNode) queryCatalog(ctx context.Context, serviceType api.ServiceType, typeStr, serviceName string) ([]*api.DiscoveredProvider, bool) {
-	// Local-hosted catalog first: query it directly, no libp2p self-dial.
-	if url, ok := n.services.localCatalogURL(); ok {
-		if providers, ok := n.queryLocalCatalog(ctx, url, typeStr, serviceName); ok {
+	for attempt := 0; attempt < 2; attempt++ {
+		for _, ep := range n.resolveCatalogEndpoints(ctx, attempt > 0) {
+			res, err := n.callCatalog(ctx, ep, args)
+			if err != nil {
+				logger.Warnf("[Catalog] query failed: %v", err)
+				continue // transport failure: try the next endpoint
+			}
+			if res == nil || len(res.Content) == 0 {
+				return nil, false
+			}
+			text, ok := res.Content[0].(*mcp.TextContent)
+			if !ok {
+				return nil, false
+			}
+			providers, err := catalogEntriesToProviders(n, text.Text, typeStr)
+			if err != nil || len(providers) == 0 {
+				return nil, false
+			}
+			logger.Infof("[Catalog] resolved %d providers via catalog", len(providers))
 			return providers, true
 		}
-	}
-	// Remote catalog peer (skips self, correct for the libp2p path).
-	for attempt := 0; attempt < 2; attempt++ {
-		p, ok := n.findCatalogProvider(ctx, attempt > 0)
-		if !ok {
-			return nil, false
-		}
-		args := map[string]string{"type": typeStr}
-		if serviceName != "" {
-			args["name"] = serviceName
-		}
-		res, err := n.callMCPToolOnce(ctx, p, "catalog.query_catalog", args)
-		if err != nil {
-			logger.Warnf("[Catalog] query via %s failed: %v", p, err)
-			continue
-		}
-		if res == nil || len(res.Content) == 0 {
-			return nil, false
-		}
-		text, ok := res.Content[0].(*mcp.TextContent)
-		if !ok {
-			return nil, false
-		}
-		providers, err := catalogEntriesToProviders(n, text.Text, typeStr)
-		if err != nil || len(providers) == 0 {
-			return nil, false
-		}
-		logger.Infof("[Catalog] resolved %d providers via catalog %s", len(providers), p)
-		return providers, true
 	}
 	logger.Debugf("[Catalog] no usable catalog; falling back to DHT discovery")
 	return nil, false

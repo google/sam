@@ -76,7 +76,7 @@ func TestCatalogEntriesToProvidersEmpty(t *testing.T) {
 	}
 }
 
-func TestQueryLocalCatalog(t *testing.T) {
+func TestCallCatalog_HTTPEndpoint(t *testing.T) {
 	_, pub, _ := crypto.GenerateKeyPair(crypto.Ed25519, -1)
 	pid, _ := peer.IDFromPublicKey(pub)
 	idStr := pid.String()
@@ -98,9 +98,17 @@ func TestQueryLocalCatalog(t *testing.T) {
 	defer ts.Close()
 
 	n := &SamNode{BoundHTTPAddr: "127.0.0.1:9999"}
-	providers, ok := n.queryLocalCatalog(context.Background(), ts.URL, "mcp", "github-tools")
+	res, err := n.callCatalog(context.Background(), catalogEndpoint{url: ts.URL}, map[string]string{"type": "mcp", "name": "github-tools"})
+	if err != nil {
+		t.Fatalf("callCatalog: %v", err)
+	}
+	text, ok := res.Content[0].(*mcp.TextContent)
 	if !ok {
-		t.Fatal("queryLocalCatalog: want ok=true")
+		t.Fatalf("content type: got %T, want *mcp.TextContent", res.Content[0])
+	}
+	providers, err := catalogEntriesToProviders(n, text.Text, "mcp")
+	if err != nil {
+		t.Fatalf("map providers: %v", err)
 	}
 	if len(providers) != 1 {
 		t.Fatalf("want 1 provider, got %d", len(providers))
