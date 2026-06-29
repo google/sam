@@ -140,7 +140,7 @@ echo
 echo "Mesh up. To call a node's MCP API, port-forward it in another shell, e.g.:"
 echo "  kubectl --context ${KCTX} -n ${NAMESPACE} port-forward deploy/node-a 9091:8080"
 echo "then:"
-echo "  ./bin/mcp-client -url http://127.0.0.1:9091/mcp -tool find_remote_tools -args '{}'"
+echo "  ./bin/mcp-client -url http://127.0.0.1:9091/mcp -token devtoken -tool find_remote_tools -args '{}'"
 
 if [[ "${1:-}" != "-s" ]]; then
   show_cluster_logs

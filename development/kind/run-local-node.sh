@@ -18,7 +18,7 @@ for bin in kubectl kind; do
   command -v "$bin" >/dev/null 2>&1 || { echo "missing prerequisite: $bin" >&2; exit 1; }
 done
 kind get clusters 2>/dev/null | grep -qx "${CLUSTER}" || {
-  echo "kind cluster '${CLUSTER}' not found; start it first: make kind" >&2; exit 1; }
+  echo "kind cluster '${CLUSTER}' not found; start it first: make kind-up" >&2; exit 1; }
 [[ -x ./bin/sam-node ]] || { echo "./bin/sam-node not found; build it first: make build" >&2; exit 1; }
 
 # Identity + token
