@@ -741,6 +741,9 @@ func (n *SamNode) fetchRemoteResourceCatalogue(ctx context.Context, targetPeer p
 		listRes, err := session.ListResources(ctx, &mcp.ListResourcesParams{})
 		if err == nil && listRes != nil {
 			for _, r := range listRes.Resources {
+				if r == nil {
+					continue
+				}
 				// Namespace the URI scheme or name if we want, but resources are URIs.
 				// We'll prefix the Name to indicate origin.
 				r.Name = svc.Name + "." + r.Name
@@ -755,6 +758,9 @@ func (n *SamNode) fetchRemoteResourceCatalogue(ctx context.Context, targetPeer p
 
 func appendFilteredResourceRows(rows []remoteResourceRow, peerID string, resources []*mcp.Resource, serviceName string) []remoteResourceRow {
 	for _, r := range resources {
+		if r == nil {
+			continue
+		}
 		if serviceName != "" && !strings.HasPrefix(r.Name, serviceName+".") {
 			continue
 		}
@@ -835,7 +841,7 @@ func (n *SamNode) handleReadRemoteResource(ctx context.Context, req *mcp.CallToo
 		})
 
 		if err == nil && res != nil && len(res.Contents) > 0 {
-			defer cleanup()
+			cleanup()
 
 			// Marshal the contents
 			data, _ := json.Marshal(res.Contents)
@@ -953,6 +959,9 @@ func (n *SamNode) fetchRemotePromptCatalogue(ctx context.Context, targetPeer pee
 		listRes, err := session.ListPrompts(ctx, &mcp.ListPromptsParams{})
 		if err == nil && listRes != nil {
 			for _, p := range listRes.Prompts {
+				if p == nil {
+					continue
+				}
 				p.Name = svc.Name + "." + p.Name
 				allPrompts = append(allPrompts, p)
 			}
@@ -965,6 +974,9 @@ func (n *SamNode) fetchRemotePromptCatalogue(ctx context.Context, targetPeer pee
 
 func appendFilteredPromptRows(rows []remotePromptRow, peerID string, prompts []*mcp.Prompt, serviceName string) []remotePromptRow {
 	for _, p := range prompts {
+		if p == nil {
+			continue
+		}
 		if serviceName != "" && !strings.HasPrefix(p.Name, serviceName+".") {
 			continue
 		}
