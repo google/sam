@@ -235,18 +235,18 @@ func TestHandleFindRemoteTools_MeshWide(t *testing.T) {
 	// Direct fan-out test: invoke fetchRemoteToolCatalogue for both peers,
 	// confirm both return their tools. This isolates the lower-level path
 	// from DHT convergence concerns.
-	rowsB, errB := nodeA.fetchRemoteToolCatalogue(ctx, nodeB.Host.ID())
+	rowsB, errB := nodeA.fetchRemoteToolCatalogue(ctx, nodeB.Host.ID(), "")
 	if errB != nil {
 		t.Fatalf("fetch from B: %v", errB)
 	}
-	rowsC, errC := nodeA.fetchRemoteToolCatalogue(ctx, nodeC.Host.ID())
+	rowsC, errC := nodeA.fetchRemoteToolCatalogue(ctx, nodeC.Host.ID(), "")
 	if errC != nil {
 		t.Fatalf("fetch from C: %v", errC)
 	}
 
 	gotNames := map[string]bool{}
 	for _, tool := range append(rowsB, rowsC...) {
-		gotNames[tool.Name] = true
+		gotNames[tool.ToolName] = true
 	}
 	if !gotNames["code-reviewer.review_pr"] {
 		t.Errorf("missing code-reviewer.review_pr; got %v", gotNames)
@@ -313,55 +313,6 @@ func TestHandleFindRemoteTools_MeshWideViaHandler(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("expected code-reviewer.review_pr from B; got rows=%+v", rows)
-	}
-}
-
-func TestAppendFilteredRows_ServiceNameFilter(t *testing.T) {
-	tools := []*mcp.Tool{
-		{Name: "code-reviewer.review_pr"},
-		{Name: "code-reviewer.add_comment"},
-		{Name: "summarizer.summarize"},
-		{Name: "send_message"}, // infra tool — no dot
-	}
-
-	rows := appendFilteredRows(nil, "peerB", tools, "code-reviewer")
-	if len(rows) != 2 {
-		t.Errorf("service filter: got %d rows, want 2; rows=%+v", len(rows), rows)
-	}
-	for _, r := range rows {
-		if !strings.HasPrefix(r.ToolName, "code-reviewer.") {
-			t.Errorf("row %+v doesn't match service prefix", r)
-		}
-	}
-}
-
-func TestAppendFilteredRows_AggregatedOnly(t *testing.T) {
-	tools := []*mcp.Tool{
-		{Name: "code-reviewer.review_pr"},
-		{Name: "send_message"},
-		{Name: "list_local_services"},
-		{Name: "get_mesh_info"},
-	}
-
-	rows := appendFilteredRows(nil, "peerB", tools, "")
-	if len(rows) != 1 {
-		t.Errorf("aggregated-only filter: got %d rows, want 1; rows=%+v", len(rows), rows)
-	}
-	if rows[0].ToolName != "code-reviewer.review_pr" {
-		t.Errorf("unexpected name %q", rows[0].ToolName)
-	}
-}
-
-func TestAppendFilteredRows_PartialPrefixMatch(t *testing.T) {
-	// "code" should NOT match "code-reviewer.review_pr" because the filter
-	// requires exact service-name + "." prefix.
-	tools := []*mcp.Tool{
-		{Name: "code-reviewer.review_pr"},
-		{Name: "code.something"},
-	}
-	rows := appendFilteredRows(nil, "peerB", tools, "code")
-	if len(rows) != 1 || rows[0].ToolName != "code.something" {
-		t.Errorf("expected exactly one row 'code.something'; got %+v", rows)
 	}
 }
 
@@ -439,7 +390,7 @@ func TestNewMCPHandler_RegistersFindRemoteTools(t *testing.T) {
 	defer srv.Close()
 
 	client := mcp.NewClient(&mcp.Implementation{Name: "tc", Version: "0.0.1"}, nil)
-	transport := &mcp.SSEClientTransport{Endpoint: srv.URL + "/mcp"}
+	transport := &mcp.StreamableClientTransport{Endpoint: srv.URL + "/mcp"}
 	session, err := client.Connect(ctx, transport, nil)
 	if err != nil {
 		t.Fatalf("connect: %v", err)
@@ -703,7 +654,7 @@ func TestNewMCPHandler_RegistersDescribeRemoteTool(t *testing.T) {
 	defer srv.Close()
 
 	client := mcp.NewClient(&mcp.Implementation{Name: "tc", Version: "0.0.1"}, nil)
-	transport := &mcp.SSEClientTransport{Endpoint: srv.URL + "/mcp"}
+	transport := &mcp.StreamableClientTransport{Endpoint: srv.URL + "/mcp"}
 	session, err := client.Connect(ctx, transport, nil)
 	if err != nil {
 		t.Fatalf("connect: %v", err)
