@@ -72,12 +72,14 @@ func TestHandleFindRemoteTools_EmptyMesh_ReturnsEmptyArray(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected TextContent, got %T", res.Content[0])
 	}
-	var rows []map[string]any
-	if err := json.Unmarshal([]byte(tc.Text), &rows); err != nil {
-		t.Fatalf("response not JSON array: %v (text: %q)", err, tc.Text)
+	var resp struct {
+		Items []map[string]any `json:"items"`
 	}
-	if len(rows) != 0 {
-		t.Errorf("expected empty results for empty mesh, got %d rows", len(rows))
+	if err := json.Unmarshal([]byte(tc.Text), &resp); err != nil {
+		t.Fatalf("response not JSON object: %v (text: %q)", err, tc.Text)
+	}
+	if len(resp.Items) != 0 {
+		t.Errorf("expected empty results for empty mesh, got %d rows", len(resp.Items))
 	}
 }
 
@@ -154,8 +156,10 @@ func TestHandleFindRemoteTools_SinglePeer(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected TextContent, got %T", res.Content[0])
 	}
-	var rows []remoteToolRow
-	if err := json.Unmarshal([]byte(tc.Text), &rows); err != nil {
+	var resp struct {
+		Items []remoteToolRow `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(tc.Text), &resp); err != nil {
 		t.Fatalf("unmarshal: %v (text: %q)", err, tc.Text)
 	}
 
@@ -163,7 +167,7 @@ func TestHandleFindRemoteTools_SinglePeer(t *testing.T) {
 		"code-reviewer.review_pr":   false,
 		"code-reviewer.add_comment": false,
 	}
-	for _, row := range rows {
+	for _, row := range resp.Items {
 		if row.PeerID != nodeB.Host.ID().String() {
 			t.Errorf("row has peer_id %q, want %q", row.PeerID, nodeB.Host.ID().String())
 		}
@@ -173,7 +177,7 @@ func TestHandleFindRemoteTools_SinglePeer(t *testing.T) {
 	}
 	for name, found := range wantNames {
 		if !found {
-			t.Errorf("expected tool %q in response, not found; rows=%+v", name, rows)
+			t.Errorf("expected tool %q in response, not found; rows=%+v", name, resp.Items)
 		}
 	}
 }

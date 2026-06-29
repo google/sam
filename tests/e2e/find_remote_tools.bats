@@ -79,7 +79,7 @@ teardown() {
 
   local match_count
   match_count=$(echo "$catalog" | jq --arg pid "${node2_peer_id}" '
-    [.[] | select(.peer_id == $pid
+    [.items[] | select(.peer_id == $pid
                  and (.tool_name | startswith("calculator.")))] | length
   ')
   echo "Matching calculator tool entries: ${match_count}"

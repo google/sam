@@ -1,9 +1,24 @@
+// Copyright 2026 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package main
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -242,6 +257,7 @@ type FindRemoteToolsParams struct {
 	Intent      string `json:"intent,omitempty" jsonschema:"Natural-language description of what the caller is looking for. Reserved for future semantic ranking; currently accepted but ignored."`
 	PeerID      string `json:"peer_id,omitempty" jsonschema:"Restrict the search to a single peer. Empty means search the whole mesh."`
 	ServiceName string `json:"service_name,omitempty" jsonschema:"Restrict results to tools whose name starts with this service prefix (e.g. 'code-reviewer'). Empty means no service filter."`
+	Cursor      string `json:"cursor,omitempty" jsonschema:"Optional pagination cursor. Pass the nextCursor from a previous response to get the next page."`
 }
 
 // remoteToolRow is one entry in the find_remote_tools response.
@@ -311,7 +327,20 @@ func (n *SamNode) handleFindRemoteTools(ctx context.Context, req *mcp.CallToolRe
 	if rows == nil {
 		rows = []remoteToolRow{}
 	}
-	respData, err := json.Marshal(rows)
+
+	paginatedRows, nextCursor, err := PaginateSlice(rows, params.Cursor, 50)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	respObj := map[string]any{
+		"items": paginatedRows,
+	}
+	if nextCursor != "" {
+		respObj["nextCursor"] = nextCursor
+	}
+
+	respData, err := json.Marshal(respObj)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -608,4 +637,446 @@ func (n *SamNode) handleGetRecentLogs(ctx context.Context, req *mcp.CallToolRequ
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{&mcp.TextContent{Text: string(data)}},
 	}, nil, nil
+}
+
+// FindRemoteResourcesParams defines the parameters for find_remote_resources.
+type FindRemoteResourcesParams struct {
+	PeerID      string `json:"peer_id,omitempty" jsonschema:"Restrict the search to a single peer. Empty means search the whole mesh."`
+	ServiceName string `json:"service_name,omitempty" jsonschema:"Restrict results to resources whose name starts with this service prefix."`
+	Cursor      string `json:"cursor,omitempty" jsonschema:"Optional pagination cursor."`
+}
+
+// remoteResourceRow is one entry in the find_remote_resources response.
+type remoteResourceRow struct {
+	PeerID      string `json:"peer_id"`
+	ResourceURI string `json:"resource_uri"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+func (n *SamNode) handleFindRemoteResources(ctx context.Context, req *mcp.CallToolRequest, params FindRemoteResourcesParams) (*mcp.CallToolResult, any, error) {
+	selfID := n.Host.ID().String()
+	if params.PeerID != "" && params.PeerID == selfID {
+		return nil, nil, fmt.Errorf("peer_id %q is this node; cross-mesh discovery cannot target self", params.PeerID)
+	}
+
+	var rows []remoteResourceRow
+
+	if params.PeerID != "" {
+		pid, err := peer.Decode(params.PeerID)
+		if err != nil {
+			return nil, nil, fmt.Errorf("invalid peer_id %q: %w", params.PeerID, err)
+		}
+		resources, err := n.fetchRemoteResourceCatalogue(ctx, pid)
+		if err != nil {
+			return nil, nil, err
+		}
+		rows = appendFilteredResourceRows(rows, params.PeerID, resources, params.ServiceName)
+	} else {
+		providers, err := n.DiscoverRemoteServices(ctx, api.ServiceType_SERVICE_TYPE_MCP, "")
+		if err != nil {
+			return nil, nil, fmt.Errorf("discover providers: %w", err)
+		}
+		seen := map[string]bool{}
+		var peerIDs []peer.ID
+		for _, p := range providers {
+			if p.PeerId == selfID || seen[p.PeerId] {
+				continue
+			}
+			seen[p.PeerId] = true
+			pid, err := peer.Decode(p.PeerId)
+			if err != nil {
+				continue
+			}
+			peerIDs = append(peerIDs, pid)
+		}
+
+		rows = n.fanOutFetchResources(ctx, peerIDs, params.ServiceName)
+	}
+
+	if rows == nil {
+		rows = []remoteResourceRow{}
+	}
+
+	paginatedRows, nextCursor, err := PaginateSlice(rows, params.Cursor, 50)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	respObj := map[string]any{
+		"items": paginatedRows,
+	}
+	if nextCursor != "" {
+		respObj["nextCursor"] = nextCursor
+	}
+
+	respData, err := json.Marshal(respObj)
+	if err != nil {
+		return nil, nil, err
+	}
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{&mcp.TextContent{Text: string(respData)}},
+	}, nil, nil
+}
+
+func (n *SamNode) fetchRemoteResourceCatalogue(ctx context.Context, targetPeer peer.ID) ([]*mcp.Resource, error) {
+	services, err := n.fetchRemoteServiceCatalog(ctx, targetPeer, "MCP")
+	if err != nil {
+		return nil, fmt.Errorf("fetch remote service catalog: %w", err)
+	}
+
+	var allResources []*mcp.Resource
+
+	for _, svc := range services {
+		if svc.Type != api.ServiceType_SERVICE_TYPE_MCP {
+			continue
+		}
+
+		n.preparePeerAddrs(ctx, targetPeer)
+		session, cleanup, err := n.ConnectMCPSession(ctx, targetPeer, svc.Name)
+		if err != nil {
+			continue
+		}
+
+		listRes, err := session.ListResources(ctx, &mcp.ListResourcesParams{})
+		if err == nil && listRes != nil {
+			for _, r := range listRes.Resources {
+				// Namespace the URI scheme or name if we want, but resources are URIs.
+				// We'll prefix the Name to indicate origin.
+				r.Name = svc.Name + "." + r.Name
+				allResources = append(allResources, r)
+			}
+		}
+		cleanup()
+	}
+
+	return allResources, nil
+}
+
+func appendFilteredResourceRows(rows []remoteResourceRow, peerID string, resources []*mcp.Resource, serviceName string) []remoteResourceRow {
+	for _, r := range resources {
+		if serviceName != "" && !strings.HasPrefix(r.Name, serviceName+".") {
+			continue
+		}
+		rows = append(rows, remoteResourceRow{
+			PeerID:      peerID,
+			ResourceURI: r.URI,
+			Name:        r.Name,
+			Description: r.Description,
+		})
+	}
+	return rows
+}
+
+func (n *SamNode) fanOutFetchResources(ctx context.Context, peers []peer.ID, serviceName string) []remoteResourceRow {
+	const maxConcurrent = 8
+	sem := make(chan struct{}, maxConcurrent)
+
+	var (
+		mu   sync.Mutex
+		rows []remoteResourceRow
+	)
+
+	var wg sync.WaitGroup
+	for _, pid := range peers {
+		pid := pid
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			peerCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			defer cancel()
+
+			resources, err := n.fetchRemoteResourceCatalogue(peerCtx, pid)
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			rows = appendFilteredResourceRows(rows, pid.String(), resources, serviceName)
+			mu.Unlock()
+		}()
+	}
+	wg.Wait()
+	return rows
+}
+
+// ReadRemoteResourceParams defines the parameters for read_remote_resource.
+type ReadRemoteResourceParams struct {
+	PeerID string `json:"peer_id" jsonschema:"The Peer ID of the target agent"`
+	URI    string `json:"uri" jsonschema:"The URI of the remote resource"`
+}
+
+func (n *SamNode) handleReadRemoteResource(ctx context.Context, req *mcp.CallToolRequest, params ReadRemoteResourceParams) (*mcp.CallToolResult, any, error) {
+	targetPeer, err := peer.Decode(params.PeerID)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Try all MCP services on the remote peer to see which one has the resource
+	services, err := n.fetchRemoteServiceCatalog(ctx, targetPeer, "MCP")
+	if err != nil {
+		return nil, nil, err
+	}
+
+	for _, svc := range services {
+		if svc.Type != api.ServiceType_SERVICE_TYPE_MCP {
+			continue
+		}
+
+		session, cleanup, err := n.ConnectMCPSession(ctx, targetPeer, svc.Name)
+		if err != nil {
+			continue
+		}
+
+		res, err := session.ReadResource(ctx, &mcp.ReadResourceParams{
+			URI: params.URI,
+		})
+
+		if err == nil && res != nil && len(res.Contents) > 0 {
+			defer cleanup()
+
+			// Marshal the contents
+			data, _ := json.Marshal(res.Contents)
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{
+					&mcp.TextContent{Text: string(data)},
+				},
+			}, nil, nil
+		}
+		cleanup()
+	}
+
+	return nil, nil, fmt.Errorf("resource %s not found on peer %s", params.URI, params.PeerID)
+}
+
+// FindRemotePromptsParams defines the parameters for find_remote_prompts.
+type FindRemotePromptsParams struct {
+	PeerID      string `json:"peer_id,omitempty" jsonschema:"Restrict the search to a single peer. Empty means search the whole mesh."`
+	ServiceName string `json:"service_name,omitempty" jsonschema:"Restrict results to prompts whose name starts with this service prefix."`
+	Cursor      string `json:"cursor,omitempty" jsonschema:"Optional pagination cursor."`
+}
+
+// remotePromptRow is one entry in the find_remote_prompts response.
+type remotePromptRow struct {
+	PeerID      string                `json:"peer_id"`
+	Name        string                `json:"name"`
+	Description string                `json:"description"`
+	Arguments   []*mcp.PromptArgument `json:"arguments"`
+}
+
+func (n *SamNode) handleFindRemotePrompts(ctx context.Context, req *mcp.CallToolRequest, params FindRemotePromptsParams) (*mcp.CallToolResult, any, error) {
+	selfID := n.Host.ID().String()
+	if params.PeerID != "" && params.PeerID == selfID {
+		return nil, nil, fmt.Errorf("peer_id %q is this node; cross-mesh discovery cannot target self", params.PeerID)
+	}
+
+	var rows []remotePromptRow
+
+	if params.PeerID != "" {
+		pid, err := peer.Decode(params.PeerID)
+		if err != nil {
+			return nil, nil, fmt.Errorf("invalid peer_id %q: %w", params.PeerID, err)
+		}
+		prompts, err := n.fetchRemotePromptCatalogue(ctx, pid)
+		if err != nil {
+			return nil, nil, err
+		}
+		rows = appendFilteredPromptRows(rows, params.PeerID, prompts, params.ServiceName)
+	} else {
+		providers, err := n.DiscoverRemoteServices(ctx, api.ServiceType_SERVICE_TYPE_MCP, "")
+		if err != nil {
+			return nil, nil, fmt.Errorf("discover providers: %w", err)
+		}
+		seen := map[string]bool{}
+		var peerIDs []peer.ID
+		for _, p := range providers {
+			if p.PeerId == selfID || seen[p.PeerId] {
+				continue
+			}
+			seen[p.PeerId] = true
+			pid, err := peer.Decode(p.PeerId)
+			if err != nil {
+				continue
+			}
+			peerIDs = append(peerIDs, pid)
+		}
+
+		rows = n.fanOutFetchPrompts(ctx, peerIDs, params.ServiceName)
+	}
+
+	if rows == nil {
+		rows = []remotePromptRow{}
+	}
+
+	paginatedRows, nextCursor, err := PaginateSlice(rows, params.Cursor, 50)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	respObj := map[string]any{
+		"items": paginatedRows,
+	}
+	if nextCursor != "" {
+		respObj["nextCursor"] = nextCursor
+	}
+
+	respData, err := json.Marshal(respObj)
+	if err != nil {
+		return nil, nil, err
+	}
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{&mcp.TextContent{Text: string(respData)}},
+	}, nil, nil
+}
+
+func (n *SamNode) fetchRemotePromptCatalogue(ctx context.Context, targetPeer peer.ID) ([]*mcp.Prompt, error) {
+	services, err := n.fetchRemoteServiceCatalog(ctx, targetPeer, "MCP")
+	if err != nil {
+		return nil, fmt.Errorf("fetch remote service catalog: %w", err)
+	}
+
+	var allPrompts []*mcp.Prompt
+
+	for _, svc := range services {
+		if svc.Type != api.ServiceType_SERVICE_TYPE_MCP {
+			continue
+		}
+
+		n.preparePeerAddrs(ctx, targetPeer)
+		session, cleanup, err := n.ConnectMCPSession(ctx, targetPeer, svc.Name)
+		if err != nil {
+			continue
+		}
+
+		listRes, err := session.ListPrompts(ctx, &mcp.ListPromptsParams{})
+		if err == nil && listRes != nil {
+			for _, p := range listRes.Prompts {
+				p.Name = svc.Name + "." + p.Name
+				allPrompts = append(allPrompts, p)
+			}
+		}
+		cleanup()
+	}
+
+	return allPrompts, nil
+}
+
+func appendFilteredPromptRows(rows []remotePromptRow, peerID string, prompts []*mcp.Prompt, serviceName string) []remotePromptRow {
+	for _, p := range prompts {
+		if serviceName != "" && !strings.HasPrefix(p.Name, serviceName+".") {
+			continue
+		}
+		rows = append(rows, remotePromptRow{
+			PeerID:      peerID,
+			Name:        p.Name,
+			Description: p.Description,
+			Arguments:   p.Arguments,
+		})
+	}
+	return rows
+}
+
+func (n *SamNode) fanOutFetchPrompts(ctx context.Context, peers []peer.ID, serviceName string) []remotePromptRow {
+	const maxConcurrent = 8
+	sem := make(chan struct{}, maxConcurrent)
+
+	var (
+		mu   sync.Mutex
+		rows []remotePromptRow
+	)
+
+	var wg sync.WaitGroup
+	for _, pid := range peers {
+		pid := pid
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			peerCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			defer cancel()
+
+			prompts, err := n.fetchRemotePromptCatalogue(peerCtx, pid)
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			rows = appendFilteredPromptRows(rows, pid.String(), prompts, serviceName)
+			mu.Unlock()
+		}()
+	}
+	wg.Wait()
+	return rows
+}
+
+// GetRemotePromptParams defines the parameters for get_remote_prompt.
+type GetRemotePromptParams struct {
+	PeerID    string            `json:"peer_id" jsonschema:"The Peer ID of the target agent"`
+	Name      string            `json:"name" jsonschema:"The namespaced name of the remote prompt (e.g. 'service.prompt')"`
+	Arguments map[string]string `json:"arguments,omitempty" jsonschema:"Arguments to pass to the prompt"`
+}
+
+func (n *SamNode) handleGetRemotePrompt(ctx context.Context, req *mcp.CallToolRequest, params GetRemotePromptParams) (*mcp.CallToolResult, any, error) {
+	targetPeer, err := peer.Decode(params.PeerID)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	targetService := api.CatalogTarget
+	originalPromptName := params.Name
+	if parts := strings.SplitN(params.Name, ".", 2); len(parts) == 2 {
+		targetService = parts[0]
+		originalPromptName = parts[1]
+	}
+
+	session, cleanup, err := n.ConnectMCPSession(ctx, targetPeer, targetService)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer cleanup()
+
+	res, err := session.GetPrompt(ctx, &mcp.GetPromptParams{
+		Name:      originalPromptName,
+		Arguments: params.Arguments,
+	})
+
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get prompt %s: %w", params.Name, err)
+	}
+
+	data, _ := json.Marshal(res)
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{
+			&mcp.TextContent{Text: string(data)},
+		},
+	}, nil, nil
+}
+
+// PaginateSlice ...
+func PaginateSlice[T any](items []T, cursor string, limit int) ([]T, string, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	startIdx := 0
+	if cursor != "" {
+		idx, err := strconv.Atoi(cursor)
+		if err != nil {
+			return nil, "", err
+		}
+		startIdx = idx
+	}
+	if startIdx >= len(items) {
+		return []T{}, "", nil
+	}
+	endIdx := startIdx + limit
+	nextCursor := ""
+	if endIdx < len(items) {
+		nextCursor = strconv.Itoa(endIdx)
+	} else {
+		endIdx = len(items)
+	}
+	return items[startIdx:endIdx], nextCursor, nil
 }
