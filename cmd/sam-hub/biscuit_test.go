@@ -101,7 +101,7 @@ func TestMintBiscuitToken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	authorizer1, err := b1.Authorizer(kr.GetCurrentPublicKey(), biscuit.WithWorldOptions(datalog.WithMaxDuration(500 * time.Millisecond)))
+	authorizer1, err := b1.Authorizer(kr.GetCurrentPublicKey(), biscuit.WithWorldOptions(datalog.WithMaxDuration(500*time.Millisecond)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +134,7 @@ func TestMintBiscuitToken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	authorizer2, err := b2.Authorizer(kr.GetCurrentPublicKey(), biscuit.WithWorldOptions(datalog.WithMaxDuration(500 * time.Millisecond)))
+	authorizer2, err := b2.Authorizer(kr.GetCurrentPublicKey(), biscuit.WithWorldOptions(datalog.WithMaxDuration(500*time.Millisecond)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +164,7 @@ func TestMintBiscuitToken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	authorizer3, err := b3.Authorizer(kr.GetCurrentPublicKey(), biscuit.WithWorldOptions(datalog.WithMaxDuration(500 * time.Millisecond)))
+	authorizer3, err := b3.Authorizer(kr.GetCurrentPublicKey(), biscuit.WithWorldOptions(datalog.WithMaxDuration(500*time.Millisecond)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,7 +194,7 @@ func TestMintBiscuitToken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	authorizer4, err := b4.Authorizer(kr.GetCurrentPublicKey(), biscuit.WithWorldOptions(datalog.WithMaxDuration(500 * time.Millisecond)))
+	authorizer4, err := b4.Authorizer(kr.GetCurrentPublicKey(), biscuit.WithWorldOptions(datalog.WithMaxDuration(500*time.Millisecond)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -339,7 +339,7 @@ func TestMintBiscuitToken_ClaimsTranslation(t *testing.T) {
 		t.Fatalf("Failed to unmarshal biscuit: %v", err)
 	}
 
-	authorizer, err := b.Authorizer(kr.GetCurrentPublicKey(), biscuit.WithWorldOptions(datalog.WithMaxDuration(500 * time.Millisecond)))
+	authorizer, err := b.Authorizer(kr.GetCurrentPublicKey(), biscuit.WithWorldOptions(datalog.WithMaxDuration(500*time.Millisecond)))
 	if err != nil {
 		t.Fatalf("Failed to get authorizer: %v", err)
 	}
@@ -560,7 +560,7 @@ func TestMintBiscuitToken_VariousClaimsTypes(t *testing.T) {
 				t.Fatalf("Unmarshal biscuit failed: %v", err)
 			}
 
-			authorizer, err := b.Authorizer(kr.GetCurrentPublicKey(), biscuit.WithWorldOptions(datalog.WithMaxDuration(500 * time.Millisecond)))
+			authorizer, err := b.Authorizer(kr.GetCurrentPublicKey(), biscuit.WithWorldOptions(datalog.WithMaxDuration(500*time.Millisecond)))
 			if err != nil {
 				t.Fatalf("Authorizer failed: %v", err)
 			}

@@ -43,7 +43,7 @@ func (b *StdioBridge) Start() {
 		scanner := bufio.NewScanner(b.stdout)
 		for scanner.Scan() {
 			line := scanner.Text()
-			
+
 			b.mu.Lock()
 			if len(line) > 0 && line[0] == '{' {
 				var msg map[string]any
@@ -68,7 +68,7 @@ func (b *StdioBridge) Start() {
 			}
 			b.mu.Unlock()
 		}
-		
+
 		b.mu.Lock()
 		for ch := range b.clients {
 			close(ch)
