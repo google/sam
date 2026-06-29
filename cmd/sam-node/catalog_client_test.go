@@ -87,12 +87,12 @@ func TestCallCatalog_HTTPEndpoint(t *testing.T) {
 	mcp.AddTool(server, &mcp.Tool{Name: "query_catalog"}, func(_ context.Context, _ *mcp.CallToolRequest, _ map[string]any) (*mcp.CallToolResult, any, error) {
 		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: cannedJSON}}}, nil, nil
 	})
-	sseHandler := mcp.NewSSEHandler(func(_ *http.Request) *mcp.Server {
+	streamableHandler := mcp.NewStreamableHTTPHandler(func(_ *http.Request) *mcp.Server {
 		return server
 	}, nil)
 
 	mux := http.NewServeMux()
-	mux.Handle("/mcp", sseHandler)
+	mux.Handle("/mcp", streamableHandler)
 	ts := httptest.NewServer(mux)
 	defer ts.Close()
 

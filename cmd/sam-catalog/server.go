@@ -64,7 +64,7 @@ func handleQueryCatalog(store *catalog.Store) func(context.Context, *mcp.CallToo
 	}
 }
 
-// newCatalogMCPHandler returns an HTTP handler exposing the query_catalog MCP tool over SSE.
+// newCatalogMCPHandler returns an HTTP handler exposing the query_catalog MCP tool.
 func newCatalogMCPHandler(store *catalog.Store) http.Handler {
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "sam-catalog-mcp",
@@ -76,12 +76,12 @@ func newCatalogMCPHandler(store *catalog.Store) http.Handler {
 		Description: "Query the service catalog. Filter by type (mcp/inference/catalog) and/or name.",
 	}, handleQueryCatalog(store))
 
-	sseHandler := mcp.NewSSEHandler(func(_ *http.Request) *mcp.Server {
+	streamableHandler := mcp.NewStreamableHTTPHandler(func(_ *http.Request) *mcp.Server {
 		return server
 	}, nil)
 
 	mux := http.NewServeMux()
-	mux.Handle("/mcp", sseHandler)
+	mux.Handle("/mcp", streamableHandler)
 	return mux
 }
 

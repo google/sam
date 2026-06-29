@@ -108,7 +108,7 @@ func (n *SamNode) resolveCatalogEndpoints(ctx context.Context, forceRefresh bool
 func (n *SamNode) callCatalog(ctx context.Context, ep catalogEndpoint, args map[string]string) (*mcp.CallToolResult, error) {
 	if ep.url != "" {
 		client := mcp.NewClient(&mcp.Implementation{Name: "sam-node-catalog-client", Version: "0.1.0"}, nil)
-		session, err := client.Connect(ctx, &mcp.SSEClientTransport{Endpoint: strings.TrimRight(ep.url, "/") + "/mcp"}, nil)
+		session, err := client.Connect(ctx, &mcp.StreamableClientTransport{Endpoint: strings.TrimRight(ep.url, "/") + "/mcp"}, nil)
 		if err != nil {
 			return nil, fmt.Errorf("connect %s: %w", ep.url, err)
 		}
