@@ -71,6 +71,7 @@ Admins define central permissions by mapping OIDC roles to specific capabilities
 * **`allowed_services`**: Defines the application-level tools or endpoints a user can access. Services use a strict `type:name` convention (e.g., `mcp:db-agent` or `inference:openrouter`).
   * **Default Namespace (`system`)**: If a service string does not contain a `:` separator (e.g., `my-tool`), it automatically defaults to the `system` type (parsed as `system:my-tool`).
   * **Wildcards**: Because `allowed_services` translates to the two-argument Biscuit fact `service($type, $name)`, SAM natively supports wildcards. You can grant access to an entire type via `type:*` (e.g., `mcp:*`), or grant global access to everything via `*`.
+  * **MCP Namespace Convention**: The `mcp:` prefix (`api.MCPServicePrefix`) is the explicit convention for all Model Context Protocol targets. When remote nodes query local nodes for tool catalogs, if the local service is an MCP server and is missing the `mcp:` prefix in its name, the proxy layer will automatically prepend `mcp:` prior to enforcing the authorization policy to prevent it from accidentally falling back into the `system:` namespace.
 
 > [!NOTE]
 > The `*` global wildcard is a special case. It maps exactly to type `*` and name `*`. It does *not* default to the `system` type.

@@ -35,6 +35,12 @@ const DefaultServiceType = "system"
 
 const DefaultAudience = "sam-mesh-audience"
 
+// MCPServicePrefix is the conventional prefix (namespace + separator) used for Model Context Protocol (MCP) services.
+// When an MCP client attempts to connect to an MCP service on a remote peer, and the target service name
+// does not contain a namespace separator (':'), this prefix is automatically prepended to the service name
+// prior to routing and policy evaluation.
+const MCPServicePrefix = "mcp:"
+
 // Biscuit fact names
 const (
 	FactExpiration    = "expiration"

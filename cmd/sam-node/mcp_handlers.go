@@ -338,7 +338,7 @@ func (n *SamNode) fetchRemoteToolCatalogue(ctx context.Context, targetPeer peer.
 
 		targetService := svc.Name
 		if !strings.Contains(targetService, ":") {
-			targetService = "mcp:" + targetService
+			targetService = api.MCPServicePrefix + targetService
 		}
 
 		n.preparePeerAddrs(ctx, targetPeer)
