@@ -117,6 +117,8 @@ func NewServiceFromRequest(req *api.RegisterServiceRequest) (Service, error) {
 		return &MCPService{baseService: baseService{info: info, backend: req.Backend}}, nil
 	case api.ServiceType_SERVICE_TYPE_INFERENCE:
 		return &InferenceService{baseService: baseService{info: info, backend: req.Backend}}, nil
+	case api.ServiceType_SERVICE_TYPE_CATALOG:
+		return &MCPService{baseService: baseService{info: info, backend: req.Backend}}, nil
 	default:
 		return nil, fmt.Errorf("unspecified or unsupported service type: %v", info.Type)
 	}
