@@ -332,7 +332,7 @@ func (n *SamNode) fetchRemoteToolCatalogue(ctx context.Context, targetPeer peer.
 	var rows []remoteToolRow
 
 	for _, svc := range services {
-		if svc.Type != api.ServiceType_SERVICE_TYPE_MCP {
+		if svc == nil || svc.Type != api.ServiceType_SERVICE_TYPE_MCP {
 			continue
 		}
 
@@ -353,6 +353,9 @@ func (n *SamNode) fetchRemoteToolCatalogue(ctx context.Context, targetPeer peer.
 		listRes, err := session.ListTools(ctx, nil)
 		if err == nil && listRes != nil {
 			for _, t := range listRes.Tools {
+				if t == nil {
+					continue
+				}
 				t.Name = svc.Name + "." + t.Name
 				if !strings.Contains(t.Name, ".") {
 					continue

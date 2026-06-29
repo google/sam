@@ -431,7 +431,7 @@ func TestFetchRemoteToolCatalogue_AuthRejected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	
+
 	// Create a biscuit that DOES NOT allow "summarizer", only "some_other_service".
 	// By baseline rules, it will STILL allow the catalog fetch.
 	if err := buildAndSaveCustomBiscuit(nodeA, rootPrivEd, []string{"some_other_service"}); err != nil {

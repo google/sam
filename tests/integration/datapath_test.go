@@ -116,16 +116,20 @@ func TestIntegrationStdioDatapath(t *testing.T) {
 	// Test Streamable HTTP (http-first mode)
 	// Send message via POST and expect the response in the HTTP response body
 	testMessage := `{"jsonrpc":"2.0","method":"ping","id":1}`
-	postReq, _ := http.NewRequest("POST", postURL, bytes.NewBufferString(testMessage))
-	postReq.Header.Set("Authorization", "Bearer "+apiToken)
-	postReq.Header.Set("Content-Type", "application/json")
-	postReq.Header.Set("Accept", "application/json")
 
 	var postResp *http.Response
 	for i := 0; i < 3; i++ {
+		postReq, _ := http.NewRequest("POST", postURL, bytes.NewBufferString(testMessage))
+		postReq.Header.Set("Authorization", "Bearer "+apiToken)
+		postReq.Header.Set("Content-Type", "application/json")
+		postReq.Header.Set("Accept", "application/json")
+
 		postResp, err = client.Do(postReq)
-		if err == nil && postResp.StatusCode == http.StatusOK {
-			break
+		if err == nil {
+			if postResp.StatusCode == http.StatusOK {
+				break
+			}
+			_ = postResp.Body.Close()
 		}
 		t.Logf("POST Attempt %d failed: %v, status: %v", i+1, err, postResp)
 		time.Sleep(1 * time.Second)

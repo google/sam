@@ -148,13 +148,15 @@ func (b *StdioBridge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				if !ok {
 					return
 				}
-				var respMsg map[string]any
-				if err := json.Unmarshal([]byte(line), &respMsg); err == nil {
-					if respID, ok := respMsg["id"]; ok && fmt.Sprintf("%v", respID) == fmt.Sprintf("%v", reqID) {
-						w.Header().Set("Content-Type", "application/json")
-						w.WriteHeader(http.StatusOK)
-						_, _ = w.Write([]byte(line))
-						return
+				if len(line) > 0 && line[0] == '{' {
+					var respMsg map[string]any
+					if err := json.Unmarshal([]byte(line), &respMsg); err == nil {
+						if respID, ok := respMsg["id"]; ok && fmt.Sprintf("%v", respID) == fmt.Sprintf("%v", reqID) {
+							w.Header().Set("Content-Type", "application/json")
+							w.WriteHeader(http.StatusOK)
+							_, _ = w.Write([]byte(line))
+							return
+						}
 					}
 				}
 			}
