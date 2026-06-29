@@ -36,6 +36,8 @@ type Service interface {
 	Init(ctx context.Context) error
 	Handler() http.Handler
 	Teardown() error
+	// TargetURL returns the URL backend if this service is URL-backed.
+	TargetURL() (string, bool)
 }
 
 // baseService is the shared embeddable. Holds the fields and default
@@ -72,6 +74,14 @@ func newReverseProxyHandler(targetURL string) (http.Handler, error) {
 
 func (b *baseService) Info() *api.ServiceInfo { return b.info }
 func (b *baseService) Handler() http.Handler  { return b.handler }
+
+// TargetURL returns the URL backend if this service is URL-backed.
+func (b *baseService) TargetURL() (string, bool) {
+	if t, ok := b.backend.(*api.RegisterServiceRequest_TargetUrl); ok {
+		return t.TargetUrl, true
+	}
+	return "", false
+}
 
 // Init builds the ingress handler for the backend. URL -> reverse-proxy,
 // Command -> StdioBridge. MCPService extends this; it does not replace it.

@@ -15,12 +15,16 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func TestCatalogEntriesToProviders(t *testing.T) {
@@ -69,5 +73,45 @@ func TestCatalogEntriesToProvidersEmpty(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Fatalf("want 0, got %d", len(got))
+	}
+}
+
+func TestQueryLocalCatalog(t *testing.T) {
+	_, pub, _ := crypto.GenerateKeyPair(crypto.Ed25519, -1)
+	pid, _ := peer.IDFromPublicKey(pub)
+	idStr := pid.String()
+
+	cannedJSON := fmt.Sprintf(`[{"Type":1,"Name":"github-tools","PeerID":%q}]`, idStr)
+
+	server := mcp.NewServer(&mcp.Implementation{Name: "test-catalog", Version: "0.1.0"}, nil)
+	mcp.AddTool(server, &mcp.Tool{Name: "query_catalog"}, func(_ context.Context, _ *mcp.CallToolRequest, _ map[string]any) (*mcp.CallToolResult, any, error) {
+		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: cannedJSON}}}, nil, nil
+	})
+	sseHandler := mcp.NewSSEHandler(func(_ *http.Request) *mcp.Server {
+		return server
+	}, nil)
+
+	mux := http.NewServeMux()
+	mux.Handle("/mcp/events", sseHandler)
+	mux.Handle("/mcp/message", sseHandler)
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	n := &SamNode{BoundHTTPAddr: "127.0.0.1:9999"}
+	providers, ok := n.queryLocalCatalog(context.Background(), ts.URL, "mcp", "github-tools")
+	if !ok {
+		t.Fatal("queryLocalCatalog: want ok=true")
+	}
+	if len(providers) != 1 {
+		t.Fatalf("want 1 provider, got %d", len(providers))
+	}
+	if providers[0].PeerId != idStr {
+		t.Errorf("PeerId = %q, want %q", providers[0].PeerId, idStr)
+	}
+	if !strings.Contains(providers[0].LocalProxyUrl, idStr) {
+		t.Errorf("LocalProxyUrl %q does not contain %q", providers[0].LocalProxyUrl, idStr)
+	}
+	if providers[0].SrvName != "github-tools" {
+		t.Errorf("SrvName = %q, want github-tools", providers[0].SrvName)
 	}
 }

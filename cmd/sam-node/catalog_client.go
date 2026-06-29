@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/google/sam/api"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -80,9 +81,46 @@ func (n *SamNode) findCatalogProvider(ctx context.Context, forceRefresh bool) (p
 	return "", false
 }
 
-// queryCatalog asks a catalog peer to resolve the request; returns (providers, true)
-// only on a successful non-empty result. Retries once with a fresh peer on failure.
+// queryLocalCatalog queries a catalog hosted on THIS node directly over HTTP MCP
+// (no libp2p / no self-dial). Returns (providers,true) only on a non-empty result.
+func (n *SamNode) queryLocalCatalog(ctx context.Context, baseURL, typeStr, serviceName string) ([]*api.DiscoveredProvider, bool) {
+	args := map[string]string{"type": typeStr}
+	if serviceName != "" {
+		args["name"] = serviceName
+	}
+	client := mcp.NewClient(&mcp.Implementation{Name: "sam-node-catalog-client", Version: "0.1.0"}, nil)
+	session, err := client.Connect(ctx, &mcp.SSEClientTransport{Endpoint: strings.TrimRight(baseURL, "/") + "/mcp/events"}, nil)
+	if err != nil {
+		logger.Warnf("[Catalog] local catalog connect %s failed: %v", baseURL, err)
+		return nil, false
+	}
+	defer func() { _ = session.Close() }()
+	res, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "query_catalog", Arguments: args})
+	if err != nil || res == nil || len(res.Content) == 0 {
+		return nil, false
+	}
+	text, ok := res.Content[0].(*mcp.TextContent)
+	if !ok {
+		return nil, false
+	}
+	providers, err := catalogEntriesToProviders(n, text.Text, typeStr)
+	if err != nil || len(providers) == 0 {
+		return nil, false
+	}
+	logger.Infof("[Catalog] resolved %d providers via local catalog", len(providers))
+	return providers, true
+}
+
+// queryCatalog asks a catalog to resolve the request; tries local-hosted first,
+// then a remote peer. Returns (providers, true) only on a successful non-empty result.
 func (n *SamNode) queryCatalog(ctx context.Context, serviceType api.ServiceType, typeStr, serviceName string) ([]*api.DiscoveredProvider, bool) {
+	// Local-hosted catalog first: query it directly, no libp2p self-dial.
+	if url, ok := n.services.localCatalogURL(); ok {
+		if providers, ok := n.queryLocalCatalog(ctx, url, typeStr, serviceName); ok {
+			return providers, true
+		}
+	}
+	// Remote catalog peer (skips self, correct for the libp2p path).
 	for attempt := 0; attempt < 2; attempt++ {
 		p, ok := n.findCatalogProvider(ctx, attempt > 0)
 		if !ok {
@@ -111,5 +149,6 @@ func (n *SamNode) queryCatalog(ctx context.Context, serviceType api.ServiceType,
 		logger.Infof("[Catalog] resolved %d providers via catalog %s", len(providers), p)
 		return providers, true
 	}
+	logger.Debugf("[Catalog] no usable catalog; falling back to DHT discovery")
 	return nil, false
 }

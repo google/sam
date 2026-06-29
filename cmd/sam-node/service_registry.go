@@ -135,6 +135,18 @@ func (r *ServiceRegistry) insertService(svc Service) {
 	r.services[svc.Info().Name] = svc
 }
 
+// localCatalogURL returns the target URL of a locally-hosted CATALOG service, if any.
+func (r *ServiceRegistry) localCatalogURL() (string, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, svc := range r.services {
+		if svc.Info().Type == api.ServiceType_SERVICE_TYPE_CATALOG {
+			return svc.TargetURL()
+		}
+	}
+	return "", false
+}
+
 // TeardownAll calls Teardown on every registered service and clears the
 // map. Per-service errors are logged; iteration continues.
 func (r *ServiceRegistry) TeardownAll() {

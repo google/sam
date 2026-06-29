@@ -52,7 +52,8 @@ func (f *fakeService) Init(ctx context.Context) error {
 	f.initCalls++
 	return f.initErr
 }
-func (f *fakeService) Handler() http.Handler { return f.handler }
+func (f *fakeService) Handler() http.Handler     { return f.handler }
+func (f *fakeService) TargetURL() (string, bool) { return "", false }
 func (f *fakeService) Teardown() error {
 	f.teardownCalls++
 	return nil
@@ -142,6 +143,31 @@ func TestServiceRegistry_ListFiltersByType(t *testing.T) {
 	mcpOnly := r.List(api.ServiceType_SERVICE_TYPE_MCP)
 	if len(mcpOnly) != 1 || mcpOnly[0].Name != "a" {
 		t.Errorf("List(MCP): got %v, want [a]", mcpOnly)
+	}
+}
+
+func TestLocalCatalogURL_WithCatalogService(t *testing.T) {
+	r := newServiceRegistryForTest(&fakeDHT{})
+	svc := &MCPService{baseService: baseService{
+		info:    &api.ServiceInfo{Type: api.ServiceType_SERVICE_TYPE_CATALOG, Name: "catalog"},
+		backend: &api.RegisterServiceRequest_TargetUrl{TargetUrl: "http://127.0.0.1:9100"},
+	}}
+	r.insertService(svc)
+	url, ok := r.localCatalogURL()
+	if !ok {
+		t.Fatal("localCatalogURL: want true when CATALOG service present")
+	}
+	if url != "http://127.0.0.1:9100" {
+		t.Errorf("localCatalogURL = %q, want http://127.0.0.1:9100", url)
+	}
+}
+
+func TestLocalCatalogURL_NoCatalogService(t *testing.T) {
+	r := newServiceRegistryForTest(&fakeDHT{})
+	r.insertService(newFakeSvc("mcp-svc", api.ServiceType_SERVICE_TYPE_MCP))
+	_, ok := r.localCatalogURL()
+	if ok {
+		t.Fatal("localCatalogURL: want false when no CATALOG service registered")
 	}
 }
 
