@@ -55,6 +55,7 @@ import (
 	"github.com/libp2p/go-libp2p/p2p/discovery/util"
 	"github.com/libp2p/go-libp2p/p2p/host/autorelay"
 	"github.com/libp2p/go-libp2p/p2p/net/connmgr"
+	"github.com/libp2p/go-libp2p/p2p/net/swarm"
 	libp2ptls "github.com/libp2p/go-libp2p/p2p/security/tls"
 	"github.com/libp2p/go-msgio"
 	"github.com/multiformats/go-multiaddr"
@@ -286,6 +287,7 @@ func NewSamNode(ctx context.Context, cfg SamNodeConfig) (*SamNode, error) {
 		libp2p.EnableRelay(),
 		libp2p.EnableHolePunching(),
 		libp2p.ConnectionManager(cm),
+		libp2p.SwarmOpts(swarm.WithDialTimeout(15 * time.Second)),
 		libp2p.AddrsFactory(func(addrs []multiaddr.Multiaddr) []multiaddr.Multiaddr {
 			if cfg.AllowLoopback {
 				return addrs

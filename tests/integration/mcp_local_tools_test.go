@@ -67,7 +67,7 @@ roles: {}
 	fetchPeerID(t, httpPortHub)
 
 	hubURL := fmt.Sprintf("http://127.0.0.1:%d", httpPortHub)
-	apiToken := "secret-token"
+	apiToken := "test-token"
 
 	homeA := t.TempDir()
 	homeB := t.TempDir()

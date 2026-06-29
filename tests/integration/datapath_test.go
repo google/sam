@@ -36,7 +36,7 @@ func TestIntegrationStdioDatapath(t *testing.T) {
 	homeA := t.TempDir()
 	homeB := t.TempDir()
 
-	apiToken := "secret-token"
+	apiToken := "test-token"
 
 	// Start Node A
 	t.Log("Starting Node A...")
@@ -161,7 +161,7 @@ func TestIntegrationHTTPDatapath(t *testing.T) {
 	homeA := t.TempDir()
 	homeB := t.TempDir()
 
-	apiToken := "secret-token"
+	apiToken := "test-token"
 
 	// Start Node A
 	t.Log("Starting Node A...")

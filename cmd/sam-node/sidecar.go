@@ -43,22 +43,22 @@ func startSidecarServer(node *SamNode, addr, token, certFile, keyFile, caFile st
 	mux.HandleFunc("/readyz", handleReadyz)
 
 	// Protected endpoints
-	mux.Handle("/sam/service/register", withMeshConnection(node, withAuth(token, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("/sam/service/register", withAuth(token, withMeshConnection(node, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handleRegisterService(node, w, r)
 	}))))
-	mux.Handle("/sam/service/unregister", withMeshConnection(node, withAuth(token, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("/sam/service/unregister", withAuth(token, withMeshConnection(node, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handleUnregisterService(node, w, r)
 	}))))
-	mux.Handle("/sam/service/discover", withMeshConnection(node, withAuth(token, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("/sam/service/discover", withAuth(token, withMeshConnection(node, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handleDiscoverService(node, w, r)
 	}))))
 
 	// Mount Egress Proxy
-	mux.Handle("/sam/", withMeshConnection(node, withAuth(token, createEgressProxy(node))))
+	mux.Handle("/sam/", withAuth(token, withMeshConnection(node, createEgressProxy(node))))
 
 	// Mount MCP handler
 	mcpHandler := NewMCPHandler(node)
-	mux.Handle("/", withMeshConnection(node, mcpHandler))
+	mux.Handle("/", withAuth(token, withMeshConnection(node, mcpHandler)))
 
 	server := &http.Server{
 		Handler: mux,

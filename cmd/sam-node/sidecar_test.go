@@ -96,21 +96,84 @@ func TestWithAuth(t *testing.T) {
 	})
 }
 
-func TestPublicEndpoints(t *testing.T) {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", handleHealthz)
-	mux.HandleFunc("/readyz", handleReadyz)
+func TestSidecarServerAuthEnforcement(t *testing.T) {
+	node := &SamNode{
+		BiscuitTimeout: 500 * time.Millisecond,
+		services:       NewServiceRegistry(&fakeDHT{}),
+	}
+	// We use a dummy token
+	token := "test-token"
 
-	endpoints := []string{"/healthz", "/readyz"}
+	// Start sidecar on an ephemeral port
+	err := startSidecarServer(node, "127.0.0.1:0", token, "", "", "")
+	if err != nil {
+		t.Fatalf("Failed to start sidecar server: %v", err)
+	}
 
-	for _, ep := range endpoints {
-		req := httptest.NewRequest("GET", ep, nil)
-		rr := httptest.NewRecorder()
-		mux.ServeHTTP(rr, req)
-
-		if rr.Code != http.StatusOK {
-			t.Errorf("expected status OK for %s, got %d", ep, rr.Code)
+	baseURL := "http://" + node.BoundHTTPAddr
+	client := &http.Client{Timeout: 2 * time.Second}
+	ready := false
+	for i := 0; i < 50; i++ {
+		time.Sleep(10 * time.Millisecond)
+		resp, err := client.Get(baseURL + "/healthz")
+		if err == nil {
+			_ = resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				ready = true
+				break
+			}
 		}
+	}
+	if !ready {
+		t.Fatalf("Sidecar server failed to become ready")
+	}
+
+	tests := []struct {
+		name           string
+		method         string
+		path           string
+		expectedStatus int
+		needsToken     bool
+	}{
+		{"healthz is public", "GET", "/healthz", http.StatusOK, false},
+		{"readyz is public", "GET", "/readyz", http.StatusOK, false},
+		{"register is protected", "POST", "/sam/service/register", http.StatusUnauthorized, false},
+		{"unregister is protected", "POST", "/sam/service/unregister", http.StatusUnauthorized, false},
+		{"discover is protected", "GET", "/sam/service/discover?type=mcp&name=test", http.StatusUnauthorized, false},
+		{"egress proxy is protected", "GET", "/sam/", http.StatusUnauthorized, false},
+		{"mcp root is protected", "GET", "/mcp", http.StatusUnauthorized, false},
+
+		{"register with token (bad req)", "POST", "/sam/service/register", http.StatusServiceUnavailable, true},
+		{"unregister with token (bad req)", "POST", "/sam/service/unregister", http.StatusServiceUnavailable, true},
+		// /sam/service/discover without mesh connection will return 503 instead of 400 since node is not connected,
+		// but as long as it gets past auth, that's what we want to verify.
+		{"discover with token", "GET", "/sam/service/discover?type=mcp&name=test", http.StatusServiceUnavailable, true},
+		{"egress proxy with token", "GET", "/sam/", http.StatusServiceUnavailable, true},
+		{"mcp root with token", "GET", "/mcp", http.StatusServiceUnavailable, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req, err := http.NewRequest(tt.method, baseURL+tt.path, nil)
+			if err != nil {
+				t.Fatalf("Failed to create request: %v", err)
+			}
+			if tt.needsToken {
+				req.Header.Set("Authorization", "Bearer "+token)
+			}
+
+			resp, err := client.Do(req)
+			if err != nil {
+				t.Fatalf("Request failed: %v", err)
+			}
+			defer func() {
+				_ = resp.Body.Close()
+			}()
+
+			if resp.StatusCode != tt.expectedStatus {
+				t.Errorf("expected status %d for %s, got %d", tt.expectedStatus, tt.path, resp.StatusCode)
+			}
+		})
 	}
 }
 

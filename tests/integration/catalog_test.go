@@ -3,6 +3,7 @@ package integration_test
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -75,7 +76,19 @@ func callMCP(t *testing.T, mcpAddr string, toolName string, params map[string]an
 		Version: "0.1.0",
 	}, nil)
 
-	session, err := client.Connect(ctx, &mcp.StreamableClientTransport{Endpoint: "http://" + mcpAddr + "/mcp"}, nil)
+	// Custom RoundTripper to inject Authorization header for tests
+	transport := http.DefaultTransport
+	clientTransport := &mcp.StreamableClientTransport{
+		Endpoint: "http://" + mcpAddr + "/mcp",
+		HTTPClient: &http.Client{
+			Transport: &authRoundTripper{
+				token: "test-token", // Token used across all integration tests
+				rt:    transport,
+			},
+		},
+	}
+
+	session, err := client.Connect(ctx, clientTransport, nil)
 	if err != nil {
 		t.Fatalf("Failed to connect: %v", err)
 	}
@@ -99,6 +112,17 @@ func callMCP(t *testing.T, mcpAddr string, toolName string, params map[string]an
 		}
 	}
 	return ""
+}
+
+type authRoundTripper struct {
+	token string
+	rt    http.RoundTripper
+}
+
+func (a *authRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	clone := req.Clone(req.Context())
+	clone.Header.Set("Authorization", "Bearer "+a.token)
+	return a.rt.RoundTrip(clone)
 }
 
 func waitForPeerInfoInLog(t *testing.T, logPath string) string {
@@ -172,7 +196,12 @@ func TestCatalogRoutingAndFailover(t *testing.T) {
 
 	for time.Now().Before(deadline) {
 		client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "0.1.0"}, nil)
-		session, err := client.Connect(context.Background(), &mcp.StreamableClientTransport{Endpoint: "http://" + mcpAddrA + "/mcp"}, nil)
+		session, err := client.Connect(context.Background(), &mcp.StreamableClientTransport{
+			Endpoint: "http://" + mcpAddrA + "/mcp",
+			HTTPClient: &http.Client{
+				Transport: &authRoundTripper{token: "test-token", rt: http.DefaultTransport},
+			},
+		}, nil)
 		if err != nil {
 			t.Logf("Poll: failed to connect: %v", err)
 			time.Sleep(500 * time.Millisecond)
