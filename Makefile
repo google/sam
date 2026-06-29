@@ -9,6 +9,7 @@ build:
 	go build -v -o "$(OUT_DIR)/sam-node" ./cmd/sam-node
 	go build -v -o "$(OUT_DIR)/sam-hub" ./cmd/sam-hub
 	go build -v -o "$(OUT_DIR)/mcp-client" ./cmd/mcp-client
+	go build -v -o "$(OUT_DIR)/sam-catalog" ./cmd/sam-catalog
 
 .PHONY: proto
 proto:

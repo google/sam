@@ -158,3 +158,22 @@ func runSweeper(ctx context.Context, store *catalog.Store, every time.Duration) 
 		}
 	}
 }
+
+// runRewalk periodically calls bootstrap to reconcile entries missed via gossip.
+func runRewalk(ctx context.Context, nc *nodeClient, store *catalog.Store, every time.Duration) {
+	ticker := time.NewTicker(every)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := nc.bootstrap(ctx, store, []api.ServiceType{
+				api.ServiceType_SERVICE_TYPE_MCP,
+				api.ServiceType_SERVICE_TYPE_INFERENCE,
+			}); err != nil && ctx.Err() == nil {
+				log.Printf("rewalk: %v", err)
+			}
+		}
+	}
+}
