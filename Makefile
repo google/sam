@@ -31,6 +31,10 @@ kind-down:
 kind-local-node:
 	./development/kind/run-local-node.sh $(ARGS)
 
+.PHONY: kind-e2e-mesh
+kind-e2e-mesh: build
+	./development/kind/test-mesh-e2e.sh
+
 test:
 	CGO_ENABLED=1 go test -v -race -count 1 $(if $(WHAT),-run $(WHAT)) ./...
 

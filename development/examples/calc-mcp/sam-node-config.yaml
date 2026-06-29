@@ -3,7 +3,7 @@ attenuation:
   # Allow cross-node MCP only when the caller's biscuit carries a
   # node($peer) fact — i.e. it was issued by our hub upon enrollment.
   policies:
-    - 'allow if operation("/sam/mcp/1.0.0"), node($peer)'
+    - 'allow if operation("calculator"), node($peer)'
 services:
   - type: "mcp"
     name: "calculator"

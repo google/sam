@@ -1,7 +1,7 @@
 version: "v1alpha1"
 attenuation:
   policies:
-    - 'allow if operation("/sam/mcp/1.0.0"), node($peer)'
+    - 'allow if operation("greeter"), node($peer)'
 services:
   - type: "mcp"
     name: "greeter"
