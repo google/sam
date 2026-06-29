@@ -34,7 +34,7 @@ echo "local node online"
 trap 'kill $PID 2>/dev/null || true' EXIT
 
 URL=http://127.0.0.1:9099/mcp
-mcp() { ./bin/mcp-client -url "$URL" -timeout 20 "$@" 2>/dev/null; }
+mcp() { ./bin/mcp-client -url "$URL" -token "devtoken" -timeout 20 "$@" 2>/dev/null; }
 
 echo "== get_mesh_info =="
 info=$(mcp -tool get_mesh_info -args '{}')
