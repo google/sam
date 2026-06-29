@@ -43,9 +43,14 @@ func catalogEntriesToProviders(n *SamNode, raw, typeStr string) ([]*api.Discover
 		if n.Host != nil && e.PeerID == n.Host.ID().String() {
 			continue
 		}
+		pid, err := peer.Decode(e.PeerID)
+		if err != nil {
+			logger.Warnf("[Catalog] skipping entry with bad peer id %q: %v", e.PeerID, err)
+			continue
+		}
 		out = append(out, &api.DiscoveredProvider{
 			PeerId:        e.PeerID,
-			LocalProxyUrl: n.localProxyURL(peer.ID(e.PeerID), typeStr, e.Name),
+			LocalProxyUrl: n.localProxyURL(pid, typeStr, e.Name),
 			SrvName:       e.Name,
 		})
 	}
