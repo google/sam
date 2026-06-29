@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"strings"
@@ -75,6 +76,13 @@ func (c *nodeClient) bootstrap(ctx context.Context, store *catalog.Store, types 
 			log.Printf("bootstrap: fetch %s: %v", typeStr, err)
 			continue
 		}
+		if resp.StatusCode != http.StatusOK {
+			// surface auth/server errors instead of silently skipping
+			snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+			resp.Body.Close()
+			log.Printf("bootstrap: %s returned status %d: %s", typeStr, resp.StatusCode, strings.TrimSpace(string(snippet)))
+			continue
+		}
 		var providers []*api.DiscoveredProvider
 		if err := json.NewDecoder(resp.Body).Decode(&providers); err != nil {
 			resp.Body.Close()
@@ -128,6 +136,11 @@ func (c *nodeClient) readSSEStream(ctx context.Context, store *catalog.Store) er
 		return err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		// surface auth/server errors; defer closes the body
+		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return fmt.Errorf("announce stream returned status %d: %s", resp.StatusCode, strings.TrimSpace(string(snippet)))
+	}
 
 	scanner := bufio.NewScanner(resp.Body)
 	for scanner.Scan() {
