@@ -344,7 +344,7 @@ func (n *SamNode) fetchRemoteToolCatalogue(ctx context.Context, targetPeer peer.
 				rows = append(rows, remoteToolRow{
 					PeerID:   targetPeer.String(),
 					ToolName: svc.Name,
-					Error:    fmt.Sprintf("auth rejected: %v", err),
+					Error:    fmt.Sprintf("failed to connect: %v", err),
 				})
 			}
 			continue
