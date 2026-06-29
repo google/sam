@@ -48,7 +48,7 @@ func TestInteractiveLogin(t *testing.T) {
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
-	node := &SamNode{}
+	node := &SamNode{BiscuitTimeout: 500 * time.Millisecond}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -93,7 +93,7 @@ func TestDiscoverEndpoints(t *testing.T) {
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
-	node := &SamNode{}
+	node := &SamNode{BiscuitTimeout: 500 * time.Millisecond}
 	ctx := context.Background()
 
 	tokenURL, authURL, err := node.DiscoverEndpoints(ctx, server.URL)
@@ -146,7 +146,7 @@ func TestInteractiveLoginWithRefresh(t *testing.T) {
 		}
 	}()
 
-	node := &SamNode{Store: store}
+	node := &SamNode{BiscuitTimeout: 500 * time.Millisecond, Store: store}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -250,7 +250,7 @@ func TestRenewWithRefreshToken(t *testing.T) {
 		t.Fatalf("Failed to save Refresh Token: %v", err)
 	}
 
-	node := &SamNode{Store: store}
+	node := &SamNode{BiscuitTimeout: 500 * time.Millisecond, Store: store}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 

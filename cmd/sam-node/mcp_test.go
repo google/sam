@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	"github.com/libp2p/go-libp2p/core/peerstore"
@@ -29,7 +30,9 @@ import (
 
 func TestMCPHandler_HTTP(t *testing.T) {
 	// Setup a dummy node
-	node := &SamNode{}
+	node := &SamNode{
+		BiscuitTimeout: 500 * time.Millisecond,
+	}
 	handler := NewMCPHandler(node)
 
 	ts := httptest.NewServer(handler)
@@ -88,8 +91,9 @@ func TestResolveRelayAddresses(t *testing.T) {
 	defer func() { _ = kdht.Close() }()
 
 	node := &SamNode{
-		Host: localHost,
-		DHT:  kdht,
+		Host:           localHost,
+		DHT:            kdht,
+		BiscuitTimeout: 500 * time.Millisecond,
 	}
 
 	// Create relay host

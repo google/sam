@@ -146,9 +146,10 @@ func TestAuthorize(t *testing.T) {
 	}
 
 	node := &SamNode{
-		Store:        store,
-		trustedKeys:  []TrustedKey{{Key: pub, ReceivedAt: time.Now()}},
-		TrustHubRBAC: true,
+		Store:          store,
+		trustedKeys:    []TrustedKey{{Key: pub, ReceivedAt: time.Now()}},
+		TrustHubRBAC:   true,
+		BiscuitTimeout: 500 * time.Millisecond,
 	}
 
 	req := RequestContext{
@@ -357,9 +358,10 @@ func TestRevocation(t *testing.T) {
 	cache, _ := lru.New[string, int64](10000)
 	rl, _ := NewPeerRateLimiter(100)
 	node := &SamNode{
-		trustedKeys:  []TrustedKey{{Key: pub, ReceivedAt: time.Now()}},
-		revokedPeers: cache,
-		rateLimiter:  rl,
+		trustedKeys:    []TrustedKey{{Key: pub, ReceivedAt: time.Now()}},
+		revokedPeers:   cache,
+		rateLimiter:    rl,
+		BiscuitTimeout: 500 * time.Millisecond,
 	}
 
 	// Mark as revoked
@@ -413,7 +415,8 @@ func TestVerifyEvent(t *testing.T) {
 	}
 
 	node := &SamNode{
-		trustedKeys: []TrustedKey{{Key: pub, ReceivedAt: time.Now()}},
+		trustedKeys:    []TrustedKey{{Key: pub, ReceivedAt: time.Now()}},
+		BiscuitTimeout: 500 * time.Millisecond,
 	}
 
 	event := &api.MeshEvent{
@@ -480,6 +483,7 @@ func TestVerifyBiscuitCache(t *testing.T) {
 	node := &SamNode{
 		trustedKeys:       []TrustedKey{{Key: pub, ReceivedAt: time.Now()}},
 		verificationCache: cache,
+		BiscuitTimeout:    500 * time.Millisecond,
 	}
 
 	// Case 1: Fresh verification (uncached)

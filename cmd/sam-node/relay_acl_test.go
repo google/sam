@@ -16,13 +16,14 @@ package main
 
 import (
 	"testing"
+	"time"
 
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
 )
 
 func TestNodeRelayACL_AllowConnect(t *testing.T) {
-	node := &SamNode{}
+	node := &SamNode{BiscuitTimeout: 500 * time.Millisecond}
 	acl := &nodeRelayACL{node: node}
 
 	srcPeer := peer.ID("src-peer")
@@ -49,7 +50,7 @@ func TestNodeRelayACL_AllowConnect(t *testing.T) {
 }
 
 func TestNodeRelayACL_AllowReserve(t *testing.T) {
-	node := &SamNode{}
+	node := &SamNode{BiscuitTimeout: 500 * time.Millisecond}
 	acl := &nodeRelayACL{node: node}
 
 	peerID := peer.ID("some-peer")
