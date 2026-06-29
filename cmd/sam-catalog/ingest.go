@@ -1,0 +1,154 @@
+// Copyright 2026 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package main
+
+import (
+	"bufio"
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/google/sam/api"
+	"github.com/google/sam/internal/announce"
+	"github.com/google/sam/internal/catalog"
+	"google.golang.org/protobuf/encoding/protojson"
+)
+
+type nodeClient struct {
+	baseURL string
+	token   string
+	hc      *http.Client
+}
+
+func newNodeClient(baseURL, token string) *nodeClient {
+	return &nodeClient{baseURL: baseURL, token: token, hc: &http.Client{}}
+}
+
+// serviceTypeStr maps ServiceType to the short query-param string.
+func serviceTypeStr(t api.ServiceType) (string, error) {
+	switch t {
+	case api.ServiceType_SERVICE_TYPE_MCP:
+		return "mcp", nil
+	case api.ServiceType_SERVICE_TYPE_INFERENCE:
+		return "inference", nil
+	case api.ServiceType_SERVICE_TYPE_CATALOG:
+		return "catalog", nil
+	default:
+		return "", fmt.Errorf("unsupported service type: %v", t)
+	}
+}
+
+// bootstrap fetches discovered providers per type and upserts synthetic announces.
+func (c *nodeClient) bootstrap(ctx context.Context, store *catalog.Store, types []api.ServiceType) error {
+	for _, t := range types {
+		typeStr, err := serviceTypeStr(t)
+		if err != nil {
+			return err
+		}
+		url := c.baseURL + "/sam/service/discover?type=" + typeStr
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return err
+		}
+		req.Header.Set("Authorization", "Bearer "+c.token)
+		resp, err := c.hc.Do(req)
+		if err != nil {
+			return err
+		}
+		var providers []*api.DiscoveredProvider
+		if err := json.NewDecoder(resp.Body).Decode(&providers); err != nil {
+			resp.Body.Close()
+			return fmt.Errorf("decode providers for %s: %w", typeStr, err)
+		}
+		resp.Body.Close()
+		for _, p := range providers {
+			ann := &api.ServiceAnnounce{
+				Type:   t,
+				Name:   p.SrvName,
+				PeerId: p.PeerId,
+				TtlMs:  announce.TTL.Milliseconds(),
+			}
+			store.Upsert(ann, time.Now())
+		}
+	}
+	return nil
+}
+
+// tail streams SSE announces from the node and upserts each into the store.
+// It reconnects with a small backoff until ctx is done.
+func (c *nodeClient) tail(ctx context.Context, store *catalog.Store) error {
+	const backoff = 2 * time.Second
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := c.readSSEStream(ctx, store); err != nil && ctx.Err() == nil {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(backoff):
+			}
+		} else if ctx.Err() != nil {
+			return ctx.Err()
+		}
+	}
+}
+
+// readSSEStream opens one SSE connection and processes events until EOF or ctx done.
+func (c *nodeClient) readSSEStream(ctx context.Context, store *catalog.Store) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/sam/service/announce/stream", nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Accept", "text/event-stream")
+	resp, err := c.hc.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	scanner := bufio.NewScanner(resp.Body)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "data: ") {
+			continue // skip event:/blank lines
+		}
+		payload := strings.TrimPrefix(line, "data: ")
+		var ann api.ServiceAnnounce
+		if err := protojson.Unmarshal([]byte(payload), &ann); err != nil {
+			continue
+		}
+		store.Upsert(&ann, time.Now())
+	}
+	return scanner.Err()
+}
+
+// runSweeper calls store.Sweep on a ticker until ctx is done.
+func runSweeper(ctx context.Context, store *catalog.Store, every time.Duration) {
+	ticker := time.NewTicker(every)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-ticker.C:
+			store.Sweep(now)
+		}
+	}
+}
