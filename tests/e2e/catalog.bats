@@ -5,9 +5,10 @@
 #   node-1  is the consumer AND hosts the catalog (sam-catalog registers to it)
 #   sam-catalog  connects to node-1, ingests via discover + announce stream
 #
-# Covers: (1) services are retrieved via the catalog, (2) a service added on the
-# fly is picked up by the catalog, (3) discovery falls back to the DHT when the
-# catalog is gone. Requires docker (run with `make test-e2e` / `make e2e-test WHAT=catalog`).
+# Three cases share provision_catalog_mesh: (1) services are retrieved via the
+# catalog, (2) a service added on the fly is picked up, (3) discovery falls back
+# to the DHT when the catalog is gone. Requires docker (run with
+# `make test-e2e` / `make e2e-test WHAT=catalog`).
 
 load "lib/container_mesh.bash"
 
@@ -64,12 +65,12 @@ print(urllib.request.urlopen(req).read().decode())
 "
 }
 
-# poll_catalog_has <name> <timeout_s>: query the catalog's own MCP until <name> is ingested.
+# poll_catalog_has <name> <timeout_secs>: query the catalog's own MCP until <name> is ingested.
 poll_catalog_has() {
   local name="$1"
-  local timeout_s="${2:-60}"
+  local timeout_secs="${2:-60}"
   local i out cnt
-  for ((i=0; i<timeout_s; i++)); do
+  for ((i=0; i<timeout_secs; i++)); do
     out=$(docker run --rm --network "${MESH_NETWORK}" "${MESH_RUNTIME_IMAGE}" mcp-client \
       -url "http://sam-catalog:9090/mcp" -tool "query_catalog" -args '{"type":"mcp"}' 2>/dev/null | tail -n 1)
     # catalog returns []catalog.Entry (Go default JSON field names: .Name).
@@ -80,16 +81,16 @@ poll_catalog_has() {
   return 1
 }
 
-# poll_discover_has <node_idx> <srv_name> <timeout_s>: call discover_remote_services
+# poll_discover_has <node_idx> <srv_name> <timeout_secs>: call discover_remote_services
 # on a node until it returns <srv_name>. Echoes the last discovery JSON on success.
 poll_discover_has() {
-  local idx="$1"
+  local node_idx="$1"
   local name="$2"
-  local timeout_s="${3:-60}"
+  local timeout_secs="${3:-60}"
   local i out cnt
-  for ((i=0; i<timeout_s; i++)); do
+  for ((i=0; i<timeout_secs; i++)); do
     out=$(docker run --rm --network "${MESH_NETWORK}" "${MESH_RUNTIME_IMAGE}" mcp-client \
-      -url "http://sam-node-${idx}:8080/mcp" -tool "discover_remote_services" -args '{"type":"mcp"}' 2>/dev/null | tail -n 1)
+      -url "http://sam-node-${node_idx}:8080/mcp" -tool "discover_remote_services" -args '{"type":"mcp"}' 2>/dev/null | tail -n 1)
     # discover returns []DiscoveredProvider (snake_case JSON: .srv_name).
     cnt=$(echo "$out" | jq --arg n "$name" '[.[] | select(.srv_name==$n)] | length' 2>/dev/null || echo 0)
     if [[ "${cnt:-0}" -ge 1 ]]; then echo "$out"; return 0; fi
@@ -98,17 +99,10 @@ poll_discover_has() {
   return 1
 }
 
-setup() {
-  export BATS_TEST_TIMEOUT=300
-  mesh_setup_env
-  build_calc_mcp_image
-}
-
-teardown() {
-  mesh_cleanup_env
-}
-
-@test "catalog: services retrieved via catalog, added on the fly, with DHT fallback" {
+# provision_catalog_mesh builds the shared topology used by every case: hub +
+# node-2 hosting "calculator" + consumer node-1 hosting the catalog, connected,
+# with the catalog confirmed to have ingested "calculator". Exports NODE2_PEER_ID.
+provision_catalog_mesh() {
   run mesh_start_mock_oidc
   [[ "$status" -eq 0 ]]
   mesh_start_hub
@@ -123,8 +117,7 @@ teardown() {
   mesh_wait_for_log "${MESH_PREFIX}-node-2" "SAM Node Online" 60
   mesh_wait_for_mcp_ready 2 20
 
-  local node2_peer_id
-  node2_peer_id=$(docker logs "${MESH_PREFIX}-node-2" 2>&1 | grep "PeerID:" | head -n 1 | awk '{print $2}' | tr -d '\r')
+  NODE2_PEER_ID=$(docker logs "${MESH_PREFIX}-node-2" 2>&1 | grep "PeerID:" | head -n 1 | awk '{print $2}' | tr -d '\r')
 
   # --- Consumer node-1 (will also host the catalog) ---
   echo "[$(date +%T)] Starting Node 1"
@@ -134,32 +127,47 @@ teardown() {
   mesh_wait_for_mcp_ready 1 20
 
   echo "[$(date +%T)] Connecting Node 1 to Node 2"
-  local node2_addr="/dns4/sam-node-2/tcp/5002/p2p/${node2_peer_id}"
+  local node2_addr="/dns4/sam-node-2/tcp/5002/p2p/${NODE2_PEER_ID}"
   run docker run --rm --network "${MESH_NETWORK}" "${MESH_RUNTIME_IMAGE}" mcp-client \
     -url "http://sam-node-1:8080/mcp" -tool "connect_peer" -args "{\"peer_addr\":\"${node2_addr}\"}"
   [[ "$status" -eq 0 ]]
-  mesh_wait_for_peer_connection 1 "${node2_peer_id}" 20
+  mesh_wait_for_peer_connection 1 "${NODE2_PEER_ID}" 20
 
-  # --- Start the catalog (registers itself on node-1) ---
+  # --- Start the catalog (registers itself on node-1) and wait until it ingested calculator ---
   echo "[$(date +%T)] Starting sam-catalog"
   start_catalog
 
-  # ============ Phase 1: services retrieved via the catalog ============
-  echo "[$(date +%T)] Phase 1: catalog ingests calculator, node-1 resolves via catalog"
   run poll_catalog_has "calculator" 60
   [[ "$status" -eq 0 ]]   # catalog ingested calculator (bootstrap + announce)
+}
+
+setup() {
+  export BATS_TEST_TIMEOUT=300
+  mesh_setup_env
+  build_calc_mcp_image
+}
+
+teardown() {
+  mesh_cleanup_env
+}
+
+@test "catalog: discovery is served via the catalog" {
+  provision_catalog_mesh
 
   run poll_discover_has 1 "calculator" 60
   echo "discover output: $output"
   [[ "$status" -eq 0 ]]   # node-1 discovery returns calculator
-  echo "$output" | jq -e --arg pid "${node2_peer_id}" '[.[] | select(.srv_name=="calculator" and .peer_id==$pid)] | length >= 1' >/dev/null || return 1
+  echo "$output" | jq -e --arg pid "${NODE2_PEER_ID}" '[.[] | select(.srv_name=="calculator" and .peer_id==$pid)] | length >= 1' >/dev/null || return 1
 
   # Prove it came VIA the catalog (not the DHT fan-out). Explicit `|| return 1`
   # so this is a hard assertion regardless of the bats set-e behavior.
   docker logs "${MESH_PREFIX}-node-1" 2>&1 | grep -q "\[Catalog\] resolved" || return 1
+}
 
-  # ============ Phase 2: new service added on the fly ============
-  echo "[$(date +%T)] Phase 2: register 'weather' on node-2, catalog picks it up live"
+@test "catalog: a service added on the fly is picked up" {
+  provision_catalog_mesh
+
+  echo "[$(date +%T)] Registering 'weather' on node-2"
   run register_service "sam-node-2" "weather"
   [[ "$status" -eq 0 ]]
 
@@ -169,9 +177,12 @@ teardown() {
   run poll_discover_has 1 "weather" 60
   echo "discover output: $output"
   [[ "$status" -eq 0 ]]   # node-1 now resolves the on-the-fly service via the catalog
+}
 
-  # ============ Phase 3: DHT fallback when the catalog is gone ============
-  echo "[$(date +%T)] Phase 3: stop catalog, discovery must fall back to the DHT"
+@test "catalog: discovery falls back to the DHT when the catalog is gone" {
+  provision_catalog_mesh
+
+  echo "[$(date +%T)] Stopping catalog; discovery must fall back to the DHT"
   docker rm -f "${MESH_PREFIX}-sam-catalog" >/dev/null 2>&1 || true
 
   # With the catalog process gone, the hosted-URL query fails -> fall back to DHT.
