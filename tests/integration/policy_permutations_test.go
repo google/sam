@@ -133,7 +133,7 @@ bindings:
 	if err := cmdHub.Start(); err != nil {
 		t.Fatalf("Failed to start Hub: %v", err)
 	}
-	defer func() { _ = cmdHub.Process.Kill() }()
+	defer func() { _ = cmdHub.Process.Kill(); _ = cmdHub.Wait() }()
 	fetchPeerID(t, httpPortHub)
 
 	// 2. Node B (Target) Config
@@ -183,18 +183,20 @@ services:
 		"--allow-loopback",
 		"--config", nodeBPolicyFile,
 	)
-	os.MkdirAll(homeB, 0755)
+	if err := os.MkdirAll(homeB, 0755); err != nil {
+		t.Fatal(err)
+	}
 	logFileB, err := os.Create(filepath.Join(homeB, "node.log"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer logFileB.Close()
+	defer func() { _ = logFileB.Close() }()
 	cmdB.Stdout = logFileB
 	cmdB.Stderr = logFileB
 	if err := cmdB.Start(); err != nil {
 		t.Fatalf("Failed to start Node B: %v", err)
 	}
-	defer func() { _ = cmdB.Process.Kill() }()
+	defer func() { _ = cmdB.Process.Kill(); _ = cmdB.Wait() }()
 
 	actualApiAddrB := waitForMCPAddr(t, filepath.Join(homeB, "node.log"))
 	waitForAPI(t, actualApiAddrB)
@@ -265,18 +267,20 @@ services:
 				"--trust-hub-rbac",
 				"--allow-loopback",
 			)
-			os.MkdirAll(homeA, 0755)
+			if err := os.MkdirAll(homeA, 0755); err != nil {
+				t.Fatal(err)
+			}
 			logFileA, err := os.Create(filepath.Join(homeA, "node.log"))
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer logFileA.Close()
+			defer func() { _ = logFileA.Close() }()
 			cmdA.Stdout = logFileA
 			cmdA.Stderr = logFileA
 			if err := cmdA.Start(); err != nil {
 				t.Fatalf("Failed to start Node A: %v", err)
 			}
-			defer func() { _ = cmdA.Process.Kill() }()
+			defer func() { _ = cmdA.Process.Kill(); _ = cmdA.Wait() }()
 
 			actualApiAddrA := waitForMCPAddr(t, filepath.Join(homeA, "node.log"))
 			waitForAPI(t, actualApiAddrA)
