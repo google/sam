@@ -82,7 +82,7 @@ func TestStartRenewalLoop_ExpiredAndFails(t *testing.T) {
 		// Run the renewal loop. Since there's no JWT/Issuer provided, it fails to renew.
 		// It will see that it's expired and it failed to renew, so it will log.Fatalf
 		node.StartRenewalLoop(context.Background(), "", "", "", "")
-		time.Sleep(5 * time.Second)
+		time.Sleep(2 * time.Second)
 		os.Exit(0) // should not be reached
 		return
 	}

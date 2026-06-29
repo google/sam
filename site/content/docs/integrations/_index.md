@@ -16,6 +16,7 @@ Every `sam-node` runs a local MCP server that allows agents to:
 Explore the step-by-step guides to integrate SAM with your favorite AI Agent systems:
 
 - [Google Gemini](gemini.md): Build an interactive client using the official `google-genai` Python SDK.
+- [Google Antigravity](antigravity.md): Connect your local node as a remote MCP server to Google Antigravity.
 - [Claude Code](claude-code.md): Connect your local node as a remote MCP server to Claude Code.
 - [Claude Desktop](claude-desktop.md): Use SAM to expose the P2P tool mesh to Claude Desktop.
 - [OpenClaw](openclaw.md): Integrate your node as a remote tool bridge for OpenClaw.

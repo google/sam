@@ -16,6 +16,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -32,15 +33,33 @@ type StdioBridge struct {
 	stdout  io.ReadCloser
 	mu      sync.Mutex
 	clients map[chan string]bool
+	calls   map[string]chan string
 }
 
 func (b *StdioBridge) Start() {
 	b.clients = make(map[chan string]bool)
+	b.calls = make(map[string]chan string)
 	go func() {
 		scanner := bufio.NewScanner(b.stdout)
 		for scanner.Scan() {
 			line := scanner.Text()
+
 			b.mu.Lock()
+			if len(line) > 0 && line[0] == '{' {
+				var msg map[string]any
+				if err := json.Unmarshal([]byte(line), &msg); err == nil {
+					if idVal, ok := msg["id"]; ok {
+						reqIDStr := fmt.Sprintf("%v", idVal)
+						if ch, found := b.calls[reqIDStr]; found {
+							select {
+							case ch <- line:
+							default:
+							}
+						}
+					}
+				}
+			}
+
 			for ch := range b.clients {
 				select {
 				case ch <- line:
@@ -49,6 +68,17 @@ func (b *StdioBridge) Start() {
 			}
 			b.mu.Unlock()
 		}
+
+		b.mu.Lock()
+		for ch := range b.clients {
+			close(ch)
+			delete(b.clients, ch)
+		}
+		for _, ch := range b.calls {
+			close(ch)
+		}
+		b.calls = make(map[string]chan string)
+		b.mu.Unlock()
 	}()
 }
 
@@ -86,7 +116,10 @@ func (b *StdioBridge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			select {
 			case <-ctx.Done():
 				return
-			case line := <-ch:
+			case line, ok := <-ch:
+				if !ok {
+					return
+				}
 				if _, err := fmt.Fprintf(w, "data: %s\n\n", line); err != nil {
 					logger.Errorf("Failed to write to SSE client: %v", err)
 					return
@@ -102,6 +135,36 @@ func (b *StdioBridge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		_ = r.Body.Close()
 
+		var msg map[string]any
+		isCall := false
+		var reqID any
+		if err := json.Unmarshal(body, &msg); err == nil {
+			if id, ok := msg["id"]; ok {
+				isCall = true
+				reqID = id
+			}
+		}
+
+		var ch <-chan string
+		var unsub func()
+		if isCall {
+			reqIDStr := fmt.Sprintf("%v", reqID)
+			callCh := make(chan string, 1)
+			b.mu.Lock()
+			b.calls[reqIDStr] = callCh
+			b.mu.Unlock()
+			ch = callCh
+			unsub = func() {
+				b.mu.Lock()
+				if existing, ok := b.calls[reqIDStr]; ok && existing == callCh {
+					delete(b.calls, reqIDStr)
+					close(callCh)
+				}
+				b.mu.Unlock()
+			}
+			defer unsub()
+		}
+
 		b.mu.Lock()
 		_, err = b.stdin.Write(append(body, '\n'))
 		b.mu.Unlock()
@@ -110,7 +173,27 @@ func (b *StdioBridge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Failed to write to process stdin", http.StatusInternalServerError)
 			return
 		}
-		w.WriteHeader(http.StatusOK)
+
+		w.Header().Set("Mcp-Session-Id", "stdio-bridge")
+
+		if !isCall {
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+
+		ctx := r.Context()
+		select {
+		case <-ctx.Done():
+			return
+		case line, ok := <-ch:
+			if !ok {
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(line))
+			return
+		}
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
@@ -129,9 +212,11 @@ func (b *StdioBridge) Subscribe() (<-chan string, func()) {
 	unsub := func() {
 		once.Do(func() {
 			b.mu.Lock()
-			delete(b.clients, ch)
+			if b.clients[ch] {
+				delete(b.clients, ch)
+				close(ch)
+			}
 			b.mu.Unlock()
-			close(ch)
 		})
 	}
 	return ch, unsub

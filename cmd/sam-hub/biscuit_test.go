@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/biscuit-auth/biscuit-go/v2"
+	"github.com/biscuit-auth/biscuit-go/v2/datalog"
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/sam/api"
@@ -68,6 +69,7 @@ func TestMintBiscuitToken(t *testing.T) {
 				},
 			},
 		},
+		BiscuitTimeout: 500 * time.Millisecond,
 	}
 
 	priv, _, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
@@ -99,7 +101,7 @@ func TestMintBiscuitToken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	authorizer1, err := b1.Authorizer(kr.GetCurrentPublicKey())
+	authorizer1, err := b1.Authorizer(kr.GetCurrentPublicKey(), biscuit.WithWorldOptions(datalog.WithMaxDuration(500*time.Millisecond)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +134,7 @@ func TestMintBiscuitToken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	authorizer2, err := b2.Authorizer(kr.GetCurrentPublicKey())
+	authorizer2, err := b2.Authorizer(kr.GetCurrentPublicKey(), biscuit.WithWorldOptions(datalog.WithMaxDuration(500*time.Millisecond)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +164,7 @@ func TestMintBiscuitToken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	authorizer3, err := b3.Authorizer(kr.GetCurrentPublicKey())
+	authorizer3, err := b3.Authorizer(kr.GetCurrentPublicKey(), biscuit.WithWorldOptions(datalog.WithMaxDuration(500*time.Millisecond)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +194,7 @@ func TestMintBiscuitToken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	authorizer4, err := b4.Authorizer(kr.GetCurrentPublicKey())
+	authorizer4, err := b4.Authorizer(kr.GetCurrentPublicKey(), biscuit.WithWorldOptions(datalog.WithMaxDuration(500*time.Millisecond)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -305,6 +307,7 @@ func TestMintBiscuitToken_ClaimsTranslation(t *testing.T) {
 				},
 			},
 		},
+		BiscuitTimeout: 500 * time.Millisecond,
 	}
 
 	priv, _, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
@@ -336,7 +339,7 @@ func TestMintBiscuitToken_ClaimsTranslation(t *testing.T) {
 		t.Fatalf("Failed to unmarshal biscuit: %v", err)
 	}
 
-	authorizer, err := b.Authorizer(kr.GetCurrentPublicKey())
+	authorizer, err := b.Authorizer(kr.GetCurrentPublicKey(), biscuit.WithWorldOptions(datalog.WithMaxDuration(500*time.Millisecond)))
 	if err != nil {
 		t.Fatalf("Failed to get authorizer: %v", err)
 	}
@@ -405,7 +408,10 @@ func TestMintBiscuitToken_NilToken(t *testing.T) {
 	}
 	defer func() { _ = kr.Close() }()
 
-	hub := &Hub{KeyRing: kr}
+	hub := &Hub{
+		KeyRing:        kr,
+		BiscuitTimeout: 500 * time.Millisecond,
+	}
 
 	priv, _, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
 	if err != nil {
@@ -433,7 +439,10 @@ func TestMintBiscuitToken_NilClaims(t *testing.T) {
 	}
 	defer func() { _ = kr.Close() }()
 
-	hub := &Hub{KeyRing: kr}
+	hub := &Hub{
+		KeyRing:        kr,
+		BiscuitTimeout: 500 * time.Millisecond,
+	}
 
 	priv, _, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
 	if err != nil {
@@ -478,6 +487,7 @@ func TestMintBiscuitToken_VariousClaimsTypes(t *testing.T) {
 				"eng-role": {},
 			},
 		},
+		BiscuitTimeout: 500 * time.Millisecond,
 	}
 
 	priv, _, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
@@ -550,7 +560,7 @@ func TestMintBiscuitToken_VariousClaimsTypes(t *testing.T) {
 				t.Fatalf("Unmarshal biscuit failed: %v", err)
 			}
 
-			authorizer, err := b.Authorizer(kr.GetCurrentPublicKey())
+			authorizer, err := b.Authorizer(kr.GetCurrentPublicKey(), biscuit.WithWorldOptions(datalog.WithMaxDuration(500*time.Millisecond)))
 			if err != nil {
 				t.Fatalf("Authorizer failed: %v", err)
 			}
@@ -670,6 +680,7 @@ func TestMintBiscuitToken_ErrorAggregation(t *testing.T) {
 				},
 			},
 		},
+		BiscuitTimeout: 500 * time.Millisecond,
 	}
 
 	priv, _, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)

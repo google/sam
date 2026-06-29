@@ -16,10 +16,10 @@ You can connect your `sam-node` to [Claude Code](https://claude.com/claude-code)
 
 ## Configuration
 
-Register the node as an SSE MCP server. Replace `<YOUR_TOKEN>` with your `--api-token`:
+Register the node as an HTTP MCP server. Replace `<YOUR_TOKEN>` with your `--api-token`:
 
 ```bash
-claude mcp add --transport sse p2p-mesh-node \
+claude mcp add --transport http p2p-mesh-node \
   http://localhost:8080/mcp \
   --header "Authorization: Bearer <YOUR_TOKEN>"
 ```
@@ -32,7 +32,7 @@ Alternatively, add it to a project `.mcp.json` directly:
 {
   "mcpServers": {
     "p2p-mesh-node": {
-      "type": "sse",
+      "type": "http",
       "url": "http://localhost:8080/mcp",
       "headers": {
         "Authorization": "Bearer <YOUR_TOKEN>"
@@ -42,7 +42,7 @@ Alternatively, add it to a project `.mcp.json` directly:
 }
 ```
 
-The `type` field is required for a remote server; omit it and the entry will not load. If a future `sam-node` release also exposes a streamable-HTTP endpoint, use `--transport http` (or `"type": "http"`) instead.
+The `type` field is required for a remote server; omit it and the entry will not load.
 
 ## Verification
 

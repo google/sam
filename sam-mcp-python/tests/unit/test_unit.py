@@ -7,12 +7,12 @@ from sam_mcp.adapters.langchain import get_langchain_tools
 # Client Tests
 @pytest.mark.asyncio
 async def test_client_get_tools():
-    with patch("sam_mcp.client.sse_client") as mock_sse_client, \
+    with patch("sam_mcp.client.streamable_http_client") as mock_sh_client, \
          patch("sam_mcp.client.ClientSession") as MockClientSession:
          
         mock_cm = AsyncMock()
-        mock_sse_client.return_value = mock_cm
-        mock_cm.__aenter__.return_value = (MagicMock(), MagicMock())
+        mock_sh_client.return_value = mock_cm
+        mock_cm.__aenter__.return_value = (MagicMock(), MagicMock(), MagicMock())
         mock_cm.__aexit__ = AsyncMock()
         
         mock_session = MockClientSession.return_value

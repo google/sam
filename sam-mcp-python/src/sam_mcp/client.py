@@ -2,7 +2,7 @@ import asyncio
 import os
 from typing import Any, Dict, List, Optional
 from mcp import ClientSession
-from mcp.client.sse import sse_client
+from mcp.client.streamable_http import streamable_http_client
 
 class SamClient:
     """High-level developer interface for SAM MCP using official SDK."""
@@ -15,27 +15,37 @@ class SamClient:
         self.server_url = server_url
         self.token = token
         self.session: Optional[ClientSession] = None
-        self._sse_cm = None
+        self._sh_cm = None
 
     async def connect(self):
-        """Connects to the SAM node via SSE."""
+        """Connects to the SAM node via Streamable HTTP."""
+        import httpx
         headers = {"Accept": "application/json, text/event-stream"}
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
-        self._sse_cm = sse_client(self.server_url, headers=headers)
-        read_stream, write_stream = await self._sse_cm.__aenter__()
-        self.session = ClientSession(read_stream, write_stream)
-        await self.session.__aenter__()
-        await self.session.initialize()
+        
+        self._http_client = httpx.AsyncClient(headers=headers)
+        try:
+            self._sh_cm = streamable_http_client(self.server_url, http_client=self._http_client)
+            read_stream, write_stream, _get_session_id = await self._sh_cm.__aenter__()
+            self.session = ClientSession(read_stream, write_stream)
+            await self.session.__aenter__()
+            await self.session.initialize()
+        except Exception:
+            await self.close()
+            raise
 
     async def close(self):
         """Closes the connection."""
         if self.session:
             await self.session.__aexit__(None, None, None)
-        if self._sse_cm:
-            await self._sse_cm.__aexit__(None, None, None)
+        if self._sh_cm:
+            await self._sh_cm.__aexit__(None, None, None)
+        if hasattr(self, '_http_client') and self._http_client:
+            await self._http_client.aclose()
         self.session = None
-        self._sse_cm = None
+        self._sh_cm = None
+        self._http_client = None
 
     async def get_tools(self) -> List[Dict[str, Any]]:
         """Returns available mesh tools."""

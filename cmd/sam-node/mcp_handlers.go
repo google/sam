@@ -247,8 +247,9 @@ type FindRemoteToolsParams struct {
 // remoteToolRow is one entry in the find_remote_tools response.
 type remoteToolRow struct {
 	PeerID      string `json:"peer_id"`
-	ToolName    string `json:"tool_name"`
-	Description string `json:"description"`
+	ToolName    string `json:"tool_name,omitempty"`
+	Description string `json:"description,omitempty"`
+	Error       string `json:"error,omitempty"`
 }
 
 // handleFindRemoteTools implements the find_remote_tools tool.
@@ -281,11 +282,11 @@ func (n *SamNode) handleFindRemoteTools(ctx context.Context, req *mcp.CallToolRe
 		if err != nil {
 			return nil, nil, fmt.Errorf("invalid peer_id %q: %w", params.PeerID, err)
 		}
-		tools, err := n.fetchRemoteToolCatalogue(ctx, pid)
+		peerRows, err := n.fetchRemoteToolCatalogue(ctx, pid, params.ServiceName)
 		if err != nil {
 			return nil, nil, err
 		}
-		rows = appendFilteredRows(rows, params.PeerID, tools, params.ServiceName)
+		rows = peerRows
 	} else {
 		providers, err := n.DiscoverRemoteServices(ctx, api.ServiceType_SERVICE_TYPE_MCP, "")
 		if err != nil {
@@ -322,16 +323,16 @@ func (n *SamNode) handleFindRemoteTools(ctx context.Context, req *mcp.CallToolRe
 
 // fetchRemoteToolCatalogue gets the remote node's service catalogue,
 // then opens a separate libp2p stream to each MCP service to fetch its tools.
-func (n *SamNode) fetchRemoteToolCatalogue(ctx context.Context, targetPeer peer.ID) ([]*mcp.Tool, error) {
+func (n *SamNode) fetchRemoteToolCatalogue(ctx context.Context, targetPeer peer.ID, serviceNameFilter string) ([]remoteToolRow, error) {
 	services, err := n.fetchRemoteServiceCatalog(ctx, targetPeer, "MCP")
 	if err != nil {
 		return nil, fmt.Errorf("fetch remote service catalog: %w", err)
 	}
 
-	var allTools []*mcp.Tool
+	var rows []remoteToolRow
 
 	for _, svc := range services {
-		if svc.Type != api.ServiceType_SERVICE_TYPE_MCP {
+		if svc == nil || svc.Type != api.ServiceType_SERVICE_TYPE_MCP {
 			continue
 		}
 
@@ -339,41 +340,46 @@ func (n *SamNode) fetchRemoteToolCatalogue(ctx context.Context, targetPeer peer.
 		session, cleanup, err := n.ConnectMCPSession(ctx, targetPeer, svc.Name)
 		if err != nil {
 			logger.Debugf("Failed to connect MCP session for service %s: %v", svc.Name, err)
+			if serviceNameFilter == "" || svc.Name == serviceNameFilter || strings.HasPrefix(svc.Name, serviceNameFilter+".") {
+				rows = append(rows, remoteToolRow{
+					PeerID:   targetPeer.String(),
+					ToolName: svc.Name,
+					Error:    fmt.Sprintf("failed to connect: %v", err),
+				})
+			}
 			continue
 		}
 
 		listRes, err := session.ListTools(ctx, nil)
-		if err == nil {
+		if err == nil && listRes != nil {
 			for _, t := range listRes.Tools {
+				if t == nil {
+					continue
+				}
 				t.Name = svc.Name + "." + t.Name
-				allTools = append(allTools, t)
+				if serviceNameFilter != "" && !strings.HasPrefix(t.Name, serviceNameFilter+".") {
+					continue
+				}
+				rows = append(rows, remoteToolRow{
+					PeerID:      targetPeer.String(),
+					ToolName:    t.Name,
+					Description: t.Description,
+				})
+			}
+		} else {
+			if serviceNameFilter == "" || svc.Name == serviceNameFilter || strings.HasPrefix(svc.Name, serviceNameFilter+".") {
+				rows = append(rows, remoteToolRow{
+					PeerID:   targetPeer.String(),
+					ToolName: svc.Name,
+					Error:    fmt.Sprintf("failed to list tools: %v", err),
+				})
 			}
 		}
 
 		cleanup()
 	}
 
-	return allTools, nil
-}
-
-// appendFilteredRows appends rows for tools that have a namespaced name
-// (containing ".") and, if serviceName is non-empty, whose name starts
-// with "<serviceName>.".
-func appendFilteredRows(rows []remoteToolRow, peerID string, tools []*mcp.Tool, serviceName string) []remoteToolRow {
-	for _, tool := range tools {
-		if !strings.Contains(tool.Name, ".") {
-			continue
-		}
-		if serviceName != "" && !strings.HasPrefix(tool.Name, serviceName+".") {
-			continue
-		}
-		rows = append(rows, remoteToolRow{
-			PeerID:      peerID,
-			ToolName:    tool.Name,
-			Description: tool.Description,
-		})
-	}
-	return rows
+	return rows, nil
 }
 
 // fanOutFetch queries each peer's tool catalogue concurrently with a
@@ -400,14 +406,20 @@ func (n *SamNode) fanOutFetch(ctx context.Context, peers []peer.ID, serviceName 
 			peerCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 			defer cancel()
 
-			tools, err := n.fetchRemoteToolCatalogue(peerCtx, pid)
+			peerRows, err := n.fetchRemoteToolCatalogue(peerCtx, pid, serviceName)
 			if err != nil {
 				logger.Debugf("[find_remote_tools] peer %s skipped: %v", pid, err)
+				mu.Lock()
+				rows = append(rows, remoteToolRow{
+					PeerID: pid.String(),
+					Error:  fmt.Sprintf("failed to fetch tool catalogue: %v", err),
+				})
+				mu.Unlock()
 				return
 			}
 
 			mu.Lock()
-			rows = appendFilteredRows(rows, pid.String(), tools, serviceName)
+			rows = append(rows, peerRows...)
 			mu.Unlock()
 		}()
 	}
@@ -470,8 +482,14 @@ func (n *SamNode) handleDescribeRemoteTool(ctx context.Context, req *mcp.CallToo
 	if err != nil {
 		return nil, nil, err
 	}
+	if listRes == nil {
+		return nil, nil, fmt.Errorf("list tools response was nil")
+	}
 
 	for _, t := range listRes.Tools {
+		if t == nil {
+			continue
+		}
 		if t.Name == actualToolName {
 			payload := remoteToolDescription{
 				PeerID:       pid.String(),
