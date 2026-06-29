@@ -11,7 +11,7 @@ By exposing the SAM Model Context Protocol (MCP) server to Gemini, the agent can
 ## Prerequisites
 
 1. **Python 3.10+**: Ensure Python is installed on your host.
-2. **SAM Node Running**: A local SAM node should be running and enrolled on the testnet (see the [Quick Start Guide](../quickstart.md)).
+2. **SAM Node Running**: A local SAM node should be running and enrolled on the testnet (see the [Quick Start Guide](../quickstart/)).
 3. **Gemini API Key**: Obtain an API key from Google AI Studio and export it:
    ```bash
    export GEMINI_API_KEY="your-api-key-here"

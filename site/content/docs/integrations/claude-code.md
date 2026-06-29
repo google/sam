@@ -10,7 +10,7 @@ You can connect your `sam-node` to [Claude Code](https://claude.com/claude-code)
 
 ## Prerequisites
 
-- A running `sam-node` with its local control-plane API reachable (default `http://localhost:8080`). See the [Quick Start](../quickstart.md).
+- A running `sam-node` with its local control-plane API reachable (default `http://localhost:8080`). See the [Quick Start](../quickstart/).
 - The `--api-token` you launched the node with.
 - Claude Code installed (the `claude` CLI).
 
