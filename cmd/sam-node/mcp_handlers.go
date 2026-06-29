@@ -346,10 +346,10 @@ func (n *SamNode) fetchRemoteToolCatalogue(ctx context.Context, targetPeer peer.
 		session, cleanup, err := n.ConnectMCPSession(ctx, targetPeer, connectService)
 		if err != nil {
 			logger.Debugf("Failed to connect MCP session for service %s: %v", targetService, err)
-			if serviceNameFilter == "" || targetService == serviceNameFilter || strings.HasPrefix(targetService, serviceNameFilter+".") {
+			if serviceNameFilter == "" || connectService == serviceNameFilter || strings.HasPrefix(connectService, serviceNameFilter+".") {
 				rows = append(rows, remoteToolRow{
 					PeerID:   targetPeer.String(),
-					ToolName: targetService,
+					ToolName: connectService,
 					Error:    fmt.Sprintf("failed to connect: %v", err),
 				})
 			}
@@ -362,7 +362,7 @@ func (n *SamNode) fetchRemoteToolCatalogue(ctx context.Context, targetPeer peer.
 				if t == nil {
 					continue
 				}
-				t.Name = targetService + "." + t.Name
+				t.Name = connectService + "." + t.Name
 				if serviceNameFilter != "" && !strings.HasPrefix(t.Name, serviceNameFilter+".") {
 					continue
 				}
