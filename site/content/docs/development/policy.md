@@ -68,10 +68,12 @@ allow if group("engineering");
 Admins define central permissions by mapping OIDC roles to specific capabilities. 
 
 * **`allowed_targets`**: Defines which logical groups or specific peers a user can route messages to, analogous to Active Directory security groups. Target definitions must be formatted as resolved facts (e.g., `group:<name>`, `user:<sub-id>`, `email:<email>`, `role:<role-name>`, or `node:<peer-id>`). *Note: These are evaluated exclusively by the destination node (see Section 3.1).*
-* **`allowed_services`**: Defines the application-level tools or endpoints a user can access, prefixed by their service type.
+* **`allowed_services`**: Defines the application-level tools or endpoints a user can access. Services use a strict `type:name` convention (e.g., `mcp:db-agent` or `inference:openrouter`).
+  * **Default Namespace (`system`)**: If a service string does not contain a `:` separator (e.g., `my-tool`), it automatically defaults to the `system` type (parsed as `system:my-tool`).
+  * **Wildcards**: Because `allowed_services` translates to the two-argument Biscuit fact `service($type, $name)`, SAM natively supports wildcards. You can grant access to an entire type via `type:*` (e.g., `mcp:*`), or grant global access to everything via `*`.
 
 > [!NOTE]
-> Because `allowed_services` translates to the two-argument Biscuit fact `service($type, $name)`, policies natively support Datalog wildcards (e.g. `allow if service("mcp", $any);`). You can configure wildcard permissions in your policy files, or explicit granular permissions like `mcp:db-agent` and `inference:openrouter`.
+> The `*` global wildcard is a special case. It maps exactly to type `*` and name `*`. It does *not* default to the `system` type.
 
 ```yaml
 version: "v1alpha1"

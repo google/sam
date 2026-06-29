@@ -20,8 +20,6 @@ import (
 	"encoding/hex"
 	"fmt"
 
-	"strings"
-
 	"github.com/biscuit-auth/biscuit-go/v2"
 	"github.com/biscuit-auth/biscuit-go/v2/datalog"
 	"github.com/biscuit-auth/biscuit-go/v2/parser"
@@ -248,16 +246,12 @@ func (n *SamNode) Authorize(rawToken []byte, req RequestContext, pubKey ed25519.
 	}
 
 	// Inject the current action context (Standard Vocabulary)
-	opType := "system"
-	opName := req.Protocol
-	if req.Target != "" {
-		parts := strings.SplitN(req.Target, ":", 2)
-		if len(parts) == 2 {
-			opType = parts[0]
-			opName = parts[1]
-		} else {
-			opName = req.Target
-		}
+	var opType, opName string
+	if req.Target == "" {
+		opType = api.DefaultServiceType
+		opName = req.Protocol
+	} else {
+		opType, opName = api.ParseServiceTarget(req.Target)
 	}
 	authorizer.AddFact(biscuit.Fact{
 		Predicate: biscuit.Predicate{

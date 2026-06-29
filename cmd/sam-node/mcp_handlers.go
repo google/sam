@@ -336,14 +336,19 @@ func (n *SamNode) fetchRemoteToolCatalogue(ctx context.Context, targetPeer peer.
 			continue
 		}
 
+		targetService := svc.Name
+		if !strings.Contains(targetService, ":") {
+			targetService = "mcp:" + targetService
+		}
+
 		n.preparePeerAddrs(ctx, targetPeer)
-		session, cleanup, err := n.ConnectMCPSession(ctx, targetPeer, svc.Name)
+		session, cleanup, err := n.ConnectMCPSession(ctx, targetPeer, targetService)
 		if err != nil {
-			logger.Debugf("Failed to connect MCP session for service %s: %v", svc.Name, err)
-			if serviceNameFilter == "" || svc.Name == serviceNameFilter || strings.HasPrefix(svc.Name, serviceNameFilter+".") {
+			logger.Debugf("Failed to connect MCP session for service %s: %v", targetService, err)
+			if serviceNameFilter == "" || targetService == serviceNameFilter || strings.HasPrefix(targetService, serviceNameFilter+".") {
 				rows = append(rows, remoteToolRow{
 					PeerID:   targetPeer.String(),
-					ToolName: svc.Name,
+					ToolName: targetService,
 					Error:    fmt.Sprintf("failed to connect: %v", err),
 				})
 			}
@@ -356,7 +361,7 @@ func (n *SamNode) fetchRemoteToolCatalogue(ctx context.Context, targetPeer peer.
 				if t == nil {
 					continue
 				}
-				t.Name = svc.Name + "." + t.Name
+				t.Name = targetService + "." + t.Name
 				if serviceNameFilter != "" && !strings.HasPrefix(t.Name, serviceNameFilter+".") {
 					continue
 				}
@@ -367,10 +372,10 @@ func (n *SamNode) fetchRemoteToolCatalogue(ctx context.Context, targetPeer peer.
 				})
 			}
 		} else {
-			if serviceNameFilter == "" || svc.Name == serviceNameFilter || strings.HasPrefix(svc.Name, serviceNameFilter+".") {
+			if serviceNameFilter == "" || targetService == serviceNameFilter || strings.HasPrefix(targetService, serviceNameFilter+".") {
 				rows = append(rows, remoteToolRow{
 					PeerID:   targetPeer.String(),
-					ToolName: svc.Name,
+					ToolName: targetService,
 					Error:    fmt.Sprintf("failed to list tools: %v", err),
 				})
 			}

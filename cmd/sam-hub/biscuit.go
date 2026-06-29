@@ -123,13 +123,7 @@ func (h *Hub) mintBiscuitToken(claims jwt.MapClaims, token *oidc.IDToken, remote
 		if h.Policy != nil {
 			if rolePolicy, ok := h.Policy.Roles[role]; ok {
 				for _, svc := range rolePolicy.AllowedServices {
-					parts := strings.SplitN(svc, ":", 2)
-					svcType := "system"
-					svcName := svc
-					if len(parts) == 2 {
-						svcType = parts[0]
-						svcName = parts[1]
-					}
+					svcType, svcName := api.ParseServiceTarget(svc)
 					if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
 						Name: api.FactAllowService,
 						IDs:  []biscuit.Term{biscuit.String(svcType), biscuit.String(svcName)},

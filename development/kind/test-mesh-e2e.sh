@@ -49,11 +49,11 @@ for i in $(seq 1 90); do
   echo "discover attempt $i: $tools"
 
   peer="$(printf '%s' "$tools" \
-    | jq -r '.[]? | select(.tool_name=="calculator.add") | .peer_id' 2>/dev/null \
+    | jq -r '.[]? | select(.tool_name=="mcp:calculator.add") | .peer_id' 2>/dev/null \
     | head -n1 || true)"
 
   if [ -n "$peer" ]; then
-    echo "calculator.add discovered on peer: $peer (attempt $i)"
+    echo "mcp:calculator.add discovered on peer: $peer (attempt $i)"
     break
   fi
 
@@ -67,7 +67,7 @@ for i in $(seq 1 90); do
 done
 
 [ -n "$peer" ] || {
-  echo "calculator.add not discovered after 90s"
+  echo "mcp:calculator.add not discovered after 90s"
   echo "final find_remote_tools:"
   mcp -tool find_remote_tools -args '{}' || true
   echo "final mesh info:"
@@ -75,9 +75,9 @@ done
   exit 1
 }
 
-echo "== call calculator.add(2,3) =="
+echo "== call mcp:calculator.add(2,3) =="
 result=$(mcp -tool call_remote_tool \
-  -args "{\"peer_id\":\"$peer\",\"tool_name\":\"calculator.add\",\"arguments\":{\"a\":2,\"b\":3}}")
+  -args "{\"peer_id\":\"$peer\",\"tool_name\":\"mcp:calculator.add\",\"arguments\":{\"a\":2,\"b\":3}}")
 echo "result: $result"
 if [[ "$result" != *"5"* ]]; then
   echo "calculator.add did not return 5"

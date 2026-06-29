@@ -16,6 +16,7 @@ package api
 
 import (
 	"maps"
+	"strings"
 
 	"github.com/libp2p/go-libp2p/core/protocol"
 )
@@ -28,6 +29,9 @@ const AuthProtocolID protocol.ID = "/sam/auth/1.0.0"
 
 // CatalogTarget is the special target service name used to retrieve tool catalogs from remote nodes.
 const CatalogTarget = "/sam/catalog"
+
+// DefaultServiceType is the default type for services without a namespace.
+const DefaultServiceType = "system"
 
 const DefaultAudience = "sam-mesh-audience"
 
@@ -69,4 +73,19 @@ var oidcClaimToFact = map[string]string{
 // This ensures that the global map is immutable and thread-safe for concurrent readers.
 func OIDCClaimToFact() map[string]string {
 	return maps.Clone(oidcClaimToFact)
+}
+
+// ParseServiceTarget parses a service target string into its type and name components.
+// The target convention is "type:name" (e.g., "mcp:my_tool").
+// If no colon is present, the type defaults to the "system" namespace.
+// The global wildcard "*" is a special case that maps to type "*" and name "*".
+func ParseServiceTarget(target string) (svcType, svcName string) {
+	if target == "*" {
+		return "*", "*"
+	}
+	parts := strings.SplitN(target, ":", 2)
+	if len(parts) == 2 {
+		return parts[0], parts[1]
+	}
+	return DefaultServiceType, target
 }
