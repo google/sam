@@ -1319,7 +1319,7 @@ func (n *SamNode) localProxyURL(peerID peer.ID, typeStr, serviceName string) str
 // DiscoverRemoteServices dispatches to the named or type-only path
 // based on whether serviceName is provided.
 func (n *SamNode) DiscoverRemoteServices(ctx context.Context, serviceType api.ServiceType, serviceName string) ([]*api.DiscoveredProvider, error) {
-	typeStr, err := serviceTypeToString(serviceType)
+	typeStr, err := api.ServiceTypeToString(serviceType)
 	if err != nil {
 		return nil, err
 	}
@@ -1332,7 +1332,7 @@ func (n *SamNode) DiscoverRemoteServices(ctx context.Context, serviceType api.Se
 // DiscoverRemoteServicesStream performs service discovery and streams results down the returned channel.
 // The channel is closed automatically when discovery completes or the context is cancelled.
 func (n *SamNode) DiscoverRemoteServicesStream(ctx context.Context, serviceType api.ServiceType, serviceName string) (<-chan *api.DiscoveredProvider, error) {
-	typeStr, err := serviceTypeToString(serviceType)
+	typeStr, err := api.ServiceTypeToString(serviceType)
 	if err != nil {
 		return nil, err
 	}
@@ -1508,7 +1508,7 @@ func (n *SamNode) StartIngressServer(ctx context.Context) error {
 				upstreamPath = parts[2]
 			}
 
-			serviceType, err := parseServiceType(serviceTypeStr)
+			serviceType, err := api.ParseServiceType(serviceTypeStr)
 			if err != nil || serviceType == api.ServiceType_SERVICE_TYPE_UNSPECIFIED {
 				http.Error(w, "Invalid service type", http.StatusBadRequest)
 				return

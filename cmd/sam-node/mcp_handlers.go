@@ -40,7 +40,7 @@ type ListLocalServicesParams struct {
 func (n *SamNode) handleListLocalServices(ctx context.Context, req *mcp.CallToolRequest, params ListLocalServicesParams) (*mcp.CallToolResult, any, error) {
 	typeFilter := api.ServiceType_SERVICE_TYPE_UNSPECIFIED
 	if params.Type != "" {
-		parsed, err := parseServiceType(params.Type)
+		parsed, err := api.ParseServiceType(params.Type)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -67,7 +67,7 @@ type DiscoverRemoteServicesParams struct {
 
 // handleDiscoverRemoteServices implements the discover_remote_services tool.
 func (n *SamNode) handleDiscoverRemoteServices(ctx context.Context, req *mcp.CallToolRequest, params DiscoverRemoteServicesParams) (*mcp.CallToolResult, any, error) {
-	serviceType, err := parseServiceType(params.Type)
+	serviceType, err := api.ParseServiceType(params.Type)
 	if err != nil || serviceType == api.ServiceType_SERVICE_TYPE_UNSPECIFIED {
 		return nil, nil, fmt.Errorf("invalid or unspecified service type: %s", params.Type)
 	}
@@ -337,12 +337,13 @@ func (n *SamNode) fetchRemoteToolCatalogue(ctx context.Context, targetPeer peer.
 		}
 
 		targetService := svc.Name
-		if !strings.Contains(targetService, ":") {
-			targetService = api.MCPServicePrefix + targetService
+		connectService := targetService
+		if !strings.Contains(connectService, ":") {
+			connectService = api.MCPServicePrefix + connectService
 		}
 
 		n.preparePeerAddrs(ctx, targetPeer)
-		session, cleanup, err := n.ConnectMCPSession(ctx, targetPeer, targetService)
+		session, cleanup, err := n.ConnectMCPSession(ctx, targetPeer, connectService)
 		if err != nil {
 			logger.Debugf("Failed to connect MCP session for service %s: %v", targetService, err)
 			if serviceNameFilter == "" || targetService == serviceNameFilter || strings.HasPrefix(targetService, serviceNameFilter+".") {

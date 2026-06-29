@@ -15,6 +15,7 @@
 package api
 
 import (
+	"fmt"
 	"maps"
 	"strings"
 
@@ -94,4 +95,37 @@ func ParseServiceTarget(target string) (svcType, svcName string) {
 		return parts[0], parts[1]
 	}
 	return DefaultServiceType, target
+}
+
+// Protocol Type strings for REST and JSON mapping.
+const (
+	ServiceTypeStringMCP       = "mcp"
+	ServiceTypeStringInference = "inference"
+)
+
+// InferenceServicePrefix is the conventional prefix used for LLM gateway inference services.
+const InferenceServicePrefix = "inference:"
+
+// ParseServiceType converts a string identifier (e.g. from JSON or REST) to the ServiceType protobuf enum.
+func ParseServiceType(s string) (ServiceType, error) {
+	switch strings.ToLower(s) {
+	case ServiceTypeStringMCP:
+		return ServiceType_SERVICE_TYPE_MCP, nil
+	case ServiceTypeStringInference:
+		return ServiceType_SERVICE_TYPE_INFERENCE, nil
+	default:
+		return ServiceType_SERVICE_TYPE_UNSPECIFIED, fmt.Errorf("invalid service type: %s", s)
+	}
+}
+
+// ServiceTypeToString converts a ServiceType protobuf enum back to its standard string identifier.
+func ServiceTypeToString(t ServiceType) (string, error) {
+	switch t {
+	case ServiceType_SERVICE_TYPE_MCP:
+		return ServiceTypeStringMCP, nil
+	case ServiceType_SERVICE_TYPE_INFERENCE:
+		return ServiceTypeStringInference, nil
+	default:
+		return "", fmt.Errorf("invalid or unspecified service type")
+	}
 }
