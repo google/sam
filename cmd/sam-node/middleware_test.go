@@ -544,6 +544,7 @@ func TestAuthorizationCacheBypass(t *testing.T) {
 		revokedPeers:      revCache,
 		rateLimiter:       rl,
 		TrustHubRBAC:      true,
+		BiscuitTimeout:    500 * time.Millisecond,
 	}
 
 	// Helper to simulate request

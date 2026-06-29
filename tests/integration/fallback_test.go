@@ -16,7 +16,6 @@ package integration_test
 
 import (
 	"bytes"
-	"context"
 	"crypto/ed25519"
 	"encoding/json"
 
@@ -28,18 +27,16 @@ import (
 	"testing"
 	"time"
 
+	"net/http"
+	"net/http/httptest"
+
 	"github.com/biscuit-auth/biscuit-go/v2/parser"
 	"github.com/google/sam/api"
 	"github.com/libp2p/go-libp2p"
-	dht "github.com/libp2p/go-libp2p-kad-dht"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
-	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-msgio"
 	"google.golang.org/protobuf/proto"
-	"io"
-	"net/http"
-	"net/http/httptest"
 )
 
 // init forces the biscuit-go parser to build its underlying participle
@@ -47,87 +44,6 @@ import (
 // a known data race when multiple goroutines parse facts concurrently.
 func init() {
 	_, _ = parser.FromStringFact(`warmup("cache")`)
-}
-
-
-func startMockHubDynamic(t *testing.T, pubA, pubB ed25519.PublicKey) (peer.ID, string) {
-	t.Helper()
-
-	h, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
-	if err != nil {
-		t.Fatalf("failed to create mock libp2p host: %v", err)
-	}
-
-	h.SetStreamHandler(api.AuthProtocolID, func(s network.Stream) {
-		defer func() { _ = s.Close() }()
-		reader := msgio.NewVarintReaderSize(s, 1024*64)
-		msg, err := reader.ReadMsg()
-		if err != nil {
-			return
-		}
-		defer reader.ReleaseMsg(msg)
-
-		writer := msgio.NewVarintWriter(s)
-		resp := &api.AuthResponse{Success: true}
-		respBytes, _ := proto.Marshal(resp)
-		_ = writer.WriteMsg(respBytes)
-	})
-
-	kdht, err := dht.New(context.Background(), h, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/sam"))
-	if err != nil {
-		t.Fatalf("failed to create DHT on mock hub: %v", err)
-	}
-
-	var callCount int
-	mux := http.NewServeMux()
-	mux.HandleFunc("/register", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			http.Error(w, "Failed to read body", http.StatusBadRequest)
-			return
-		}
-		var req api.EnrollRequest
-		if err := proto.Unmarshal(body, &req); err != nil {
-			http.Error(w, "Invalid request format", http.StatusBadRequest)
-			return
-		}
-
-		callCount++
-		var pub []byte
-		if callCount == 1 {
-			pub = pubA
-		} else {
-			pub = pubB
-		}
-
-		resp := &api.EnrollResponse{
-			BiscuitToken: []byte("mock-biscuit-token"),
-			HubPublicKey: pub,
-			HubAddresses: []string{h.Addrs()[0].String() + "/p2p/" + h.ID().String()},
-		}
-		data, err := proto.Marshal(resp)
-		if err != nil {
-			http.Error(w, "Failed to marshal response", http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "application/x-protobuf")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(data)
-	})
-
-	httpServer := httptest.NewServer(mux)
-
-	t.Cleanup(func() {
-		httpServer.Close()
-		_ = kdht.Close()
-		_ = h.Close()
-	})
-
-	return h.ID(), httpServer.URL
 }
 
 type safeBuffer struct {
