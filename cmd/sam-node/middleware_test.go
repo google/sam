@@ -128,8 +128,8 @@ func TestAuthorize(t *testing.T) {
 
 	// Add fact to match baseline rule
 	err = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
-		Name: api.FactMCPServer,
-		IDs:  []biscuit.Term{biscuit.String("/test/proto")},
+		Name: api.FactAllowService,
+		IDs:  []biscuit.Term{biscuit.String("system"), biscuit.String("/test/proto")},
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -180,7 +180,7 @@ func TestEnterprisePolicyEngine(t *testing.T) {
 		{
 			name: "Case 1 (Happy Path)",
 			mintToken: func(t *testing.T, builder biscuit.Builder) {
-				fact, err := parser.FromStringFact(`allow_mcp_server("query_db")`)
+				fact, err := parser.FromStringFact(`allow_service("system", "query_db")`)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -194,7 +194,7 @@ func TestEnterprisePolicyEngine(t *testing.T) {
 		{
 			name: "Case 2 (Unauthorized Tool)",
 			mintToken: func(t *testing.T, builder biscuit.Builder) {
-				fact, err := parser.FromStringFact(`allow_mcp_server("query_db")`)
+				fact, err := parser.FromStringFact(`allow_service("system", "query_db")`)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -208,7 +208,7 @@ func TestEnterprisePolicyEngine(t *testing.T) {
 		{
 			name: "Case 3 (Wildcard Access)",
 			mintToken: func(t *testing.T, builder biscuit.Builder) {
-				fact, err := parser.FromStringFact(`allow_mcp_server("*")`)
+				fact, err := parser.FromStringFact(`allow_service("*", "*")`)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -222,7 +222,7 @@ func TestEnterprisePolicyEngine(t *testing.T) {
 		{
 			name: "Case 4 (Local Attenuation Override)",
 			mintToken: func(t *testing.T, builder biscuit.Builder) {
-				fact1, err := parser.FromStringFact(`allow_mcp_server("*")`)
+				fact1, err := parser.FromStringFact(`allow_service("*", "*")`)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -532,8 +532,8 @@ func TestAuthorizationCacheBypass(t *testing.T) {
 		IDs:  []biscuit.Term{biscuit.String(dummyPeer.String())},
 	}})
 	_ = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
-		Name: "allow_mcp_server",
-		IDs:  []biscuit.Term{biscuit.String("query_db")},
+		Name: "allow_service",
+		IDs:  []biscuit.Term{biscuit.String("system"), biscuit.String("query_db")},
 	}})
 
 	b, _ := builder.Build()
@@ -585,12 +585,12 @@ func TestAuthorizationCacheBypass(t *testing.T) {
 	}
 
 	// 1. Authorized target should succeed
-	if !doRequest("query_db") {
+	if !doRequest("system:query_db") {
 		t.Fatal("Expected authorized target to succeed")
 	}
 
 	// 2. Unauthorized target with the same token should FAIL
-	if doRequest("reboot_server") {
+	if doRequest("system:reboot_server") {
 		t.Fatal("SECURITY BUG: Unauthorized target succeeded due to cache bypass!")
 	}
 }

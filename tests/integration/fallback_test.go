@@ -164,6 +164,7 @@ func TestSelfHealingHTTPFallback(t *testing.T) {
 	env := append(os.Environ(),
 		"HOME="+tmpHome,
 		"XDG_CONFIG_HOME="+filepath.Join(tmpHome, ".config"),
+		"BROWSER=echo",
 	)
 
 	// Step 1: Enroll via Join (using mock OIDC)
@@ -205,7 +206,10 @@ func TestSelfHealingHTTPFallback(t *testing.T) {
 	if err := runCmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = runCmd.Process.Kill() }()
+	defer func() {
+		_ = runCmd.Process.Kill()
+		_ = runCmd.Wait()
+	}()
 
 	// Wait for successful fallback
 	success := false

@@ -8,8 +8,8 @@ data:
     version: "v1alpha1"
     attenuation:
       policies:
-        - 'allow if operation("mcp:cop");'
-        - 'allow if operation("/sam/catalog");'
+        - 'allow if service("mcp", "cop");'
+        - 'allow if service("system", "/sam/catalog");'
       checks: []
       rules: []
     services: []

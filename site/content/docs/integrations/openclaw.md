@@ -6,7 +6,7 @@ You can seamlessly integrate your `sam-node` as a remote MCP server in [OpenClaw
 
 ## Overview
 
-By configuring your `sam-node` as an MCP server, you enable your OpenClaw agents to access the P2P mesh, discovering tools from remote nodes and executing operations as if they were local.
+By configuring your `sam-node` as an MCP server, you enable your OpenClaw agents to access the P2P mesh, discovering tools from remote nodes and executing services as if they were local.
 
 ## Configuration
 

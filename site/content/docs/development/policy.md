@@ -65,19 +65,28 @@ allow if group("engineering");
 ```
 
 ## 2. Hub Policy Schema (`policies.yaml`)
-Admins define central permissions by mapping OIDC roles to specific capabilities.
+Admins define central permissions by mapping OIDC roles to specific capabilities. 
 
-> [!IMPORTANT]
-> Wildcards (e.g. `*`) are explicitly disallowed in policy definitions. All allowed network targets and MCP servers must be explicitly listed.
+* **`allowed_targets`**: Defines which logical groups or specific peers a user can route messages to, analogous to Active Directory security groups. Target definitions must be formatted as resolved facts (e.g., `group:<name>`, `user:<sub-id>`, `email:<email>`, `role:<role-name>`, or `node:<peer-id>`).
+* **`allowed_services`**: Defines the application-level tools or endpoints a user can access, prefixed by their service type.
+
+> [!NOTE]
+> Because `allowed_services` translates to the two-argument Biscuit fact `service($type, $name)`, policies natively support Datalog wildcards (e.g. `allow if service("mcp", $any);`). You can configure wildcard permissions in your policy files, or explicit granular permissions like `mcp:db-agent` and `inference:openrouter`.
 
 ```yaml
 version: "v1alpha1"
 roles:
   data-scientist:
-    network:
-      allowed_targets: ["db-agent.data-mesh"] # Who they can connect to
-    mcp:
-      allowed_servers: ["db-agent"] # Allowed MCP server names
+    allowed_targets: 
+      - "node:12D3KooW..."        # Specific peer ID
+      - "group:backend-nodes"     # Logical group of peers
+      - "role:admin"              # Nodes possessing the admin role
+      - "user:auth0|123456"       # Node bound to a specific user sub
+      - "email:db@example.com"    # Node bound to a specific email
+    allowed_services: 
+      - "mcp:db-agent"            # Access to specific MCP server
+      - "inference:openrouter"    # Access to inference endpoints
+      - "mcp:*"                   # Wildcard access to all MCP servers
     custom_datalog:
       - 'department("analytics");' # Raw injected facts
 ```
@@ -109,7 +118,7 @@ To allow remote peers to discover tools and query connectivity, each node hosts 
 
 To ensure tool discovery works out-of-the-box, the node automatically injects a baseline rule allowing all verified peers to access it:
 ```datalog
-allow if operation("/sam/catalog");
+allow if service("system", "/sam/catalog");
 ```
 > [!IMPORTANT]
 > Without this baseline rule (or if a custom local attenuation policy explicitly blocks it), remote nodes will not be able to retrieve this node's tool catalog. As a result, agents across the mesh will fail to discover or call any of this node's tools.

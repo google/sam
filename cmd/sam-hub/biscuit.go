@@ -41,11 +41,12 @@ func (h *Hub) mintBiscuitToken(claims jwt.MapClaims, token *oidc.IDToken, remote
 	oidcRoles := toStringSlice(claims["roles"])
 	oidcGroups := toStringSlice(claims["groups"])
 	oidcSub, _ := claims["sub"].(string)
+	oidcEmail, _ := claims["email"].(string)
 
 	// Resolve roles based on configured bindings and explicit OIDC roles
 	resolvedRoles := make(map[string]bool)
 	if h.Policy != nil {
-		// 1. Map OIDC groups and users to roles via configured bindings (RBAC mapping)
+		// 1. Map OIDC groups, users, and emails to roles via configured bindings (RBAC mapping)
 		for _, b := range h.Policy.Bindings {
 			if b.Group != "" {
 				for _, cg := range oidcGroups {
@@ -56,6 +57,11 @@ func (h *Hub) mintBiscuitToken(claims jwt.MapClaims, token *oidc.IDToken, remote
 			}
 			if b.User != "" && oidcSub != "" {
 				if b.User == oidcSub {
+					resolvedRoles[b.Role] = true
+				}
+			}
+			if b.Email != "" && oidcEmail != "" {
+				if b.Email == oidcEmail {
 					resolvedRoles[b.Role] = true
 				}
 			}
@@ -116,15 +122,22 @@ func (h *Hub) mintBiscuitToken(claims jwt.MapClaims, token *oidc.IDToken, remote
 
 		if h.Policy != nil {
 			if rolePolicy, ok := h.Policy.Roles[role]; ok {
-				for _, tool := range rolePolicy.MCP.AllowedServers {
+				for _, svc := range rolePolicy.AllowedServices {
+					parts := strings.SplitN(svc, ":", 2)
+					svcType := "system"
+					svcName := svc
+					if len(parts) == 2 {
+						svcType = parts[0]
+						svcName = parts[1]
+					}
 					if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
-						Name: api.FactMCPServer,
-						IDs:  []biscuit.Term{biscuit.String(tool)},
+						Name: api.FactAllowService,
+						IDs:  []biscuit.Term{biscuit.String(svcType), biscuit.String(svcName)},
 					}}); err != nil {
-						errs = append(errs, fmt.Errorf("failed to add MCP tool fact for %s: %w", tool, err))
+						errs = append(errs, fmt.Errorf("failed to add allowed service fact for %s: %w", svc, err))
 					}
 				}
-				for _, target := range rolePolicy.Network.AllowedTargets {
+				for _, target := range rolePolicy.AllowedTargets {
 					if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
 						Name: api.FactNetworkTarget,
 						IDs:  []biscuit.Term{biscuit.String(target)},

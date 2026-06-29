@@ -157,7 +157,7 @@ roles:
   local node_policy="version: \"v1alpha1\"
 attenuation:
   policies:
-    - 'deny if operation(\"delete_tables\");'"
+    - 'deny if service("system", \"delete_tables\");'"
 
   docker run --rm -v "${POLICY_VOL}:/policies" busybox sh -c "cat <<'EOF' > /policies/policies.yaml
 ${hub_policy}

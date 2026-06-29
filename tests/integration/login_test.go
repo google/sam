@@ -32,6 +32,7 @@ func TestSamNodeJoin(t *testing.T) {
 	env := append(os.Environ(),
 		"HOME="+tmpHome,
 		"XDG_CONFIG_HOME="+filepath.Join(tmpHome, ".config"),
+		"BROWSER=echo",
 	)
 
 	// Mock OIDC server for device flow

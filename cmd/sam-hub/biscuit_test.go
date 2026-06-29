@@ -55,17 +55,11 @@ func TestMintBiscuitToken(t *testing.T) {
 			},
 			Roles: map[string]api.RolePolicy{
 				"admin": {
-					MCP: api.MCPPolicy{
-						AllowedServers: []string{"read", "write"},
-					},
-					Network: api.NetworkPolicy{
-						AllowedTargets: []string{"target1"},
-					},
+					AllowedServices: []string{"read", "write"},
+					AllowedTargets:  []string{"target1"},
 				},
 				"canary-role": {
-					MCP: api.MCPPolicy{
-						AllowedServers: []string{"/sam/mcp/1.0.0"},
-					},
+					AllowedServices: []string{"/sam/mcp/1.0.0"},
 				},
 			},
 		},
@@ -301,9 +295,7 @@ func TestMintBiscuitToken_ClaimsTranslation(t *testing.T) {
 			},
 			Roles: map[string]api.RolePolicy{
 				"developer-role": {
-					MCP: api.MCPPolicy{
-						AllowedServers: []string{"git-helper"},
-					},
+					AllowedServices: []string{"git-helper"},
 				},
 			},
 		},

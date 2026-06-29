@@ -20,6 +20,8 @@ import (
 	"encoding/hex"
 	"fmt"
 
+	"strings"
+
 	"github.com/biscuit-auth/biscuit-go/v2"
 	"github.com/biscuit-auth/biscuit-go/v2/datalog"
 	"github.com/biscuit-auth/biscuit-go/v2/parser"
@@ -39,19 +41,19 @@ var (
 
 func init() {
 	var err error
-	rule1Str := fmt.Sprintf(`allow if operation($op), %s($op)`, api.FactMCPServer)
+	rule1Str := fmt.Sprintf(`allow if service($type, $name), %s($type, $name)`, api.FactAllowService)
 	baselineRule1, err = parser.FromStringPolicy(rule1Str)
 	if err != nil {
 		panic(fmt.Sprintf("failed to parse baseline rule 1: %v", err))
 	}
 
-	rule2Str := fmt.Sprintf(`allow if operation($op), %s("*")`, api.FactMCPServer)
+	rule2Str := fmt.Sprintf(`allow if service($type, $name), %s("*", "*")`, api.FactAllowService)
 	baselineRule2, err = parser.FromStringPolicy(rule2Str)
 	if err != nil {
 		panic(fmt.Sprintf("failed to parse baseline rule 2: %v", err))
 	}
 
-	rule3Str := fmt.Sprintf(`allow if operation("%s")`, api.CatalogTarget)
+	rule3Str := fmt.Sprintf(`allow if service("system", "%s")`, api.CatalogTarget)
 	baselineRule3, err = parser.FromStringPolicy(rule3Str)
 	if err != nil {
 		panic(fmt.Sprintf("failed to parse baseline rule 3: %v", err))
@@ -231,14 +233,21 @@ func (n *SamNode) Authorize(rawToken []byte, req RequestContext, pubKey ed25519.
 	}
 
 	// Inject the current action context (Standard Vocabulary)
-	op := req.Protocol
+	opType := "system"
+	opName := req.Protocol
 	if req.Target != "" {
-		op = req.Target
+		parts := strings.SplitN(req.Target, ":", 2)
+		if len(parts) == 2 {
+			opType = parts[0]
+			opName = parts[1]
+		} else {
+			opName = req.Target
+		}
 	}
 	authorizer.AddFact(biscuit.Fact{
 		Predicate: biscuit.Predicate{
-			Name: "operation",
-			IDs:  []biscuit.Term{biscuit.String(op)},
+			Name: "service",
+			IDs:  []biscuit.Term{biscuit.String(opType), biscuit.String(opName)},
 		},
 	})
 

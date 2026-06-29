@@ -1,8 +1,8 @@
 version: "v1alpha1"
 attenuation:
   policies:
-    - 'allow if operation("mcp:everything");'
-    - 'allow if operation("/sam/catalog");'
+    - 'allow if service("mcp", "everything");'
+    - 'allow if service("system", "/sam/catalog");'
 services:
   - type: "mcp"
     name: "everything"

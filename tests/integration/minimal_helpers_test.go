@@ -77,10 +77,21 @@ func runCommand(
 
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = cwd
+	tmpBin := filepath.Join(t.TempDir(), "bin")
+	_ = os.MkdirAll(tmpBin, 0755)
+	_ = os.WriteFile(filepath.Join(tmpBin, "xdg-open"), []byte("#!/bin/sh\nexit 0\n"), 0755)
+	_ = os.WriteFile(filepath.Join(tmpBin, "open"), []byte("#!/bin/sh\nexit 0\n"), 0755)
+
 	var finalEnv []string
+	finalEnv = append(finalEnv, "BROWSER=echo")
 	for _, e := range append(os.Environ(), env...) {
 		if !strings.HasPrefix(e, "SSH_CLIENT=") && !strings.HasPrefix(e, "SSH_TTY=") {
 			finalEnv = append(finalEnv, e)
+		}
+	}
+	for i, e := range finalEnv {
+		if strings.HasPrefix(e, "PATH=") {
+			finalEnv[i] = "PATH=" + tmpBin + string(os.PathListSeparator) + e[5:]
 		}
 	}
 	cmd.Env = finalEnv
@@ -157,10 +168,21 @@ func runCommandWithCallback(
 
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = cwd
+	tmpBin := filepath.Join(t.TempDir(), "bin")
+	_ = os.MkdirAll(tmpBin, 0755)
+	_ = os.WriteFile(filepath.Join(tmpBin, "xdg-open"), []byte("#!/bin/sh\nexit 0\n"), 0755)
+	_ = os.WriteFile(filepath.Join(tmpBin, "open"), []byte("#!/bin/sh\nexit 0\n"), 0755)
+
 	var finalEnv []string
+	finalEnv = append(finalEnv, "BROWSER=echo")
 	for _, e := range append(os.Environ(), env...) {
 		if !strings.HasPrefix(e, "SSH_CLIENT=") && !strings.HasPrefix(e, "SSH_TTY=") {
 			finalEnv = append(finalEnv, e)
+		}
+	}
+	for i, e := range finalEnv {
+		if strings.HasPrefix(e, "PATH=") {
+			finalEnv[i] = "PATH=" + tmpBin + string(os.PathListSeparator) + e[5:]
 		}
 	}
 	cmd.Env = finalEnv

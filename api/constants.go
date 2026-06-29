@@ -40,7 +40,7 @@ const (
 	FactRole          = "role"
 	FactUser          = "user"
 	FactEmail         = "email"
-	FactMCPServer     = "allow_mcp_server"
+	FactAllowService  = "allow_service"
 	FactNetworkTarget = "allow_network_target"
 )
 

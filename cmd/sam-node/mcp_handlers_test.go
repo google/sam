@@ -38,8 +38,8 @@ func buildAndSaveBiscuit(node *SamNode, rootPriv ed25519.PrivateKey) error {
 		return err
 	}
 	if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
-		Name: api.FactMCPServer,
-		IDs:  []biscuit.Term{biscuit.String("*")},
+		Name: api.FactAllowService,
+		IDs:  []biscuit.Term{biscuit.String("*"), biscuit.String("*")},
 	}}); err != nil {
 		return err
 	}
@@ -395,9 +395,15 @@ func buildAndSaveCustomBiscuit(node *SamNode, rootPriv ed25519.PrivateKey, allow
 		return err
 	}
 	for _, svc := range allowedServices {
+		parts := strings.SplitN(svc, ":", 2)
+		opType := parts[0]
+		opName := "*"
+		if len(parts) > 1 {
+			opName = parts[1]
+		}
 		if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
-			Name: api.FactMCPServer,
-			IDs:  []biscuit.Term{biscuit.String(svc)},
+			Name: api.FactAllowService,
+			IDs:  []biscuit.Term{biscuit.String(opType), biscuit.String(opName)},
 		}}); err != nil {
 			return err
 		}
