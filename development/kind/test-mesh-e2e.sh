@@ -79,5 +79,5 @@ echo "== call calculator.add(2,3) =="
 result=$(mcp -tool call_remote_tool \
   -args "{\"peer_id\":\"$peer\",\"tool_name\":\"calculator.add\",\"arguments\":{\"a\":2,\"b\":3}}")
 echo "result: $result"
-printf '%s' "$result" | grep -q 5 || { echo "calculator.add did not return 5"; exit 1; }
+[ "$result" = "5" ] || { echo "calculator.add did not return 5"; exit 1; }
 echo "OK: calculator.add(2,3) == 5"
