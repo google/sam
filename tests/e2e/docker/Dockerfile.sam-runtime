@@ -25,5 +25,11 @@ RUN addgroup -S sam && adduser -S -G sam sam
 
 COPY --from=build /src/bin/ /usr/local/bin/
 
+USER root
+RUN mv /usr/local/bin/mcp-client /usr/local/bin/mcp-client-real && \
+    echo '#!/bin/sh' > /usr/local/bin/mcp-client && \
+    echo 'exec /usr/local/bin/mcp-client-real -token "secret-token" "$@"' >> /usr/local/bin/mcp-client && \
+    chmod +x /usr/local/bin/mcp-client
+
 USER sam
 WORKDIR /home/sam

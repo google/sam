@@ -33,6 +33,7 @@ teardown() {
     --network "${MESH_NETWORK}" \
     -v "$(pwd)/sam-mcp-python:/sam-mcp-python" \
     -e PYTHONPATH=/sam-mcp-python/src \
+    -e SAM_API_TOKEN=secret-token \
     python:3.12 \
     bash -c 'pip install mcp httpx && python3 /sam-mcp-python/test_client.py'
   echo "Python SDK output: $output"

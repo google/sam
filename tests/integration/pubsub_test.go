@@ -22,8 +22,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func TestPubSubTools(t *testing.T) {
@@ -46,7 +44,7 @@ func TestPubSubTools(t *testing.T) {
 
 	// Start Node 1
 	env1 := append(os.Environ(), "HOME="+tmpHome1, "XDG_CONFIG_HOME="+filepath.Join(tmpHome1, ".config"))
-	cmd1 := exec.CommandContext(ctx, nodeBin, "run", "--trust-hub-rbac", "--hub", hubAddr, "--bind-addr", "127.0.0.1:0", "--listen", "/ip4/127.0.0.1/udp/5003/quic-v1", "--listen", "/ip4/127.0.0.1/tcp/5004", "--jwt", "dummy-token", "--log-level", "debug", "--discovery-interval", "100ms", "--api-token", "dummy-token", "--allow-loopback")
+	cmd1 := exec.CommandContext(ctx, nodeBin, "run", "--trust-hub-rbac", "--hub", hubAddr, "--bind-addr", "127.0.0.1:0", "--listen", "/ip4/127.0.0.1/udp/5003/quic-v1", "--listen", "/ip4/127.0.0.1/tcp/5004", "--jwt", "dummy-token", "--log-level", "debug", "--discovery-interval", "100ms", "--api-token", "test-token", "--allow-loopback")
 	cmd1.Env = env1
 	logFile1, err := os.Create(filepath.Join(tmpHome1, "node1.log"))
 	if err != nil {
@@ -61,7 +59,7 @@ func TestPubSubTools(t *testing.T) {
 
 	// Start Node 2
 	env2 := append(os.Environ(), "HOME="+tmpHome2, "XDG_CONFIG_HOME="+filepath.Join(tmpHome2, ".config"))
-	cmd2 := exec.CommandContext(ctx, nodeBin, "run", "--trust-hub-rbac", "--hub", hubAddr, "--bind-addr", "127.0.0.1:0", "--listen", "/ip4/127.0.0.1/udp/5005/quic-v1", "--listen", "/ip4/127.0.0.1/tcp/5006", "--jwt", "dummy-token", "--log-level", "debug", "--discovery-interval", "100ms", "--api-token", "dummy-token", "--allow-loopback")
+	cmd2 := exec.CommandContext(ctx, nodeBin, "run", "--trust-hub-rbac", "--hub", hubAddr, "--bind-addr", "127.0.0.1:0", "--listen", "/ip4/127.0.0.1/udp/5005/quic-v1", "--listen", "/ip4/127.0.0.1/tcp/5006", "--jwt", "dummy-token", "--log-level", "debug", "--discovery-interval", "100ms", "--api-token", "test-token", "--allow-loopback")
 	cmd2.Env = env2
 	logFile2, err := os.Create(filepath.Join(tmpHome2, "node2.log"))
 	if err != nil {
@@ -100,35 +98,7 @@ func TestPubSubTools(t *testing.T) {
 
 	// Helper to call MCP tool
 	callTool := func(mcpAddr string, toolName string, params map[string]any) string {
-		client := mcp.NewClient(&mcp.Implementation{
-			Name:    "test-client",
-			Version: "0.1.0",
-		}, nil)
-
-		session, err := client.Connect(context.Background(), &mcp.StreamableClientTransport{Endpoint: "http://" + mcpAddr + "/mcp"}, nil)
-		if err != nil {
-			t.Fatalf("Failed to connect: %v", err)
-		}
-		defer func() {
-			if err := session.Close(); err != nil {
-				t.Logf("failed to close session: %v", err)
-			}
-		}()
-
-		result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-			Name:      toolName,
-			Arguments: params,
-		})
-		if err != nil {
-			t.Fatalf("CallTool failed: %v", err)
-		}
-
-		for _, content := range result.Content {
-			if textContent, ok := content.(*mcp.TextContent); ok {
-				return textContent.Text
-			}
-		}
-		return ""
+		return callMCP(t, mcpAddr, toolName, params)
 	}
 
 	waitForPeerInfoInLog := func(t *testing.T, logPath string) string {
