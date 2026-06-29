@@ -293,7 +293,7 @@ func TestHandleFindRemoteTools_MeshWideViaHandler(t *testing.T) {
 	}
 
 	// Give the DHT a moment to record the provider.
-	time.Sleep(5 * time.Second)
+	time.Sleep(500 * time.Millisecond)
 
 	res, _, err := nodeA.handleFindRemoteTools(ctx, &mcp.CallToolRequest{}, FindRemoteToolsParams{})
 	if err != nil {
