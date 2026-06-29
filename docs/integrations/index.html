@@ -42,7 +42,7 @@ Auto<svg class="bi ms-auto d-none"><use href="#check2"/></svg></button></li></ul
 </span></span><span class=line><span class=cl><span class=k>async</span> <span class=k>def</span> <span class=nf>main</span><span class=p>():</span>
 </span></span><span class=line><span class=cl>    <span class=c1># Connect to the local SAM node&#39;s MCP SSE endpoint</span>
 </span></span><span class=line><span class=cl>    <span class=c1># By default, sam-node listens at 127.0.0.1:8080</span>
-</span></span><span class=line><span class=cl>    <span class=n>url</span> <span class=o>=</span> <span class=n>os</span><span class=o>.</span><span class=n>environ</span><span class=o>.</span><span class=n>get</span><span class=p>(</span><span class=s2>&#34;SAM_MCP_URL&#34;</span><span class=p>,</span> <span class=s2>&#34;http://127.0.0.1:8080/mcp/events&#34;</span><span class=p>)</span>
+</span></span><span class=line><span class=cl>    <span class=n>url</span> <span class=o>=</span> <span class=n>os</span><span class=o>.</span><span class=n>environ</span><span class=o>.</span><span class=n>get</span><span class=p>(</span><span class=s2>&#34;SAM_MCP_URL&#34;</span><span class=p>,</span> <span class=s2>&#34;http://127.0.0.1:8080/mcp&#34;</span><span class=p>)</span>
 </span></span><span class=line><span class=cl>    <span class=nb>print</span><span class=p>(</span><span class=sa>f</span><span class=s2>&#34;Connecting to SAM Node at </span><span class=si>{</span><span class=n>url</span><span class=si>}</span><span class=s2>&#34;</span><span class=p>)</span>
 </span></span><span class=line><span class=cl>
 </span></span><span class=line><span class=cl>    <span class=k>try</span><span class=p>:</span>
@@ -65,7 +65,7 @@ Auto<svg class="bi ms-auto d-none"><use href="#check2"/></svg></button></li></ul
 </span></span><span class=line><span class=cl>
 </span></span><span class=line><span class=cl><span class=k>if</span> <span class=vm>__name__</span> <span class=o>==</span> <span class=s2>&#34;__main__&#34;</span><span class=p>:</span>
 </span></span><span class=line><span class=cl>    <span class=n>asyncio</span><span class=o>.</span><span class=n>run</span><span class=p>(</span><span class=n>main</span><span class=p>())</span>
-</span></span></code></pre></div><p><em>(You can find this snippet at <code>site/content/docs/snippets/agent_demo.py</code>)</em></p><h3 id=example-output>Example Output</h3><p>When you run the demo while a <code>sam-node</code> is running locally, you&rsquo;ll see output similar to this:</p><pre tabindex=0><code>Connecting to SAM Node at http://127.0.0.1:8080/mcp/events
+</span></span></code></pre></div><p><em>(You can find this snippet at <code>site/content/docs/snippets/agent_demo.py</code>)</em></p><h3 id=example-output>Example Output</h3><p>When you run the demo while a <code>sam-node</code> is running locally, you&rsquo;ll see output similar to this:</p><pre tabindex=0><code>Connecting to SAM Node at http://127.0.0.1:8080/mcp
 Discovered tools:
  - get_mesh_info: Get information about the mesh network
  - call_remote_tool: Call an MCP tool on a remote agent

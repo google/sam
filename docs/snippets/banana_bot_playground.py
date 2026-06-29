@@ -12,7 +12,7 @@ class SamClient:
     """Inlined SAM Client for self-contained execution."""
     def __init__(self, server_url: Optional[str] = None, token: Optional[str] = None):
         if server_url is None:
-            server_url = os.environ.get("SAM_MCP_URL", "http://localhost:8080/mcp/events")
+            server_url = os.environ.get("SAM_MCP_URL", "http://localhost:8080/mcp")
         if token is None:
             token = os.environ.get("SAM_API_TOKEN")
         self.server_url = server_url
@@ -323,7 +323,7 @@ async def poll_chat_messages(client: SamClient):
 
 async def run_banana_bot():
     api_key = os.environ.get("GEMINI_API_KEY")
-    url = os.environ.get("SAM_MCP_URL", "http://127.0.0.1:8080/mcp/events")
+    url = os.environ.get("SAM_MCP_URL", "http://127.0.0.1:8080/mcp")
     token = os.environ.get("SAM_API_TOKEN", "secret-token")
 
     if not api_key:

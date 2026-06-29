@@ -6,7 +6,7 @@ from sam_mcp.client import SamClient
 async def main():
     # Connect to the local SAM node's MCP SSE endpoint
     # By default, sam-node listens at 127.0.0.1:8080
-    url = os.environ.get("SAM_MCP_URL", "http://127.0.0.1:8080/mcp/events")
+    url = os.environ.get("SAM_MCP_URL", "http://127.0.0.1:8080/mcp")
     print(f"Connecting to SAM Node at {url}")
 
     try:
