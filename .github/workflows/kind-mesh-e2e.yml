@@ -82,14 +82,36 @@ jobs:
 
           echo "== discover services / find calculator (poll) =="
           peer=""
-          for _ in $(seq 1 30); do
-            tools=$(mcp -tool find_remote_tools -args '{}' || true)
-            peer=$(printf '%s' "$tools" | jq -r '.[]? | select(.tool_name=="calculator.add") | .peer_id' 2>/dev/null | head -n1)
-            [ -n "$peer" ] && break
+          for i in $(seq 1 90); do
+            tools="$(mcp -tool discover_services -args '{}' 2>/dev/null || true)"
+            echo "discover attempt $i: $tools"
+
+            peer="$(printf '%s' "$tools" \
+              | jq -r '.[]? | select(.tool_name=="calculator.add") | .peer_id' 2>/dev/null \
+              | head -n1)"
+
+            if [ -n "$peer" ]; then
+              echo "calculator.add discovered on peer: $peer (attempt $i)"
+              break
+            fi
+
+            # periodic mesh debug
+            if [ $((i % 10)) -eq 0 ]; then
+              echo "mesh info (attempt $i):"
+              mcp -tool get_mesh_info -args '{}' || true
+            fi
+
             sleep 1
           done
-          [ -n "$peer" ] || { echo "calculator.add not discovered"; exit 1; }
-          echo "calculator host: $peer"
+
+          [ -n "$peer" ] || {
+            echo "calculator.add not discovered after 90s"
+            echo "final discover_services:"
+            mcp -tool discover_services -args '{}' || true
+            echo "final mesh info:"
+            mcp -tool get_mesh_info -args '{}' || true
+            exit 1
+          }
 
           echo "== call calculator.add(2,3) =="
           result=$(mcp -tool call_remote_tool \
