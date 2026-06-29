@@ -127,7 +127,7 @@ func (n *SamNode) WithBiscuitAuth(next func(network.Stream, RequestContext)) net
 
 		// Check verification cache
 		tokenHash := sha256.Sum256(authFrame.Biscuit)
-		hashStr := hex.EncodeToString(tokenHash[:]) + ":" + remotePeer.String() + ":" + reqCtx.Protocol + ":" + reqCtx.Target
+		hashStr := hex.EncodeToString(tokenHash[:]) + "\x00" + remotePeer.String() + "\x00" + reqCtx.Protocol + "\x00" + reqCtx.Target
 
 		if pubKeyStr, ok := n.verificationCache.Get(hashStr); ok {
 			n.keysMu.RLock()
@@ -176,8 +176,6 @@ func (n *SamNode) WithBiscuitAuth(next func(network.Stream, RequestContext)) net
 				lastErr = err
 			}
 		}
-
-
 
 		if !authorized {
 			logger.Warnf("[Auth] AuthZ Denied %s: %v", remotePeer, lastErr)

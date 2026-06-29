@@ -565,6 +565,7 @@ func TestAuthorizationCacheBypass(t *testing.T) {
 		authFrame := &api.AuthFrame{Biscuit: tokenBytes, TargetService: target}
 		data, _ := proto.Marshal(authFrame)
 		_ = writer.WriteMsg(data)
+		pw1.Close()
 
 		reader := msgio.NewVarintReaderSize(pr2, 1024*64)
 		msg, err := reader.ReadMsg()
@@ -573,7 +574,7 @@ func TestAuthorizationCacheBypass(t *testing.T) {
 		}
 		var resp api.AuthResponse
 		_ = proto.Unmarshal(msg, &resp)
-		
+
 		success := <-done
 		return resp.Success && success
 	}
