@@ -209,7 +209,7 @@ func NewMCPServer(node *SamNode) *mcp.Server {
 			},
 		},
 	}, func(ctx context.Context, req *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
-		peerID, _ := req.Params.Arguments["peer_id"]
+		peerID := req.Params.Arguments["peer_id"]
 		text := fmt.Sprintf("I am trying to debug connectivity to peer %s. Please check the local mesh state using the mesh://state resource, and then use the check_connectivity tool to diagnose the network path. Finally, use discover_remote_services to see if they are advertising the expected service.", peerID)
 		return &mcp.GetPromptResult{
 			Description: "Debug mesh connectivity",
