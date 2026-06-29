@@ -49,7 +49,7 @@ for i in $(seq 1 90); do
   echo "discover attempt $i: $tools"
 
   peer="$(printf '%s' "$tools" \
-    | jq -r '.items[]? | select(.tool_name=="calculator.add") | .peer_id' 2>/dev/null \
+    | jq -r '.[]? | select(.tool_name=="calculator.add") | .peer_id' 2>/dev/null \
     | head -n1 || true)"
 
   if [ -n "$peer" ]; then
