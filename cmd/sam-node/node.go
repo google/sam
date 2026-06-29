@@ -120,6 +120,7 @@ type SamNode struct {
 	peerLastEventTime map[string]int64
 	receivedMsgs      map[string][]string
 	topics            map[string]*pubsub.Topic
+	subscribedTopics  map[string]bool
 	mu                sync.Mutex
 	LocalPolicy       *NodeConfigComplete
 	revokedPeers      *lru.Cache[string, int64]
@@ -221,6 +222,7 @@ func NewSamNode(ctx context.Context, cfg SamNodeConfig) (*SamNode, error) {
 		peerLastEventTime: make(map[string]int64),
 		receivedMsgs:      make(map[string][]string),
 		topics:            make(map[string]*pubsub.Topic),
+		subscribedTopics:  map[string]bool{},
 		authenticatedHubs: make(map[peer.ID]bool),
 		LocalPolicy:       cfg.NodeConfig,
 		AllowLoopback:     cfg.AllowLoopback,
@@ -1016,23 +1018,27 @@ func (n *SamNode) verifyEvent(event *api.MeshEvent) bool {
 
 func (n *SamNode) subscribeToTopic(ctx context.Context, topicName string) error {
 	n.mu.Lock()
-	defer n.mu.Unlock()
-
-	if _, ok := n.topics[topicName]; ok {
+	if n.subscribedTopics[topicName] {
+		n.mu.Unlock()
 		return nil
 	}
-
-	topic, err := n.PubSub.Join(topicName)
-	if err != nil {
-		return err
+	topic, ok := n.topics[topicName]
+	if !ok {
+		t, err := n.PubSub.Join(topicName)
+		if err != nil {
+			n.mu.Unlock()
+			return err
+		}
+		n.topics[topicName] = t
+		topic = t
 	}
-
 	sub, err := topic.Subscribe()
 	if err != nil {
+		n.mu.Unlock()
 		return err
 	}
-
-	n.topics[topicName] = topic
+	n.subscribedTopics[topicName] = true
+	n.mu.Unlock()
 
 	logger.Infof("[PubSub] Started subscription background loop for topic: %s", topicName)
 	go func() {
