@@ -88,13 +88,15 @@ type catalogEndpoint struct {
 	peer peer.ID // valid -> reach over libp2p
 }
 
-// resolveCatalogEndpoints returns the catalogs to try, in priority order. A catalog
-// this node hosts is reached directly over HTTP (no libp2p self-dial) and comes first;
-// a mesh peer is appended as a fallback. forceRefresh rediscovers the mesh peer.
+// resolveCatalogEndpoints returns the catalogs to try, in priority order. On the first
+// pass the hosted URL (if any) is prepended so it is reached directly over HTTP; on a
+// forceRefresh pass only the mesh peer is re-resolved, avoiding a redundant hosted dial.
 func (n *SamNode) resolveCatalogEndpoints(ctx context.Context, forceRefresh bool) []catalogEndpoint {
 	var eps []catalogEndpoint
-	if url, ok := n.services.hostedCatalogURL(); ok {
-		eps = append(eps, catalogEndpoint{url: url})
+	if !forceRefresh {
+		if url, ok := n.services.hostedCatalogURL(); ok {
+			eps = append(eps, catalogEndpoint{url: url})
+		}
 	}
 	if p, ok := n.findCatalogProvider(ctx, forceRefresh); ok {
 		eps = append(eps, catalogEndpoint{peer: p})
@@ -120,7 +122,7 @@ func (n *SamNode) callCatalog(ctx context.Context, ep catalogEndpoint, args map[
 // endpoint implies. It walks the resolved endpoints in priority order; a transport
 // error moves on to the next, while a reachable catalog's empty/bad answer is
 // authoritative. A second pass rediscovers the mesh peer; exhaustion falls back to DHT.
-func (n *SamNode) queryCatalog(ctx context.Context, serviceType api.ServiceType, typeStr, serviceName string) ([]*api.DiscoveredProvider, bool) {
+func (n *SamNode) queryCatalog(ctx context.Context, typeStr, serviceName string) ([]*api.DiscoveredProvider, bool) {
 	args := map[string]string{"type": typeStr}
 	if serviceName != "" {
 		args["name"] = serviceName

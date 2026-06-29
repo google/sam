@@ -1334,7 +1334,7 @@ func (n *SamNode) DiscoverRemoteServices(ctx context.Context, serviceType api.Se
 	if err != nil {
 		return nil, err
 	}
-	if providers, ok := n.queryCatalog(ctx, serviceType, typeStr, serviceName); ok {
+	if providers, ok := n.queryCatalog(ctx, typeStr, serviceName); ok {
 		return providers, nil
 	}
 	if serviceName == "" {
@@ -1356,7 +1356,7 @@ func (n *SamNode) DiscoverRemoteServicesStream(ctx context.Context, serviceType 
 	go func() {
 		defer close(out)
 
-		if providers, ok := n.queryCatalog(ctx, serviceType, typeStr, serviceName); ok {
+		if providers, ok := n.queryCatalog(ctx, typeStr, serviceName); ok {
 			for _, dp := range providers {
 				select {
 				case <-ctx.Done():
