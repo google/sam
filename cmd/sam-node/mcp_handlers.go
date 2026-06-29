@@ -351,7 +351,7 @@ func (n *SamNode) fetchRemoteToolCatalogue(ctx context.Context, targetPeer peer.
 		}
 
 		listRes, err := session.ListTools(ctx, nil)
-		if err == nil {
+		if err == nil && listRes != nil {
 			for _, t := range listRes.Tools {
 				t.Name = svc.Name + "." + t.Name
 				if !strings.Contains(t.Name, ".") {
@@ -481,6 +481,9 @@ func (n *SamNode) handleDescribeRemoteTool(ctx context.Context, req *mcp.CallToo
 	listRes, err := session.ListTools(ctx, nil)
 	if err != nil {
 		return nil, nil, err
+	}
+	if listRes == nil {
+		return nil, nil, fmt.Errorf("list tools response was nil")
 	}
 
 	for _, t := range listRes.Tools {

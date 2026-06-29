@@ -87,7 +87,10 @@ func (b *StdioBridge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			select {
 			case <-ctx.Done():
 				return
-			case line := <-ch:
+			case line, ok := <-ch:
+				if !ok {
+					return
+				}
 				if _, err := fmt.Fprintf(w, "data: %s\n\n", line); err != nil {
 					logger.Errorf("Failed to write to SSE client: %v", err)
 					return
@@ -141,7 +144,10 @@ func (b *StdioBridge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			select {
 			case <-ctx.Done():
 				return
-			case line := <-ch:
+			case line, ok := <-ch:
+				if !ok {
+					return
+				}
 				var respMsg map[string]any
 				if err := json.Unmarshal([]byte(line), &respMsg); err == nil {
 					if respID, ok := respMsg["id"]; ok && fmt.Sprintf("%v", respID) == fmt.Sprintf("%v", reqID) {
