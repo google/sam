@@ -357,9 +357,6 @@ func (n *SamNode) fetchRemoteToolCatalogue(ctx context.Context, targetPeer peer.
 					continue
 				}
 				t.Name = svc.Name + "." + t.Name
-				if !strings.Contains(t.Name, ".") {
-					continue
-				}
 				if serviceNameFilter != "" && !strings.HasPrefix(t.Name, serviceNameFilter+".") {
 					continue
 				}
