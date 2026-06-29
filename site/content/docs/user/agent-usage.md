@@ -98,7 +98,7 @@ Authorization: Bearer my-agent-super-token-123
 
 ### Specific Integration Guides
 Explore our step-by-step guides for integrating your node with popular agent clients:
-*   🚀 **[Google Gemini AI Agent](../integrations/gemini.md)**: Connect using Python scripts and the google-genai SDK.
-*   💻 **[Claude Desktop](../integrations/claude-desktop.md)**: Expose P2P tools directly to your Claude Desktop application menu.
-*   🤖 **[Claude Code](../integrations/claude-code.md)**: Add your local node tools directly to the Claude CLI.
-*   🔌 **[OpenClaw](../integrations/openclaw.md)**: Setup remote tool bridges for OpenClaw clusters.
+*   🚀 **[Google Gemini AI Agent](../integrations/gemini/)**: Connect using Python scripts and the google-genai SDK.
+*   💻 **[Claude Desktop](../integrations/claude-desktop/)**: Expose P2P tools directly to your Claude Desktop application menu.
+*   🤖 **[Claude Code](../integrations/claude-code/)**: Add your local node tools directly to the Claude CLI.
+*   🔌 **[OpenClaw](../integrations/openclaw/)**: Setup remote tool bridges for OpenClaw clusters.

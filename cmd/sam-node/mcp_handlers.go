@@ -40,7 +40,7 @@ type ListLocalServicesParams struct {
 func (n *SamNode) handleListLocalServices(ctx context.Context, req *mcp.CallToolRequest, params ListLocalServicesParams) (*mcp.CallToolResult, any, error) {
 	typeFilter := api.ServiceType_SERVICE_TYPE_UNSPECIFIED
 	if params.Type != "" {
-		parsed, err := parseServiceType(params.Type)
+		parsed, err := api.ParseServiceType(params.Type)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -67,7 +67,7 @@ type DiscoverRemoteServicesParams struct {
 
 // handleDiscoverRemoteServices implements the discover_remote_services tool.
 func (n *SamNode) handleDiscoverRemoteServices(ctx context.Context, req *mcp.CallToolRequest, params DiscoverRemoteServicesParams) (*mcp.CallToolResult, any, error) {
-	serviceType, err := parseServiceType(params.Type)
+	serviceType, err := api.ParseServiceType(params.Type)
 	if err != nil || serviceType == api.ServiceType_SERVICE_TYPE_UNSPECIFIED {
 		return nil, nil, fmt.Errorf("invalid or unspecified service type: %s", params.Type)
 	}
@@ -336,14 +336,20 @@ func (n *SamNode) fetchRemoteToolCatalogue(ctx context.Context, targetPeer peer.
 			continue
 		}
 
+		targetService := svc.Name
+		connectService := targetService
+		if !strings.Contains(connectService, ":") {
+			connectService = api.MCPServicePrefix + connectService
+		}
+
 		n.preparePeerAddrs(ctx, targetPeer)
-		session, cleanup, err := n.ConnectMCPSession(ctx, targetPeer, svc.Name)
+		session, cleanup, err := n.ConnectMCPSession(ctx, targetPeer, connectService)
 		if err != nil {
-			logger.Debugf("Failed to connect MCP session for service %s: %v", svc.Name, err)
-			if serviceNameFilter == "" || svc.Name == serviceNameFilter || strings.HasPrefix(svc.Name, serviceNameFilter+".") {
+			logger.Debugf("Failed to connect MCP session for service %s: %v", targetService, err)
+			if serviceNameFilter == "" || connectService == serviceNameFilter || strings.HasPrefix(connectService, serviceNameFilter+".") {
 				rows = append(rows, remoteToolRow{
 					PeerID:   targetPeer.String(),
-					ToolName: svc.Name,
+					ToolName: connectService,
 					Error:    fmt.Sprintf("failed to connect: %v", err),
 				})
 			}
@@ -356,7 +362,7 @@ func (n *SamNode) fetchRemoteToolCatalogue(ctx context.Context, targetPeer peer.
 				if t == nil {
 					continue
 				}
-				t.Name = svc.Name + "." + t.Name
+				t.Name = connectService + "." + t.Name
 				if serviceNameFilter != "" && !strings.HasPrefix(t.Name, serviceNameFilter+".") {
 					continue
 				}
@@ -367,10 +373,10 @@ func (n *SamNode) fetchRemoteToolCatalogue(ctx context.Context, targetPeer peer.
 				})
 			}
 		} else {
-			if serviceNameFilter == "" || svc.Name == serviceNameFilter || strings.HasPrefix(svc.Name, serviceNameFilter+".") {
+			if serviceNameFilter == "" || targetService == serviceNameFilter || strings.HasPrefix(targetService, serviceNameFilter+".") {
 				rows = append(rows, remoteToolRow{
 					PeerID:   targetPeer.String(),
-					ToolName: svc.Name,
+					ToolName: targetService,
 					Error:    fmt.Sprintf("failed to list tools: %v", err),
 				})
 			}

@@ -305,7 +305,7 @@ func handleDiscoverService(node *SamNode, w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	serviceType, err := parseServiceType(serviceTypeStr)
+	serviceType, err := api.ParseServiceType(serviceTypeStr)
 	if err != nil || serviceType == api.ServiceType_SERVICE_TYPE_UNSPECIFIED {
 		http.Error(w, "Invalid or unspecified service type", http.StatusBadRequest)
 		return

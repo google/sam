@@ -38,8 +38,8 @@ func buildAndSaveBiscuit(node *SamNode, rootPriv ed25519.PrivateKey) error {
 		return err
 	}
 	if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
-		Name: api.FactMCPServer,
-		IDs:  []biscuit.Term{biscuit.String("*")},
+		Name: api.FactAllowService,
+		IDs:  []biscuit.Term{biscuit.String("*"), biscuit.String("*")},
 	}}); err != nil {
 		return err
 	}
@@ -160,8 +160,8 @@ func TestHandleFindRemoteTools_SinglePeer(t *testing.T) {
 	}
 
 	wantNames := map[string]bool{
-		"code-reviewer.review_pr":   false,
-		"code-reviewer.add_comment": false,
+		"mcp:code-reviewer.review_pr":   false,
+		"mcp:code-reviewer.add_comment": false,
 	}
 	for _, row := range rows {
 		if row.PeerID != nodeB.Host.ID().String() {
@@ -182,17 +182,22 @@ func TestHandleFindRemoteTools_MeshWide(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	// B hosts "code-reviewer", C hosts "summarizer".
+	// B hosts "code-reviewer", C hosts "mcp:summarizer", D hosts "plugin:linter".
 	bTools := []*mcp.Tool{
 		{Name: "review_pr", Description: "review", InputSchema: map[string]any{"type": "object"}},
 	}
 	cTools := []*mcp.Tool{
 		{Name: "summarize", Description: "summarize", InputSchema: map[string]any{"type": "object"}},
 	}
+	dTools := []*mcp.Tool{
+		{Name: "lint", Description: "lint", InputSchema: map[string]any{"type": "object"}},
+	}
 	bSrv := httptest.NewServer(newFakeMCPHandler(t, bTools))
 	defer bSrv.Close()
 	cSrv := httptest.NewServer(newFakeMCPHandler(t, cTools))
 	defer cSrv.Close()
+	dSrv := httptest.NewServer(newFakeMCPHandler(t, dTools))
+	defer dSrv.Close()
 
 	nodeA, cleanupA := startBareNode(t, ctx)
 	defer cleanupA()
@@ -200,9 +205,10 @@ func TestHandleFindRemoteTools_MeshWide(t *testing.T) {
 	defer cleanupB()
 	nodeC, cleanupC := startBareNode(t, ctx)
 	defer cleanupC()
+	nodeD, cleanupD := startBareNode(t, ctx)
+	defer cleanupD()
 
-	// Connect A to both B and C, and set up biscuit auth so A's stream
-	// to B/C passes WithBiscuitAuth.
+	// Connect A to B, C, and D, and set up biscuit auth so A's stream passes WithBiscuitAuth.
 	rootPub, rootPriv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatalf("gen root: %v", err)
@@ -210,7 +216,7 @@ func TestHandleFindRemoteTools_MeshWide(t *testing.T) {
 	if err := buildAndSaveBiscuit(nodeA, rootPriv); err != nil {
 		t.Fatalf("buildAndSaveBiscuit: %v", err)
 	}
-	for _, target := range []*SamNode{nodeB, nodeC} {
+	for _, target := range []*SamNode{nodeB, nodeC, nodeD} {
 		if err := nodeA.Host.Connect(ctx, peer.AddrInfo{ID: target.Host.ID(), Addrs: target.Host.Addrs()}); err != nil {
 			t.Fatalf("connect to %s: %v", target.Host.ID(), err)
 		}
@@ -226,15 +232,20 @@ func TestHandleFindRemoteTools_MeshWide(t *testing.T) {
 		t.Fatalf("RegisterService B: %v", err)
 	}
 	if err := nodeC.RegisterService(ctx, &api.RegisterServiceRequest{
-		Service: &api.ServiceInfo{Type: api.ServiceType_SERVICE_TYPE_MCP, Name: "summarizer"},
+		Service: &api.ServiceInfo{Type: api.ServiceType_SERVICE_TYPE_MCP, Name: "mcp:summarizer"},
 		Backend: &api.RegisterServiceRequest_TargetUrl{TargetUrl: cSrv.URL},
 	}); err != nil {
 		t.Fatalf("RegisterService C: %v", err)
 	}
+	if err := nodeD.RegisterService(ctx, &api.RegisterServiceRequest{
+		Service: &api.ServiceInfo{Type: api.ServiceType_SERVICE_TYPE_MCP, Name: "plugin:linter"},
+		Backend: &api.RegisterServiceRequest_TargetUrl{TargetUrl: dSrv.URL},
+	}); err != nil {
+		t.Fatalf("RegisterService D: %v", err)
+	}
 
-	// Direct fan-out test: invoke fetchRemoteToolCatalogue for both peers,
-	// confirm both return their tools. This isolates the lower-level path
-	// from DHT convergence concerns.
+	// Direct fan-out test: invoke fetchRemoteToolCatalogue for peers,
+	// confirm they return their tools.
 	rowsB, errB := nodeA.fetchRemoteToolCatalogue(ctx, nodeB.Host.ID(), "")
 	if errB != nil {
 		t.Fatalf("fetch from B: %v", errB)
@@ -243,16 +254,27 @@ func TestHandleFindRemoteTools_MeshWide(t *testing.T) {
 	if errC != nil {
 		t.Fatalf("fetch from C: %v", errC)
 	}
+	rowsD, errD := nodeA.fetchRemoteToolCatalogue(ctx, nodeD.Host.ID(), "")
+	if errD != nil {
+		t.Fatalf("fetch from D: %v", errD)
+	}
 
 	gotNames := map[string]bool{}
-	for _, tool := range append(rowsB, rowsC...) {
+	for _, tool := range append(append(rowsB, rowsC...), rowsD...) {
 		gotNames[tool.ToolName] = true
 	}
-	if !gotNames["code-reviewer.review_pr"] {
-		t.Errorf("missing code-reviewer.review_pr; got %v", gotNames)
+
+	// Test permutation 1: no prefix gets "mcp:" automatically prepended.
+	if !gotNames["mcp:code-reviewer.review_pr"] {
+		t.Errorf("missing mcp:code-reviewer.review_pr; got %v", gotNames)
 	}
-	if !gotNames["summarizer.summarize"] {
-		t.Errorf("missing summarizer.summarize; got %v", gotNames)
+	// Test permutation 2: "mcp:" prefix is preserved.
+	if !gotNames["mcp:summarizer.summarize"] {
+		t.Errorf("missing mcp:summarizer.summarize; got %v", gotNames)
+	}
+	// Test permutation 3: custom namespace prefix is preserved.
+	if !gotNames["plugin:linter.lint"] {
+		t.Errorf("missing plugin:linter.lint; got %v", gotNames)
 	}
 }
 
@@ -370,12 +392,12 @@ func TestHandleFindRemoteTools_PartialFailure(t *testing.T) {
 
 	gotSummarizer := false
 	for _, r := range rows {
-		if r.ToolName == "summarizer.summarize" {
+		if r.ToolName == "mcp:summarizer.summarize" {
 			gotSummarizer = true
 		}
 	}
 	if !gotSummarizer {
-		t.Errorf("expected summarizer.summarize from C even with B unreachable; got %+v", rows)
+		t.Errorf("expected mcp:summarizer.summarize from C even with B unreachable; got %+v", rows)
 	}
 }
 
@@ -395,9 +417,15 @@ func buildAndSaveCustomBiscuit(node *SamNode, rootPriv ed25519.PrivateKey, allow
 		return err
 	}
 	for _, svc := range allowedServices {
+		parts := strings.SplitN(svc, ":", 2)
+		opType := parts[0]
+		opName := "*"
+		if len(parts) > 1 {
+			opName = parts[1]
+		}
 		if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
-			Name: api.FactMCPServer,
-			IDs:  []biscuit.Term{biscuit.String(svc)},
+			Name: api.FactAllowService,
+			IDs:  []biscuit.Term{biscuit.String(opType), biscuit.String(opName)},
 		}}); err != nil {
 			return err
 		}
@@ -465,8 +493,8 @@ func TestFetchRemoteToolCatalogue_AuthRejected(t *testing.T) {
 	}
 
 	row := rows[0]
-	if row.ToolName != "summarizer" {
-		t.Errorf("expected ToolName 'summarizer', got %q", row.ToolName)
+	if row.ToolName != "mcp:summarizer" {
+		t.Errorf("expected ToolName 'mcp:summarizer', got %q", row.ToolName)
 	}
 	if !strings.Contains(row.Error, "auth rejected") {
 		t.Errorf("expected Error to contain 'auth rejected', got %q", row.Error)

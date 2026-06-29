@@ -62,3 +62,58 @@ func startMockOIDC(t *testing.T) (string, string) {
 
 	return issuer, jwtStr
 }
+
+func startCustomMockOIDC(t *testing.T) (string, func(claims map[string]interface{}) string) {
+	privKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("failed to generate rsa key: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	srv := httptest.NewServer(mux)
+	issuer := srv.URL
+
+	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"issuer":   issuer,
+			"jwks_uri": issuer + "/keys",
+		})
+	})
+
+	mux.HandleFunc("/keys", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"keys": []map[string]interface{}{
+				{
+					"kty": "RSA",
+					"alg": "RS256",
+					"use": "sig",
+					"kid": "mock-key",
+					"n":   base64.RawURLEncoding.EncodeToString(privKey.N.Bytes()),
+					"e":   base64.RawURLEncoding.EncodeToString(big.NewInt(int64(privKey.E)).Bytes()),
+				},
+			},
+		})
+	})
+
+	mintToken := func(customClaims map[string]interface{}) string {
+		claims := jwt.MapClaims{
+			"iss": issuer,
+			"aud": "sam-mesh-audience",
+			"exp": time.Now().Add(time.Hour).Unix(),
+		}
+		for k, v := range customClaims {
+			claims[k] = v
+		}
+		token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+		token.Header["kid"] = "mock-key"
+		jwtStr, err := token.SignedString(privKey)
+		if err != nil {
+			t.Fatalf("failed to sign jwt: %v", err)
+		}
+		return jwtStr
+	}
+
+	return issuer, mintToken
+}

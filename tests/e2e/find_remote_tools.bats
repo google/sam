@@ -80,7 +80,7 @@ teardown() {
   local match_count
   match_count=$(echo "$catalog" | jq --arg pid "${node2_peer_id}" '
     [.[] | select(.peer_id == $pid
-                 and (.tool_name | startswith("calculator.")))] | length
+                 and (.tool_name | startswith("mcp:calculator.")))] | length
   ')
   echo "Matching calculator tool entries: ${match_count}"
   [[ "${match_count}" -ge 1 ]]
@@ -124,7 +124,7 @@ teardown() {
 
   echo "[$(date +%T)] Calling call_remote_tool for calculator.add"
   local call_args
-  call_args="{\"peer_id\":\"${node2_peer_id}\",\"tool_name\":\"calculator.add\",\"arguments\":{\"a\":2,\"b\":3}}"
+  call_args="{\"peer_id\":\"${node2_peer_id}\",\"tool_name\":\"mcp:calculator.add\",\"arguments\":{\"a\":2,\"b\":3}}"
   run docker run --rm --network "${MESH_NETWORK}" \
     "${MESH_RUNTIME_IMAGE}" mcp-client \
     -url "http://sam-node-1:8080/mcp" \
@@ -175,7 +175,7 @@ teardown() {
 
   echo "[$(date +%T)] Calling describe_remote_tool for calculator.add"
   local describe_args
-  describe_args="{\"peer_id\":\"${node2_peer_id}\",\"tool_name\":\"calculator.add\"}"
+  describe_args="{\"peer_id\":\"${node2_peer_id}\",\"tool_name\":\"mcp:calculator.add\"}"
   run docker run --rm --network "${MESH_NETWORK}" \
     "${MESH_RUNTIME_IMAGE}" mcp-client \
     -url "http://sam-node-1:8080/mcp" \
@@ -195,7 +195,7 @@ teardown() {
 
   local got_name
   got_name=$(echo "$payload" | jq -r '.tool_name')
-  [[ "${got_name}" == "calculator.add" ]]
+  [[ "${got_name}" == "mcp:calculator.add" ]]
 
   local got_input_type
   got_input_type=$(echo "$payload" | jq -r '.input_schema.type')
@@ -240,7 +240,7 @@ teardown() {
 
   echo "[$(date +%T)] Calling describe_remote_tool for an unknown tool"
   local describe_args
-  describe_args="{\"peer_id\":\"${node2_peer_id}\",\"tool_name\":\"calculator.does-not-exist\"}"
+  describe_args="{\"peer_id\":\"${node2_peer_id}\",\"tool_name\":\"mcp:calculator.does-not-exist\"}"
   run docker run --rm --network "${MESH_NETWORK}" \
     "${MESH_RUNTIME_IMAGE}" mcp-client \
     -url "http://sam-node-1:8080/mcp" \

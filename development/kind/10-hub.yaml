@@ -30,6 +30,7 @@ spec:
         # addr (for pods) and the host-mapped addr (for a local sam-node).
         - "--external-multiaddr=/dns4/sam-hub.${NAMESPACE}.svc.cluster.local/tcp/4001"
         - "--external-multiaddr=/ip4/127.0.0.1/tcp/4001"
+        - "--policy-file=/etc/sam/policies/policies.yaml"
         ports:
         - { containerPort: 9090, name: http, protocol: TCP }
         - { containerPort: 4001, name: p2p-tcp, protocol: TCP }
@@ -39,6 +40,14 @@ spec:
         readinessProbe:
           tcpSocket: { port: 9090 }
           periodSeconds: 2
+        volumeMounts:
+        - name: policies-volume
+          mountPath: /etc/sam/policies
+          readOnly: true
+      volumes:
+      - name: policies-volume
+        configMap:
+          name: sam-hub-policies
 ---
 apiVersion: v1
 kind: Service
@@ -68,3 +77,26 @@ spec:
   ports:
   - { name: http, port: 9090, targetPort: 9090, nodePort: 30090, protocol: TCP }
   - { name: p2p-tcp, port: 4001, targetPort: 4001, nodePort: 30401, protocol: TCP }
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sam-hub-policies
+  namespace: ${NAMESPACE}
+data:
+  policies.yaml: |
+    version: "v1alpha1"
+    bindings:
+      - group: "system:serviceaccounts"
+        role: "sam-admin"
+      - group: "system:authenticated"
+        role: "sam-admin"
+      - group: "system:serviceaccounts:${NAMESPACE}"
+        role: "sam-admin"
+    roles:
+      sam-admin:
+        allowed_services:
+          - "*"
+        allowed_targets:
+          - "*"

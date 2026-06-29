@@ -294,7 +294,7 @@ jobs:
           export HF_TOKEN="${{ secrets.HF_TOKEN }}"
           
           # Read and indent banana bot playground script for the ConfigMap template
-          export BANANA_BOT_SCRIPT=$(cat docs/snippets/banana_bot_playground.py | sed 's/^/    /')
+          export BANANA_BOT_SCRIPT=$(cat site/content/docs/snippets/banana_bot_playground.py | sed 's/^/    /')
           # Provision the openclaw-secret, preserving the gateway-token if it exists
           GATEWAY_TOKEN=$(kubectl get secret openclaw-secret-${ENV_NAME} -n ${CANARY_NAMESPACE} -o jsonpath="{.data.gateway-token}" 2>/dev/null | base64 -d || openssl rand -hex 16)
           kubectl create secret generic openclaw-secret-${ENV_NAME} \
@@ -358,5 +358,50 @@ jobs:
             echo "Rolling back Everything Canary deployment..."
             kubectl rollout undo deployment/everything-canary-${ENV_NAME} -n ${CANARY_NAMESPACE}
             kubectl rollout status deployment/everything-canary-${ENV_NAME} -n ${CANARY_NAMESPACE} || true
+            exit 1
+          }
+
+      - name: Deploy OpenRouter Node to Testnet
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          print_rollout_diagnostics() {
+            local namespace="$1"
+            local deployment="$2"
+            local selector="$3"
+
+            echo "Collecting diagnostics for deployment/${deployment} in namespace ${namespace}..."
+
+            kubectl describe deployment/${deployment} -n ${namespace} || true
+            kubectl get pods -n ${namespace} -l "${selector}" -o wide || true
+            kubectl describe pods -n ${namespace} -l "${selector}" || true
+            kubectl get events -n ${namespace} --sort-by=.lastTimestamp || true
+
+            for pod in $(kubectl get pods -n ${namespace} -l "${selector}" -o name 2>/dev/null); do
+              echo "==== Describe ${pod} ===="
+              kubectl describe -n ${namespace} "${pod}" || true
+
+              for container in $(kubectl get -n ${namespace} "${pod}" -o jsonpath='{.spec.containers[*].name}' 2>/dev/null); do
+                echo "==== Logs for ${pod} container ${container} ===="
+                kubectl logs -n ${namespace} "${pod#pod/}" -c "${container}" --tail=-1 || true
+              done
+            done
+          }
+
+          export ENV_NAME="${{ vars.ENV_NAME }}"
+          export NAMESPACE="sam-${ENV_NAME}"
+          export CANARY_NAMESPACE="sam-canary-${ENV_NAME}"
+          export IMAGE_TAG="${{ env.IMAGE_TAG }}"
+          
+          # Substitute the API key and other variables into the template and apply it to the cluster
+          envsubst < .github/k8s/sam-node-openrouter-template.yaml | kubectl apply -f -
+          
+          kubectl rollout status deployment/openrouter-canary-${ENV_NAME} -n ${CANARY_NAMESPACE} --timeout=120s || {
+            echo "OpenRouter Canary Deployment failed!"
+            print_rollout_diagnostics "${CANARY_NAMESPACE}" "openrouter-canary-${ENV_NAME}" "app=openrouter-canary-${ENV_NAME}"
+
+            echo "Rolling back OpenRouter Canary deployment..."
+            kubectl rollout undo deployment/openrouter-canary-${ENV_NAME} -n ${CANARY_NAMESPACE}
+            kubectl rollout status deployment/openrouter-canary-${ENV_NAME} -n ${CANARY_NAMESPACE} || true
             exit 1
           }

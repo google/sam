@@ -47,12 +47,8 @@ func BenchmarkMintBiscuitToken(b *testing.B) {
 			},
 			Roles: map[string]api.RolePolicy{
 				"developer-role": {
-					MCP: api.MCPPolicy{
-						AllowedServers: []string{"git-helper", "mcp-server-2"},
-					},
-					Network: api.NetworkPolicy{
-						AllowedTargets: []string{"target-1", "target-2"},
-					},
+					AllowedServices: []string{"git-helper", "mcp-server-2"},
+					AllowedTargets:  []string{"target-1", "target-2"},
 					CustomDatalog: []string{
 						"department(\"analytics\");",
 					},

@@ -34,27 +34,42 @@ var (
 	baselineRule1       biscuit.Policy
 	baselineRule2       biscuit.Policy
 	baselineRule3       biscuit.Policy
+	baselineRule4       biscuit.Policy
 	baselineReplayCheck biscuit.Check
 )
 
+// init compiles the baseline Datalog rules and checks for the node.
+// These rules are loaded at initialization to avoid runtime parsing overhead.
+// Baseline Rules:
+// 1. Exact Match: Allows the request if the token explicitly allows the specific service type and name.
+// 2. Global Wildcard: Allows the request if the token explicitly grants access to all services ("*", "*").
+// 3. Catalog Target: Allows access to the service discovery catalog ("system", "catalog").
+// 4. Type Wildcard: Allows the request if the token explicitly grants access to all names under a specific service type ($type, "*").
+// 5. Replay Check: Enforces that the peer identity bound in the token matches the physical connection peer ID.
 func init() {
 	var err error
-	rule1Str := fmt.Sprintf(`allow if operation($op), %s($op)`, api.FactMCPServer)
+	rule1Str := fmt.Sprintf(`allow if service($type, $name), %s($type, $name)`, api.FactAllowService)
 	baselineRule1, err = parser.FromStringPolicy(rule1Str)
 	if err != nil {
 		panic(fmt.Sprintf("failed to parse baseline rule 1: %v", err))
 	}
 
-	rule2Str := fmt.Sprintf(`allow if operation($op), %s("*")`, api.FactMCPServer)
+	rule2Str := fmt.Sprintf(`allow if service($type, $name), %s("*", "*")`, api.FactAllowService)
 	baselineRule2, err = parser.FromStringPolicy(rule2Str)
 	if err != nil {
 		panic(fmt.Sprintf("failed to parse baseline rule 2: %v", err))
 	}
 
-	rule3Str := fmt.Sprintf(`allow if operation("%s")`, api.CatalogTarget)
+	rule3Str := fmt.Sprintf(`allow if service("system", "%s")`, api.CatalogTarget)
 	baselineRule3, err = parser.FromStringPolicy(rule3Str)
 	if err != nil {
 		panic(fmt.Sprintf("failed to parse baseline rule 3: %v", err))
+	}
+
+	rule4Str := fmt.Sprintf(`allow if service($type, $name), %s($type, "*")`, api.FactAllowService)
+	baselineRule4, err = parser.FromStringPolicy(rule4Str)
+	if err != nil {
+		panic(fmt.Sprintf("failed to parse baseline rule 4: %v", err))
 	}
 
 	replayCheckStr := `check if client_peer_id($id), connection_peer_id($id)`
@@ -231,14 +246,17 @@ func (n *SamNode) Authorize(rawToken []byte, req RequestContext, pubKey ed25519.
 	}
 
 	// Inject the current action context (Standard Vocabulary)
-	op := req.Protocol
-	if req.Target != "" {
-		op = req.Target
+	var opType, opName string
+	if req.Target == "" {
+		opType = api.DefaultServiceType
+		opName = req.Protocol
+	} else {
+		opType, opName = api.ParseServiceTarget(req.Target)
 	}
 	authorizer.AddFact(biscuit.Fact{
 		Predicate: biscuit.Predicate{
-			Name: "operation",
-			IDs:  []biscuit.Term{biscuit.String(op)},
+			Name: "service",
+			IDs:  []biscuit.Term{biscuit.String(opType), biscuit.String(opName)},
 		},
 	})
 
@@ -271,6 +289,7 @@ func (n *SamNode) Authorize(rawToken []byte, req RequestContext, pubKey ed25519.
 		authorizer.AddPolicy(baselineRule1)
 		authorizer.AddPolicy(baselineRule2)
 		authorizer.AddPolicy(baselineRule3)
+		authorizer.AddPolicy(baselineRule4)
 	}
 
 	err = authorizer.Authorize()

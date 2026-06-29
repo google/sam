@@ -8,8 +8,8 @@ data:
     version: "v1alpha1"
     attenuation:
       policies:
-        - 'allow if operation("mcp:openclaw");'
-        - 'allow if operation("/sam/catalog");'
+        - 'allow if service("mcp", "openclaw");'
+        - 'allow if service("system", "/sam/catalog");'
       checks: []
       rules: []
     services: []

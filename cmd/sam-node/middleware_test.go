@@ -19,6 +19,7 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -128,8 +129,8 @@ func TestAuthorize(t *testing.T) {
 
 	// Add fact to match baseline rule
 	err = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
-		Name: api.FactMCPServer,
-		IDs:  []biscuit.Term{biscuit.String("/test/proto")},
+		Name: api.FactAllowService,
+		IDs:  []biscuit.Term{biscuit.String("system"), biscuit.String("/test/proto")},
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -162,6 +163,135 @@ func TestAuthorize(t *testing.T) {
 	}
 }
 
+func TestBaselineRules(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dummyPeer := peer.ID("dummy-peer")
+
+	tests := []struct {
+		name          string
+		mintToken     func(t *testing.T, builder biscuit.Builder)
+		protocol      string
+		target        string
+		expectSuccess bool
+	}{
+		{
+			name: "Baseline Rule 1: Exact Match",
+			mintToken: func(t *testing.T, builder biscuit.Builder) {
+				factStr := fmt.Sprintf(`%s("mcp", "test_tool")`, api.FactAllowService)
+				fact, _ := parser.FromStringFact(factStr)
+				_ = builder.AddAuthorityFact(fact)
+			},
+			protocol:      "test_tool",
+			target:        "mcp:test_tool",
+			expectSuccess: true,
+		},
+		{
+			name: "Baseline Rule 2: Global Wildcard",
+			mintToken: func(t *testing.T, builder biscuit.Builder) {
+				factStr := fmt.Sprintf(`%s("*", "*")`, api.FactAllowService)
+				fact, _ := parser.FromStringFact(factStr)
+				_ = builder.AddAuthorityFact(fact)
+			},
+			protocol:      "anything",
+			target:        "mcp:anything",
+			expectSuccess: true,
+		},
+		{
+			name: "Baseline Rule 3: Catalog Target",
+			mintToken: func(t *testing.T, builder biscuit.Builder) {
+				// No specific allowed_service facts needed
+			},
+			protocol:      api.CatalogTarget, // "catalog"
+			target:        "system:" + api.CatalogTarget,
+			expectSuccess: true,
+		},
+		{
+			name: "Baseline Rule 4: Type Wildcard",
+			mintToken: func(t *testing.T, builder biscuit.Builder) {
+				factStr := fmt.Sprintf(`%s("mcp", "*")`, api.FactAllowService)
+				fact, _ := parser.FromStringFact(factStr)
+				_ = builder.AddAuthorityFact(fact)
+			},
+			protocol:      "test_tool",
+			target:        "mcp:test_tool",
+			expectSuccess: true,
+		},
+		{
+			name: "Baseline Rule Rejection: Type Wildcard does not allow other types",
+			mintToken: func(t *testing.T, builder biscuit.Builder) {
+				factStr := fmt.Sprintf(`%s("mcp", "*")`, api.FactAllowService)
+				fact, _ := parser.FromStringFact(factStr)
+				_ = builder.AddAuthorityFact(fact)
+			},
+			protocol:      "test_tool",
+			target:        "system:test_tool",
+			expectSuccess: false,
+		},
+		{
+			name: "Baseline Replay Check Rejection: mismatched peer ID",
+			mintToken: func(t *testing.T, builder biscuit.Builder) {
+				factStr := fmt.Sprintf(`%s("mcp", "test_tool")`, api.FactAllowService)
+				fact, _ := parser.FromStringFact(factStr)
+				_ = builder.AddAuthorityFact(fact)
+				// deliberately add a different client_peer_id than the connection peer ID
+				err = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+					Name: "client_peer_id",
+					IDs:  []biscuit.Term{biscuit.String("different-peer")},
+				}})
+			},
+			protocol:      "test_tool",
+			target:        "mcp:test_tool",
+			expectSuccess: false, // Should fail the connection_peer_id check
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			builder := biscuit.NewBuilder(priv)
+			_ = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+				Name: "node",
+				IDs:  []biscuit.Term{biscuit.String(dummyPeer.String())},
+			}})
+
+			// For the happy paths, add the matching client_peer_id
+			if tt.name != "Baseline Replay Check Rejection: mismatched peer ID" {
+				_ = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+					Name: "client_peer_id",
+					IDs:  []biscuit.Term{biscuit.String(dummyPeer.String())},
+				}})
+			}
+
+			tt.mintToken(t, builder)
+
+			b, _ := builder.Build()
+			tokenBytes, _ := b.Serialize()
+
+			node := &SamNode{
+				trustedKeys:    []TrustedKey{{Key: pub, ReceivedAt: time.Now()}},
+				TrustHubRBAC:   true,
+				BiscuitTimeout: 500 * time.Millisecond,
+			}
+
+			req := RequestContext{
+				PeerID:   dummyPeer,
+				Protocol: tt.protocol,
+				Target:   tt.target,
+			}
+
+			err = node.Authorize(tokenBytes, req, pub)
+			if tt.expectSuccess && err != nil {
+				t.Errorf("expected success, got error: %v", err)
+			} else if !tt.expectSuccess && err == nil {
+				t.Error("expected failure, got success")
+			}
+		})
+	}
+}
+
 func TestEnterprisePolicyEngine(t *testing.T) {
 	pub, priv, err := ed25519.GenerateKey(nil)
 	if err != nil {
@@ -180,7 +310,7 @@ func TestEnterprisePolicyEngine(t *testing.T) {
 		{
 			name: "Case 1 (Happy Path)",
 			mintToken: func(t *testing.T, builder biscuit.Builder) {
-				fact, err := parser.FromStringFact(`allow_mcp_server("query_db")`)
+				fact, err := parser.FromStringFact(`allow_service("system", "query_db")`)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -194,7 +324,7 @@ func TestEnterprisePolicyEngine(t *testing.T) {
 		{
 			name: "Case 2 (Unauthorized Tool)",
 			mintToken: func(t *testing.T, builder biscuit.Builder) {
-				fact, err := parser.FromStringFact(`allow_mcp_server("query_db")`)
+				fact, err := parser.FromStringFact(`allow_service("system", "query_db")`)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -208,7 +338,7 @@ func TestEnterprisePolicyEngine(t *testing.T) {
 		{
 			name: "Case 3 (Wildcard Access)",
 			mintToken: func(t *testing.T, builder biscuit.Builder) {
-				fact, err := parser.FromStringFact(`allow_mcp_server("*")`)
+				fact, err := parser.FromStringFact(`allow_service("*", "*")`)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -222,7 +352,7 @@ func TestEnterprisePolicyEngine(t *testing.T) {
 		{
 			name: "Case 4 (Local Attenuation Override)",
 			mintToken: func(t *testing.T, builder biscuit.Builder) {
-				fact1, err := parser.FromStringFact(`allow_mcp_server("*")`)
+				fact1, err := parser.FromStringFact(`allow_service("*", "*")`)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -532,8 +662,8 @@ func TestAuthorizationCacheBypass(t *testing.T) {
 		IDs:  []biscuit.Term{biscuit.String(dummyPeer.String())},
 	}})
 	_ = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
-		Name: "allow_mcp_server",
-		IDs:  []biscuit.Term{biscuit.String("query_db")},
+		Name: "allow_service",
+		IDs:  []biscuit.Term{biscuit.String("system"), biscuit.String("query_db")},
 	}})
 
 	b, _ := builder.Build()
@@ -585,12 +715,12 @@ func TestAuthorizationCacheBypass(t *testing.T) {
 	}
 
 	// 1. Authorized target should succeed
-	if !doRequest("query_db") {
+	if !doRequest("system:query_db") {
 		t.Fatal("Expected authorized target to succeed")
 	}
 
 	// 2. Unauthorized target with the same token should FAIL
-	if doRequest("reboot_server") {
+	if doRequest("system:reboot_server") {
 		t.Fatal("SECURITY BUG: Unauthorized target succeeded due to cache bypass!")
 	}
 }

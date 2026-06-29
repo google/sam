@@ -204,7 +204,30 @@ metadata:
   namespace: sam-nodes
 ```
 
-### 2. Deploy Nodes using Token Projection
+### 2. Configure Node Identity and Services
+Create a ConfigMap defining the node's local services and local security target identity (see the [Node Configuration Guide](../node-configuration/) for schema details):
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sam-node-config
+  namespace: sam-nodes
+data:
+  sam-node.yaml: |
+    version: "v1alpha1"
+    services:
+      - type: mcp
+        name: db-agent
+        command: ["echo", "placeholder db-agent service"]
+    attenuation:
+      rules:
+        - 'target("group:backend-nodes") <- true;'
+      policies:
+        - 'allow if target($t), network_target($t);'
+```
+
+### 3. Deploy Nodes using Token Projection
 Deploy the nodes. We use a `projected` volume to request a short-lived token containing the audience expected by the hub (`sam-hub-audience`):
 
 ```yaml

@@ -115,11 +115,11 @@ data:
         role: "sam-canary"
     roles:
       sam-canary:
-        mcp:
-          allowed_servers:
-            - "/sam/mcp/1.0.0"
-            - "/sam/catalog"
-
+        allowed_services:
+          - "/sam/mcp/1.0.0"
+          - "/sam/catalog"
+          - "inference:openrouter"
+          - "*"
 ---
 apiVersion: monitoring.googleapis.com/v1
 kind: PodMonitoring

@@ -34,12 +34,8 @@ bindings:
     role: admin
 roles:
   admin:
-    mcp:
-      allowed_servers: 
-        - "/sam/mcp/1.0.0"
-        - "list_local_services"
-        - "discover_remote_services"
-        - "federated-tool"
+    allowed_services: 
+      - "mcp:*"
 `
 	if err := os.WriteFile(policyFile, []byte(policyContent), 0644); err != nil {
 		t.Fatal(err)

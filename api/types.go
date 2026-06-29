@@ -15,7 +15,9 @@
 package api
 
 import (
+	"fmt"
 	"maps"
+	"strings"
 
 	"github.com/libp2p/go-libp2p/core/protocol"
 )
@@ -29,7 +31,16 @@ const AuthProtocolID protocol.ID = "/sam/auth/1.0.0"
 // CatalogTarget is the special target service name used to retrieve tool catalogs from remote nodes.
 const CatalogTarget = "/sam/catalog"
 
+// DefaultServiceType is the default type for services without a namespace.
+const DefaultServiceType = "system"
+
 const DefaultAudience = "sam-mesh-audience"
+
+// MCPServicePrefix is the conventional prefix (namespace + separator) used for Model Context Protocol (MCP) services.
+// When an MCP client attempts to connect to an MCP service on a remote peer, and the target service name
+// does not contain a namespace separator (':'), this prefix is automatically prepended to the service name
+// prior to routing and policy evaluation.
+const MCPServicePrefix = "mcp:"
 
 // Biscuit fact names
 const (
@@ -40,7 +51,7 @@ const (
 	FactRole          = "role"
 	FactUser          = "user"
 	FactEmail         = "email"
-	FactMCPServer     = "allow_mcp_server"
+	FactAllowService  = "allow_service"
 	FactNetworkTarget = "allow_network_target"
 )
 
@@ -69,4 +80,52 @@ var oidcClaimToFact = map[string]string{
 // This ensures that the global map is immutable and thread-safe for concurrent readers.
 func OIDCClaimToFact() map[string]string {
 	return maps.Clone(oidcClaimToFact)
+}
+
+// ParseServiceTarget parses a service target string into its type and name components.
+// The target convention is "type:name" (e.g., "mcp:my_tool").
+// If no colon is present, the type defaults to the "system" namespace.
+// The global wildcard "*" is a special case that maps to type "*" and name "*".
+func ParseServiceTarget(target string) (svcType, svcName string) {
+	if target == "*" {
+		return "*", "*"
+	}
+	parts := strings.SplitN(target, ":", 2)
+	if len(parts) == 2 {
+		return parts[0], parts[1]
+	}
+	return DefaultServiceType, target
+}
+
+// Protocol Type strings for REST and JSON mapping.
+const (
+	ServiceTypeStringMCP       = "mcp"
+	ServiceTypeStringInference = "inference"
+)
+
+// InferenceServicePrefix is the conventional prefix used for LLM gateway inference services.
+const InferenceServicePrefix = "inference:"
+
+// ParseServiceType converts a string identifier (e.g. from JSON or REST) to the ServiceType protobuf enum.
+func ParseServiceType(s string) (ServiceType, error) {
+	switch strings.ToLower(s) {
+	case ServiceTypeStringMCP:
+		return ServiceType_SERVICE_TYPE_MCP, nil
+	case ServiceTypeStringInference:
+		return ServiceType_SERVICE_TYPE_INFERENCE, nil
+	default:
+		return ServiceType_SERVICE_TYPE_UNSPECIFIED, fmt.Errorf("invalid service type: %s", s)
+	}
+}
+
+// ServiceTypeToString converts a ServiceType protobuf enum back to its standard string identifier.
+func ServiceTypeToString(t ServiceType) (string, error) {
+	switch t {
+	case ServiceType_SERVICE_TYPE_MCP:
+		return ServiceTypeStringMCP, nil
+	case ServiceType_SERVICE_TYPE_INFERENCE:
+		return ServiceTypeStringInference, nil
+	default:
+		return "", fmt.Errorf("invalid or unspecified service type")
+	}
 }

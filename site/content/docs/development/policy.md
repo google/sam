@@ -65,25 +65,37 @@ allow if group("engineering");
 ```
 
 ## 2. Hub Policy Schema (`policies.yaml`)
-Admins define central permissions by mapping OIDC roles to specific capabilities.
+Admins define central permissions by mapping OIDC roles to specific capabilities. 
 
-> [!IMPORTANT]
-> Wildcards (e.g. `*`) are explicitly disallowed in policy definitions. All allowed network targets and MCP servers must be explicitly listed.
+* **`allowed_targets`**: Defines which logical groups or specific peers a user can route messages to, analogous to Active Directory security groups. Target definitions must be formatted as resolved facts (e.g., `group:<name>`, `user:<sub-id>`, `email:<email>`, `role:<role-name>`, or `node:<peer-id>`). *Note: These are evaluated exclusively by the destination node (see Section 3.1).*
+* **`allowed_services`**: Defines the application-level tools or endpoints a user can access. Services use a strict `type:name` convention (e.g., `mcp:db-agent` or `inference:openrouter`).
+  * **Default Namespace (`system`)**: If a service string does not contain a `:` separator (e.g., `my-tool`), it automatically defaults to the `system` type (parsed as `system:my-tool`).
+  * **Wildcards**: Because `allowed_services` translates to the two-argument Biscuit fact `service($type, $name)`, SAM natively supports wildcards. You can grant access to an entire type via `type:*` (e.g., `mcp:*`), or grant global access to everything via `*`.
+  * **MCP Namespace Convention**: The `mcp:` prefix (`api.MCPServicePrefix`) is the explicit convention for all Model Context Protocol targets. When remote nodes query local nodes for tool catalogs, if the local service is an MCP server and is missing the `mcp:` prefix in its name, the proxy layer will automatically prepend `mcp:` prior to enforcing the authorization policy to prevent it from accidentally falling back into the `system:` namespace.
+
+> [!NOTE]
+> The `*` global wildcard is a special case. It maps exactly to type `*` and name `*`. It does *not* default to the `system` type.
 
 ```yaml
 version: "v1alpha1"
 roles:
   data-scientist:
-    network:
-      allowed_targets: ["db-agent.data-mesh"] # Who they can connect to
-    mcp:
-      allowed_servers: ["db-agent"] # Allowed MCP server names
+    allowed_targets: 
+      - "node:12D3KooW..."        # Specific peer ID
+      - "group:backend-nodes"     # Logical group of peers
+      - "role:admin"              # Nodes possessing the admin role
+      - "user:auth0|123456"       # Node bound to a specific user sub
+      - "email:db@example.com"    # Node bound to a specific email
+    allowed_services: 
+      - "mcp:db-agent"            # Access to specific MCP server
+      - "inference:openrouter"    # Access to inference endpoints
+      - "mcp:*"                   # Wildcard access to all MCP servers
     custom_datalog:
       - 'department("analytics");' # Raw injected facts
 ```
 
-## 3. Node Local Attenuation Schema (`local_policy.yaml`)
-Local developers can further restrict access to their specific node. Local policies can only attenuate (restrict) access, never expand it beyond what the Hub allowed.
+## 3. Node Local Attenuation Schema (`sam-node-config.yaml`)
+Local developers can further restrict access to their specific node. Local policies can only attenuate (restrict) access, never expand it beyond what the Hub allowed. They are evaluated entirely at the destination node.
 
 ```yaml
 version: "v1alpha1"
@@ -93,6 +105,34 @@ attenuation:
   checks:
     - 'check if time($time), $time < 2026-12-31T00:00:00Z;'
 ```
+
+### 3.1 Evaluating `allowed_targets` at the Destination
+The SAM network operates on a Zero Trust architecture. The origin node does not police its own traffic. When the Hub injects an `allowed_targets` permission (like `- "group:backend-nodes"`) into the token, it creates a `network_target("group:backend-nodes")` capability fact.
+
+It is up to the **destination node** to mathematically prove that it is the intended target. To do this, the destination node injects its own identity into its local config using `rules`, and enforces the match using `policies`:
+
+```yaml
+version: "v1alpha1"
+attenuation:
+  rules:
+    # 1. The destination defines what it "is" locally
+    - 'target("group:backend-nodes") <- true;'
+    - 'target("email:db@example.com") <- true;'
+  policies:
+    # 2. The destination strictly enforces that the token contains the matching network_target
+    - 'allow if target($t), network_target($t);'
+```
+
+If the calling node's token does not contain a `network_target` fact that exactly matches one of the destination's `target` rules, the destination node's authorization middleware will reject the connection.
+
+> [!WARNING]
+> **What happens if a node does not set any local target policies?**
+> If a node does not define any `target` rules or `allow if target($t), network_target($t);` policies in its local configuration, it defaults to relying strictly on the Hub's **Baseline Security Rules** (Section 4). In this default state, the node is "open" to *any* peer in the mesh, provided the peer possesses the explicit `allow_service` permissions required to execute the tool. In other words, `allowed_targets` is an *opt-in* mechanism for the destination to attenuate traffic further; without it, the destination trusts the Hub's `allowed_services` whitelist implicitly.
+>
+> **Does this mean the mesh is insecure by default?**
+> No. By default, `sam-hub` operates in a **Default-Deny** state. If a user is not explicitly mapped to a role in the Hub's `policies.yaml`, or if their role does not explicitly grant an `allowed_service` capability, their token will contain no service permissions. Because the destination node's Baseline Rules require an explicit `allow_service` fact to execute any tool, the connection will be instantly denied (even if no targets are defined).
+>
+> It is entirely a **Mesh Operator decision** how the mesh behaves. Operators can choose to rely solely on service whitelists (granting broad mesh-wide execution), or strictly partition the network into isolated zones by injecting `allowed_targets` and enforcing them locally on the nodes.
 
 ## 4. Node Baseline Security Rules
 
@@ -109,7 +149,7 @@ To allow remote peers to discover tools and query connectivity, each node hosts 
 
 To ensure tool discovery works out-of-the-box, the node automatically injects a baseline rule allowing all verified peers to access it:
 ```datalog
-allow if operation("/sam/catalog");
+allow if service("system", "/sam/catalog");
 ```
 > [!IMPORTANT]
 > Without this baseline rule (or if a custom local attenuation policy explicitly blocks it), remote nodes will not be able to retrieve this node's tool catalog. As a result, agents across the mesh will fail to discover or call any of this node's tools.

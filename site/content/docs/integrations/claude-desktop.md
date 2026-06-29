@@ -2,7 +2,7 @@
 title: "Integrating SAM with Claude Desktop"
 linkTitle: "Integrating SAM with Claude Desktop"
 ---
-You can connect your `sam-node` to the [Claude Desktop](https://claude.com/download) app as an MCP server. Unlike [Claude Code](./claude-code.md), Claude Desktop has its own configuration and does **not** read Claude Code's MCP settings.
+You can connect your `sam-node` to the [Claude Desktop](https://claude.com/download) app as an MCP server. Unlike [Claude Code](./claude-code/), Claude Desktop has its own configuration and does **not** read Claude Code's MCP settings.
 
 ## Overview
 
@@ -49,7 +49,7 @@ Restart Claude Desktop for the change to take effect. The `sam-node` tools — `
 
 ## Discovering and Invoking Remote Tools
 
-The tool flow is identical to the [Claude Code guide](./claude-code.md#discovering-and-invoking-remote-tools):
+The tool flow is identical to the [Claude Code guide](./claude-code/#discovering-and-invoking-remote-tools):
 
 1. `discover_remote_services` → list active services and obtain their `peer_id`s.
 2. `find_remote_tools` (`peer_id`) → list the tools a peer hosts.

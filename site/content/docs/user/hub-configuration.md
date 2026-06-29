@@ -39,10 +39,14 @@ The hub is highly configurable. Each setting can be passed as a command-line fla
 
 ## 3. Configuring Role-Based Policies (`policies.yaml`)
 
-The hub dynamically issues permissions inside the Biscuit token based on identity claims (users or groups) mapped to specific roles in the policy file.
+The hub dynamically issues permissions inside the Biscuit token based on identity claims (users or groups) mapped to specific roles in the policy file. 
 
-> [!IMPORTANT]
-> For security reasons, wildcards (e.g. `*`) are explicitly disallowed in policy definitions. All allowed network targets and MCP servers must be explicitly listed.
+The policy defines what endpoints and services agents are permitted to use:
+* **`allowed_targets`**: Acts similar to Active Directory network groups. This restricts which logical endpoints the agent can route connections to. **Note: IP address ranges are not allowed.** Instead, use the format of the resolved Biscuit facts: `group:<name>`, `user:<sub-id>`, `email:<email>`, `role:<role-name>`, or `node:<peer-id>`.
+* **`allowed_services`**: Restricts the application-level services the agent can invoke. Services are prefixed by their protocol type (e.g., `mcp:local-shell-tools` or `inference:openrouter`).
+
+> [!NOTE]
+> You can use wildcards (e.g. `mcp:*`) in `allowed_services` to grant broad access, or specify explicit service names for granular control.
 
 ### Example Policy Mapping
 Create a `policies.yaml` file in the directory where you run `sam-hub`:
@@ -53,30 +57,30 @@ version: v1alpha1
 # Define authorization roles and their specific network/tool permissions
 roles:
   developer-role:
-    network:
-      allowed_targets:
-        - "10.0.0.0/8"
-        - "192.168.1.0/24"
-    mcp:
-      allowed_servers:
-        - "local-shell-tools"
-        - "git-helper"
+    allowed_targets:
+      - "group:dev-nodes"
+      - "email:dev-lead@example.com"
+      - "user:auth0|123456"
+      - "node:12D3KooWSpecificDevNodeId"
+    allowed_services:
+      - "mcp:local-shell-tools"
+      - "mcp:git-helper"
+      - "inference:openrouter"
   
   admin-role:
-    network:
-      allowed_targets:
-        - "10.0.0.0/8"
-        - "172.16.0.0/12"
-        - "192.168.1.0/24"
-    mcp:
-      allowed_servers:
-        - "local-shell-tools"
-        - "git-helper"
-        - "db-agent"
+    allowed_targets:
+      - "group:all-nodes"
+      - "role:admin"
+    allowed_services:
+      - "mcp:*"
+      - "inference:*"
+      - "system:*"
 
-# Bind OIDC user emails or group claims to roles
+# Bind OIDC user subs, emails, or group claims to roles
 bindings:
-  - user: "alice@example.com"
+  - email: "alice@example.com"
+    role: "admin-role"
+  - user: "auth0|123456"
     role: "admin-role"
   - group: "eng-team"
     role: "developer-role"

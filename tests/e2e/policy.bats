@@ -149,15 +149,14 @@ bindings:
     role: \"mesh-member\"
 roles:
   mesh-member:
-    mcp:
-      allowed_servers:
-        - \"query_database\"
-        - \"delete_tables\""
+    allowed_services:
+      - \"mcp:query_database\"
+      - \"mcp:delete_tables\""
 
   local node_policy="version: \"v1alpha1\"
 attenuation:
   policies:
-    - 'deny if operation(\"delete_tables\");'"
+    - 'deny if service(\"mcp\", \"delete_tables\");'"
 
   docker run --rm -v "${POLICY_VOL}:/policies" busybox sh -c "cat <<'EOF' > /policies/policies.yaml
 ${hub_policy}

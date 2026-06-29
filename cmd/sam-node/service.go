@@ -125,7 +125,7 @@ func NewServiceFromRequest(req *api.RegisterServiceRequest) (Service, error) {
 // buildRegisterRequest converts a static-config service entry into the
 // RegisterServiceRequest the registry consumes.
 func buildRegisterRequest(sCfg api.ServiceConfig) (*api.RegisterServiceRequest, error) {
-	sType, err := parseServiceType(sCfg.Type)
+	sType, err := api.ParseServiceType(sCfg.Type)
 	if err != nil {
 		return nil, fmt.Errorf("invalid service type %q for service %s: %w", sCfg.Type, sCfg.Name, err)
 	}
@@ -152,27 +152,6 @@ func buildRegisterRequest(sCfg api.ServiceConfig) (*api.RegisterServiceRequest, 
 	return req, nil
 }
 
-func serviceTypeToString(t api.ServiceType) (string, error) {
-	switch t {
-	case api.ServiceType_SERVICE_TYPE_MCP:
-		return "mcp", nil
-	case api.ServiceType_SERVICE_TYPE_INFERENCE:
-		return "inference", nil
-	default:
-		return "", fmt.Errorf("invalid or unspecified service type")
-	}
-}
-
-func parseServiceType(s string) (api.ServiceType, error) {
-	switch strings.ToLower(s) {
-	case "mcp":
-		return api.ServiceType_SERVICE_TYPE_MCP, nil
-	case "inference":
-		return api.ServiceType_SERVICE_TYPE_INFERENCE, nil
-	default:
-		return api.ServiceType_SERVICE_TYPE_UNSPECIFIED, fmt.Errorf("invalid service type: %s", s)
-	}
-}
 
 // serviceKeyToCID hashes "sam:service[:part]..." into a DHT rendezvous CID.
 func serviceKeyToCID(parts ...string) (cid.Cid, error) {
@@ -185,7 +164,7 @@ func serviceKeyToCID(parts ...string) (cid.Cid, error) {
 }
 
 func serviceNameToCID(serviceType api.ServiceType, serviceName string) (cid.Cid, error) {
-	srvTypeStr, err := serviceTypeToString(serviceType)
+	srvTypeStr, err := api.ServiceTypeToString(serviceType)
 	if err != nil {
 		return cid.Undef, err
 	}
@@ -193,7 +172,7 @@ func serviceNameToCID(serviceType api.ServiceType, serviceName string) (cid.Cid,
 }
 
 func serviceTypeToCID(serviceType api.ServiceType) (cid.Cid, error) {
-	srvTypeStr, err := serviceTypeToString(serviceType)
+	srvTypeStr, err := api.ServiceTypeToString(serviceType)
 	if err != nil {
 		return cid.Undef, err
 	}

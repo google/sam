@@ -51,30 +51,28 @@ func LoadPolicyConfig(path string) (*api.PolicyConfig, error) {
 // ValidatePolicyConfig ensures that no wildcards are used in policies, and that all referenced roles in bindings exist.
 func ValidatePolicyConfig(config *api.PolicyConfig) error {
 	for _, b := range config.Bindings {
-		if b.Group == "" && b.User == "" {
-			return fmt.Errorf("binding must specify either 'group' or 'user'")
+		if b.Group == "" && b.User == "" && b.Email == "" {
+			return fmt.Errorf("binding must specify either 'group', 'user', or 'email'")
 		}
-		if b.Group != "" && b.User != "" {
-			return fmt.Errorf("binding cannot specify both 'group' and 'user' concurrently")
+		// A binding should only specify one of them
+		count := 0
+		if b.Group != "" {
+			count++
+		}
+		if b.User != "" {
+			count++
+		}
+		if b.Email != "" {
+			count++
+		}
+		if count > 1 {
+			return fmt.Errorf("binding cannot specify multiple identities (group/user/email) concurrently")
 		}
 		if b.Role == "" {
 			return fmt.Errorf("binding role cannot be empty")
 		}
 		if _, exists := config.Roles[b.Role]; !exists {
 			return fmt.Errorf("binding role %q does not exist in defined roles", b.Role)
-		}
-	}
-
-	for role, rolePolicy := range config.Roles {
-		for _, target := range rolePolicy.Network.AllowedTargets {
-			if target == "*" {
-				return fmt.Errorf("wildcard target '*' is not allowed in role %q", role)
-			}
-		}
-		for _, tool := range rolePolicy.MCP.AllowedServers {
-			if tool == "*" {
-				return fmt.Errorf("wildcard tool '*' is not allowed in role %q", role)
-			}
 		}
 	}
 	return nil
