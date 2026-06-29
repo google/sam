@@ -29,10 +29,12 @@ import (
 	"time"
 
 	"github.com/google/sam/api"
+	"github.com/google/sam/internal/announce"
 	libp2phttp "github.com/libp2p/go-libp2p-http"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 )
 
 func startSidecarServer(node *SamNode, addr, token, certFile, keyFile, caFile string) error {
@@ -51,6 +53,9 @@ func startSidecarServer(node *SamNode, addr, token, certFile, keyFile, caFile st
 	}))))
 	mux.Handle("/sam/service/discover", withAuth(token, withMeshConnection(node, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handleDiscoverService(node, w, r)
+	}))))
+	mux.Handle("/sam/service/announce/stream", withMeshConnection(node, withAuth(token, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handleAnnounceStream(node, w, r)
 	}))))
 
 	// Mount Egress Proxy
@@ -385,6 +390,57 @@ func handleDiscoverService(node *SamNode, w http.ResponseWriter, r *http.Request
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(providers); err != nil {
 		logger.Errorf("Failed to encode providers: %v", err)
+	}
+}
+
+func handleAnnounceStream(node *SamNode, w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	topic, err := node.joinTopic(api.GossipServiceAnnounce)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("join topic: %v", err), http.StatusInternalServerError)
+		return
+	}
+	sub, err := topic.Subscribe()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("subscribe: %v", err), http.StatusInternalServerError)
+		return
+	}
+	defer sub.Cancel()
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+
+	ctx := r.Context()
+	for {
+		msg, err := sub.Next(ctx)
+		if err != nil {
+			return // ctx cancelled or sub closed
+		}
+		var ann api.ServiceAnnounce
+		if err := proto.Unmarshal(msg.Data, &ann); err != nil {
+			continue
+		}
+		ok, err := announce.Verify(&ann)
+		if err != nil || !ok {
+			continue // drop forged/invalid
+		}
+		data, err := protojson.Marshal(&ann)
+		if err != nil {
+			continue
+		}
+		if _, err := fmt.Fprintf(w, "data: %s\n\n", data); err != nil {
+			return
+		}
+		flusher.Flush()
 	}
 }
 
