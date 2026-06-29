@@ -1063,8 +1063,8 @@ func PaginateSlice[T any](items []T, cursor string, limit int) ([]T, string, err
 	startIdx := 0
 	if cursor != "" {
 		idx, err := strconv.Atoi(cursor)
-		if err != nil {
-			return nil, "", err
+		if err != nil || idx < 0 {
+			return nil, "", fmt.Errorf("invalid cursor: %q", cursor)
 		}
 		startIdx = idx
 	}
