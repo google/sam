@@ -91,6 +91,11 @@ func (c *nodeClient) bootstrap(ctx context.Context, store *catalog.Store, types 
 		}
 		resp.Body.Close()
 		for _, p := range providers {
+			// No Addrs: discover doesn't return provider dial addrs. Bootstrap-only
+			// entries carry empty Addrs until a live announce refreshes them (~1
+			// reprovide cycle). Harmless today: consumers route by peer id via the
+			// egress proxy, not Entry.Addrs. Fill from peerstore/DHT only if a
+			// consumer ever dials Addrs directly.
 			ann := &api.ServiceAnnounce{
 				Type:   t,
 				Name:   p.SrvName,
