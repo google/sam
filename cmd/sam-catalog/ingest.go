@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -54,26 +55,31 @@ func serviceTypeStr(t api.ServiceType) (string, error) {
 }
 
 // bootstrap fetches discovered providers per type and upserts synthetic announces.
+// Per-type failures are logged and skipped; remaining types are still processed.
 func (c *nodeClient) bootstrap(ctx context.Context, store *catalog.Store, types []api.ServiceType) error {
 	for _, t := range types {
 		typeStr, err := serviceTypeStr(t)
 		if err != nil {
-			return err
+			log.Printf("bootstrap: skip unknown type %v: %v", t, err)
+			continue
 		}
 		url := c.baseURL + "/sam/service/discover?type=" + typeStr
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 		if err != nil {
-			return err
+			log.Printf("bootstrap: build request for %s: %v", typeStr, err)
+			continue
 		}
 		req.Header.Set("Authorization", "Bearer "+c.token)
 		resp, err := c.hc.Do(req)
 		if err != nil {
-			return err
+			log.Printf("bootstrap: fetch %s: %v", typeStr, err)
+			continue
 		}
 		var providers []*api.DiscoveredProvider
 		if err := json.NewDecoder(resp.Body).Decode(&providers); err != nil {
 			resp.Body.Close()
-			return fmt.Errorf("decode providers for %s: %w", typeStr, err)
+			log.Printf("bootstrap: decode providers for %s: %v", typeStr, err)
+			continue
 		}
 		resp.Body.Close()
 		for _, p := range providers {
@@ -90,21 +96,21 @@ func (c *nodeClient) bootstrap(ctx context.Context, store *catalog.Store, types 
 }
 
 // tail streams SSE announces from the node and upserts each into the store.
-// It reconnects with a small backoff until ctx is done.
+// It reconnects with a fixed backoff (on any exit, error or clean EOF) until ctx is done.
 func (c *nodeClient) tail(ctx context.Context, store *catalog.Store) error {
 	const backoff = 2 * time.Second
 	for {
-		if err := ctx.Err(); err != nil {
-			return err
+		if ctx.Err() != nil {
+			return ctx.Err()
 		}
 		if err := c.readSSEStream(ctx, store); err != nil && ctx.Err() == nil {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(backoff):
-			}
-		} else if ctx.Err() != nil {
+			log.Printf("tail: stream error: %v; reconnecting in %s", err, backoff)
+		}
+		// Always back off before reconnecting, whether stream ended cleanly or not.
+		select {
+		case <-ctx.Done():
 			return ctx.Err()
+		case <-time.After(backoff):
 		}
 	}
 }
