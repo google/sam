@@ -138,6 +138,8 @@ type SamNode struct {
 	currentRelays     []peer.AddrInfo
 	reprovideTrigger  chan struct{}
 	BiscuitTimeout    time.Duration
+	catalogPeer       peer.ID
+	catalogMu         sync.Mutex
 }
 
 // UpdateRelays updates the current relays used by AutoRelay.
