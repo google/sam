@@ -75,7 +75,7 @@ func callMCP(t *testing.T, mcpAddr string, toolName string, params map[string]an
 		Version: "0.1.0",
 	}, nil)
 
-	session, err := client.Connect(ctx, &mcp.SSEClientTransport{Endpoint: "http://" + mcpAddr + "/mcp"}, nil)
+	session, err := client.Connect(ctx, &mcp.StreamableClientTransport{Endpoint: "http://" + mcpAddr + "/mcp"}, nil)
 	if err != nil {
 		t.Fatalf("Failed to connect: %v", err)
 	}
@@ -172,7 +172,7 @@ func TestCatalogRoutingAndFailover(t *testing.T) {
 
 	for time.Now().Before(deadline) {
 		client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "0.1.0"}, nil)
-		session, err := client.Connect(context.Background(), &mcp.SSEClientTransport{Endpoint: "http://" + mcpAddrA + "/mcp"}, nil)
+		session, err := client.Connect(context.Background(), &mcp.StreamableClientTransport{Endpoint: "http://" + mcpAddrA + "/mcp"}, nil)
 		if err != nil {
 			t.Logf("Poll: failed to connect: %v", err)
 			time.Sleep(500 * time.Millisecond)

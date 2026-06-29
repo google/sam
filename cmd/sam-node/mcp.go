@@ -189,12 +189,12 @@ func NewUnauthenticatedMCPServer(hubURL string) *mcp.Server {
 func NewUnauthenticatedMCPHandler(hubURL string) http.Handler {
 	mcpServer := NewUnauthenticatedMCPServer(hubURL)
 
-	sseHandler := mcp.NewSSEHandler(func(request *http.Request) *mcp.Server {
+	streamableHandler := mcp.NewStreamableHTTPHandler(func(request *http.Request) *mcp.Server {
 		return mcpServer
 	}, nil)
 
 	mux := http.NewServeMux()
-	mux.Handle("/mcp", sseHandler)
+	mux.Handle("/mcp", streamableHandler)
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		logger.Debugf("Unauth MCP Request: %s %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
@@ -206,13 +206,13 @@ func NewUnauthenticatedMCPHandler(hubURL string) http.Handler {
 func NewMCPHandler(node *SamNode) http.Handler {
 	mcpServer := NewMCPServer(node)
 
-	// Create the SSE handler using the SDK
-	sseHandler := mcp.NewSSEHandler(func(request *http.Request) *mcp.Server {
+	// Create the Streamable handler using the SDK
+	streamableHandler := mcp.NewStreamableHTTPHandler(func(request *http.Request) *mcp.Server {
 		return mcpServer
 	}, nil)
 
 	mux := http.NewServeMux()
-	mux.Handle("/mcp", sseHandler)
+	mux.Handle("/mcp", streamableHandler)
 
 	// Wrap in logging middleware to debug incoming requests
 	wrappedHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

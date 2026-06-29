@@ -145,9 +145,9 @@ func main() {
 	}, nil)
 
 	// Connect to server using the URL
-	var sseTransport mcp.Transport = &mcp.SSEClientTransport{Endpoint: *serverURL}
+	var mcpTransport mcp.Transport = &mcp.StreamableClientTransport{Endpoint: *serverURL}
 	if *tokenOpt != "" {
-		sseTransport = &mcp.SSEClientTransport{
+		mcpTransport = &mcp.StreamableClientTransport{
 			Endpoint: *serverURL,
 			HTTPClient: &http.Client{
 				Transport: &authTransport{
@@ -157,7 +157,7 @@ func main() {
 			},
 		}
 	}
-	session, err := client.Connect(ctx, sseTransport, nil)
+	session, err := client.Connect(ctx, mcpTransport, nil)
 	if err != nil {
 		log.Fatalf("Failed to connect: %v", err)
 	}

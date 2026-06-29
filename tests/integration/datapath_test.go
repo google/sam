@@ -15,7 +15,6 @@
 package integration_test
 
 import (
-	"bufio"
 	"bytes"
 	"fmt"
 	"io"
@@ -110,64 +109,44 @@ func TestIntegrationStdioDatapath(t *testing.T) {
 
 	// Node B calls Node A's service via its local egress proxy
 	// URL format: http://localhost:<port>/sam/{peer_id}/{service_type}/{service_name}/{upstream_path}
-	sseURL := fmt.Sprintf("http://%s/sam/%s/mcp/%s/", actualApiAddrB, peerIDA, serviceName)
 	postURL := fmt.Sprintf("http://%s/sam/%s/mcp/%s/", actualApiAddrB, peerIDA, serviceName)
 
 	client := &http.Client{}
 
-	// Establish SSE stream
-	var sseResp *http.Response
+	// Test Streamable HTTP (http-first mode)
+	// Send message via POST and expect the response in the HTTP response body
+	testMessage := `{"jsonrpc":"2.0","method":"ping","id":1}`
+	postReq, _ := http.NewRequest("POST", postURL, bytes.NewBufferString(testMessage))
+	postReq.Header.Set("Authorization", "Bearer "+apiToken)
+	postReq.Header.Set("Content-Type", "application/json")
+	postReq.Header.Set("Accept", "application/json")
+
+	var postResp *http.Response
 	for i := 0; i < 3; i++ {
-		req, _ := http.NewRequest("GET", sseURL, nil)
-		req.Header.Set("Authorization", "Bearer "+apiToken)
-		sseResp, err = client.Do(req)
-		if err == nil && sseResp.StatusCode == http.StatusOK {
+		postResp, err = client.Do(postReq)
+		if err == nil && postResp.StatusCode == http.StatusOK {
 			break
 		}
-		t.Logf("SSE Connect Attempt %d failed: %v, status: %v", i+1, err, sseResp)
+		t.Logf("POST Attempt %d failed: %v, status: %v", i+1, err, postResp)
 		time.Sleep(1 * time.Second)
 	}
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = sseResp.Body.Close() }()
-
-	if sseResp.StatusCode != http.StatusOK {
-		t.Fatalf("Expected SSE status OK, got %d", sseResp.StatusCode)
-	}
-
-	// Send message via POST
-	testMessage := `{"jsonrpc":"2.0","method":"ping","id":1}`
-	postReq, _ := http.NewRequest("POST", postURL, bytes.NewBufferString(testMessage))
-	postReq.Header.Set("Authorization", "Bearer "+apiToken)
-	postReq.Header.Set("Content-Type", "application/json")
-	postResp, err := client.Do(postReq)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = postResp.Body.Close()
+	defer func() { _ = postResp.Body.Close() }()
 
 	if postResp.StatusCode != http.StatusOK {
 		t.Fatalf("Expected POST status OK, got %d", postResp.StatusCode)
 	}
 
-	// Read from SSE stream
-	reader := bufio.NewReader(sseResp.Body)
-	line, err := reader.ReadString('\n')
+	bodyBytes, err := io.ReadAll(postResp.Body)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	expectedPrefix := "data: "
-	if !strings.HasPrefix(line, expectedPrefix) {
-		t.Fatalf("Expected line to start with %q, got %q", expectedPrefix, line)
-	}
-
-	receivedMessage := strings.TrimPrefix(line, expectedPrefix)
-	receivedMessage = strings.TrimSpace(receivedMessage)
-
+	receivedMessage := strings.TrimSpace(string(bodyBytes))
 	if receivedMessage != testMessage {
-		t.Fatalf("Expected to receive %q, got %q", testMessage, receivedMessage)
+		t.Fatalf("Expected to receive %q in POST response, got %q", testMessage, receivedMessage)
 	}
 }
 

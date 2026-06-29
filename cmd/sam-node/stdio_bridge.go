@@ -16,6 +16,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -102,6 +103,23 @@ func (b *StdioBridge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		_ = r.Body.Close()
 
+		var msg map[string]any
+		isCall := false
+		var reqID any
+		if err := json.Unmarshal(body, &msg); err == nil {
+			if id, ok := msg["id"]; ok {
+				isCall = true
+				reqID = id
+			}
+		}
+
+		var ch <-chan string
+		var unsub func()
+		if isCall {
+			ch, unsub = b.Subscribe()
+			defer unsub()
+		}
+
 		b.mu.Lock()
 		_, err = b.stdin.Write(append(body, '\n'))
 		b.mu.Unlock()
@@ -110,7 +128,31 @@ func (b *StdioBridge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Failed to write to process stdin", http.StatusInternalServerError)
 			return
 		}
-		w.WriteHeader(http.StatusOK)
+
+		w.Header().Set("Mcp-Session-Id", "stdio-bridge")
+
+		if !isCall {
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+
+		ctx := r.Context()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case line := <-ch:
+				var respMsg map[string]any
+				if err := json.Unmarshal([]byte(line), &respMsg); err == nil {
+					if respID, ok := respMsg["id"]; ok && fmt.Sprintf("%v", respID) == fmt.Sprintf("%v", reqID) {
+						w.Header().Set("Content-Type", "application/json")
+						w.WriteHeader(http.StatusOK)
+						_, _ = w.Write([]byte(line))
+						return
+					}
+				}
+			}
+		}
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
