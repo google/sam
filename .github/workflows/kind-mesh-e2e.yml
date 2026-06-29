@@ -71,7 +71,7 @@ jobs:
       - name: Mesh info, discover, find + call calculator
         run: |
           set -euo pipefail
-          URL=http://127.0.0.1:9099/mcp/events
+          URL=http://127.0.0.1:9099/mcp
           mcp() { ./bin/mcp-client -url "$URL" -timeout 20 "$@" 2>/dev/null; }
 
           echo "== get_mesh_info =="

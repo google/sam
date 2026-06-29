@@ -53,8 +53,8 @@ func TestMCPHandler_HTTP(t *testing.T) {
 		t.Errorf("Expected status NotFound on root, got %d", resp.StatusCode)
 	}
 
-	// Test GET on /mcp/events
-	req2, err := http.NewRequest("GET", ts.URL+"/mcp/events", nil)
+	// Test GET on /mcp
+	req2, err := http.NewRequest("GET", ts.URL+"/mcp", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +66,7 @@ func TestMCPHandler_HTTP(t *testing.T) {
 	defer func() { _ = resp2.Body.Close() }()
 
 	if resp2.StatusCode != http.StatusOK && resp2.StatusCode != http.StatusBadRequest {
-		t.Errorf("Expected status OK or BadRequest on /mcp/events, got %d", resp2.StatusCode)
+		t.Errorf("Expected status OK or BadRequest on /mcp, got %d", resp2.StatusCode)
 	}
 }
 

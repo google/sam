@@ -105,7 +105,7 @@ func TestPubSubTools(t *testing.T) {
 			Version: "0.1.0",
 		}, nil)
 
-		session, err := client.Connect(context.Background(), &mcp.SSEClientTransport{Endpoint: "http://" + mcpAddr + "/mcp/events"}, nil)
+		session, err := client.Connect(context.Background(), &mcp.SSEClientTransport{Endpoint: "http://" + mcpAddr + "/mcp"}, nil)
 		if err != nil {
 			t.Fatalf("Failed to connect: %v", err)
 		}

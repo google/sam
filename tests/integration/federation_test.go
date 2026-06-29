@@ -179,7 +179,7 @@ roles:
 	// Search for the service from Node B
 	t.Log("Searching for tool from Node B...")
 	searchCmd := exec.Command(clientBin,
-		"-url", fmt.Sprintf("http://127.0.0.1:%d/mcp/events", apiPortB),
+		"-url", fmt.Sprintf("http://127.0.0.1:%d/mcp", apiPortB),
 		"-token", "tokenB",
 		"-tool", "discover_remote_services",
 		"-args", `{"type": "mcp"}`,
@@ -302,7 +302,7 @@ func waitForDHTReady(t *testing.T, clientBin string, apiPort int, token string) 
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
 	cmdArgs := []string{
-		"-url", fmt.Sprintf("http://127.0.0.1:%d/mcp/events", apiPort),
+		"-url", fmt.Sprintf("http://127.0.0.1:%d/mcp", apiPort),
 		"-token", token,
 		"-tool", "get_mesh_info",
 		"-args", `{}`,

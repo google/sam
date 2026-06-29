@@ -4,7 +4,7 @@ import sys
 from sam_mcp.client import SamClient
 
 async def main():
-    url = os.environ.get("SAM_MCP_URL", "http://sam-node-1:8080/mcp/events")
+    url = os.environ.get("SAM_MCP_URL", "http://sam-node-1:8080/mcp")
     print(f"Connecting to {url}")
     try:
         async with SamClient(server_url=url) as client:

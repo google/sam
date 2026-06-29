@@ -66,23 +66,23 @@ You can invoke control plane tools on your local `sam-node` to locate, query, an
 
 ### List Local Control Plane Tools
 ```bash
-bin/mcp-client -url http://localhost:8080/mcp/events -token secret-token -list
+bin/mcp-client -url http://localhost:8080/mcp -token secret-token -list
 ```
 
 ### Find Remote Tools on a Specific Peer
 ```bash
-bin/mcp-client -url http://localhost:8080/mcp/events -token secret-token -tool find_remote_tools -args '{"peer_id":"12D3KooWKquLDsMiFc5BXsaHmVoJLDDGddqEWbVYYCpUnHR9u6RR"}'
+bin/mcp-client -url http://localhost:8080/mcp -token secret-token -tool find_remote_tools -args '{"peer_id":"12D3KooWKquLDsMiFc5BXsaHmVoJLDDGddqEWbVYYCpUnHR9u6RR"}'
 ```
 This returns the list of available tools (e.g., `everything.get-sum`, `everything.echo`).
 
 ### Inspect Tool Schemas
 ```bash
-bin/mcp-client -url http://localhost:8080/mcp/events -token secret-token -tool describe_remote_tool -args '{"peer_id":"12D3KooWKquLDsMiFc5BXsaHmVoJLDDGddqEWbVYYCpUnHR9u6RR", "tool_name":"everything.get-sum"}'
+bin/mcp-client -url http://localhost:8080/mcp -token secret-token -tool describe_remote_tool -args '{"peer_id":"12D3KooWKquLDsMiFc5BXsaHmVoJLDDGddqEWbVYYCpUnHR9u6RR", "tool_name":"everything.get-sum"}'
 ```
 
 ### Call the Remote Tool
 ```bash
-bin/mcp-client -url http://localhost:8080/mcp/events -token secret-token -tool call_remote_tool -args '{"peer_id":"12D3KooWKquLDsMiFc5BXsaHmVoJLDDGddqEWbVYYCpUnHR9u6RR", "tool_name":"everything.get-sum", "arguments":{"a":37.5, "b":5.2}}'
+bin/mcp-client -url http://localhost:8080/mcp -token secret-token -tool call_remote_tool -args '{"peer_id":"12D3KooWKquLDsMiFc5BXsaHmVoJLDDGddqEWbVYYCpUnHR9u6RR", "tool_name":"everything.get-sum", "arguments":{"a":37.5, "b":5.2}}'
 ```
 Response:
 ```text

@@ -182,7 +182,20 @@ func main() {
 			if jwtStr == "" {
 				token, _ := store.LoadIdentity()
 				if len(token) == 0 {
-					logger.Fatal("No JWT or stored identity found. Cannot authenticate.")
+					displayHub := hubAddr
+					if displayHub == "" {
+						if h, err := store.LoadHubURL(); err == nil && h != "" {
+							displayHub = h
+						} else {
+							displayHub = "https://bananas.sam-mesh.dev"
+						}
+					}
+					logger.Infof("No identity found. Starting unauthenticated sidecar for enrollment over MCP...")
+					if err := startUnauthSidecarServer(displayHub, bindAddrFlag, tlsCertFlag, tlsKeyFlag); err != nil {
+						logger.Fatalf("Failed to start unauthenticated sidecar: %v", err)
+					}
+					<-ctx.Done()
+					return
 				}
 				logger.Infoln("Using stored identity.")
 
@@ -554,7 +567,7 @@ func resolveDataDir() string {
 func getOrGenerateKey(s *Store) crypto.PrivKey {
 	kb, _ := s.LoadKey()
 	if len(kb) == 0 {
-		fmt.Println("[Store] Generating new Peer Identity...")
+		logger.Info("[Store] Generating new Peer Identity...")
 		priv, _, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
 		if err != nil {
 			logger.Fatalf("Failed to generate key: %v", err)
@@ -667,6 +680,6 @@ func (n *SamNode) Enroll(ctx context.Context, jwt string) error {
 		return fmt.Errorf("failed to connect and authenticate with any hub after HTTP enrollment (last error: %v)", lastAuthErr)
 	}
 
-	fmt.Println("Successfully enrolled via HTTP and stored identity and hub config.")
+	logger.Info("Successfully enrolled via HTTP and stored identity and hub config.")
 	return nil
 }

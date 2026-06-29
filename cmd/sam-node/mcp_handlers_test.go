@@ -439,7 +439,7 @@ func TestNewMCPHandler_RegistersFindRemoteTools(t *testing.T) {
 	defer srv.Close()
 
 	client := mcp.NewClient(&mcp.Implementation{Name: "tc", Version: "0.0.1"}, nil)
-	transport := &mcp.SSEClientTransport{Endpoint: srv.URL + "/mcp/events"}
+	transport := &mcp.SSEClientTransport{Endpoint: srv.URL + "/mcp"}
 	session, err := client.Connect(ctx, transport, nil)
 	if err != nil {
 		t.Fatalf("connect: %v", err)
@@ -703,7 +703,7 @@ func TestNewMCPHandler_RegistersDescribeRemoteTool(t *testing.T) {
 	defer srv.Close()
 
 	client := mcp.NewClient(&mcp.Implementation{Name: "tc", Version: "0.0.1"}, nil)
-	transport := &mcp.SSEClientTransport{Endpoint: srv.URL + "/mcp/events"}
+	transport := &mcp.SSEClientTransport{Endpoint: srv.URL + "/mcp"}
 	session, err := client.Connect(ctx, transport, nil)
 	if err != nil {
 		t.Fatalf("connect: %v", err)

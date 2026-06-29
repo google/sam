@@ -27,7 +27,7 @@ data:
         "servers": {
           "sam-mesh": {
             "enabled": true,
-            "url": "http://127.0.0.1:8080/mcp/events"
+            "url": "http://127.0.0.1:8080/mcp"
           }
         }
       }
@@ -74,7 +74,7 @@ spec:
                   ) >/dev/null 2>&1 </dev/null &
         env:
         - name: SAM_MCP_URL
-          value: "http://127.0.0.1:8080/mcp/events"
+          value: "http://127.0.0.1:8080/mcp"
         - name: OPENCLAW_STATE_DIR
           value: "/data"
         - name: OPENCLAW_GATEWAY_TOKEN

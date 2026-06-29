@@ -49,7 +49,7 @@ python3 examples/gemini_agent.py
 ```
 
 Upon starting, the script will:
-1. Connect to the local SAM node's MCP server at `http://localhost:8080/mcp/events`.
+1. Connect to the local SAM node's MCP server at `http://localhost:8080/mcp`.
 2. Discover all tools currently available in the mesh.
 3. Map the mesh tools to Gemini-compatible OpenAPI schemas.
 4. Spin up a chat loop with Gemini (`gemini-2.5-flash`).

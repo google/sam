@@ -46,9 +46,8 @@ Other useful tools: discover_remote_services browses services by type, get_mesh_
 
 Remote tool names are namespaced as '<service>.<tool>' (e.g. 'code-reviewer.review_pr'). Prefer discovering and describing a tool before calling it rather than guessing arguments.`
 
-// NewMCPHandler creates a new HTTP handler for the MCP server using the official SDK.
-func NewMCPHandler(node *SamNode) http.Handler {
-	// Create an MCP server.
+// NewMCPServer creates a new MCP server instance with all tools registered.
+func NewMCPServer(node *SamNode) *mcp.Server {
 	mcpServer := mcp.NewServer(&mcp.Implementation{
 		Name:    "sam-node-mcp",
 		Version: "0.1.0",
@@ -144,14 +143,76 @@ func NewMCPHandler(node *SamNode) http.Handler {
 		Description: "Returns the last few lines of the node's log output.",
 	}, node.handleGetRecentLogs)
 
+	return mcpServer
+}
+
+// NewUnauthenticatedMCPServer creates a minimal MCP server that instructs the client on how to authenticate.
+func NewUnauthenticatedMCPServer(hubURL string) *mcp.Server {
+	mcpServer := mcp.NewServer(&mcp.Implementation{
+		Name:    "sam-node-mcp-unauth",
+		Version: "0.1.0",
+	}, &mcp.ServerOptions{Instructions: "This node is unauthenticated. Use the get_login_instructions tool or help_user_login prompt."})
+
+	mcp.AddTool(mcpServer, &mcp.Tool{
+		Name:        "get_login_instructions",
+		Description: "Get instructions on how to authenticate this node so it can join the SAM mesh.",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, params map[string]any) (*mcp.CallToolResult, any, error) {
+		msg := fmt.Sprintf("The node is unauthenticated. Please open a regular terminal and run:\n\n  sam-node join %s\n\nOnce complete, restart this MCP client.", hubURL)
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{Text: msg},
+			},
+		}, nil, nil
+	})
+
+	mcpServer.AddPrompt(&mcp.Prompt{
+		Name:        "help_user_login",
+		Description: "Provides the user with login instructions when the node is unauthenticated.",
+	}, func(ctx context.Context, req *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
+		return &mcp.GetPromptResult{
+			Description: "Instructions for joining the SAM mesh.",
+			Messages: []*mcp.PromptMessage{
+				{
+					Role: "user",
+					Content: &mcp.TextContent{
+						Text: fmt.Sprintf("Please open a terminal and run:\n\n`sam-node join %s`\n\nAfter you finish, please restart this MCP connection.", hubURL),
+					},
+				},
+			},
+		}, nil
+	})
+
+	return mcpServer
+}
+
+// NewUnauthenticatedMCPHandler creates an HTTP handler for the unauthenticated MCP server.
+func NewUnauthenticatedMCPHandler(hubURL string) http.Handler {
+	mcpServer := NewUnauthenticatedMCPServer(hubURL)
+
+	sseHandler := mcp.NewSSEHandler(func(request *http.Request) *mcp.Server {
+		return mcpServer
+	}, nil)
+
+	mux := http.NewServeMux()
+	mux.Handle("/mcp", sseHandler)
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		logger.Debugf("Unauth MCP Request: %s %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
+		mux.ServeHTTP(w, r)
+	})
+}
+
+// NewMCPHandler creates a new HTTP handler for the MCP server using the official SDK.
+func NewMCPHandler(node *SamNode) http.Handler {
+	mcpServer := NewMCPServer(node)
+
 	// Create the SSE handler using the SDK
 	sseHandler := mcp.NewSSEHandler(func(request *http.Request) *mcp.Server {
 		return mcpServer
 	}, nil)
 
 	mux := http.NewServeMux()
-	mux.Handle("/mcp/events", sseHandler)
-	mux.Handle("/mcp/message", sseHandler)
+	mux.Handle("/mcp", sseHandler)
 
 	// Wrap in logging middleware to debug incoming requests
 	wrappedHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

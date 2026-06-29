@@ -34,7 +34,7 @@ teardown() {
     -v "$(pwd)/sam-mcp-python:/sam-mcp-python" \
     -v "$(pwd)/site/content/docs/snippets:/snippets" \
     -e PYTHONPATH=/sam-mcp-python/src \
-    -e SAM_MCP_URL="http://sam-node-1:8080/mcp/events" \
+    -e SAM_MCP_URL="http://sam-node-1:8080/mcp" \
     python:3.12 \
     bash -c 'pip install mcp httpx && python3 /snippets/agent_demo.py'
 

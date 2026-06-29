@@ -26,7 +26,7 @@ def to_gemini_schema(mcp_schema: dict) -> dict:
 
 async def run_agent():
     # 1. Connect to local SAM Node
-    # By default, connects to http://localhost:8080/mcp/events
+    # By default, connects to http://localhost:8080/mcp
     print("Connecting to local SAM Node...")
     client = SamClient()
     try:

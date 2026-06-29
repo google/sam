@@ -60,14 +60,14 @@ teardown() {
 
   echo "[$(date +%T)] Connecting Node 1 to Node 2"
   local node2_addr="/dns4/sam-node-2/tcp/5002/p2p/${node2_peer_id}"
-  run docker run --rm --network "${MESH_NETWORK}" "${MESH_RUNTIME_IMAGE}" mcp-client -url "http://sam-node-1:8080/mcp/events" -tool "connect_peer" -args "{\"peer_addr\":\"${node2_addr}\"}"
+  run docker run --rm --network "${MESH_NETWORK}" "${MESH_RUNTIME_IMAGE}" mcp-client -url "http://sam-node-1:8080/mcp" -tool "connect_peer" -args "{\"peer_addr\":\"${node2_addr}\"}"
   [[ "$status" -eq 0 ]]
   mesh_wait_for_peer_connection 1 "${node2_peer_id}" 20
 
   echo "[$(date +%T)] Calling find_remote_tools from Node 1, targeting Node 2"
   run docker run --rm --network "${MESH_NETWORK}" \
     "${MESH_RUNTIME_IMAGE}" mcp-client \
-    -url "http://sam-node-1:8080/mcp/events" \
+    -url "http://sam-node-1:8080/mcp" \
     -tool "find_remote_tools" \
     -args "{\"peer_id\":\"${node2_peer_id}\"}"
   echo "find_remote_tools output: $output"
@@ -116,7 +116,7 @@ teardown() {
   local node2_addr="/dns4/sam-node-2/tcp/5002/p2p/${node2_peer_id}"
   run docker run --rm --network "${MESH_NETWORK}" \
     "${MESH_RUNTIME_IMAGE}" mcp-client \
-    -url "http://sam-node-1:8080/mcp/events" \
+    -url "http://sam-node-1:8080/mcp" \
     -tool "connect_peer" \
     -args "{\"peer_addr\":\"${node2_addr}\"}"
   [[ "$status" -eq 0 ]]
@@ -127,7 +127,7 @@ teardown() {
   call_args="{\"peer_id\":\"${node2_peer_id}\",\"tool_name\":\"calculator.add\",\"arguments\":{\"a\":2,\"b\":3}}"
   run docker run --rm --network "${MESH_NETWORK}" \
     "${MESH_RUNTIME_IMAGE}" mcp-client \
-    -url "http://sam-node-1:8080/mcp/events" \
+    -url "http://sam-node-1:8080/mcp" \
     -tool "call_remote_tool" \
     -args "${call_args}"
   echo "call_remote_tool output: $output"
@@ -167,7 +167,7 @@ teardown() {
   local node2_addr="/dns4/sam-node-2/tcp/5002/p2p/${node2_peer_id}"
   run docker run --rm --network "${MESH_NETWORK}" \
     "${MESH_RUNTIME_IMAGE}" mcp-client \
-    -url "http://sam-node-1:8080/mcp/events" \
+    -url "http://sam-node-1:8080/mcp" \
     -tool "connect_peer" \
     -args "{\"peer_addr\":\"${node2_addr}\"}"
   [[ "$status" -eq 0 ]]
@@ -178,7 +178,7 @@ teardown() {
   describe_args="{\"peer_id\":\"${node2_peer_id}\",\"tool_name\":\"calculator.add\"}"
   run docker run --rm --network "${MESH_NETWORK}" \
     "${MESH_RUNTIME_IMAGE}" mcp-client \
-    -url "http://sam-node-1:8080/mcp/events" \
+    -url "http://sam-node-1:8080/mcp" \
     -tool "describe_remote_tool" \
     -args "${describe_args}"
   echo "describe_remote_tool output: $output"
@@ -232,7 +232,7 @@ teardown() {
   local node2_addr="/dns4/sam-node-2/tcp/5002/p2p/${node2_peer_id}"
   run docker run --rm --network "${MESH_NETWORK}" \
     "${MESH_RUNTIME_IMAGE}" mcp-client \
-    -url "http://sam-node-1:8080/mcp/events" \
+    -url "http://sam-node-1:8080/mcp" \
     -tool "connect_peer" \
     -args "{\"peer_addr\":\"${node2_addr}\"}"
   [[ "$status" -eq 0 ]]
@@ -243,7 +243,7 @@ teardown() {
   describe_args="{\"peer_id\":\"${node2_peer_id}\",\"tool_name\":\"calculator.does-not-exist\"}"
   run docker run --rm --network "${MESH_NETWORK}" \
     "${MESH_RUNTIME_IMAGE}" mcp-client \
-    -url "http://sam-node-1:8080/mcp/events" \
+    -url "http://sam-node-1:8080/mcp" \
     -tool "describe_remote_tool" \
     -args "${describe_args}"
   echo "describe_remote_tool output: $output"

@@ -95,14 +95,14 @@ Your SAM node exposes a standard Model Context Protocol (MCP) server. The easies
 Query the list of tools available on your local node (e.g. peer discovery, message broadcast, and remote tool execution):
 
 ```bash
-mcp-client -url http://localhost:8080/mcp/events -token my-secret-token -list
+mcp-client -url http://localhost:8080/mcp -token my-secret-token -list
 ```
 
 ### Discover Remote Services in the Mesh
 List active MCP services currently registered across the public mesh network:
 
 ```bash
-mcp-client -url http://localhost:8080/mcp/events \
+mcp-client -url http://localhost:8080/mcp \
   -tool discover_remote_services \
   -args '{"type":"mcp"}'
 ```
@@ -111,7 +111,7 @@ mcp-client -url http://localhost:8080/mcp/events \
 Using a `peer_id` returned from the service discovery, find the tools available on that peer:
 
 ```bash
-mcp-client -url http://localhost:8080/mcp/events \
+mcp-client -url http://localhost:8080/mcp \
   -tool find_remote_tools \
   -args '{"peer_id":"<target-peer-id>"}'
 ```
@@ -120,7 +120,7 @@ mcp-client -url http://localhost:8080/mcp/events \
 Call a tool hosted on a remote peer through your local node's P2P stream reverse proxy:
 
 ```bash
-mcp-client -url http://localhost:8080/mcp/events \
+mcp-client -url http://localhost:8080/mcp \
   -tool call_remote_tool \
   -args '{"peer_id":"<target-peer-id>","tool_name":"everything.get-sum","arguments":{"a":12.5,"b":7.5}}'
 ```
