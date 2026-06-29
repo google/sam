@@ -25,13 +25,15 @@ class SamClient:
             headers["Authorization"] = f"Bearer {self.token}"
         
         self._http_client = httpx.AsyncClient(headers=headers)
-        self._sh_cm = streamable_http_client(self.server_url, http_client=self._http_client)
-        
-        read_stream, write_stream, _get_session_id = await self._sh_cm.__aenter__()
-        
-        self.session = ClientSession(read_stream, write_stream)
-        await self.session.__aenter__()
-        await self.session.initialize()
+        try:
+            self._sh_cm = streamable_http_client(self.server_url, http_client=self._http_client)
+            read_stream, write_stream, _get_session_id = await self._sh_cm.__aenter__()
+            self.session = ClientSession(read_stream, write_stream)
+            await self.session.__aenter__()
+            await self.session.initialize()
+        except Exception:
+            await self.close()
+            raise
 
     async def close(self):
         """Closes the connection."""
