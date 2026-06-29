@@ -490,6 +490,9 @@ func (n *SamNode) handleDescribeRemoteTool(ctx context.Context, req *mcp.CallToo
 	}
 
 	for _, t := range listRes.Tools {
+		if t == nil {
+			continue
+		}
 		if t.Name == actualToolName {
 			payload := remoteToolDescription{
 				PeerID:       pid.String(),
