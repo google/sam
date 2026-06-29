@@ -46,7 +46,7 @@ spec:
           python -u /app/banana_bot_playground.py
         env:
         - name: SAM_MCP_URL
-          value: "http://127.0.0.1:8080/mcp/events"
+          value: "http://127.0.0.1:8080/mcp"
         - name: SAM_API_TOKEN
           value: "secret-token"
         - name: GEMINI_API_KEY

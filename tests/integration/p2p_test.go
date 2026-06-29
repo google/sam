@@ -34,7 +34,7 @@ func TestSamNodeRunWithoutIdentity(t *testing.T) {
 		t.Fatalf("expected sam-node run without identity to fail, but it succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
 	}
 	out := stdout + stderr
-	if !strings.Contains(out, "No JWT or stored identity found") {
+	if !strings.Contains(out, "No identity found. Starting unauthenticated sidecar for enrollment over MCP") {
 		t.Fatalf("expected missing identity message, got:\n%s", out)
 	}
 }

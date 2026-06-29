@@ -116,6 +116,50 @@ func startSidecarServer(node *SamNode, addr, token, certFile, keyFile, caFile st
 	return nil
 }
 
+func startUnauthSidecarServer(hubURL, addr, certFile, keyFile string) error {
+	mux := http.NewServeMux()
+
+	// Public endpoints
+	mux.HandleFunc("/healthz", handleHealthz)
+	mux.HandleFunc("/readyz", handleReadyz)
+
+	// Mount Unauthenticated MCP handler
+	mcpHandler := NewUnauthenticatedMCPHandler(hubURL)
+	mux.Handle("/", mcpHandler)
+
+	server := &http.Server{
+		Handler: mux,
+	}
+
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("failed to listen on %s: %w", addr, err)
+	}
+
+	actualAddr := listener.Addr().String()
+
+	if (certFile != "") != (keyFile != "") {
+		return fmt.Errorf("both --tls-cert and --tls-key must be provided to enable TLS")
+	}
+
+	if certFile != "" && keyFile != "" {
+		logger.Infof("Starting Unauthenticated MCP server on TCP address %s (with TLS Sidecar)", actualAddr)
+		go func() {
+			if err := server.ServeTLS(listener, certFile, keyFile); err != nil && err != http.ErrServerClosed {
+				logger.Errorf("Unauth Sidecar API server error: %v", err)
+			}
+		}()
+	} else {
+		logger.Infof("Starting Unauthenticated MCP server on TCP address %s", actualAddr)
+		go func() {
+			if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
+				logger.Errorf("Unauth Sidecar API server error: %v", err)
+			}
+		}()
+	}
+	return nil
+}
+
 func handleHealthz(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	if _, err := w.Write([]byte("OK")); err != nil {

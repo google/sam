@@ -9,7 +9,7 @@ class SamClient:
     
     def __init__(self, server_url: Optional[str] = None, token: Optional[str] = None):
         if server_url is None:
-            server_url = os.environ.get("SAM_MCP_URL", "http://localhost:8080/mcp/events")
+            server_url = os.environ.get("SAM_MCP_URL", "http://localhost:8080/mcp")
         if token is None:
             token = os.environ.get("SAM_API_TOKEN")
         self.server_url = server_url

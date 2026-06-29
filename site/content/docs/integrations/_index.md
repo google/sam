@@ -47,7 +47,7 @@ from sam_mcp.client import SamClient
 async def main():
     # Connect to the local SAM node's MCP SSE endpoint
     # By default, sam-node listens at 127.0.0.1:8080
-    url = os.environ.get("SAM_MCP_URL", "http://127.0.0.1:8080/mcp/events")
+    url = os.environ.get("SAM_MCP_URL", "http://127.0.0.1:8080/mcp")
     print(f"Connecting to SAM Node at {url}")
 
     try:
@@ -79,7 +79,7 @@ if __name__ == "__main__":
 When you run the demo while a `sam-node` is running locally, you'll see output similar to this:
 
 ```
-Connecting to SAM Node at http://127.0.0.1:8080/mcp/events
+Connecting to SAM Node at http://127.0.0.1:8080/mcp
 Discovered tools:
  - get_mesh_info: Get information about the mesh network
  - call_remote_tool: Call an MCP tool on a remote agent

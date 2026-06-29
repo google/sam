@@ -30,7 +30,8 @@ import (
 func TestHandleBannedEvent(t *testing.T) {
 	revokedCache, _ := lru.New[string, int64](10)
 	node := &SamNode{
-		revokedPeers: revokedCache,
+		revokedPeers:   revokedCache,
+		BiscuitTimeout: 500 * time.Millisecond,
 	}
 
 	event := &api.MeshEvent{
@@ -47,7 +48,7 @@ func TestHandleBannedEvent(t *testing.T) {
 }
 
 func TestHandleKeyRotationEvent(t *testing.T) {
-	node := &SamNode{}
+	node := &SamNode{BiscuitTimeout: 500 * time.Millisecond}
 
 	pub, _, err := ed25519.GenerateKey(nil)
 	if err != nil {
@@ -74,7 +75,8 @@ func TestStartRenewalLoop_ExpiredAndFails(t *testing.T) {
 		_ = store.SaveIdentityExpiration(time.Now().Add(-1 * time.Hour).Unix())
 
 		node := &SamNode{
-			Store: store,
+			BiscuitTimeout: 500 * time.Millisecond,
+			Store:          store,
 		}
 
 		// Run the renewal loop. Since there's no JWT/Issuer provided, it fails to renew.

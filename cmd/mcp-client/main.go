@@ -72,7 +72,7 @@ func main() {
 		}
 
 		// Construct URL
-		baseURL := strings.TrimSuffix(*serverURL, "/mcp/events")
+		baseURL := strings.TrimSuffix(*serverURL, "/mcp")
 		baseURL = strings.TrimSuffix(baseURL, "/")
 		if !strings.Contains(baseURL, "/sam/service/discover") {
 			baseURL = baseURL + "/sam/service/discover"

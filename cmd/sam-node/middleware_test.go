@@ -146,9 +146,10 @@ func TestAuthorize(t *testing.T) {
 	}
 
 	node := &SamNode{
-		Store:        store,
-		trustedKeys:  []TrustedKey{{Key: pub, ReceivedAt: time.Now()}},
-		TrustHubRBAC: true,
+		Store:          store,
+		trustedKeys:    []TrustedKey{{Key: pub, ReceivedAt: time.Now()}},
+		TrustHubRBAC:   true,
+		BiscuitTimeout: 500 * time.Millisecond,
 	}
 
 	req := RequestContext{
@@ -357,9 +358,10 @@ func TestRevocation(t *testing.T) {
 	cache, _ := lru.New[string, int64](10000)
 	rl, _ := NewPeerRateLimiter(100)
 	node := &SamNode{
-		trustedKeys:  []TrustedKey{{Key: pub, ReceivedAt: time.Now()}},
-		revokedPeers: cache,
-		rateLimiter:  rl,
+		trustedKeys:    []TrustedKey{{Key: pub, ReceivedAt: time.Now()}},
+		revokedPeers:   cache,
+		rateLimiter:    rl,
+		BiscuitTimeout: 500 * time.Millisecond,
 	}
 
 	// Mark as revoked
@@ -413,7 +415,8 @@ func TestVerifyEvent(t *testing.T) {
 	}
 
 	node := &SamNode{
-		trustedKeys: []TrustedKey{{Key: pub, ReceivedAt: time.Now()}},
+		trustedKeys:    []TrustedKey{{Key: pub, ReceivedAt: time.Now()}},
+		BiscuitTimeout: 500 * time.Millisecond,
 	}
 
 	event := &api.MeshEvent{
@@ -480,6 +483,7 @@ func TestVerifyBiscuitCache(t *testing.T) {
 	node := &SamNode{
 		trustedKeys:       []TrustedKey{{Key: pub, ReceivedAt: time.Now()}},
 		verificationCache: cache,
+		BiscuitTimeout:    500 * time.Millisecond,
 	}
 
 	// Case 1: Fresh verification (uncached)
@@ -506,5 +510,87 @@ func TestVerifyBiscuitCache(t *testing.T) {
 	_, err = node.verifyBiscuit(tokenBytes, dummyPeer)
 	if err == nil {
 		t.Fatal("Expected verifyBiscuit to FAIL after key rotation, but it succeeded")
+	}
+}
+
+func TestAuthorizationCacheBypass(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dummyPeer := peer.ID("dummy-peer-id")
+
+	// Mint token allowing ONLY query_db
+	builder := biscuit.NewBuilder(priv)
+	_ = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+		Name: "node",
+		IDs:  []biscuit.Term{biscuit.String(dummyPeer.String())},
+	}})
+	_ = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+		Name: "client_peer_id",
+		IDs:  []biscuit.Term{biscuit.String(dummyPeer.String())},
+	}})
+	_ = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+		Name: "allow_mcp_server",
+		IDs:  []biscuit.Term{biscuit.String("query_db")},
+	}})
+
+	b, _ := builder.Build()
+	tokenBytes, _ := b.Serialize()
+
+	cache, _ := lru.New[string, string](10)
+	revCache, _ := lru.New[string, int64](10)
+	rl, _ := NewPeerRateLimiter(100)
+	node := &SamNode{
+		trustedKeys:       []TrustedKey{{Key: pub, ReceivedAt: time.Now()}},
+		verificationCache: cache,
+		revokedPeers:      revCache,
+		rateLimiter:       rl,
+		TrustHubRBAC:      true,
+		BiscuitTimeout:    500 * time.Millisecond,
+	}
+
+	// Helper to simulate request
+	doRequest := func(target string) bool {
+		pr1, pw1 := io.Pipe()
+		pr2, pw2 := io.Pipe()
+		serverStream := &mockStream{r: pr1, w: pw2, protocol: protocol.ID("mcp"), conn: &mockConn{remotePeer: dummyPeer}}
+
+		done := make(chan bool, 1)
+		go func() {
+			handler := node.WithBiscuitAuth(func(s network.Stream, reqCtx RequestContext) {
+				done <- true
+			})
+			handler(serverStream)
+			close(done)
+		}()
+
+		writer := msgio.NewVarintWriter(pw1)
+		authFrame := &api.AuthFrame{Biscuit: tokenBytes, TargetService: target}
+		data, _ := proto.Marshal(authFrame)
+		_ = writer.WriteMsg(data)
+		pw1.Close() //nolint:errcheck
+
+		reader := msgio.NewVarintReaderSize(pr2, 1024*64)
+		msg, err := reader.ReadMsg()
+		if err != nil {
+			return false
+		}
+		var resp api.AuthResponse
+		_ = proto.Unmarshal(msg, &resp)
+
+		success := <-done
+		return resp.Success && success
+	}
+
+	// 1. Authorized target should succeed
+	if !doRequest("query_db") {
+		t.Fatal("Expected authorized target to succeed")
+	}
+
+	// 2. Unauthorized target with the same token should FAIL
+	if doRequest("reboot_server") {
+		t.Fatal("SECURITY BUG: Unauthorized target succeeded due to cache bypass!")
 	}
 }

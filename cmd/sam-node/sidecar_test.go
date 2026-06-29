@@ -146,7 +146,7 @@ func TestHandleRegisterService(t *testing.T) {
 	// Wait for DHT to recognize the peer
 	time.Sleep(100 * time.Millisecond)
 
-	node := &SamNode{
+	node := &SamNode{BiscuitTimeout: 500 * time.Millisecond,
 		services: NewServiceRegistry(d),
 		DHT:      d,
 	}
@@ -185,7 +185,7 @@ func TestHandleRegisterService(t *testing.T) {
 }
 
 func TestHandleUnregisterService(t *testing.T) {
-	node := &SamNode{
+	node := &SamNode{BiscuitTimeout: 500 * time.Millisecond,
 		services: NewServiceRegistry(&fakeDHT{}),
 	}
 	node.services.insertService(&testService{info: &api.ServiceInfo{Name: "test-service"}})
@@ -222,7 +222,7 @@ func TestHandleDiscoverService(t *testing.T) {
 	}
 	defer func() { _ = d.Close() }()
 
-	node := &SamNode{
+	node := &SamNode{BiscuitTimeout: 500 * time.Millisecond,
 		services:      NewServiceRegistry(d),
 		DHT:           d,
 		Host:          h,
@@ -281,7 +281,7 @@ func TestHandleDiscoverService(t *testing.T) {
 }
 
 func TestListLocalServices(t *testing.T) {
-	node := &SamNode{
+	node := &SamNode{BiscuitTimeout: 500 * time.Millisecond,
 		services: NewServiceRegistry(&fakeDHT{}),
 	}
 
@@ -299,7 +299,7 @@ func TestListLocalServices(t *testing.T) {
 }
 
 func TestListLocalServices_TypeFilter(t *testing.T) {
-	node := &SamNode{
+	node := &SamNode{BiscuitTimeout: 500 * time.Millisecond,
 		services: NewServiceRegistry(&fakeDHT{}),
 	}
 	mcpA := &api.ServiceInfo{Type: api.ServiceType_SERVICE_TYPE_MCP, Name: "mcp-a"}
@@ -398,7 +398,7 @@ func TestServiceKeyToCID_Equivalence(t *testing.T) {
 }
 
 func TestHandleRegisterService_Validation(t *testing.T) {
-	node := &SamNode{
+	node := &SamNode{BiscuitTimeout: 500 * time.Millisecond,
 		services: NewServiceRegistry(&fakeDHT{}),
 	}
 
@@ -458,7 +458,7 @@ func TestHandleRegisterService_Validation(t *testing.T) {
 }
 
 func TestStartSidecarServer_TokenMandatory(t *testing.T) {
-	node := &SamNode{}
+	node := &SamNode{BiscuitTimeout: 500 * time.Millisecond}
 
 	// Test case: No token, no TLS
 	err := startSidecarServer(node, "127.0.0.1:0", "", "", "", "")

@@ -88,7 +88,7 @@ Your AI agent connects to the node's local MCP server. The local server translat
 
 ### Exposing the API
 The local MCP endpoint is served via **HTTP Server-Sent Events (SSE)** at:
-`http://127.0.0.1:8080/mcp/events`
+`http://127.0.0.1:8080/mcp`
 
 ### Authentication
 When configuring your agent client, you must pass the API token in the headers:

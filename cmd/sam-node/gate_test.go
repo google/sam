@@ -48,8 +48,9 @@ func TestConnectionGater(t *testing.T) {
 	}
 
 	node := &SamNode{
-		Store:        store,
-		revokedPeers: cache,
+		Store:          store,
+		revokedPeers:   cache,
+		BiscuitTimeout: 500 * time.Millisecond,
 	}
 	gater := &nodeConnGate{node: node}
 

@@ -33,7 +33,7 @@ Add the node through the `mcp-remote` bridge (replace `<YOUR_TOKEN>` with your `
       "args": [
         "mcp-remote",
         "--sse",
-        "http://localhost:8080/mcp/events",
+        "http://localhost:8080/mcp",
         "--allow-http",
         "--header",
         "Authorization: Bearer <YOUR_TOKEN>"

@@ -55,48 +55,8 @@ jobs:
       - name: Bring up the kind mesh
         run: make kind-up ARGS="-s"
 
-      - name: Enroll a local sam-node
-        run: |
-          ./development/kind/run-local-node.sh > "$RUNNER_TEMP/local-node.log" 2>&1 &
-          PID=$!
-          for _ in $(seq 1 60); do
-            grep -q "SAM Node Online" "$RUNNER_TEMP/local-node.log" && break
-            kill -0 "$PID" 2>/dev/null || { echo "local node exited early:"; cat "$RUNNER_TEMP/local-node.log"; exit 1; }
-            sleep 1
-          done
-          grep -q "SAM Node Online" "$RUNNER_TEMP/local-node.log" \
-            || { echo "local node did not come online:"; cat "$RUNNER_TEMP/local-node.log"; exit 1; }
-          echo "local node online"
-
-      - name: Mesh info, discover, find + call calculator
-        run: |
-          set -euo pipefail
-          URL=http://127.0.0.1:9099/mcp/events
-          mcp() { ./bin/mcp-client -url "$URL" -timeout 20 "$@" 2>/dev/null; }
-
-          echo "== get_mesh_info =="
-          info=$(mcp -tool get_mesh_info -args '{}')
-          echo "$info"
-          echo "$info" | jq -e '.hub_peer_id != "" and (.dht_size > 0)' >/dev/null \
-            || { echo "get_mesh_info assertion failed"; exit 1; }
-
-          echo "== discover services / find calculator (poll) =="
-          peer=""
-          for _ in $(seq 1 30); do
-            tools=$(mcp -tool find_remote_tools -args '{}' || true)
-            peer=$(printf '%s' "$tools" | jq -r '.[]? | select(.tool_name=="calculator.add") | .peer_id' 2>/dev/null | head -n1)
-            [ -n "$peer" ] && break
-            sleep 1
-          done
-          [ -n "$peer" ] || { echo "calculator.add not discovered"; exit 1; }
-          echo "calculator host: $peer"
-
-          echo "== call calculator.add(2,3) =="
-          result=$(mcp -tool call_remote_tool \
-            -args "{\"peer_id\":\"$peer\",\"tool_name\":\"calculator.add\",\"arguments\":{\"a\":2,\"b\":3}}")
-          echo "result: $result"
-          printf '%s' "$result" | grep -q 5 || { echo "calculator.add did not return 5"; exit 1; }
-          echo "OK: calculator.add(2,3) == 5"
+      - name: Run e2e mesh tests
+        run: make kind-e2e-mesh
 
       - name: Collect logs on failure
         if: failure()

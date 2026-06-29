@@ -20,7 +20,7 @@ Register the node as an SSE MCP server. Replace `<YOUR_TOKEN>` with your `--api-
 
 ```bash
 claude mcp add --transport sse p2p-mesh-node \
-  http://localhost:8080/mcp/events \
+  http://localhost:8080/mcp \
   --header "Authorization: Bearer <YOUR_TOKEN>"
 ```
 
@@ -33,7 +33,7 @@ Alternatively, add it to a project `.mcp.json` directly:
   "mcpServers": {
     "p2p-mesh-node": {
       "type": "sse",
-      "url": "http://localhost:8080/mcp/events",
+      "url": "http://localhost:8080/mcp",
       "headers": {
         "Authorization": "Bearer <YOUR_TOKEN>"
       }

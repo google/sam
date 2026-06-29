@@ -63,7 +63,7 @@ teardown() {
   local node2_addr="/dns4/sam-node-2/tcp/5002/p2p/${node2_peer_id}"
   run docker run --rm --network "${MESH_NETWORK}" \
     "${MESH_RUNTIME_IMAGE}" mcp-client \
-    -url "http://sam-node-1:8080/mcp/events" \
+    -url "http://sam-node-1:8080/mcp" \
     -tool "connect_peer" \
     -args "{\"peer_addr\":\"${node2_addr}\"}"
   [[ "$status" -eq 0 ]]
@@ -75,7 +75,7 @@ teardown() {
   echo "[$(date +%T)] Discovering MCP services from Node 1 (type-only)"
   run docker run --rm --network "${MESH_NETWORK}" \
     "${MESH_RUNTIME_IMAGE}" mcp-client \
-    -url "http://sam-node-1:8080/mcp/events" \
+    -url "http://sam-node-1:8080/mcp" \
     -tool "discover_remote_services" \
     -args '{"type":"mcp"}'
   echo "Discovery output: $output"
