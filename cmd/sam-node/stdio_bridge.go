@@ -33,15 +33,33 @@ type StdioBridge struct {
 	stdout  io.ReadCloser
 	mu      sync.Mutex
 	clients map[chan string]bool
+	calls   map[string]chan string
 }
 
 func (b *StdioBridge) Start() {
 	b.clients = make(map[chan string]bool)
+	b.calls = make(map[string]chan string)
 	go func() {
 		scanner := bufio.NewScanner(b.stdout)
 		for scanner.Scan() {
 			line := scanner.Text()
+			
 			b.mu.Lock()
+			if len(line) > 0 && line[0] == '{' {
+				var msg map[string]any
+				if err := json.Unmarshal([]byte(line), &msg); err == nil {
+					if idVal, ok := msg["id"]; ok {
+						reqIDStr := fmt.Sprintf("%v", idVal)
+						if ch, found := b.calls[reqIDStr]; found {
+							select {
+							case ch <- line:
+							default:
+							}
+						}
+					}
+				}
+			}
+
 			for ch := range b.clients {
 				select {
 				case ch <- line:
@@ -50,6 +68,17 @@ func (b *StdioBridge) Start() {
 			}
 			b.mu.Unlock()
 		}
+		
+		b.mu.Lock()
+		for ch := range b.clients {
+			close(ch)
+			delete(b.clients, ch)
+		}
+		for _, ch := range b.calls {
+			close(ch)
+		}
+		b.calls = make(map[string]chan string)
+		b.mu.Unlock()
 	}()
 }
 
@@ -119,7 +148,20 @@ func (b *StdioBridge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		var ch <-chan string
 		var unsub func()
 		if isCall {
-			ch, unsub = b.Subscribe()
+			reqIDStr := fmt.Sprintf("%v", reqID)
+			callCh := make(chan string, 1)
+			b.mu.Lock()
+			b.calls[reqIDStr] = callCh
+			b.mu.Unlock()
+			ch = callCh
+			unsub = func() {
+				b.mu.Lock()
+				if existing, ok := b.calls[reqIDStr]; ok && existing == callCh {
+					delete(b.calls, reqIDStr)
+					close(callCh)
+				}
+				b.mu.Unlock()
+			}
 			defer unsub()
 		}
 
@@ -140,26 +182,17 @@ func (b *StdioBridge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		ctx := r.Context()
-		for {
-			select {
-			case <-ctx.Done():
+		select {
+		case <-ctx.Done():
+			return
+		case line, ok := <-ch:
+			if !ok {
 				return
-			case line, ok := <-ch:
-				if !ok {
-					return
-				}
-				if len(line) > 0 && line[0] == '{' {
-					var respMsg map[string]any
-					if err := json.Unmarshal([]byte(line), &respMsg); err == nil {
-						if respID, ok := respMsg["id"]; ok && fmt.Sprintf("%v", respID) == fmt.Sprintf("%v", reqID) {
-							w.Header().Set("Content-Type", "application/json")
-							w.WriteHeader(http.StatusOK)
-							_, _ = w.Write([]byte(line))
-							return
-						}
-					}
-				}
 			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(line))
+			return
 		}
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -179,9 +212,11 @@ func (b *StdioBridge) Subscribe() (<-chan string, func()) {
 	unsub := func() {
 		once.Do(func() {
 			b.mu.Lock()
-			delete(b.clients, ch)
+			if b.clients[ch] {
+				delete(b.clients, ch)
+				close(ch)
+			}
 			b.mu.Unlock()
-			close(ch)
 		})
 	}
 	return ch, unsub
