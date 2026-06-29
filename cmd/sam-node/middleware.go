@@ -36,9 +36,18 @@ var (
 	baselineRule1       biscuit.Policy
 	baselineRule2       biscuit.Policy
 	baselineRule3       biscuit.Policy
+	baselineRule4       biscuit.Policy
 	baselineReplayCheck biscuit.Check
 )
 
+// init compiles the baseline Datalog rules and checks for the node.
+// These rules are loaded at initialization to avoid runtime parsing overhead.
+// Baseline Rules:
+// 1. Exact Match: Allows the request if the token explicitly allows the specific service type and name.
+// 2. Global Wildcard: Allows the request if the token explicitly grants access to all services ("*", "*").
+// 3. Catalog Target: Allows access to the service discovery catalog ("system", "catalog").
+// 4. Type Wildcard: Allows the request if the token explicitly grants access to all names under a specific service type ($type, "*").
+// 5. Replay Check: Enforces that the peer identity bound in the token matches the physical connection peer ID.
 func init() {
 	var err error
 	rule1Str := fmt.Sprintf(`allow if service($type, $name), %s($type, $name)`, api.FactAllowService)
@@ -57,6 +66,12 @@ func init() {
 	baselineRule3, err = parser.FromStringPolicy(rule3Str)
 	if err != nil {
 		panic(fmt.Sprintf("failed to parse baseline rule 3: %v", err))
+	}
+
+	rule4Str := fmt.Sprintf(`allow if service($type, $name), %s($type, "*")`, api.FactAllowService)
+	baselineRule4, err = parser.FromStringPolicy(rule4Str)
+	if err != nil {
+		panic(fmt.Sprintf("failed to parse baseline rule 4: %v", err))
 	}
 
 	replayCheckStr := `check if client_peer_id($id), connection_peer_id($id)`
@@ -280,6 +295,7 @@ func (n *SamNode) Authorize(rawToken []byte, req RequestContext, pubKey ed25519.
 		authorizer.AddPolicy(baselineRule1)
 		authorizer.AddPolicy(baselineRule2)
 		authorizer.AddPolicy(baselineRule3)
+		authorizer.AddPolicy(baselineRule4)
 	}
 
 	err = authorizer.Authorize()
