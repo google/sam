@@ -92,8 +92,7 @@ func TestCallCatalog_HTTPEndpoint(t *testing.T) {
 	}, nil)
 
 	mux := http.NewServeMux()
-	mux.Handle("/mcp/events", sseHandler)
-	mux.Handle("/mcp/message", sseHandler)
+	mux.Handle("/mcp", sseHandler)
 	ts := httptest.NewServer(mux)
 	defer ts.Close()
 

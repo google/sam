@@ -81,8 +81,7 @@ func newCatalogMCPHandler(store *catalog.Store) http.Handler {
 	}, nil)
 
 	mux := http.NewServeMux()
-	mux.Handle("/mcp/events", sseHandler)
-	mux.Handle("/mcp/message", sseHandler)
+	mux.Handle("/mcp", sseHandler)
 	return mux
 }
 

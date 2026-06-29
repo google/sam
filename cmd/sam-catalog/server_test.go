@@ -41,7 +41,7 @@ func TestQueryCatalogTool(t *testing.T) {
 
 	ctx := context.Background()
 	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "0.1.0"}, nil)
-	session, err := client.Connect(ctx, &mcp.SSEClientTransport{Endpoint: ts.URL + "/mcp/events"}, nil)
+	session, err := client.Connect(ctx, &mcp.SSEClientTransport{Endpoint: ts.URL + "/mcp"}, nil)
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
