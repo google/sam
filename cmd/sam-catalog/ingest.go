@@ -79,17 +79,17 @@ func (c *nodeClient) bootstrap(ctx context.Context, store *catalog.Store, types 
 		if resp.StatusCode != http.StatusOK {
 			// surface auth/server errors instead of silently skipping
 			snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			log.Printf("bootstrap: %s returned status %d: %s", typeStr, resp.StatusCode, strings.TrimSpace(string(snippet)))
 			continue
 		}
 		var providers []*api.DiscoveredProvider
 		if err := json.NewDecoder(resp.Body).Decode(&providers); err != nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			log.Printf("bootstrap: decode providers for %s: %v", typeStr, err)
 			continue
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		for _, p := range providers {
 			// No Addrs: discover doesn't return provider dial addrs. Bootstrap-only
 			// entries carry empty Addrs until a live announce refreshes them (~1

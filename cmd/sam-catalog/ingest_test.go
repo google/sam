@@ -72,8 +72,8 @@ func TestTailPopulatesStoreFromSSE(t *testing.T) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
 		flusher, _ := w.(http.Flusher)
-		fmt.Fprint(w, ev1)
-		fmt.Fprint(w, ev2)
+		_, _ = fmt.Fprint(w, ev1)
+		_, _ = fmt.Fprint(w, ev2)
 		if flusher != nil {
 			flusher.Flush()
 		}

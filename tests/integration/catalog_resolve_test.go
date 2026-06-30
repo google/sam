@@ -77,10 +77,6 @@ func TestDiscoveryUsesCatalog(t *testing.T) {
 	catalogAddr := waitForCatalogAddr(t, catLogPath)
 
 	// Wait until catalog has ingested github-tools.
-	type catEntry struct {
-		Name   string `json:"Name"`
-		PeerID string `json:"PeerID"`
-	}
 	deadline := time.Now().Add(35 * time.Second)
 	var catalogReady bool
 	for time.Now().Before(deadline) {
