@@ -79,11 +79,10 @@ var (
 	autoRelayBootDelayFlag   time.Duration
 	autoRelayBackoffFlag     time.Duration
 
-	apiTokenFlag     string
-	tlsCertFlag      string
-	tlsKeyFlag       string
-	tlsCAFlag        string
-	trustHubRBACFlag bool
+	apiTokenFlag string
+	tlsCertFlag  string
+	tlsKeyFlag   string
+	tlsCAFlag    string
 )
 
 var logger = golog.Logger("sam-node")
@@ -220,7 +219,6 @@ func main() {
 					AutoRelayMinInterval: autoRelayMinIntervalFlag,
 					AutoRelayBootDelay:   autoRelayBootDelayFlag,
 					AutoRelayBackoff:     autoRelayBackoffFlag,
-					TrustHubRBAC:         trustHubRBACFlag,
 				})
 				if err != nil {
 					logger.Fatalf("Failed to start mesh node: %v", err)
@@ -276,7 +274,6 @@ func main() {
 					AutoRelayMinInterval: autoRelayMinIntervalFlag,
 					AutoRelayBootDelay:   autoRelayBootDelayFlag,
 					AutoRelayBackoff:     autoRelayBackoffFlag,
-					TrustHubRBAC:         trustHubRBACFlag,
 				})
 				if err != nil {
 					enrollCancel()
@@ -324,7 +321,6 @@ func main() {
 					AutoRelayMinInterval: autoRelayMinIntervalFlag,
 					AutoRelayBootDelay:   autoRelayBootDelayFlag,
 					AutoRelayBackoff:     autoRelayBackoffFlag,
-					TrustHubRBAC:         trustHubRBACFlag,
 				})
 				if err != nil {
 					logger.Fatalf("Failed to start mesh node after enrollment: %v", err)
@@ -472,7 +468,6 @@ func main() {
 				AutoRelayMinInterval: 30 * time.Second,
 				AutoRelayBootDelay:   0 * time.Second,
 				AutoRelayBackoff:     3 * time.Second,
-				TrustHubRBAC:         false,
 			})
 			if err != nil {
 				logger.Fatalf("Failed to initialize node for enrollment: %v", err)
@@ -518,7 +513,6 @@ func main() {
 	runCmd.Flags().StringVar(&tlsCertFlag, "tls-cert", "", "Path to TLS certificate for sidecar API")
 	runCmd.Flags().StringVar(&tlsKeyFlag, "tls-key", "", "Path to TLS key for sidecar API")
 	runCmd.Flags().StringVar(&tlsCAFlag, "tls-ca", "", "Path to TLS CA for sidecar API mTLS")
-	runCmd.Flags().BoolVar(&trustHubRBACFlag, "trust-hub-rbac", false, "Apply baseline rules to trust the hub's RBAC")
 	rootCmd.PersistentFlags().StringVar(&hubAddr, "hub", DefaultHubURL, "Hub URL")
 	rootCmd.PersistentFlags().StringVar(&configFile, "config", DefaultConfigFile, "Path to sam-node.yaml configuration file")
 	rootCmd.PersistentFlags().StringVar(&oidcIssuerFlag, "oidc-issuer", "", "OIDC Issuer URL")
@@ -645,6 +639,7 @@ func (n *SamNode) Enroll(ctx context.Context, jwt string) error {
 	if err := n.Store.SaveIdentity(enrollResp.BiscuitToken); err != nil {
 		return fmt.Errorf("failed to save identity: %v", err)
 	}
+	n.SetIdentityCache(enrollResp.BiscuitToken)
 
 	if err := n.Store.SaveIdentityExpiration(enrollResp.Expiration); err != nil {
 		return fmt.Errorf("failed to save identity expiration: %v", err)

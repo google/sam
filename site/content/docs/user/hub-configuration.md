@@ -46,7 +46,7 @@ The policy defines what endpoints and services agents are permitted to use:
 * **`allowed_services`**: Restricts the application-level services the agent can invoke. Services are prefixed by their protocol type (e.g., `mcp:local-shell-tools` or `inference:openrouter`).
 
 > [!NOTE]
-> You can use wildcards (e.g. `mcp:*`) in `allowed_services` to grant broad access, or specify explicit service names for granular control.
+> SAM natively supports prefix and suffix wildcards in `allowed_services`. You can grant access to an entire type via `mcp:*`, allow prefix matching like `mcp:dev-*`, suffix matching like `mcp:*-prod`, or grant global access to everything via `*`.
 
 ### Example Policy Mapping
 Create a `policies.yaml` file in the directory where you run `sam-hub`:

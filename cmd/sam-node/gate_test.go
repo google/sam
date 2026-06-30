@@ -125,7 +125,6 @@ func startBareNode(t *testing.T, ctx context.Context) (*SamNode, func()) {
 		AllowLoopback:     true,
 		MonitorBootstrap:  2 * time.Minute,
 		MonitorInterval:   1 * time.Minute,
-		TrustHubRBAC:      true,
 		BiscuitTimeout:    500 * time.Millisecond,
 	})
 	if err != nil {

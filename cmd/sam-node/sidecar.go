@@ -18,6 +18,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -430,5 +431,21 @@ func createEgressProxy(node *SamNode) http.Handler {
 		Transport: transport,
 	}
 
-	return proxy
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if node == nil {
+			logger.Errorf("[Proxy] Node is nil, rejecting egress request.")
+			http.Error(w, "Service Unavailable: Node Not Initialized", http.StatusServiceUnavailable)
+			return
+		}
+		biscuitBytes := node.GetIdentity()
+		if biscuitBytes == nil {
+			logger.Errorf("[Proxy] Failed to load node identity for egress request, rejecting.")
+			http.Error(w, "Service Unavailable: Missing Node Identity", http.StatusServiceUnavailable)
+			return
+		}
+
+		r.Header.Del("Authorization")
+		r.Header.Set("X-Sam-Biscuit", base64.StdEncoding.EncodeToString(biscuitBytes))
+		proxy.ServeHTTP(w, r)
+	})
 }

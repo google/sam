@@ -1,7 +1,6 @@
 version: "v1alpha1"
 attenuation:
-  policies:
-    - 'allow if service("system", "/sam/mcp/1.0.0"), node($peer)'
+  policies: []
 services:
   - type: "mcp"
     name: "code-reviewer"

@@ -61,7 +61,6 @@ spec:
           - "--jwt-path=/var/run/secrets/tokens/sam-token"
           - "--api-token=secret-token"
           - "--bind-addr=127.0.0.1:8080"
-          - "--trust-hub-rbac"
         ports:
         - containerPort: 8080
         resources:

@@ -124,19 +124,86 @@ func (h *Hub) mintBiscuitToken(claims jwt.MapClaims, token *oidc.IDToken, remote
 			if rolePolicy, ok := h.Policy.Roles[role]; ok {
 				for _, svc := range rolePolicy.AllowedServices {
 					svcType, svcName := api.ParseServiceTarget(svc)
-					if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
-						Name: api.FactAllowService,
-						IDs:  []biscuit.Term{biscuit.String(svcType), biscuit.String(svcName)},
-					}}); err != nil {
-						errs = append(errs, fmt.Errorf("failed to add allowed service fact for %s: %w", svc, err))
+
+					if svcType == "*" && svcName == "*" {
+						if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+							Name: api.FactGrantedServiceAllTypes,
+							IDs:  []biscuit.Term{},
+						}}); err != nil {
+							errs = append(errs, fmt.Errorf("failed to add granted_service_all_types fact: %w", err))
+						}
+					} else if svcName == "*" {
+						if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+							Name: api.FactGrantedServiceAll,
+							IDs:  []biscuit.Term{biscuit.String(svcType)},
+						}}); err != nil {
+							errs = append(errs, fmt.Errorf("failed to add granted_service_all fact: %w", err))
+						}
+					} else if strings.HasPrefix(svcName, "*.") {
+						suffix := svcName[1:]
+						if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+							Name: api.FactGrantedServiceSuffix,
+							IDs:  []biscuit.Term{biscuit.String(svcType), biscuit.String(suffix)},
+						}}); err != nil {
+							errs = append(errs, fmt.Errorf("failed to add granted_service_suffix fact: %w", err))
+						}
+					} else if strings.HasSuffix(svcName, ".*") {
+						prefix := svcName[:len(svcName)-1]
+						if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+							Name: api.FactGrantedServicePrefix,
+							IDs:  []biscuit.Term{biscuit.String(svcType), biscuit.String(prefix)},
+						}}); err != nil {
+							errs = append(errs, fmt.Errorf("failed to add granted_service_prefix fact: %w", err))
+						}
+					} else {
+						if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+							Name: api.FactGrantedServiceExact,
+							IDs:  []biscuit.Term{biscuit.String(svcType), biscuit.String(svcName)},
+						}}); err != nil {
+							errs = append(errs, fmt.Errorf("failed to add granted_service_exact fact: %w", err))
+						}
 					}
 				}
 				for _, target := range rolePolicy.AllowedTargets {
-					if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
-						Name: api.FactNetworkTarget,
-						IDs:  []biscuit.Term{biscuit.String(target)},
-					}}); err != nil {
-						errs = append(errs, fmt.Errorf("failed to add network target fact for %s: %w", target, err))
+					targetFact, targetVal := api.ParseServiceTarget(target)
+
+					if targetFact == "*" && targetVal == "*" {
+						if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+							Name: api.FactGrantedTargetAllFacts,
+							IDs:  []biscuit.Term{},
+						}}); err != nil {
+							errs = append(errs, fmt.Errorf("failed to add granted_target_all_facts fact: %w", err))
+						}
+					} else if targetVal == "*" {
+						if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+							Name: api.FactGrantedTargetAll,
+							IDs:  []biscuit.Term{biscuit.String(targetFact)},
+						}}); err != nil {
+							errs = append(errs, fmt.Errorf("failed to add granted_target_all fact: %w", err))
+						}
+					} else if strings.HasPrefix(targetVal, "*.") {
+						suffix := targetVal[1:]
+						if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+							Name: api.FactGrantedTargetSuffix,
+							IDs:  []biscuit.Term{biscuit.String(targetFact), biscuit.String(suffix)},
+						}}); err != nil {
+							errs = append(errs, fmt.Errorf("failed to add granted_target_suffix fact: %w", err))
+						}
+					} else if strings.HasSuffix(targetVal, ".*") {
+						prefix := targetVal[:len(targetVal)-1]
+						if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+							Name: api.FactGrantedTargetPrefix,
+							IDs:  []biscuit.Term{biscuit.String(targetFact), biscuit.String(prefix)},
+						}}); err != nil {
+							errs = append(errs, fmt.Errorf("failed to add granted_target_prefix fact: %w", err))
+						}
+					} else {
+						if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+							Name: api.FactGrantedTargetExact,
+							IDs:  []biscuit.Term{biscuit.String(targetFact), biscuit.String(targetVal)},
+						}}); err != nil {
+							errs = append(errs, fmt.Errorf("failed to add granted_target_exact fact: %w", err))
+						}
 					}
 				}
 				for _, customFact := range rolePolicy.CustomDatalog {
@@ -165,6 +232,27 @@ func (h *Hub) mintBiscuitToken(claims jwt.MapClaims, token *oidc.IDToken, remote
 					}
 				}
 			}
+		}
+	}
+
+	hasTargets := false
+	for _, role := range roles {
+		if h.Policy != nil {
+			if rolePolicy, ok := h.Policy.Roles[role]; ok {
+				if len(rolePolicy.AllowedTargets) > 0 {
+					hasTargets = true
+					break
+				}
+			}
+		}
+	}
+	if hasTargets {
+		if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{Name: "target_restricted"}}); err != nil {
+			errs = append(errs, err)
+		}
+	} else {
+		if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{Name: "target_unrestricted"}}); err != nil {
+			errs = append(errs, err)
 		}
 	}
 

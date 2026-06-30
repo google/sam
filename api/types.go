@@ -29,7 +29,7 @@ const GossipHubSync = "/sam/hub/sync/v1"
 const AuthProtocolID protocol.ID = "/sam/auth/1.0.0"
 
 // CatalogTarget is the special target service name used to retrieve tool catalogs from remote nodes.
-const CatalogTarget = "/sam/catalog"
+const CatalogTarget = "sam.catalog"
 
 // DefaultServiceType is the default type for services without a namespace.
 const DefaultServiceType = "system"
@@ -44,15 +44,25 @@ const MCPServicePrefix = "mcp:"
 
 // Biscuit fact names
 const (
-	FactExpiration    = "expiration"
-	FactNode          = "node"
-	FactClientPeerID  = "client_peer_id"
-	FactGroup         = "group"
-	FactRole          = "role"
-	FactUser          = "user"
-	FactEmail         = "email"
-	FactAllowService  = "allow_service"
-	FactNetworkTarget = "allow_network_target"
+	FactExpiration             = "expiration"
+	FactNode                   = "node"
+	FactClientPeerID           = "client_peer_id"
+	FactGroup                  = "group"
+	FactRole                   = "role"
+	FactUser                   = "user"
+	FactEmail                  = "email"
+	FactGrantedServiceAllTypes = "granted_service_all_types"
+	FactGrantedServiceAll      = "granted_service_all"
+	FactGrantedServiceSuffix   = "granted_service_suffix"
+	FactGrantedServicePrefix   = "granted_service_prefix"
+	FactGrantedServiceExact    = "granted_service_exact"
+
+	FactGrantedTargetAllTypes = "granted_target_all_types"
+	FactGrantedTargetAll      = "granted_target_all"
+	FactGrantedTargetSuffix   = "granted_target_suffix"
+	FactGrantedTargetPrefix   = "granted_target_prefix"
+	FactGrantedTargetExact    = "granted_target_exact"
+	FactGrantedTargetAllFacts = "granted_target_all_facts"
 )
 
 // oidcClaimToFact maps standard OIDC claims to their corresponding Biscuit facts.

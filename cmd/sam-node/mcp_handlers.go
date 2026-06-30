@@ -362,8 +362,8 @@ func (n *SamNode) fetchRemoteToolCatalogue(ctx context.Context, targetPeer peer.
 				if t == nil {
 					continue
 				}
-				t.Name = connectService + "." + t.Name
-				if serviceNameFilter != "" && !strings.HasPrefix(t.Name, serviceNameFilter+".") {
+				t.Name = connectService + "/" + t.Name
+				if serviceNameFilter != "" && !strings.HasPrefix(t.Name, serviceNameFilter+"/") {
 					continue
 				}
 				rows = append(rows, remoteToolRow{
@@ -453,7 +453,7 @@ type remoteToolDescription struct {
 // sidecar tool.
 type DescribeRemoteToolParams struct {
 	PeerID   string `json:"peer_id" jsonschema:"Peer ID of the node hosting the server. Required."`
-	ToolName string `json:"tool_name" jsonschema:"Namespaced server name as returned by find_remote_tools (e.g. 'code-reviewer.review_pr'). Required."`
+	ToolName string `json:"tool_name" jsonschema:"Namespaced server name as returned by find_remote_tools (e.g. 'code-reviewer/review_pr'). Required."`
 }
 
 // handleDescribeRemoteTool implements the describe_remote_tool client-facing tool.
@@ -470,9 +470,9 @@ func (n *SamNode) handleDescribeRemoteTool(ctx context.Context, req *mcp.CallToo
 		return nil, nil, fmt.Errorf("invalid peer_id: %w", err)
 	}
 
-	parts := strings.SplitN(params.ToolName, ".", 2)
+	parts := strings.SplitN(params.ToolName, "/", 2)
 	if len(parts) != 2 {
-		return nil, nil, fmt.Errorf("invalid tool_name format, expected 'service.tool'")
+		return nil, nil, fmt.Errorf("invalid tool_name format, expected 'service/tool'")
 	}
 	serviceName := parts[0]
 	actualToolName := parts[1]

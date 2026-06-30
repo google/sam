@@ -1,0 +1,10 @@
+version: v1alpha1
+bindings:
+  - group: "*"
+    role: admin
+roles:
+  admin:
+    allowed_services:
+      - "*:*"
+    allowed_targets:
+      - "*:*"

@@ -44,7 +44,6 @@ spec:
         image: ghcr.io/google/sam-node:${IMAGE_TAG}
         args: 
           - "run"
-          - "--trust-hub-rbac"
           - "--config=/etc/sam/sam-node.yaml"
           - "--hub=http://sam-hub-${ENV_NAME}.${NAMESPACE}.svc.cluster.local:9090"
           - "--jwt-path=/var/run/secrets/tokens/sam-token"

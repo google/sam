@@ -116,9 +116,8 @@ data:
     roles:
       node-role:
         mcp:
-          allowed_servers:
-            - "/sam/mcp/1.0.0"
-            - "/sam/catalog"
+          allowed_services:
+            - "system:sam.catalog"
 ```
 ```bash
 kubectl apply -f policies-configmap.yaml
@@ -222,9 +221,9 @@ data:
         command: ["echo", "placeholder db-agent service"]
     attenuation:
       rules:
-        - 'target("group:backend-nodes") <- true;'
+        - 'department("analytics") <- true;'
       policies:
-        - 'allow if target($t), network_target($t);'
+        - 'deny if user("untrusted_user");'
 ```
 
 ### 3. Deploy Nodes using Token Projection
@@ -246,7 +245,6 @@ spec:
         image: ghcr.io/google/sam-node:latest
         args: 
           - "run"
-          - "--trust-hub-rbac"
           - "--config=/etc/sam/sam-node.yaml"
           - "--hub=http://sam-hub.sam.svc.cluster.local:9090"
           - "--jwt-path=/var/run/secrets/tokens/sam-token"

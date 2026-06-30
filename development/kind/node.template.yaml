@@ -33,7 +33,6 @@ spec:
         - "--api-token=devtoken"
         - "--bind-addr=0.0.0.0:8080"
         - "--discovery-interval=200ms"
-        - "--trust-hub-rbac"
 ${CONFIG_ARG}
         ports:
         - { containerPort: 8080, name: mcp, protocol: TCP }

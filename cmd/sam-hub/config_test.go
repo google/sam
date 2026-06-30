@@ -12,8 +12,8 @@ func TestLoadPolicyConfig(t *testing.T) {
 version: "v1alpha1"
 roles:
   data-scientist:
-    allowed_targets: ["db-agent.data-mesh"]
-    allowed_services: ["query_database"]
+    allowed_targets: ["node:db-agent.data-mesh"]
+    allowed_services: ["system:query-database"]
     custom_datalog:
       - 'department("analytics");'
 `
@@ -34,10 +34,10 @@ roles:
 	if !ok {
 		t.Fatal("expected role data-scientist to exist")
 	}
-	if len(role.AllowedTargets) != 1 || role.AllowedTargets[0] != "db-agent.data-mesh" {
+	if len(role.AllowedTargets) != 1 || role.AllowedTargets[0] != "node:db-agent.data-mesh" {
 		t.Errorf("unexpected allowed targets: %v", role.AllowedTargets)
 	}
-	if len(role.AllowedServices) != 1 || role.AllowedServices[0] != "query_database" {
+	if len(role.AllowedServices) != 1 || role.AllowedServices[0] != "system:query-database" {
 		t.Errorf("unexpected allowed tools: %v", role.AllowedServices)
 	}
 	if len(role.CustomDatalog) != 1 || role.CustomDatalog[0] != `department("analytics");` {
@@ -100,7 +100,7 @@ bindings:
     role: "mesh-member"
 roles:
   mesh-member:
-    allowed_services: ["/sam/mcp/1.0.0"]
+    allowed_services: ["mcp:1.0.0"]
 `
 	bindingsFile := filepath.Join(dir, "bindings.yaml")
 	if err := os.WriteFile(bindingsFile, []byte(bindingsYAML), 0644); err != nil {
@@ -126,7 +126,7 @@ bindings:
     role: "non-existent-role"
 roles:
   mesh-member:
-    allowed_services: ["/sam/mcp/1.0.0"]
+    allowed_services: ["mcp:1.0.0"]
 `
 	invalidBindingFile := filepath.Join(dir, "invalid_binding.yaml")
 	if err := os.WriteFile(invalidBindingFile, []byte(invalidBindingYAML), 0644); err != nil {
@@ -146,7 +146,7 @@ bindings:
     role: "mesh-member"
 roles:
   mesh-member:
-    allowed_services: ["/sam/mcp/1.0.0"]
+    allowed_services: ["mcp:1.0.0"]
 `
 	userBindingFile := filepath.Join(dir, "user_binding.yaml")
 	if err := os.WriteFile(userBindingFile, []byte(userBindingYAML), 0644); err != nil {
@@ -171,7 +171,7 @@ bindings:
   - role: "mesh-member"
 roles:
   mesh-member:
-    allowed_services: ["/sam/mcp/1.0.0"]
+    allowed_services: ["mcp:1.0.0"]
 `
 	missingBothFile := filepath.Join(dir, "missing_both.yaml")
 	if err := os.WriteFile(missingBothFile, []byte(missingBothYAML), 0644); err != nil {
@@ -192,7 +192,7 @@ bindings:
     role: "mesh-member"
 roles:
   mesh-member:
-    allowed_services: ["/sam/mcp/1.0.0"]
+    allowed_services: ["mcp:1.0.0"]
 `
 	bothPopulatedFile := filepath.Join(dir, "both_populated.yaml")
 	if err := os.WriteFile(bothPopulatedFile, []byte(bothPopulatedYAML), 0644); err != nil {

@@ -97,6 +97,6 @@ data:
     roles:
       sam-admin:
         allowed_services:
-          - "*"
+          - "*:*"
         allowed_targets:
-          - "*"
+          - "*:*"

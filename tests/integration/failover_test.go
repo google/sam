@@ -134,8 +134,7 @@ roles: {}
 		"HOME="+nodeHome,
 		"XDG_CONFIG_HOME="+filepath.Join(nodeHome, ".config"),
 	)
-	cmdNode := exec.Command(nodeBin, "run", "--trust-hub-rbac",
-		"--hub", lb.URL,
+	cmdNode := exec.Command(nodeBin, "run", "--hub", lb.URL,
 		"--listen", "/ip4/127.0.0.1/tcp/0",
 		"--jwt-path", jwtPath,
 		"--bind-addr", "127.0.0.1:0",

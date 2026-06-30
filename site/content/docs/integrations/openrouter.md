@@ -53,24 +53,19 @@ By default, services on your node are completely locked down. To allow agents in
 
 The service format for an inference service is always `inference:<service-name>`. 
 
-To allow **any** authenticated mesh agent to use the service:
+To allow **any** authenticated mesh agent to use the service, no local attenuation policies are necessary—the Hub will manage access centrally based on the node's assigned roles.
+
+If you only want to allow specific identities or groups (e.g., agents belonging to the "research" group) and want to enforce this restriction locally at the node (regardless of Hub configuration), you can add a local check based on the cryptographic facts injected by the Hub:
 ```yaml
 version: "v1alpha1"
 attenuation:
-  policies:
-    - 'allow if service("inference", "openrouter");'
-    - 'allow if service("system", "/sam/catalog");' # Required for discovery
-  checks: []
-```
-
-If you only want to allow specific identities or groups (e.g., agents belonging to the "research" group), you can restrict the policy based on the cryptographic facts injected by the Hub:
-```yaml
-    - 'allow if service("inference", "openrouter"), group("research");'
+  checks:
+    - 'check if group("research");'
 ```
 
 ## 4. Deploying the Node
 
-When deploying (for instance, via Kubernetes), you deploy both containers in the same Pod so they can communicate over `localhost`. The `sam-node` container runs with the `--trust-hub-rbac` flag to trust the identity facts from the Hub.
+When deploying (for instance, via Kubernetes), you deploy both containers in the same Pod so they can communicate over `localhost`.
 
 ```yaml
       containers:
@@ -88,7 +83,6 @@ When deploying (for instance, via Kubernetes), you deploy both containers in the
         args: 
           - "run"
           - "--config=/etc/sam/sam-node.yaml"
-          - "--trust-hub-rbac"
           # ... (other required arguments like --jwt-path)
 ```
 

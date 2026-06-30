@@ -80,7 +80,6 @@ roles: {}
 		"--bind-addr", "127.0.0.1:0",
 		"--api-token", apiToken,
 		"--jwt", jwtTokenStr,
-		"--trust-hub-rbac",
 	)
 
 	// Start Node B
@@ -91,7 +90,6 @@ roles: {}
 		"--bind-addr", "127.0.0.1:0",
 		"--api-token", apiToken,
 		"--jwt", jwtTokenStr,
-		"--trust-hub-rbac",
 	)
 
 	// Resolve actual MCP address from log

@@ -26,11 +26,14 @@ import (
 	"testing"
 	"time"
 
+	"crypto/ed25519"
+	"crypto/rand"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 
+	"github.com/biscuit-auth/biscuit-go/v2"
 	"github.com/google/sam/api"
 	"github.com/libp2p/go-libp2p"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
@@ -231,6 +234,11 @@ func startMockLibp2pHub(t *testing.T) (peer.ID, string) {
 	}
 
 	// Start HTTP server for enrollment
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("Failed to generate hub key: %v", err)
+	}
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/register", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -249,8 +257,8 @@ func startMockLibp2pHub(t *testing.T) (peer.ID, string) {
 		}
 
 		resp := &api.EnrollResponse{
-			BiscuitToken: []byte("mock-biscuit-token"),
-			HubPublicKey: []byte("mock-hub-pub-key"),
+			BiscuitToken: createMockBiscuitToken(t, req.PeerId, priv),
+			HubPublicKey: pub,
 			HubAddresses: []string{h.Addrs()[0].String() + "/p2p/" + h.ID().String()},
 		}
 		data, err := proto.Marshal(resp)
@@ -303,6 +311,11 @@ func startMockLibp2pHubWithOIDC(t *testing.T, oidcIssuerURL string) (peer.ID, st
 	}
 
 	// Start HTTP server for enrollment and info
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("Failed to generate hub key: %v", err)
+	}
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/info", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -340,8 +353,8 @@ func startMockLibp2pHubWithOIDC(t *testing.T, oidcIssuerURL string) (peer.ID, st
 		}
 
 		resp := &api.EnrollResponse{
-			BiscuitToken: []byte("mock-biscuit-token"),
-			HubPublicKey: []byte("mock-hub-pub-key"),
+			BiscuitToken: createMockBiscuitToken(t, req.PeerId, priv),
+			HubPublicKey: pub,
 			HubAddresses: []string{h.Addrs()[0].String() + "/p2p/" + h.ID().String()},
 		}
 		data, err := proto.Marshal(resp)
@@ -363,4 +376,42 @@ func startMockLibp2pHubWithOIDC(t *testing.T, oidcIssuerURL string) (peer.ID, st
 	})
 
 	return h.ID(), httpServer.URL
+}
+
+func createMockBiscuitToken(t *testing.T, peerID string, priv ed25519.PrivateKey) []byte {
+	builder := biscuit.NewBuilder(priv)
+	_ = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{Name: "target_unrestricted"}})
+
+	err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+		Name: "node",
+		IDs:  []biscuit.Term{biscuit.String(peerID)},
+	}})
+	if err != nil {
+		t.Fatalf("failed to add node fact: %v", err)
+	}
+
+	err = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+		Name: "client_peer_id",
+		IDs:  []biscuit.Term{biscuit.String(peerID)},
+	}})
+	if err != nil {
+		t.Fatalf("failed to add client_peer_id fact: %v", err)
+	}
+
+	err = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+		Name: "granted_service_all_types",
+	}})
+	if err != nil {
+		t.Fatalf("failed to add granted_service_all_types fact: %v", err)
+	}
+
+	b, err := builder.Build()
+	if err != nil {
+		t.Fatalf("failed to build biscuit: %v", err)
+	}
+	serialized, err := b.Serialize()
+	if err != nil {
+		t.Fatalf("failed to serialize biscuit: %v", err)
+	}
+	return serialized
 }

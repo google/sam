@@ -206,6 +206,7 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
   }
 
   mesh_start_hub() {
+    local config_path="${1:-tests/e2e/fixtures/default-policy.yaml}"
     local name="${MESH_PREFIX}-hub"
     if docker inspect -f '{{.State.Running}}' "${name}" 2>/dev/null | grep -q "true"; then
       return 0
@@ -217,6 +218,7 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
       --name "${name}" \
       --network "${MESH_NETWORK}" \
       --network-alias sam-hub \
+      -v "$(pwd)/${config_path}:/etc/sam/hub-config.yaml:ro" \
       "sam-hub:local" \
       --issuer "http://mock-oidc:18080" \
       --client-id "sam-e2e" \
@@ -224,6 +226,7 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
       --key "${key}" \
       --listen "/ip4/0.0.0.0/tcp/4002" \
       --external-multiaddr "/dns4/sam-hub/tcp/4002" \
+      --policy-file "/etc/sam/hub-config.yaml" \
       --mesh "e2e-mesh" >/dev/null
 
     MESH_CONTAINERS+=("${name}")

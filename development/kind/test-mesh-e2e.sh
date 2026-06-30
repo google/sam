@@ -49,11 +49,11 @@ for i in $(seq 1 90); do
   echo "discover attempt $i: $tools"
 
   peer="$(printf '%s' "$tools" \
-    | jq -r '.[]? | select(.tool_name=="mcp:calculator.add") | .peer_id' 2>/dev/null \
+    | jq -r '.[]? | select(.tool_name=="mcp:calculator/add") | .peer_id' 2>/dev/null \
     | head -n1 || true)"
 
   if [ -n "$peer" ]; then
-    echo "mcp:calculator.add discovered on peer: $peer (attempt $i)"
+    echo "mcp:calculator/add discovered on peer: $peer (attempt $i)"
     break
   fi
 
@@ -75,12 +75,12 @@ done
   exit 1
 }
 
-echo "== call mcp:calculator.add(2,3) =="
+echo "== call mcp:calculator/add(2,3) =="
 result=$(mcp -tool call_remote_tool \
-  -args "{\"peer_id\":\"$peer\",\"tool_name\":\"mcp:calculator.add\",\"arguments\":{\"a\":2,\"b\":3}}")
+  -args "{\"peer_id\":\"$peer\",\"tool_name\":\"mcp:calculator/add\",\"arguments\":{\"a\":2,\"b\":3}}")
 echo "result: $result"
 if [[ "$result" != *"5"* ]]; then
-  echo "calculator.add did not return 5"
+  echo "calculator/add did not return 5"
   exit 1
 fi
-echo "OK: calculator.add(2,3) == 5"
+echo "OK: calculator/add(2,3) == 5"

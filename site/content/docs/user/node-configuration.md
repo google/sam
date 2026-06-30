@@ -40,19 +40,18 @@ services:
 # 2. Define Local Security Identity (Zero Trust)
 attenuation:
   rules:
-    # Explicitly define this node's identity in the mesh
-    - 'target("group:backend-nodes") <- true;'
-    - 'target("email:db@example.com") <- true;'
+    # Example: Inject custom Datalog facts asserting local node state
+    - 'time(2026-06-30T00:00:00Z) <- true;'
   policies:
-    # Enforce that the incoming caller's token contains a matching network_target 
-    - 'allow if target($t), network_target($t);'
+    # Example: Custom local deny rule restricting access from untrusted users
+    - 'deny if user("untrusted_sub_id");'
 ```
 
 ---
 
 ## 2. Defining Local Services
 
-The `services` array allows you to register endpoints that remote peers in the SAM Network can discover and execute (provided they possess the proper `allow_service` credentials issued by the Hub).
+The `services` array allows you to register endpoints that remote peers in the SAM Network can discover and execute (provided they possess the proper `granted_service_*` credentials issued by the Hub).
 
 | Property | Description |
 | :--- | :--- |
@@ -67,13 +66,14 @@ The `services` array allows you to register endpoints that remote peers in the S
 
 ## 3. Defining Local Security (Target Attenuation)
 
-In a Zero Trust architecture, the destination node is entirely responsible for verifying that it is the intended recipient of an incoming request. 
+In a Zero Trust architecture, the destination node is entirely responsible for verifying that it is the intended recipient of an incoming request.
 
-While the Hub injects routing boundaries (like `network_target("group:backend-nodes")`) into the caller's token, the destination node will **ignore these targets by default** (relying solely on the Hub's service whitelist) unless you explicitly configure the node's local identity.
+While the Hub limits token capabilities based on target restrictions (e.g., `target_restricted()` or `target_unrestricted()`), the destination node evaluates these dynamically. The node automatically resolves its local identity context based on its configuration, generating facts internally (such as `allow_network_target($fact, $value)`).
 
-If your mesh operator utilizes `allowed_targets` to partition the network, your node **must** define its identity in the `attenuation` block to accept traffic:
+If the caller's token has target restrictions, the connection will only be allowed if the token's `granted_target_*` facts match the dynamically injected identity of the node. You do **not** need to write manual Datalog rules to enforce this mechanism; it is baked directly into the node middleware via baseline policies.
 
-1. **`rules`**: Inject Datalog facts asserting the node's identity (e.g. `target("group:backend-nodes") <- true;`).
-2. **`policies`**: Add a local policy strictly enforcing that the incoming token possesses the matching capability (e.g. `allow if target($t), network_target($t);`).
+### Local Custom Policies
+You can further restrict access using the `attenuation` block. Local policies defined here are evaluated **before** the baseline rules. This means local administrators can write custom rules that explicitly `deny` access based on custom logic, overriding broad access granted by the Hub.
 
-If a calling node attempts to connect and its token does not contain the required `network_target` matching your local `target` rules, the connection will be cryptographically rejected.
+1. **`rules`**: Inject custom Datalog facts asserting local node state (e.g., `time($time)`).
+2. **`policies`**: Add local restrictions (e.g., `deny if user("banned_user");`).

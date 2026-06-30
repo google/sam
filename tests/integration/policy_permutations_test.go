@@ -84,7 +84,7 @@ roles:
     allowed_targets: ["user:bob-subject"]
   role-email:
     allowed_services: ["mcp:test-email"]
-    allowed_targets: ["node:nodeB"]
+    allowed_targets: ["email:nodeB@example.com"]
   role-group:
     allowed_services: ["mcp:test-group"]
     allowed_targets: ["group:compute"]
@@ -93,10 +93,10 @@ roles:
     allowed_targets: ["group:backend"]
   role-direct:
     allowed_services: ["mcp:test-role"]
-    allowed_targets: ["node:nodeB"]
+    allowed_targets: ["group:compute"]
   admin:
-    allowed_services: ["*"]
-    allowed_targets: ["*"]
+    allowed_services: ["*:*"]
+    allowed_targets: ["*:*"]
 
 bindings:
   - role: role-user
@@ -139,28 +139,21 @@ bindings:
 	// 2. Node B (Target) Config
 	nodeBPolicyFile := filepath.Join(tmpDir, "nodeB_config.yaml")
 	nodeBPolicyYAML := `version: "v1alpha1"
-attenuation:
-  rules:
-    - 'target("user:bob-subject") <- true'
-    - 'target("node:nodeB") <- true'
-    - 'target("group:compute") <- true'
-    - 'target("group:backend") <- true'
-
 services:
   - type: "mcp"
-    name: "mcp:test-user"
+    name: "test-user"
     command: ["echo", "test-user"]
   - type: "mcp"
-    name: "mcp:test-email"
+    name: "test-email"
     command: ["echo", "test-email"]
   - type: "mcp"
-    name: "mcp:test-group"
+    name: "test-group"
     command: ["echo", "test-group"]
   - type: "mcp"
-    name: "mcp:test-role"
+    name: "test-role"
     command: ["echo", "test-role"]
   - type: "mcp"
-    name: "mcp:test-node"
+    name: "test-node"
     command: ["echo", "test-node"]
 `
 	if err := os.WriteFile(nodeBPolicyFile, []byte(nodeBPolicyYAML), 0644); err != nil {
@@ -176,10 +169,13 @@ services:
 		"--data-dir", homeB,
 		"--bind-addr", fmt.Sprintf("127.0.0.1:%d", apiPortB),
 		"--api-token", apiTokenB,
-		"--jwt", mintToken(map[string]interface{}{"sub": "nodeB"}),
+		"--jwt", mintToken(map[string]interface{}{
+			"sub":    "bob-subject",
+			"email":  "nodeB@example.com",
+			"groups": []string{"compute", "backend"},
+		}),
 		"--listen", "/ip4/127.0.0.1/tcp/0",
 		"--listen", "/ip4/127.0.0.1/udp/0/quic-v1",
-		"--trust-hub-rbac",
 		"--allow-loopback",
 		"--config", nodeBPolicyFile,
 	)
@@ -264,7 +260,6 @@ services:
 				"--jwt", jwtA,
 				"--listen", "/ip4/127.0.0.1/tcp/0",
 				"--listen", "/ip4/127.0.0.1/udp/0/quic-v1",
-				"--trust-hub-rbac",
 				"--allow-loopback",
 			)
 			if err := os.MkdirAll(homeA, 0755); err != nil {
@@ -294,7 +289,7 @@ services:
 			// Use the local callMCPAllowError targeting Node A to hit Node B
 			resp, callErr := callMCPAllowError(t, actualApiAddrA, apiTokenA, "call_remote_tool", map[string]any{
 				"peer_id":   peerIDB,
-				"tool_name": tt.targetSvc + ".test_tool",
+				"tool_name": tt.targetSvc + "/test_tool",
 				"arguments": map[string]any{},
 			})
 

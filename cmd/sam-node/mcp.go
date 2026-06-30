@@ -44,7 +44,7 @@ Reach into the mesh only when the needed tool isn't available locally. To do so:
 
 Other useful tools: discover_remote_services browses services by type, get_mesh_info reports connected peers and mesh state, list_local_services shows what this node hosts.
 
-Remote tool names are namespaced as '<service>.<tool>' (e.g. 'code-reviewer.review_pr'). Prefer discovering and describing a tool before calling it rather than guessing arguments.`
+Remote tool names are namespaced as '<service>/<tool>' (e.g. 'code-reviewer/review_pr'). Prefer discovering and describing a tool before calling it rather than guessing arguments.`
 
 // NewMCPServer creates a new MCP server instance with all tools registered.
 func NewMCPServer(node *SamNode) *mcp.Server {
@@ -365,7 +365,7 @@ func (n *SamNode) ConnectMCPSession(ctx context.Context, targetPeer peer.ID, tar
 func (n *SamNode) callMCPToolOnce(ctx context.Context, targetPeer peer.ID, toolName string, params any) (*mcp.CallToolResult, error) {
 	targetService := api.CatalogTarget
 	originalToolName := toolName
-	if parts := strings.SplitN(toolName, ".", 2); len(parts) == 2 {
+	if parts := strings.SplitN(toolName, "/", 2); len(parts) == 2 {
 		targetService = parts[0]
 		originalToolName = parts[1]
 	}

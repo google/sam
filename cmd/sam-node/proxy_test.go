@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"fmt"
 	"io"
 	"net/http"
@@ -100,6 +102,18 @@ func TestDatapathIntegration(t *testing.T) {
 			t.Logf("failed to close nodeB host: %v", err)
 		}
 	}()
+
+	// Setup identity for Node B (the caller proxy) and trust it on Node A
+	rootPub, rootPriv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("gen root: %v", err)
+	}
+	if err := buildAndSaveBiscuit(nodeB, rootPriv); err != nil {
+		t.Fatalf("buildAndSaveBiscuit: %v", err)
+	}
+	nodeA.keysMu.Lock()
+	nodeA.trustedKeys = append(nodeA.trustedKeys, TrustedKey{Key: rootPub, ReceivedAt: time.Now()})
+	nodeA.keysMu.Unlock()
 
 	// Connect Node B to Node A directly
 	err = nodeB.Host.Connect(ctx, peer.AddrInfo{ID: nodeA.Host.ID(), Addrs: nodeA.Host.Addrs()})
@@ -217,6 +231,148 @@ func TestDatapathIntegration(t *testing.T) {
 	}
 }
 
+func TestDatapathIntegration_Unauthenticated(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	privA, _, _ := crypto.GenerateKeyPair(crypto.Ed25519, -1)
+	privB, _, _ := crypto.GenerateKeyPair(crypto.Ed25519, -1)
+
+	dirA := t.TempDir()
+	dirB := t.TempDir()
+
+	storeA, err := NewStore(dirA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = storeA.Close() }()
+
+	storeB, err := NewStore(dirB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = storeB.Close() }()
+
+	nodeA, err := NewSamNode(ctx, SamNodeConfig{
+		PrivKey:           privA,
+		HubAddrs:          nil,
+		Store:             storeA,
+		MeshID:            "test-mesh",
+		DiscoveryInterval: "1s",
+		ListenAddrs:       []string{"/ip4/127.0.0.1/tcp/0"},
+		EnableRelay:       false,
+		NodeConfig:        &NodeConfigComplete{},
+		KeyGracePeriod:    24 * time.Hour,
+		AllowLoopback:     true,
+		MonitorBootstrap:  2 * time.Minute,
+		MonitorInterval:   1 * time.Minute,
+		BiscuitTimeout:    500 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := nodeA.Host.Close(); err != nil {
+			t.Logf("failed to close nodeA host: %v", err)
+		}
+	}()
+
+	nodeB, err := NewSamNode(ctx, SamNodeConfig{
+		PrivKey:           privB,
+		HubAddrs:          nil,
+		Store:             storeB,
+		MeshID:            "test-mesh",
+		DiscoveryInterval: "1s",
+		ListenAddrs:       []string{"/ip4/127.0.0.1/tcp/0"},
+		EnableRelay:       false,
+		NodeConfig:        &NodeConfigComplete{},
+		KeyGracePeriod:    24 * time.Hour,
+		AllowLoopback:     true,
+		MonitorBootstrap:  2 * time.Minute,
+		MonitorInterval:   1 * time.Minute,
+		BiscuitTimeout:    500 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := nodeB.Host.Close(); err != nil {
+			t.Logf("failed to close nodeB host: %v", err)
+		}
+	}()
+
+	// NOTE: We do NOT setup an identity for Node B (caller).
+	// This means the Egress Proxy will not inject an X-Sam-Biscuit header,
+	// and the request should be rejected by Node A's ingress server.
+
+	// Connect Node B to Node A directly
+	err = nodeB.Host.Connect(ctx, peer.AddrInfo{ID: nodeA.Host.ID(), Addrs: nodeA.Host.Addrs()})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dummyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"success"}`))
+	}))
+	defer dummyServer.Close()
+
+	serviceName := "dummy-tool"
+	serviceInfo := &api.ServiceInfo{
+		Type: api.ServiceType_SERVICE_TYPE_MCP,
+		Name: serviceName,
+	}
+
+	_ = nodeA.RegisterService(ctx, &api.RegisterServiceRequest{
+		Service: serviceInfo,
+		Backend: &api.RegisterServiceRequest_TargetUrl{TargetUrl: dummyServer.URL},
+	})
+
+	targetURL, _ := url.Parse(dummyServer.URL)
+	nodeA.services.insertService(&testService{
+		info:    serviceInfo,
+		handler: httputil.NewSingleHostReverseProxy(targetURL),
+	})
+
+	nodeB.BoundHTTPAddr = "127.0.0.1:0"
+
+	proxyHandler := createEgressProxy(nodeB)
+	proxyServer := httptest.NewServer(proxyHandler)
+	defer proxyServer.Close()
+
+	url := fmt.Sprintf("%s/sam/%s/mcp/%s/api/v1/test", proxyServer.URL, nodeA.Host.ID().String(), serviceName)
+
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	client := &http.Client{}
+
+	var resp *http.Response
+	for i := 0; i < 3; i++ {
+		resp, err = client.Do(req)
+		if err == nil {
+			break
+		}
+		t.Logf("Attempt %d failed: %v", i+1, err)
+		time.Sleep(1 * time.Second)
+	}
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+
+	// ASSERTION: Should be service unavailable because the local node has no identity to send
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("Expected status ServiceUnavailable (503), got %d", resp.StatusCode)
+	}
+}
+
 func TestStdioDatapathIntegration(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -279,6 +435,18 @@ func TestStdioDatapathIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = nodeB.Host.Close() }()
+
+	// Setup identity for Node B (the caller proxy) and trust it on Node A
+	rootPub, rootPriv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("gen root: %v", err)
+	}
+	if err := buildAndSaveBiscuit(nodeB, rootPriv); err != nil {
+		t.Fatalf("buildAndSaveBiscuit: %v", err)
+	}
+	nodeA.keysMu.Lock()
+	nodeA.trustedKeys = append(nodeA.trustedKeys, TrustedKey{Key: rootPub, ReceivedAt: time.Now()})
+	nodeA.keysMu.Unlock()
 
 	// Connect Node B to Node A directly
 	err = nodeB.Host.Connect(ctx, peer.AddrInfo{ID: nodeA.Host.ID(), Addrs: nodeA.Host.Addrs()})

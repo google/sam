@@ -197,7 +197,7 @@ func TestSelfHealingHTTPFallback(t *testing.T) {
 	mu.Unlock()
 
 	// Step 3: Start sam-node run
-	runCmd := exec.Command(nodeBin, "run", "--trust-hub-rbac", "--listen", "/ip4/127.0.0.1/tcp/0", "--bind-addr", "127.0.0.1:0")
+	runCmd := exec.Command(nodeBin, "run", "--listen", "/ip4/127.0.0.1/tcp/0", "--bind-addr", "127.0.0.1:0")
 	runCmd.Env = env
 	var stdout safeBuffer
 	runCmd.Stdout = &stdout
