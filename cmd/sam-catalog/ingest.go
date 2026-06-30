@@ -140,7 +140,7 @@ func (c *nodeClient) readSSEStream(ctx context.Context, store *catalog.Store) er
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		// surface auth/server errors; defer closes the body
 		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
