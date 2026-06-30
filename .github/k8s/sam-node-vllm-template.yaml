@@ -28,7 +28,7 @@ data:
       - type: inference
         name: vllm-tpu
         description: "vLLM TPU Inference Service"
-        target_url: "http://localhost:8000/v1"
+        target_url: "http://localhost:8000"
 ---
 apiVersion: apps/v1
 kind: Deployment

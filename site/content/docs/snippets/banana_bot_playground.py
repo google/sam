@@ -153,7 +153,7 @@ class FallbackAgent:
             return await self.step_gemini(prompt, mcp_tools)
 
     async def step_mesh(self, peer_id: str, prompt: str, mcp_tools: list) -> dict:
-        url = f"{self.base_url}/sam/{peer_id}/inference/vllm-tpu/chat/completions"
+        url = f"{self.base_url}/sam/{peer_id}/inference/vllm-tpu/v1/chat/completions"
         headers = {
             "Authorization": f"Bearer {self.token}",
             "Content-Type": "application/json"
