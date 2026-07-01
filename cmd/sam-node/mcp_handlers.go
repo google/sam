@@ -226,7 +226,7 @@ func (n *SamNode) handleConnectPeer(ctx context.Context, req *mcp.CallToolReques
 	if err != nil {
 		return nil, nil, err
 	}
-	if n.revokedPeers.Contains(addrInfo.ID.String()) {
+	if n.revokedPeers != nil && n.revokedPeers.Contains(addrInfo.ID.String()) {
 		return nil, nil, fmt.Errorf("failed to dial: failed to dial %s: gater disallows connection to peer", addrInfo.ID)
 	}
 	if n.Store.IsBanned(addrInfo.ID) {

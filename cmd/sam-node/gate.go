@@ -40,7 +40,7 @@ type nodeConnGate struct {
 // InterceptPeerDial controls who we are allowed to call (Outbound)
 func (g *nodeConnGate) InterceptPeerDial(p peer.ID) (allow bool) {
 	logger.Debugf("[Gater] InterceptPeerDial for %s", p)
-	if g.node.revokedPeers.Contains(p.String()) {
+	if g.node.revokedPeers != nil && g.node.revokedPeers.Contains(p.String()) {
 		logger.Warnf("[Gater] InterceptPeerDial denying %s: in revoked cache", p)
 		return false
 	}
@@ -66,7 +66,7 @@ func (g *nodeConnGate) InterceptAccept(n network.ConnMultiaddrs) (allow bool) {
 // InterceptSecured is called after TLS handshake. This is our Layer 2 Check.
 func (g *nodeConnGate) InterceptSecured(dir network.Direction, p peer.ID, n network.ConnMultiaddrs) (allow bool) {
 	logger.Debugf("[Gater] InterceptSecured for %s (dir: %v)", p, dir)
-	if g.node.revokedPeers.Contains(p.String()) {
+	if g.node.revokedPeers != nil && g.node.revokedPeers.Contains(p.String()) {
 		logger.Warnf("[Gater] InterceptSecured denying %s: in revoked cache", p)
 		return false
 	}

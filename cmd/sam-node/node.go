@@ -952,7 +952,9 @@ func (n *SamNode) handleBannedEvent(event *api.MeshEvent) {
 
 	logger.Infof("[Mesh Event] Peer banned: %s", event.PeerId)
 
-	n.revokedPeers.Add(event.PeerId, event.Timestamp)
+	if n.revokedPeers != nil {
+		n.revokedPeers.Add(event.PeerId, event.Timestamp)
+	}
 	if p, err := peer.Decode(event.PeerId); err == nil {
 		if n.Host != nil {
 			_ = n.Host.Network().ClosePeer(p)
