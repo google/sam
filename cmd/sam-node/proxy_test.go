@@ -557,3 +557,227 @@ func TestStdioDatapathIntegration(t *testing.T) {
 	// Cancel context to close the SSE stream and allow server to close gracefully
 	cancel()
 }
+
+func TestDatapathHeadersAndRoutingTable(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	privA, _, _ := crypto.GenerateKeyPair(crypto.Ed25519, -1)
+	privB, _, _ := crypto.GenerateKeyPair(crypto.Ed25519, -1)
+
+	dirA := t.TempDir()
+	dirB := t.TempDir()
+
+	storeA, err := NewStore(dirA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = storeA.Close() }()
+
+	storeB, err := NewStore(dirB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = storeB.Close() }()
+
+	nodeA, err := NewSamNode(ctx, SamNodeConfig{
+		PrivKey:           privA,
+		HubAddrs:          nil,
+		Store:             storeA,
+		MeshID:            "test-mesh",
+		DiscoveryInterval: "1s",
+		ListenAddrs:       []string{"/ip4/127.0.0.1/tcp/0"},
+		EnableRelay:       false,
+		NodeConfig:        &NodeConfigComplete{},
+		KeyGracePeriod:    24 * time.Hour,
+		AllowLoopback:     true,
+		MonitorBootstrap:  2 * time.Minute,
+		MonitorInterval:   1 * time.Minute,
+		BiscuitTimeout:    500 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := nodeA.Host.Close(); err != nil {
+			t.Logf("failed to close nodeA host: %v", err)
+		}
+	}()
+
+	nodeB, err := NewSamNode(ctx, SamNodeConfig{
+		PrivKey:           privB,
+		HubAddrs:          nil,
+		Store:             storeB,
+		MeshID:            "test-mesh",
+		DiscoveryInterval: "1s",
+		ListenAddrs:       []string{"/ip4/127.0.0.1/tcp/0"},
+		EnableRelay:       false,
+		NodeConfig:        &NodeConfigComplete{},
+		KeyGracePeriod:    24 * time.Hour,
+		AllowLoopback:     true,
+		MonitorBootstrap:  2 * time.Minute,
+		MonitorInterval:   1 * time.Minute,
+		BiscuitTimeout:    500 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := nodeB.Host.Close(); err != nil {
+			t.Logf("failed to close nodeB host: %v", err)
+		}
+	}()
+
+	rootPub, rootPriv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("gen root: %v", err)
+	}
+	if err := buildAndSaveBiscuit(nodeB, rootPriv); err != nil {
+		t.Fatalf("buildAndSaveBiscuit: %v", err)
+	}
+	nodeA.keysMu.Lock()
+	nodeA.trustedKeys = append(nodeA.trustedKeys, TrustedKey{Key: rootPub, ReceivedAt: time.Now()})
+	nodeA.keysMu.Unlock()
+
+	err = nodeB.Host.Connect(ctx, peer.AddrInfo{ID: nodeA.Host.ID(), Addrs: nodeA.Host.Addrs()})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// We will record the HTTP request headers and URL received by the backend dummy service.
+	var lastReceivedHeaders http.Header
+	var lastReceivedPath string
+
+	dummyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		lastReceivedHeaders = r.Header.Clone()
+		lastReceivedPath = r.URL.Path
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer dummyServer.Close()
+
+	serviceName := "dummy-tool"
+	serviceInfo := &api.ServiceInfo{
+		Type: api.ServiceType_SERVICE_TYPE_MCP,
+		Name: serviceName,
+	}
+
+	_ = nodeA.RegisterService(ctx, &api.RegisterServiceRequest{
+		Service: serviceInfo,
+		Backend: &api.RegisterServiceRequest_TargetUrl{TargetUrl: dummyServer.URL},
+	})
+
+	handler, err := newReverseProxyHandler(dummyServer.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nodeA.services.insertService(&testService{
+		info:    serviceInfo,
+		handler: handler,
+	})
+
+	nodeB.BoundHTTPAddr = "127.0.0.1:0"
+
+	proxyHandler := createEgressProxy(nodeB)
+	proxyServer := httptest.NewServer(proxyHandler)
+	defer proxyServer.Close()
+
+	client := &http.Client{}
+
+	tests := []struct {
+		name                   string
+		pathSuffix             string // e.g. "/api/v1/test" or ""
+		requestHeaders         map[string]string
+		wantReceivedHeaders    map[string]string // header key -> expected value. If value is "", header must be absent.
+		wantReceivedPathSuffix string
+	}{
+		{
+			name:       "Auth mapping with X-Sam-Authorization",
+			pathSuffix: "/api/v1/test",
+			requestHeaders: map[string]string{
+				"Authorization":            "Bearer local-token",
+				api.HeaderSamAuthorization: "Bearer upstream-token",
+				"X-Test-Request":           "yes",
+			},
+			wantReceivedHeaders: map[string]string{
+				"Authorization":              "Bearer upstream-token",
+				api.HeaderSamAuthorization:   "", // Must be stripped
+				api.HeaderSamBiscuit:         "", // Must be stripped
+				api.HeaderSamNoTrailingSlash: "", // Must be stripped
+				"X-Test-Request":             "yes",
+			},
+			wantReceivedPathSuffix: "/api/v1/test",
+		},
+		{
+			name:       "Auth stripping when X-Sam-Authorization is absent",
+			pathSuffix: "/api/v1/test",
+			requestHeaders: map[string]string{
+				"Authorization":  "Bearer local-token",
+				"X-Test-Request": "yes",
+			},
+			wantReceivedHeaders: map[string]string{
+				"Authorization":              "", // Must be stripped to avoid leaking local sidecar token
+				api.HeaderSamAuthorization:   "",
+				api.HeaderSamBiscuit:         "",
+				api.HeaderSamNoTrailingSlash: "",
+				"X-Test-Request":             "yes",
+			},
+			wantReceivedPathSuffix: "/api/v1/test",
+		},
+		{
+			name:       "Trailing slash handling with empty path",
+			pathSuffix: "", // Requesting the root of the service: .../dummy-tool
+			requestHeaders: map[string]string{
+				"Authorization": "Bearer local-token",
+			},
+			wantReceivedHeaders: map[string]string{
+				api.HeaderSamNoTrailingSlash: "", // Must be stripped
+			},
+			wantReceivedPathSuffix: "/", // Should be mapped to "/" without trailing slash issues
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lastReceivedHeaders = nil
+			lastReceivedPath = ""
+
+			url := fmt.Sprintf("%s/sam/%s/mcp/%s%s", proxyServer.URL, nodeA.Host.ID().String(), serviceName, tt.pathSuffix)
+			req, err := http.NewRequest("GET", url, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for k, v := range tt.requestHeaders {
+				req.Header.Set(k, v)
+			}
+
+			resp, err := client.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = resp.Body.Close()
+
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("Expected 200 OK, got %d", resp.StatusCode)
+			}
+
+			// Verify received path
+			if lastReceivedPath != tt.wantReceivedPathSuffix {
+				t.Errorf("Expected received path to be %q, got %q", tt.wantReceivedPathSuffix, lastReceivedPath)
+			}
+
+			// Verify received headers
+			for k, expectedVal := range tt.wantReceivedHeaders {
+				actualVal := lastReceivedHeaders.Get(k)
+				if expectedVal == "" {
+					if _, present := lastReceivedHeaders[k]; present {
+						t.Errorf("Expected header %q to be absent, but got %q", k, actualVal)
+					}
+				} else {
+					if actualVal != expectedVal {
+						t.Errorf("Expected header %q to be %q, got %q", k, expectedVal, actualVal)
+					}
+				}
+			}
+		})
+	}
+}

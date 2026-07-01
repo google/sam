@@ -2,10 +2,7 @@ package api
 
 import (
 	"fmt"
-	"net/url"
 	"strings"
-
-	"github.com/asaskevich/govalidator"
 )
 
 // ValidateServiceFormat ensures the service string follows the explicit URI format.
@@ -13,20 +10,31 @@ func ValidateServiceFormat(svc string) error {
 	if svc == "*" {
 		return nil
 	}
-	// We parse the service string as a URL to enforce hierarchical URIs (e.g., mcp://name).
-	// - If no scheme is present (e.g., "mcp-service"), u.Scheme will be empty.
-	// - If a legacy non-hierarchical format is used (e.g., "mcp:my-service"), url.Parse will parse the
-	//   part after the colon into u.Opaque. We reject u.Opaque != "" to ensure that the hierarchical
-	//   separator "://" is explicitly present (which maps the target name to u.Host instead of u.Opaque).
-	//   Without this check, "mcp:my-service.local" would parse successfully and be accepted since
-	//   "my-service.local" is a valid DNS name.
-	u, err := url.Parse(svc)
-	if err != nil || u.Scheme == "" || u.Opaque != "" {
+
+	matches := rfc3986URIRegex.FindStringSubmatch(svc)
+	if len(matches) < 6 {
 		return fmt.Errorf("invalid service format %q: must follow explicit URI format (e.g., mcp://name)", svc)
 	}
-	if u.User != nil {
+
+	scheme := matches[2]
+	hasAuthority := matches[3] != ""
+	authority := matches[4]
+
+	if scheme == "" || !hasAuthority {
+		return fmt.Errorf("invalid service format %q: must follow explicit URI format (e.g., mcp://name)", svc)
+	}
+
+	if matches[6] != "" {
+		return fmt.Errorf("invalid service format %q: query parameters are not allowed in service URIs", svc)
+	}
+	if matches[8] != "" {
+		return fmt.Errorf("invalid service format %q: fragments are not allowed in service URIs", svc)
+	}
+
+	if strings.Contains(authority, "@") {
 		return fmt.Errorf("invalid service format %q: userinfo is not allowed in service URIs", svc)
 	}
+
 	typ, val := ParseServiceTarget(svc)
 	if typ == "" {
 		return fmt.Errorf("invalid service format %q: type cannot be empty", svc)
@@ -43,26 +51,7 @@ func ValidateServiceFormat(svc string) error {
 	parts := strings.SplitN(val, "/", 2)
 	host := parts[0]
 
-	// Host validation
-	if strings.Contains(host, "_") {
-		return fmt.Errorf("invalid service format %q: host cannot contain underscores", svc)
-	}
-
-	// Normalize wildcards for DNS validation.
-	// Note: We only support prefix wildcards starting with "*." (e.g., "*.service")
-	// and suffix wildcards ending with ".*" (e.g., "service.*"). Both formats
-	// strictly require a dot separator at the domain boundary.
-	// Arbitrary partial matching (e.g., "dev-*", "*-prod", or "service*") is not
-	// supported because the unnormalized "*" character will fail the DNS validation.
-	h := host
-	if strings.HasPrefix(h, "*.") {
-		h = "wildcard." + h[2:]
-	}
-	if strings.HasSuffix(h, ".*") {
-		h = h[:len(h)-2] + ".wildcard"
-	}
-
-	if !govalidator.IsDNSName(h) {
+	if !dnsNameRegex.MatchString(host) {
 		return fmt.Errorf("invalid service format %q: %q is not a valid DNS name", svc, host)
 	}
 

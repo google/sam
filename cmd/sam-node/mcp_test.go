@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/sam/api"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	"github.com/libp2p/go-libp2p/core/peerstore"
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
@@ -207,9 +208,9 @@ func TestSplitToolName(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotSvc, gotTool, err := splitToolName(tt.input)
+			gotSvc, gotTool, err := api.SplitToolName(tt.input)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("splitToolName(%q) returned error: %v, wantErr: %v", tt.input, err, tt.wantErr)
+				t.Errorf("SplitToolName(%q) returned error: %v, wantErr: %v", tt.input, err, tt.wantErr)
 			}
 			if !tt.wantErr {
 				if gotSvc != tt.wantService || gotTool != tt.wantTool {

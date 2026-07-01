@@ -470,7 +470,7 @@ func (n *SamNode) handleDescribeRemoteTool(ctx context.Context, req *mcp.CallToo
 		return nil, nil, fmt.Errorf("invalid peer_id: %w", err)
 	}
 
-	serviceName, actualToolName, err := splitToolName(params.ToolName)
+	serviceName, actualToolName, err := api.SplitToolName(params.ToolName)
 	if err != nil {
 		return nil, nil, err
 	}

@@ -20,7 +20,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
@@ -34,18 +33,19 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// meshInstructions tells connecting clients a mesh is reachable here and how
-// the find → describe → call flow works. Sent at initialize time.
-const meshInstructions = `This MCP server connects this node to a SAM mesh: a network of remote agents that host their own MCP tools. The tools listed here are infrastructure for reaching tools on other peers when no local tool or capability covers the task.
+// meshInstructions tells connecting clients how the SAM mesh is composed and how
+// to discover and call remote tools/services. Sent at initialize time.
+const meshInstructions = `This MCP server connects this node to a SAM mesh: a network of remote agents that host their own services (e.g., MCP servers or inference services) and tools.
 
-Reach into the mesh only when the needed tool isn't available locally. To do so:
+The mesh allows you to discover these remote services, list their tools, and call them.
+To use these remote services and their tools, the client can use the following flow:
   1. find_remote_tools — discover what tools exist across the mesh (returns peer_id + namespaced tool_name + description). Optionally narrow by service_name or peer_id.
   2. describe_remote_tool — fetch a specific tool's input_schema before calling it. Always do this so you know the argument shape.
-  3. call_remote_tool — invoke it. Pass peer_id, the namespaced tool_name, and arguments as a JSON object whose keys match the input_schema from step 2 (not a stringified blob).
+  3. call_remote_tool — invoke it. Pass peer_id, the namespaced tool_name (scheme://service/tool, e.g. 'mcp://code-reviewer/review_pr'), and arguments as a JSON object whose keys match the input_schema.
 
-Other useful tools: discover_remote_services browses services by type, get_mesh_info reports connected peers and mesh state, list_local_services shows what this node hosts.
+Other useful tools: discover_remote_services browses services by type (e.g. 'MCP' or 'Inference'), get_mesh_info reports connected peers and mesh state, list_local_services shows what this node hosts.
 
-Remote tool names are namespaced as 'scheme://service/tool' (e.g. 'mcp://code-reviewer/review_pr'). Prefer discovering and describing a tool before calling it rather than guessing arguments.`
+Tools on remote services are identified via the format 'scheme://service-name/tool-name' (where 'scheme://service-name' represents the well-known local address of the service, and 'tool-name' is the individual tool to execute on it. Tool names themselves can contain any characters).`
 
 // NewMCPServer creates a new MCP server instance with all tools registered.
 func NewMCPServer(node *SamNode) *mcp.Server {
@@ -364,7 +364,7 @@ func (n *SamNode) ConnectMCPSession(ctx context.Context, targetPeer peer.ID, tar
 }
 
 func (n *SamNode) callMCPToolOnce(ctx context.Context, targetPeer peer.ID, toolName string, params any) (*mcp.CallToolResult, error) {
-	targetService, originalToolName, err := splitToolName(toolName)
+	targetService, originalToolName, err := api.SplitToolName(toolName)
 	if err != nil {
 		return nil, err
 	}
@@ -553,24 +553,4 @@ func (n *SamNode) preparePeerAddrs(ctx context.Context, targetPeer peer.ID) {
 		n.Host.Peerstore().AddAddrs(targetPeer, validAddrs, peerstore.TempAddrTTL)
 		logger.Debugf("[Discovery] Replaced addrs for %s with %d routable/circuit addrs", targetPeer, len(validAddrs))
 	}
-}
-
-// splitToolName splits a fully qualified MCP tool name into its target service URI
-// and the original tool name to be invoked on that service.
-//
-// Expected format: "scheme://service-name/tool-name" (e.g., "mcp://my-service/my-tool").
-// If the input is empty or invalid, it returns an error. No default fallback is applied.
-func splitToolName(toolName string) (targetService, originalToolName string, err error) {
-	if toolName == "" {
-		return "", "", fmt.Errorf("tool name cannot be empty")
-	}
-
-	u, parseErr := url.Parse(toolName)
-	if parseErr != nil || u.Scheme == "" || u.Host == "" || u.Path == "" || u.Opaque != "" {
-		return "", "", fmt.Errorf("invalid namespaced tool name %q: must follow explicit URI format 'scheme://service/tool'", toolName)
-	}
-
-	targetService = u.Scheme + "://" + u.Host
-	originalToolName = strings.TrimPrefix(u.Path, "/")
-	return targetService, originalToolName, nil
 }

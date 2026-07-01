@@ -1512,7 +1512,7 @@ func (n *SamNode) StartIngressServer(ctx context.Context) error {
 			}
 
 			// Extract biscuit from X-Sam-Biscuit header
-			biscuitB64 := r.Header.Get("X-Sam-Biscuit")
+			biscuitB64 := r.Header.Get(api.HeaderSamBiscuit)
 			if biscuitB64 == "" {
 				http.Error(w, "Missing X-Sam-Biscuit header", http.StatusUnauthorized)
 				return
@@ -1545,7 +1545,7 @@ func (n *SamNode) StartIngressServer(ctx context.Context) error {
 			}
 
 			// Strip the biscuit header so it doesn't leak to the backend service
-			r.Header.Del("X-Sam-Biscuit")
+			r.Header.Del(api.HeaderSamBiscuit)
 
 			svc, ok := n.services.Get(serviceName)
 			if !ok {
@@ -1563,7 +1563,7 @@ func (n *SamNode) StartIngressServer(ctx context.Context) error {
 			if upstreamPath == "" {
 				r.URL.Path = "/"
 				if len(parts) == 2 {
-					r.Header.Set("X-Sam-No-Trailing-Slash", "true")
+					r.Header.Set(api.HeaderSamNoTrailingSlash, "true")
 				}
 			} else {
 				r.URL.Path = "/" + upstreamPath

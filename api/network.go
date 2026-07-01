@@ -16,7 +16,7 @@ package api
 
 import (
 	"fmt"
-	"net/url"
+	"regexp"
 	"strings"
 
 	"github.com/libp2p/go-libp2p/core/protocol"
@@ -44,6 +44,37 @@ const (
 
 	// DefaultAudience is the default audience string used in OIDC token validation.
 	DefaultAudience = "sam-mesh-audience"
+)
+
+// ============================================================================
+// SAM Custom HTTP Headers
+// ============================================================================
+
+const (
+	// HeaderSamBiscuit is the custom HTTP header used to carry the base64-encoded
+	// Biscuit token containing the node's identity credentials when forwarding requests
+	// over libp2p HTTP between nodes in the mesh.
+	//
+	// This header is internal to the SAM mesh datapath and is stripped before requests
+	// are forwarded to backend services.
+	HeaderSamBiscuit = "X-Sam-Biscuit"
+
+	// HeaderSamAuthorization is the custom HTTP header that a client can pass to a local
+	// SAM node's egress proxy to supply the Authorization header intended for the remote service.
+	//
+	// The egress proxy uses "Authorization: Bearer <token>" for its own local authentication.
+	// By specifying the target service's auth token in HeaderSamAuthorization, the client avoids
+	// stomping local authentication, and prevents the egress proxy from leaking the local sidecar
+	// authentication token to the remote peer. The egress proxy maps this header back to
+	// "Authorization" before transmitting the request to the destination node.
+	HeaderSamAuthorization = "X-Sam-Authorization"
+
+	// HeaderSamNoTrailingSlash is the custom HTTP header set by the ingress handler
+	// to indicate that the original request had no trailing slash.
+	//
+	// This helps backward-compatibility with services that strictly distinguish
+	// between a root path "/" and an empty path "".
+	HeaderSamNoTrailingSlash = "X-Sam-No-Trailing-Slash"
 )
 
 // ============================================================================
@@ -107,6 +138,26 @@ func ServiceTypeToString(t ServiceType) (string, error) {
 // Parsing & Routing Utilities
 // ============================================================================
 
+var (
+	// rfc3986URIRegex is the exact regular expression provided by RFC 3986 Appendix B
+	// for breaking down a well-formed URI reference into its components.
+	// Reference: https://tools.ietf.org/html/rfc3986#appendix-B
+	//
+	// Breaking down the regex:
+	//   ^(([^:/?#]+):)?   - Group 1 & 2: Scheme (optional, e.g. "mcp:")
+	//   (//([^/?#]*))?    - Group 3 & 4: Authority (optional, e.g. "//my-service")
+	//   ([^?#]*)          - Group 5: Path
+	//   (\?([^#]*))?      - Group 6 & 7: Query (optional)
+	//   (#(.*))?          - Group 8 & 9: Fragment (optional)
+	rfc3986URIRegex = regexp.MustCompile(`^(([^:/?#]+):)?(//([^/?#]*))?([^?#]*)(\?([^#]*))?(#(.*))?`)
+
+	// dnsNameRegex is adapted from govalidator's DNSName pattern.
+	// Reference: https://github.com/asaskevich/govalidator/blob/3dd3875e2b081a20d6eed935913a482fea14ecd0/patterns.go#L29
+	// It is adapted to allow underscores and asterisks (wildcards).
+	// The asterisk '*' can only be at the very beginning (e.g., "*.example.com") or at the very end (e.g., "example.*").
+	dnsNameRegex = regexp.MustCompile(`^(\*\.)?([a-zA-Z0-9_]{1}[a-zA-Z0-9_-]{0,62}){1}(\.[a-zA-Z0-9_]{1}[a-zA-Z0-9_-]{0,62})*(\.\*)?[\._]?$`)
+)
+
 // ParseServiceTarget parses a service target string into its type (scheme) and name components.
 //
 // Expected formats:
@@ -120,15 +171,64 @@ func ParseServiceTarget(target string) (svcType, svcName string) {
 	if target == "*" {
 		return "*", "*"
 	}
-	u, err := url.Parse(target)
-	if err != nil || u.Scheme == "" {
-		return "", target
+
+	if strings.Contains(target, "://") {
+		matches := rfc3986URIRegex.FindStringSubmatch(target)
+		if len(matches) < 6 {
+			return "", target
+		}
+		scheme := matches[2]
+		hasAuthority := matches[3] != ""
+		authority := matches[4]
+		path := matches[5]
+
+		if scheme == "" || !hasAuthority {
+			return "", target
+		}
+		name := authority
+		if path != "" {
+			name = authority + path
+		}
+		return scheme, name
 	}
-	name := u.Host
-	if u.Opaque != "" {
-		name = u.Opaque
-	} else if u.Path != "" {
-		name = u.Host + u.Path
+
+	parts := strings.SplitN(target, ":", 2)
+	if len(parts) == 2 {
+		return parts[0], parts[1]
 	}
-	return u.Scheme, name
+	return "", target
+}
+
+// SplitToolName splits a fully qualified MCP tool name into its target service URI
+// and the original tool name.
+//
+// Expected format: "scheme://service/tool" (e.g., "mcp://my-service/my-tool").
+// If the input is empty or invalid, it returns an error. No default fallback is applied.
+func SplitToolName(toolName string) (targetService, originalToolName string, err error) {
+	if toolName == "" {
+		return "", "", fmt.Errorf("tool name cannot be empty")
+	}
+
+	matches := rfc3986URIRegex.FindStringSubmatch(toolName)
+	if len(matches) < 6 {
+		return "", "", fmt.Errorf("invalid namespaced tool name %q: must follow explicit URI format 'scheme://service/tool'", toolName)
+	}
+
+	scheme := matches[2]
+	hasAuthority := matches[3] != ""
+	authority := matches[4]
+	path := matches[5]
+
+	if scheme == "" || !hasAuthority || authority == "" || path == "" || path == "/" {
+		return "", "", fmt.Errorf("invalid namespaced tool name %q: must follow explicit URI format 'scheme://service/tool'", toolName)
+	}
+
+	// Reject query parameters or fragments in the tool name
+	if matches[6] != "" || matches[8] != "" {
+		return "", "", fmt.Errorf("invalid namespaced tool name %q: queries and fragments are not allowed", toolName)
+	}
+
+	targetService = scheme + "://" + authority
+	originalToolName = strings.TrimPrefix(path, "/")
+	return targetService, originalToolName, nil
 }

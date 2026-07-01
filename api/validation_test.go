@@ -19,10 +19,13 @@ func TestValidateServiceFormat(t *testing.T) {
 		{"invalid fallback", "mcp-service", true},
 		{"invalid consecutive dots", "mcp://my..service", true},
 		{"invalid wildcard middle", "mcp://my.*.service", true},
-		{"invalid invalid chars", "mcp://service_name", true},
+		{"valid with underscore", "mcp://service_name", false},
 		{"invalid suffix wildcard without dot", "mcp://service.inc*", true},
 		{"valid exact with path", "mcp://my-service/local", false},
 		{"invalid legacy mcp: format", "mcp:my-service.local", true},
+		{"invalid with query", "mcp://my-service?query=1", true},
+		{"invalid with fragment", "mcp://my-service#fragment", true},
+		{"invalid with query and fragment", "mcp://my-service?query=1#fragment", true},
 	}
 
 	for _, tt := range tests {

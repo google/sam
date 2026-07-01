@@ -57,15 +57,24 @@ services:
 			},
 		},
 		{
-			name: "Invalid service name containing underscores",
+			name: "Valid service name containing underscores",
 			yamlContent: `
 version: "v1alpha1"
 services:
   - type: "mcp"
-    name: "invalid_mcp_name"
+    name: "valid_mcp_name"
     target_url: "http://localhost:8080"
 `,
-			wantErr: true,
+			wantErr: false,
+			verify: func(t *testing.T, config *NodeConfigComplete) {
+				if len(config.Services) != 1 {
+					t.Errorf("expected 1 service, got %d", len(config.Services))
+				}
+				s := config.Services[0]
+				if s.Type != "mcp" || s.Name != "valid_mcp_name" || s.TargetURL != "http://localhost:8080" {
+					t.Errorf("unexpected service: %+v", s)
+				}
+			},
 		},
 		{
 			name: "Invalid service name containing invalid DNS characters",

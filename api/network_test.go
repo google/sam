@@ -61,6 +61,30 @@ func TestParseServiceTarget(t *testing.T) {
 			wantType: "mcp",
 			wantName: "tool:subtool",
 		},
+		{
+			name:     "Target with underscore",
+			target:   "client_peer_id:value_with_underscore",
+			wantType: "client_peer_id",
+			wantName: "value_with_underscore",
+		},
+		{
+			name:     "Wildcard fact",
+			target:   "*:*",
+			wantType: "*",
+			wantName: "*",
+		},
+		{
+			name:     "Hierarchical URI with path",
+			target:   "mcp://my_service/tool",
+			wantType: "mcp",
+			wantName: "my_service/tool",
+		},
+		{
+			name:     "Hierarchical URI with underscore",
+			target:   "mcp://my_service_name",
+			wantType: "mcp",
+			wantName: "my_service_name",
+		},
 	}
 
 	for _, tt := range tests {

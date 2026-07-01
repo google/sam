@@ -444,8 +444,17 @@ func createEgressProxy(node *SamNode) http.Handler {
 			return
 		}
 
-		r.Header.Del("Authorization")
-		r.Header.Set("X-Sam-Biscuit", base64.StdEncoding.EncodeToString(biscuitBytes))
+		r.Header.Set(api.HeaderSamBiscuit, base64.StdEncoding.EncodeToString(biscuitBytes))
+
+		// Map X-Sam-Authorization to Authorization header for the remote service,
+		// and delete the local sidecar Authorization header to prevent leaking it.
+		if upstreamAuth := r.Header.Get(api.HeaderSamAuthorization); upstreamAuth != "" {
+			r.Header.Set("Authorization", upstreamAuth)
+			r.Header.Del(api.HeaderSamAuthorization)
+		} else {
+			r.Header.Del("Authorization")
+		}
+
 		proxy.ServeHTTP(w, r)
 	})
 }
