@@ -236,7 +236,8 @@ func (n *SamNode) injectIdentityFacts(authorizer biscuit.Authorizer, pubKey ed25
 	}
 
 	n.keysMu.RLock()
-	keys := n.trustedKeys
+	keys := make([]TrustedKey, len(n.trustedKeys))
+	copy(keys, n.trustedKeys)
 	n.keysMu.RUnlock()
 
 	var auth biscuit.Authorizer
