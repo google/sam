@@ -58,8 +58,10 @@ teardown() {
 
   docker network connect "${MESH_NETWORK_2}" "${hub_node}"
   DISCONNECT_CONTAINERS+=("${hub_node}:${MESH_NETWORK_2}")
-  docker network connect "${MESH_NETWORK_2}" "${oidc_node}"
-  DISCONNECT_CONTAINERS+=("${oidc_node}:${MESH_NETWORK_2}")
+  if [[ "${oidc_node}" != "${hub_node}" ]]; then
+    docker network connect "${MESH_NETWORK_2}" "${oidc_node}"
+    DISCONNECT_CONTAINERS+=("${oidc_node}:${MESH_NETWORK_2}")
+  fi
 
   mesh_start_node "1" "--enable-relay=true --log-level=debug"
 

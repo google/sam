@@ -346,7 +346,8 @@ KIND
   mesh_assert_container_running() {
     local name="$1"
     if [[ "${name}" == *"-hub" ]]; then
-      name="sam-hub"
+      kubectl --context="${KUBECONTEXT:-kind-sam-wi-test}" get pod sam-hub-0 -o jsonpath='{.status.phase}' | grep -q "Running"
+      return $?
     fi
     local state
     state="$(docker inspect -f '{{.State.Running}}' "${name}" 2>/dev/null || true)"
