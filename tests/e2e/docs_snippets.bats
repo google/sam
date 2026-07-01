@@ -21,8 +21,7 @@ teardown() {
   run mesh_start_hub
   [[ "$status" -eq 0 ]]
 
-  run mesh_start_node 1 "--log-level debug"
-  [[ "$status" -eq 0 ]]
+  mesh_start_node 1 "--log-level debug"
 
   local node1_name="${MESH_PREFIX}-node-1"
   mesh_wait_for_log "${node1_name}" "SAM Node Online" 20

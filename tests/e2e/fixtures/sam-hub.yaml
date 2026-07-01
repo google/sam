@@ -3,18 +3,32 @@ kind: ConfigMap
 metadata:
   name: sam-hub-config
 data:
-  SAM_OIDC_ISSUER: "${ISSUER}"
+  SAM_OIDC_ISSUER: "${ISSUERS}"
   SAM_OIDC_ID: "sam-mesh-audience"
   SAM_HUB_KEY: "0000000000000000000000000000000000000000000000000000000000000000"
   policy.yaml: |
     version: v1alpha1
     bindings:
-      - group: "*"
+      - user: "system:serviceaccount:default:sam-node-sa"
+        role: admin
+      - group: "data-scientist"
+        role: mesh-member
+      - group: "admin"
+        role: admin
+      - user: "admin-user"
         role: admin
     roles:
       admin:
         allowed_services:
           - "*"
+        allowed_targets:
+          - "*"
+      mesh-member:
+        allowed_services:
+          - "mcp://calculator"
+          - "mcp://db-agent"
+          - "mcp://http-tool"
+          - "mcp://stdio-tool"
         allowed_targets:
           - "*"
 ---
@@ -60,6 +74,11 @@ spec:
         envFrom:
         - configMapRef:
             name: sam-hub-config
+        env:
+        - name: MY_NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
         ports:
         - containerPort: 9090
           hostPort: 9090
@@ -72,17 +91,18 @@ spec:
           protocol: UDP
         args:
         - "--issuer"
-        - "${ISSUER}"
+        - "${ISSUERS}"
         - "--key"
         - "0000000000000000000000000000000000000000000000000000000000000000"
         - "--insecure-skip-tls-verify"
         - "--policy-file=/etc/sam/policy.yaml"
         - "--listen=/ip4/0.0.0.0/tcp/4501"
         - "--listen=/ip4/0.0.0.0/udp/4501/quic-v1"
-        - "--external-multiaddr=/dns4/sam-hub.default.svc.cluster.local/tcp/4501"
-        - "--external-multiaddr=/dns4/sam-hub.default.svc.cluster.local/udp/4501/quic-v1"
-        - "--external-multiaddr=http://sam-hub-0.sam-hub.default.svc.cluster.local:9090"
-        - "--external-multiaddr=http://sam-hub-1.sam-hub.default.svc.cluster.local:9090"
+        - "--external-multiaddr=/dns4/$(MY_NODE_NAME)/tcp/4501"
+        - "--external-multiaddr=/dns4/$(MY_NODE_NAME)/udp/4501/quic-v1"
+        - "--external-multiaddr=http://sam-hub:9090"
+        - "--log-level"
+        - "debug"
         volumeMounts:
         - name: config-volume
           mountPath: /etc/sam/policy.yaml

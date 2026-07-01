@@ -39,8 +39,7 @@ teardown() {
   mesh_start_hub
 
   echo "[$(date +%T)] Starting Node 1"
-  run mesh_start_node 1 "--log-level debug"
-  [[ "$status" -eq 0 ]]
+  mesh_start_node 1 "--log-level debug"
   mesh_wait_for_log "${MESH_PREFIX}-node-1" "SAM Node Online" 60
   mesh_wait_for_mcp_ready 1 20
 
@@ -48,10 +47,9 @@ teardown() {
   start_calc_mcp
 
   echo "[$(date +%T)] Starting Node 2 with calculator service"
-  run mesh_start_node 2 \
+  mesh_start_node 2 \
     "--log-level debug" \
     "tests/e2e/docker/calc-mcp/sam-node-config.yaml"
-  [[ "$status" -eq 0 ]]
   mesh_wait_for_log "${MESH_PREFIX}-node-2" "SAM Node Online" 20
   mesh_wait_for_mcp_ready 2 20
 
@@ -93,8 +91,7 @@ teardown() {
   mesh_start_hub
 
   echo "[$(date +%T)] Starting Node 1"
-  run mesh_start_node 1 "--log-level debug"
-  [[ "$status" -eq 0 ]]
+  mesh_start_node 1 "--log-level debug"
   mesh_wait_for_log "${MESH_PREFIX}-node-1" "SAM Node Online" 60
   mesh_wait_for_mcp_ready 1 20
 
@@ -102,10 +99,9 @@ teardown() {
   start_calc_mcp
 
   echo "[$(date +%T)] Starting Node 2 with calculator service"
-  run mesh_start_node 2 \
+  mesh_start_node 2 \
     "--log-level debug" \
     "tests/e2e/docker/calc-mcp/sam-node-config.yaml"
-  [[ "$status" -eq 0 ]]
   mesh_wait_for_log "${MESH_PREFIX}-node-2" "SAM Node Online" 20
   mesh_wait_for_mcp_ready 2 20
 
@@ -144,8 +140,7 @@ teardown() {
   mesh_start_hub
 
   echo "[$(date +%T)] Starting Node 1"
-  run mesh_start_node 1 "--log-level debug"
-  [[ "$status" -eq 0 ]]
+  mesh_start_node 1 "--log-level debug"
   mesh_wait_for_log "${MESH_PREFIX}-node-1" "SAM Node Online" 60
   mesh_wait_for_mcp_ready 1 20
 
@@ -153,10 +148,9 @@ teardown() {
   start_calc_mcp
 
   echo "[$(date +%T)] Starting Node 2 with calculator service"
-  run mesh_start_node 2 \
+  mesh_start_node 2 \
     "--log-level debug" \
     "tests/e2e/docker/calc-mcp/sam-node-config.yaml"
-  [[ "$status" -eq 0 ]]
   mesh_wait_for_log "${MESH_PREFIX}-node-2" "SAM Node Online" 20
   mesh_wait_for_mcp_ready 2 20
 
@@ -209,8 +203,7 @@ teardown() {
   mesh_start_hub
 
   echo "[$(date +%T)] Starting Node 1"
-  run mesh_start_node 1 "--log-level debug"
-  [[ "$status" -eq 0 ]]
+  mesh_start_node 1 "--log-level debug"
   mesh_wait_for_log "${MESH_PREFIX}-node-1" "SAM Node Online" 60
   mesh_wait_for_mcp_ready 1 20
 
@@ -218,10 +211,9 @@ teardown() {
   start_calc_mcp
 
   echo "[$(date +%T)] Starting Node 2 with calculator service"
-  run mesh_start_node 2 \
+  mesh_start_node 2 \
     "--log-level debug" \
     "tests/e2e/docker/calc-mcp/sam-node-config.yaml"
-  [[ "$status" -eq 0 ]]
   mesh_wait_for_log "${MESH_PREFIX}-node-2" "SAM Node Online" 20
   mesh_wait_for_mcp_ready 2 20
 

@@ -8,3 +8,7 @@ services:
     name: "calculator"
     description: "Simple math operations"
     target_url: "http://calc-mcp:7777/mcp"
+  - type: "mcp"
+    name: "calc_service"
+    description: "Simple math operations with underscore"
+    target_url: "http://calc-mcp:7777/mcp"

@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mock-oidc
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mock-oidc
+  template:
+    metadata:
+      labels:
+        app: mock-oidc
+    spec:
+      containers:
+      - name: mock-oidc
+        image: sam-mock-oidc:local
+        ports:
+        - containerPort: 18080
+          hostPort: 18080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mock-oidc
+spec:
+  selector:
+    app: mock-oidc
+  ports:
+  - name: http
+    port: 18080
+    targetPort: 18080
