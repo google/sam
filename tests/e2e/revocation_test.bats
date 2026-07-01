@@ -113,5 +113,13 @@ teardown() {
   local node2_addr="/dns4/sam-node-2/tcp/5002/p2p/${node2_peer_id}"
   run docker run --rm --network "${MESH_NETWORK}" "${MESH_RUNTIME_IMAGE}" mcp-client -url "http://sam-node-1:8080/mcp" -tool "connect_peer" -args "{\"peer_addr\":\"${node2_addr}\"}"
   echo "Reconnect output: $output"
+
+  local info_output
+  info_output="$(docker run --rm --network "${MESH_NETWORK}" "${MESH_RUNTIME_IMAGE}" mcp-client -url "http://sam-node-1:8080/mcp" -tool "get_mesh_info" 2>/dev/null)"
+  echo "After reconnect mesh info: ${info_output}"
+  local connected
+  connected="$(echo "${info_output}" | jq -r --arg peer "${node2_peer_id}" '.connected_peers | index($peer) != null')"
+  echo "Connected after reconnect: ${connected}"
+
   [[ "$output" == *"gater disallows connection"* ]]
 }

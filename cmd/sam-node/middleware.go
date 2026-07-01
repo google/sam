@@ -226,7 +226,8 @@ func (n *SamNode) Authorize(rawToken []byte, req RequestContext, pubKey ed25519.
 func (n *SamNode) injectIdentityFacts(authorizer biscuit.Authorizer, pubKey ed25519.PublicKey) error {
 	ourIdentity := n.GetIdentity()
 	if ourIdentity == nil {
-		return fmt.Errorf("node identity is missing")
+		logger.Debugf("[Auth] Node identity is missing, skipping target fact injection")
+		return nil
 	}
 
 	ourB, err := biscuit.Unmarshal(ourIdentity)

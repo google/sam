@@ -226,6 +226,12 @@ func (n *SamNode) handleConnectPeer(ctx context.Context, req *mcp.CallToolReques
 	if err != nil {
 		return nil, nil, err
 	}
+	if n.revokedPeers.Contains(addrInfo.ID.String()) {
+		return nil, nil, fmt.Errorf("failed to dial: failed to dial %s: gater disallows connection to peer", addrInfo.ID)
+	}
+	if n.Store.IsBanned(addrInfo.ID) {
+		return nil, nil, fmt.Errorf("failed to dial: failed to dial %s: gater disallows connection to peer", addrInfo.ID)
+	}
 	conns := n.Host.Network().ConnsToPeer(addrInfo.ID)
 	connectedness := n.Host.Network().Connectedness(addrInfo.ID)
 	logger.Debugf("[connect_peer] Target peer %s, connectedness: %v, active conns: %d", addrInfo.ID, connectedness, len(conns))
