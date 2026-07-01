@@ -143,3 +143,50 @@ allow if service("system", "sam.catalog");
 > [!IMPORTANT]
 > Without this baseline rule (or if a custom local attenuation policy explicitly blocks it), remote nodes will not be able to retrieve this node's tool catalog. As a result, agents across the mesh will fail to discover or call any of this node's tools.
 
+## 5. Ingress Authorization Pipeline (Execution Flow)
+
+When a node receives an incoming connection request (via P2P HTTP Ingress or wrapped protocol streams like MCP/Inference), it performs a multi-stage verification pipeline.
+
+### 5.1 Pipeline Stages
+
+```mermaid
+graph TD
+    A[Incoming Connection] --> B(Stage 1: Connection Gating)
+    B -->|Banned/Revoked| C[Drop Connection]
+    B -->|Allowed| D(Stage 2: Biscuit Token Verification)
+    D --> E[Run 1: Authorize Node's Own Identity Token]
+    E --> F[Query & Inject Destination Target Facts]
+    F --> G[Run 2: Authorize Caller's Request Token]
+    G -->|Success| H[Proxy to Downstream Service]
+    G -->|Denied| I[Return 403 Forbidden / Reject Auth Frame]
+```
+
+1. **Stage 1: Connection Gating (Layer 2)**
+   - Performed immediately at the connection manager level (`gate.go`).
+   - Checks the remote peer ID against local blacklist (`Store.IsBanned`) and revocation caches (`revokedPeers`).
+   - Does not parse Biscuit tokens. Connection is dropped early if matched.
+
+2. **Stage 2: Biscuit Token Verification (Layer 3/4)**
+   - Handled inside node middleware (`middleware.go`).
+   - Performs exactly **two Biscuit authorizer execution runs** to process authorization:
+
+#### Run 1: Destination Identity Fact Evaluation
+- **Target**: The node's **own identity token** (issued by the Hub during enrollment).
+- **Purpose**: We must mathematically evaluate the node's own OIDC group/user claims and node ID to produce `target_fact(...)` datalog assertions (e.g. `target_fact("group", "backend-nodes")`). These facts represent *who we are*.
+- **Mechanism**:
+  1. We create an authorizer for our own token signed by the Hub's public key.
+  2. We add a baseline `allow if true` policy. This policy is required by Biscuit so that the authorizer can execute (since the token itself holds only identity facts and has no operation-level authorization policies).
+  3. We execute `Authorize()` to verify our token signature and validate internal checks (such as expiration).
+  4. We query `api.TargetFactRules` against this authorizer to extract target facts.
+  5. We inject these extracted `target_fact` assertions into the main request authorizer.
+
+#### Run 2: Caller Request Authorization
+- **Target**: The caller's **request token** (the Biscuit token presented in the request's `X-Sam-Biscuit` header or `AuthFrame`).
+- **Purpose**: Verifies that the caller has been granted access by the Hub to the requested target service, checks for replay protection, and evaluates local attenuation constraints.
+- **Mechanism**:
+  1. We create an authorizer for the caller's token using the Hub's public key.
+  2. We inject the target matching facts derived from Run 1.
+  3. We add baseline rules (e.g. peer ID matching connection ID check, system catalog access policies) and local attenuation configurations (`sam-node-config.yaml`).
+  4. We execute `Authorize()` to check all signatures, checks, and policies. If successful, the request is forwarded to the underlying service.
+
+

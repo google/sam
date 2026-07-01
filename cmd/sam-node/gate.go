@@ -16,7 +16,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/libp2p/go-libp2p/core/connmgr"
 	"github.com/libp2p/go-libp2p/core/control"
@@ -40,10 +39,18 @@ type nodeConnGate struct {
 
 // InterceptPeerDial controls who we are allowed to call (Outbound)
 func (g *nodeConnGate) InterceptPeerDial(p peer.ID) (allow bool) {
+	logger.Debugf("[Gater] InterceptPeerDial for %s", p)
 	if g.node.revokedPeers.Contains(p.String()) {
+		logger.Infof("[Gater] InterceptPeerDial denying %s: in revoked cache", p)
 		return false
 	}
-	return !g.node.Store.IsBanned(p)
+	banned := g.node.Store.IsBanned(p)
+	if banned {
+		logger.Infof("[Gater] InterceptPeerDial denying %s: banned in store", p)
+		return false
+	}
+	logger.Debugf("[Gater] InterceptPeerDial allowing %s", p)
+	return true
 }
 
 // InterceptAddrDial ensures we only dial specific approved networks
@@ -58,16 +65,16 @@ func (g *nodeConnGate) InterceptAccept(n network.ConnMultiaddrs) (allow bool) {
 
 // InterceptSecured is called after TLS handshake. This is our Layer 2 Check.
 func (g *nodeConnGate) InterceptSecured(dir network.Direction, p peer.ID, n network.ConnMultiaddrs) (allow bool) {
+	logger.Debugf("[Gater] InterceptSecured for %s (dir: %v)", p, dir)
 	if g.node.revokedPeers.Contains(p.String()) {
-		fmt.Printf("[Layer 2] Dropping connection: Peer %s is in revoked cache\n", p)
+		logger.Infof("[Gater] InterceptSecured denying %s: in revoked cache", p)
 		return false
 	}
 	if g.node.Store.IsBanned(p) {
-		fmt.Printf("[Layer 2] Dropping connection: Peer %s is explicitly BANNED\n", p)
+		logger.Infof("[Gater] InterceptSecured denying %s: banned in store", p)
 		return false
 	}
-
-	// Allow the TLS pipe to stay open. Layer 3 & 4 will handle the rest.
+	logger.Debugf("[Gater] InterceptSecured allowing %s", p)
 	return true
 }
 

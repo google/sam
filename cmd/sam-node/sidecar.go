@@ -178,6 +178,7 @@ func handleReadyz(w http.ResponseWriter, r *http.Request) {
 func withMeshConnection(node *SamNode, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if node != nil && !node.IsConnected() {
+			logger.Warnf("[SidecarAuth] Request %s %s rejected: node not connected to mesh", r.Method, r.URL.Path)
 			http.Error(w, "Service Unavailable: Not connected to the mesh", http.StatusServiceUnavailable)
 			return
 		}
@@ -187,6 +188,7 @@ func withMeshConnection(node *SamNode, next http.Handler) http.Handler {
 
 func withAuth(token string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		logger.Debugf("[SidecarAuth] Incoming request: %s %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
 		if token == "" {
 			// If token is empty, we assume mTLS is handling authentication.
 			// startSidecarServer enforces that token is present if mTLS is not used.
@@ -196,6 +198,7 @@ func withAuth(token string, next http.Handler) http.Handler {
 
 		authHeader := r.Header.Get("Authorization")
 		if authHeader == "" {
+			logger.Warnf("[SidecarAuth] Request %s %s rejected: missing Authorization header", r.Method, r.URL.Path)
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}

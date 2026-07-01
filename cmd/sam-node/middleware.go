@@ -254,6 +254,7 @@ func (n *SamNode) injectIdentityFacts(authorizer biscuit.Authorizer, pubKey ed25
 	}
 
 	// We must Authorize() to evaluate the token's facts into the world
+	auth.AddPolicy(api.AllowIfTruePolicy)
 	if err := auth.Authorize(); err != nil {
 		logger.Warnf("Failed to authorize our own identity token: %v", err)
 		// we continue anyway, as we just want the facts, but ideally it shouldn't fail
