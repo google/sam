@@ -5,6 +5,13 @@ linkTitle: "SAM Policy & Authorization Reference"
 SAM uses a decentralized authorization model powered by [Biscuit](https://www.biscuitsec.org/). 
 The `sam-hub` authenticates users via OIDC and injects **Facts** into their token based on `policies.yaml`. The `sam-node` operates offline, evaluating the token against baseline rules and optional local attenuation policies.
 
+> [!IMPORTANT]
+> **Default-Deny Security Posture**
+> SAM enforces a strict **default-deny** model. By default, when a node joins the mesh, **all of its services (MCP tools, LLM inference endpoints) are completely locked down and inaccessible to other peers**. 
+> Access is only permitted if the caller presents a Biscuit token containing capability facts (e.g., `granted_service_exact(...)`) explicitly issued by the Hub based on matched user roles.
+> The only built-in exception is the catalog service (`system://sam.catalog`), which is open to all verified nodes to facilitate peer-to-peer discovery.
+
+
 ## 1. OIDC to Biscuit Translation
 The Hub automatically translates OIDC claims into undeniable cryptographic facts:
 
@@ -93,8 +100,8 @@ roles:
       - 'department("analytics");' # Raw injected facts
 ```
 
-## 3. Node Local Attenuation Schema (`sam-node-config.yaml`)
-Local developers can further restrict access to their specific node. Local policies can only attenuate (restrict) access, never expand it beyond what the Hub allowed. They are evaluated entirely at the destination node.
+## 3. Node Local Policy Schema (`sam-node-config.yaml`)
+Local developers can configure custom validation rules for their specific node under `attenuation:`. These rules are loaded directly into the main authorizer and evaluated entirely at the destination node.
 
 ```yaml
 version: "v1alpha1"
@@ -103,9 +110,22 @@ attenuation:
     - 'deny if user("untrusted_sub_id");'
   checks:
     - 'check if time($time), $time < 2026-12-31T00:00:00Z;'
+  policies:
+    - 'allow if service("mcp", "calculator");' # Technical override
 ```
 
-### 3.1 Evaluating `allowed_targets` at the Destination
+### 3.1 Understanding Authorization Limits (Local vs. Hub)
+While the local configuration section is named `attenuation` (reflecting the architectural goal of further restricting access), policies defined under `attenuation.policies` are loaded directly into the execution authorizer. 
+
+This means:
+* **Service Permission Override (Possible)**: A local node owner can write `allow` policies in `sam-node-config.yaml` to bypass or override the Hub's service-level permissions. For example, they can expose their local `mcp://calculator` to all authenticated callers even if the Hub did not assign them access to that service.
+* **Hard Constraints (Bypass Impossible)**: A local node owner **cannot** authorize unauthenticated or malicious requests. The baseline checks in the node middleware are hardcoded and will reject calls that:
+  1. Fail signature verification against the trusted Hub keys.
+  2. Fail the libp2p connection-level replay check (the caller must prove possession of the private key corresponding to the `client_peer_id` in the token).
+  3. Fail target restrictions (if the Hub restricted the token to specific destination groups, the connection is dropped unless the node matches those target groups).
+
+
+### 3.2 Evaluating `allowed_targets` at the Destination
 The SAM network operates on a Zero Trust architecture. The origin node does not police its own traffic. When the Hub injects `allowed_targets` permissions (like `- "group:backend-nodes"`) into the token, it creates `granted_target_group("backend-nodes")` capability facts and seals the token with a `target_restricted()` fact. If no targets are specified, the Hub mints a `target_unrestricted()` fact.
 
 It is up to the **destination node** to mathematically prove that it is the intended target. To do this, the destination node automatically injects its own identity into the local authorization context as target facts (e.g., `target_fact("group", "backend-nodes")`).
@@ -121,7 +141,7 @@ If the token is `target_restricted()` and the destination node does not possess 
 
 > [!NOTE]
 > **Policy Evaluation Precedence**
-> Local policies defined in `sam-node-config.yaml` are evaluated **before** baseline rules. This means local administrators can write rules that explicitly `deny` access based on custom logic, effectively overriding any broad access granted by the Hub's baseline policies. Local policies can only attenuate (restrict) access, never expand it beyond what the Hub allowed.
+> Local policies defined in `sam-node-config.yaml` are evaluated **before** baseline rules. This means local administrators can write rules that explicitly `deny` access based on custom logic, overriding access granted by the Hub. While they can also use local `allow` policies to bypass Hub service capability constraints, all hardcoded baseline checks (OIDC signatures, replay defense, and target group restrictions) remain strictly enforced.
 
 ## 4. Node Baseline Security Rules
 
