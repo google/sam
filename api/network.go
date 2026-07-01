@@ -16,7 +16,6 @@ package api
 
 import (
 	"fmt"
-	"maps"
 	"net/url"
 	"strings"
 
@@ -67,60 +66,6 @@ const (
 	// Fully qualified inference services use the URI format: inference://<service-name>
 	InferenceServicePrefix = "inference://"
 )
-
-// ============================================================================
-// Biscuit Authorization Facts
-// ============================================================================
-
-// Biscuit fact names represent the Datalog predicates used in auth tokens and policy evaluation.
-const (
-	FactExpiration             = "expiration"
-	FactNode                   = "node"
-	FactClientPeerID           = "client_peer_id"
-	FactGroup                  = "group"
-	FactRole                   = "role"
-	FactUser                   = "user"
-	FactEmail                  = "email"
-	FactGrantedServiceAllTypes = "granted_service_all_types"
-	FactGrantedServiceAll      = "granted_service_all"
-	FactGrantedServiceSuffix   = "granted_service_suffix"
-	FactGrantedServicePrefix   = "granted_service_prefix"
-	FactGrantedServiceExact    = "granted_service_exact"
-
-	FactGrantedTargetAllTypes = "granted_target_all_types"
-	FactGrantedTargetAll      = "granted_target_all"
-	FactGrantedTargetSuffix   = "granted_target_suffix"
-	FactGrantedTargetPrefix   = "granted_target_prefix"
-	FactGrantedTargetExact    = "granted_target_exact"
-	FactGrantedTargetAllFacts = "granted_target_all_facts"
-)
-
-// oidcClaimToFact maps standard OIDC claims to their corresponding Biscuit facts.
-//
-// Specification References:
-//   - OIDC Claims: Standard JWT payload claims are defined in OpenID Connect Core 1.0 section 5.1:
-//     https://openid.net/specs/openid-connect-core-1_0.html#Claims
-//   - Biscuit Symbols / Facts: The Biscuit symbol table and fact specification is defined at:
-//     https://doc.biscuitsec.org/reference/specifications.html#symbol-table
-//
-// How to add a new translation:
-//  1. Define a constant for the Biscuit fact name in the constants block above
-//     (e.g., FactMyNewClaim = "my_new_fact").
-//  2. Add an entry to the oidcClaimToFact map below (e.g., "my_oidc_claim": FactMyNewClaim).
-//  3. Update translateClaimsToFacts in cmd/sam-hub/biscuit.go to handle parsing/type conversion
-//     for the new fact if it uses a custom format (e.g. integer, date, list).
-//  4. Implement unit tests in cmd/sam-hub/biscuit_test.go covering the new mapping.
-var oidcClaimToFact = map[string]string{
-	"sub":    FactUser,
-	"email":  FactEmail,
-	"groups": FactGroup,
-}
-
-// OIDCClaimToFact returns a copy of the OIDC claims to Biscuit facts map.
-// This ensures that the global map is immutable and thread-safe for concurrent readers.
-func OIDCClaimToFact() map[string]string {
-	return maps.Clone(oidcClaimToFact)
-}
 
 // ============================================================================
 // Protocol Types & String Mappings

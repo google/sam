@@ -20,87 +20,12 @@ import (
 
 	"github.com/biscuit-auth/biscuit-go/v2"
 	"github.com/biscuit-auth/biscuit-go/v2/datalog"
-	"github.com/biscuit-auth/biscuit-go/v2/parser"
 	"github.com/google/sam/api"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-msgio"
 	"google.golang.org/protobuf/proto"
 )
-
-var (
-	baselinePolicies    []biscuit.Policy
-	baselineRules       []biscuit.Rule
-	baselineReplayCheck biscuit.Check
-	baselineTargetCheck biscuit.Check
-	targetFactRules     []biscuit.Rule
-)
-
-// init compiles the baseline Datalog rules, policies, and checks for the node.
-// These are loaded at initialization to avoid runtime parsing overhead.
-func init() {
-	// 1. Service Allow Policies
-	policyStrs := []string{
-		fmt.Sprintf(`allow if service($type, $name), %s($type, $name)`, api.FactGrantedServiceExact),
-		fmt.Sprintf(`allow if service($type, $name), %s($type, $prefix), $name.starts_with($prefix)`, api.FactGrantedServicePrefix),
-		fmt.Sprintf(`allow if service($type, $name), %s($type, $suffix), $name.ends_with($suffix)`, api.FactGrantedServiceSuffix),
-		fmt.Sprintf(`allow if service($type, $name), %s($type)`, api.FactGrantedServiceAll),
-		fmt.Sprintf(`allow if service($type, $name), %s()`, api.FactGrantedServiceAllTypes),
-		fmt.Sprintf(`allow if service("system", "%s")`, api.CatalogTarget),
-	}
-
-	for i, pStr := range policyStrs {
-		p, err := parser.FromStringPolicy(pStr)
-		if err != nil {
-			panic(fmt.Sprintf("failed to parse baseline policy %d: %v", i, err))
-		}
-		baselinePolicies = append(baselinePolicies, p)
-	}
-
-	// 2. Target Evaluation Rules
-	// These rules satisfy the check if allow_network_target($fact, $val) injected by the Hub.
-	ruleStrs := []string{
-		fmt.Sprintf(`allow_network_target($fact, $val) <- target_fact($fact, $val), %s($fact, $val)`, api.FactGrantedTargetExact),
-		fmt.Sprintf(`allow_network_target($fact, $val) <- target_fact($fact, $val), %s($fact, $prefix), $val.starts_with($prefix)`, api.FactGrantedTargetPrefix),
-		fmt.Sprintf(`allow_network_target($fact, $val) <- target_fact($fact, $val), %s($fact, $suffix), $val.ends_with($suffix)`, api.FactGrantedTargetSuffix),
-		fmt.Sprintf(`allow_network_target($fact, $val) <- target_fact($fact, $val), %s($fact)`, api.FactGrantedTargetAll),
-		fmt.Sprintf(`allow_network_target($fact, $val) <- target_fact($fact, $val), %s()`, api.FactGrantedTargetAllFacts),
-	}
-
-	for i, rStr := range ruleStrs {
-		r, err := parser.FromStringRule(rStr)
-		if err != nil {
-			panic(fmt.Sprintf("failed to parse baseline rule %d: %v", i, err))
-		}
-		baselineRules = append(baselineRules, r)
-	}
-
-	var err error
-	baselineReplayCheck, err = parser.FromStringCheck(`check if client_peer_id($id), connection_peer_id($id)`)
-	if err != nil {
-		panic(fmt.Sprintf("failed to parse replay check: %v", err))
-	}
-
-	baselineTargetCheck, err = parser.FromStringCheck(`check if allow_network_target($fact, $val) or target_unrestricted()`)
-	if err != nil {
-		panic(fmt.Sprintf("failed to parse target check: %v", err))
-	}
-
-	for _, val := range api.OIDCClaimToFact() {
-		ruleStr := fmt.Sprintf(`target_fact(%q, $val) <- %s($val)`, val, val)
-		r, err := parser.FromStringRule(ruleStr)
-		if err != nil {
-			panic(fmt.Sprintf("failed to parse target fact rule: %v", err))
-		}
-		targetFactRules = append(targetFactRules, r)
-	}
-
-	r, err := parser.FromStringRule(`target_fact("node", $val) <- node($val)`)
-	if err != nil {
-		panic(fmt.Sprintf("failed to parse node fact rule: %v", err))
-	}
-	targetFactRules = append(targetFactRules, r)
-}
 
 // RequestContext carries the security metadata for a specific stream request
 type RequestContext struct {
@@ -248,7 +173,7 @@ func (n *SamNode) Authorize(rawToken []byte, req RequestContext, pubKey ed25519.
 	}
 	authorizer.AddFact(biscuit.Fact{
 		Predicate: biscuit.Predicate{
-			Name: "service",
+			Name: api.FactService,
 			IDs:  []biscuit.Term{biscuit.String(opType), biscuit.String(opName)},
 		},
 	})
@@ -256,13 +181,13 @@ func (n *SamNode) Authorize(rawToken []byte, req RequestContext, pubKey ed25519.
 	// Inject connection_peer_id fact for replay defense
 	authorizer.AddFact(biscuit.Fact{
 		Predicate: biscuit.Predicate{
-			Name: "connection_peer_id",
+			Name: api.FactConnectionPeerID,
 			IDs:  []biscuit.Term{biscuit.String(req.PeerID.String())},
 		},
 	})
 
 	// Enforce client_peer_id matches connection_peer_id
-	authorizer.AddCheck(baselineReplayCheck)
+	authorizer.AddCheck(api.BaselineReplayCheck)
 
 	// Inject facts from our own identity token to support target matching
 	n.injectIdentityFacts(authorizer, pubKey)
@@ -280,11 +205,11 @@ func (n *SamNode) Authorize(rawToken []byte, req RequestContext, pubKey ed25519.
 	}
 
 	// Apply Baseline Policies and Rules
-	authorizer.AddCheck(baselineTargetCheck)
-	for _, p := range baselinePolicies {
+	authorizer.AddCheck(api.BaselineTargetCheck)
+	for _, p := range api.BaselinePolicies {
 		authorizer.AddPolicy(p)
 	}
-	for _, r := range baselineRules {
+	for _, r := range api.BaselineRules {
 		authorizer.AddRule(r)
 	}
 
@@ -334,7 +259,7 @@ func (n *SamNode) injectIdentityFacts(authorizer biscuit.Authorizer, pubKey ed25
 		// we continue anyway, as we just want the facts, but ideally it shouldn't fail
 	}
 
-	for _, rule := range targetFactRules {
+	for _, rule := range api.TargetFactRules {
 		if factSet, err := auth.Query(rule); err == nil {
 			for _, fact := range factSet {
 				authorizer.AddFact(fact)

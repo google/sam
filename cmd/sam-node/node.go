@@ -36,7 +36,6 @@ import (
 
 	"github.com/biscuit-auth/biscuit-go/v2"
 	"github.com/biscuit-auth/biscuit-go/v2/datalog"
-	"github.com/biscuit-auth/biscuit-go/v2/parser"
 	"github.com/google/sam/api"
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/ipfs/go-cid"
@@ -1203,12 +1202,7 @@ func (n *SamNode) verifyBiscuit(biscuitData []byte, remotePeer peer.ID) (*biscui
 			continue
 		}
 
-		rule, err := parser.FromStringPolicy("allow if true")
-		if err != nil {
-			lastErr = fmt.Errorf("policy error: %w", err)
-			continue
-		}
-		authorizer.AddPolicy(rule)
+		authorizer.AddPolicy(api.AllowIfTruePolicy)
 
 		if err := authorizer.Authorize(); err == nil {
 			return b, nil

@@ -15,7 +15,6 @@
 package api
 
 import (
-	"reflect"
 	"testing"
 )
 
@@ -74,27 +73,5 @@ func TestParseServiceTarget(t *testing.T) {
 				t.Errorf("ParseServiceTarget() gotName = %v, want %v", gotName, tt.wantName)
 			}
 		})
-	}
-}
-
-func TestOIDCClaimToFact(t *testing.T) {
-	facts := OIDCClaimToFact()
-
-	want := map[string]string{
-		"sub":    FactUser,
-		"email":  FactEmail,
-		"groups": FactGroup,
-	}
-
-	if !reflect.DeepEqual(facts, want) {
-		t.Errorf("OIDCClaimToFact() = %v, want %v", facts, want)
-	}
-
-	// Verify that modifying the returned map does not mutate the internal map.
-	facts["new_claim"] = "new_fact"
-	facts2 := OIDCClaimToFact()
-
-	if _, ok := facts2["new_claim"]; ok {
-		t.Errorf("OIDCClaimToFact() returned map is not a clone, modifications affect internal state")
 	}
 }

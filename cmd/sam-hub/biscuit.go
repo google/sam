@@ -247,11 +247,11 @@ func (h *Hub) mintBiscuitToken(claims jwt.MapClaims, token *oidc.IDToken, remote
 		}
 	}
 	if hasTargets {
-		if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{Name: "target_restricted"}}); err != nil {
+		if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{Name: api.FactTargetRestricted}}); err != nil {
 			errs = append(errs, err)
 		}
 	} else {
-		if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{Name: "target_unrestricted"}}); err != nil {
+		if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{Name: api.FactTargetUnrestricted}}); err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -271,23 +271,6 @@ func (h *Hub) mintBiscuitToken(claims jwt.MapClaims, token *oidc.IDToken, remote
 	}
 
 	return biscuitData, nil
-}
-
-var (
-	staticTimeCheck   biscuit.Check
-	staticAllowPolicy biscuit.Policy
-)
-
-func init() {
-	var err error
-	staticTimeCheck, err = parser.FromStringCheck(`check if time($time), expiration($exp), $time <= $exp`)
-	if err != nil {
-		panic(fmt.Sprintf("failed to parse static time check: %v", err))
-	}
-	staticAllowPolicy, err = parser.FromStringPolicy("allow if true")
-	if err != nil {
-		panic(fmt.Sprintf("failed to parse static allow policy: %v", err))
-	}
 }
 
 func (h *Hub) verifyBiscuit(biscuitData []byte, remotePeer peer.ID) (*biscuit.Biscuit, error) {
@@ -312,13 +295,13 @@ func (h *Hub) verifyBiscuit(biscuitData []byte, remotePeer peer.ID) (*biscuit.Bi
 
 		authorizer.AddFact(biscuit.Fact{
 			Predicate: biscuit.Predicate{
-				Name: "time",
+				Name: api.FactTime,
 				IDs:  []biscuit.Term{biscuit.Date(time.Now())},
 			},
 		})
 
-		authorizer.AddCheck(staticTimeCheck)
-		authorizer.AddPolicy(staticAllowPolicy)
+		authorizer.AddCheck(api.HubStaticTimeCheck)
+		authorizer.AddPolicy(api.AllowIfTruePolicy)
 
 		if err := authorizer.Authorize(); err == nil {
 			return b, nil
