@@ -111,18 +111,16 @@ attenuation:
   checks:
     - 'check if time($time), $time < 2026-12-31T00:00:00Z;'
   policies:
-    - 'allow if service("mcp", "calculator");' # Technical override
+    - 'deny if service("mcp", "restricted-tool"), group("externals");'
 ```
 
 ### 3.1 Understanding Authorization Limits (Local vs. Hub)
-While the local configuration section is named `attenuation` (reflecting the architectural goal of further restricting access), policies defined under `attenuation.policies` are loaded directly into the execution authorizer. 
+The SAM network operates on a Zero Trust architecture where authorization is typically managed centrally by the Hub. However, local nodes have full sovereignty over their resources and can define their own authorization policies using the local `sam-node` configuration.
 
-This means:
-* **Service Permission Override (Possible)**: A local node owner can write `allow` policies in `sam-node-config.yaml` to bypass or override the Hub's service-level permissions. For example, they can expose their local `mcp://calculator` to all authenticated callers even if the Hub did not assign them access to that service.
-* **Hard Constraints (Bypass Impossible)**: A local node owner **cannot** authorize unauthenticated or malicious requests. The baseline checks in the node middleware are hardcoded and will reject calls that:
-  1. Fail signature verification against the trusted Hub keys.
-  2. Fail the libp2p connection-level replay check (the caller must prove possession of the private key corresponding to the `client_peer_id` in the token).
-  3. Fail target restrictions (if the Hub restricted the token to specific destination groups, the connection is dropped unless the node matches those target groups).
+Local policies (defined under `attenuation.policies`) configure the **Verifier** on the local node. 
+
+* **Restrictive Policies (Deny)**: Local nodes can narrow down or restrict permissions granted by the Hub. For example, blocking users during off-hours, restricting specific contractors, or adding custom time-bound checks using `deny if` policies.
+* **Permissive Policies (Allow)**: Local nodes can explicitly grant access to peers, overriding an **implicit deny** (e.g., when the Hub omits a `granted_service` fact). However, local allow policies **cannot bypass explicit constraints** (such as target restrictions or expirations) enforced via Hub-injected `check if` statements. In Biscuit, all `check if` conditions must evaluate to true; if the Hub seals a token with a target restriction that the destination node does not satisfy, the request is unconditionally rejected regardless of any local `allow if` policies.
 
 
 ### 3.2 Evaluating `allowed_targets` at the Destination
@@ -209,4 +207,111 @@ graph TD
   3. We add baseline rules (e.g. peer ID matching connection ID check, system catalog access policies) and local attenuation configurations (`sam-node-config.yaml`).
   4. We execute `Authorize()` to check all signatures, checks, and policies. If successful, the request is forwarded to the underlying service.
 
+## 6. Comprehensive Mesh Policy Example
 
+Here is a representative configuration for an engineering mesh deployment. It shows how to use roles, target groups, service namespaces, wildcards, and local attenuation checks to build a zero-trust development network.
+
+### 6.1 Central Hub Policy (`policies.yaml`)
+
+Deploy this file on `sam-hub` to define global roles and user/service-account mappings.
+
+```yaml
+version: "v1alpha1"
+
+# Bindings map OIDC identities (sub/user, email, groups) to SAM Roles.
+# Note: Kubernetes projected service account tokens do not carry 'groups' claims,
+# so they must be bound explicitly using their 'user' claim format.
+bindings:
+  # 1. Global Admins (Infrastructure SAs, Lead Architects)
+  - user: "system:serviceaccount:sam-mesh:admin-sa"
+    role: "admin"
+  - group: "infrastructure-leads"
+    role: "admin"
+
+  # 2. Software Developers
+  - group: "software-engineering-team"
+    role: "developer"
+
+  # 3. Data Scientists & AI Engineers
+  - group: "data-science-team"
+    role: "data-scientist"
+
+  # 4. Contractors / Read-Only Audits
+  - email: "audit-contractor@external.com"
+    role: "auditor"
+
+# Roles define the allowed destinations (allowed_targets) and tools (allowed_services)
+roles:
+  # Admins have full, unrestricted access to the entire mesh
+  admin:
+    allowed_targets:
+      - "*"
+    allowed_services:
+      - "*"
+
+  # Developers can call development tools on dev nodes
+  developer:
+    allowed_targets:
+      - "group:dev-nodes"           # Can only call nodes in the 'dev-nodes' target group
+    allowed_services:
+      - "mcp://code-reviewer"       # Can call the code reviewer tool
+      - "mcp://git-helper"          # Can call git helper tools
+      - "mcp://build-runner.*"      # Wildcard: matches any build runner sub-service (e.g. build-runner.go)
+
+  # Data Scientists can call database tools and all AI inference endpoints
+  data-scientist:
+    allowed_targets:
+      - "group:data-nodes"          # Can call nodes in the 'data-nodes' target group
+      - "node:12D3KooWSpecialNode"  # Can call a specific high-compute node directly
+    allowed_services:
+      - "mcp://db-reader"           # Can query databases
+      - "inference://*"             # Wildcard: can access any LLM inference service
+
+  # Auditors can only query metadata catalogs and cannot call operational tools
+  auditor:
+    allowed_targets:
+      - "*"
+    allowed_services:
+      - "system://sam.catalog"      # Strictly limited to tool discovery/metadata
+```
+
+### 6.2 Node-Level Configuration (`sam-node-config.yaml`)
+
+Deploy this file on a specific database node in the `data-nodes` group to register services and enforce local restrictions.
+
+```yaml
+version: "v1alpha1"
+
+# Static services hosted by this local node
+services:
+  - type: "mcp"
+    name: "db-reader"
+    description: "Read-only SQL execution tool"
+    target_url: "http://127.0.0.1:5001/mcp"
+
+  - type: "mcp"
+    name: "db-writer"
+    description: "Database modification tool"
+    target_url: "http://127.0.0.1:5002/mcp"
+
+# Local policies further restrict or override permissions on this specific node
+attenuation:
+  # local rules evaluate to block unauthorized actions
+  rules:
+    # 1. Block db-writer calls during off-hours (9 PM to 6 AM)
+    - 'deny if service("mcp", "db-writer"), time($time), $time.hour() >= 21;'
+    - 'deny if service("mcp", "db-writer"), time($time), $time.hour() < 6;'
+
+  # local checks must be satisfied for any connection to succeed
+  checks:
+    # 2. Enforce strict TLS certificate expiry limit
+    - 'check if time($time), $time < 2026-12-31T23:59:59Z;'
+
+  # local policies can contain deny rules (to restrict Hub grants) or allow rules (to override implicit denies)
+  policies:
+    # 3. Restrict contractors from accessing db-writer even if Hub granted it
+    - 'deny if service("mcp", "db-writer"), role("contractor");'
+    
+    # 4. Explicitly allow local admin bypass
+    - 'allow if user("local-admin");'
+```
