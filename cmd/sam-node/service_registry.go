@@ -135,6 +135,18 @@ func (r *ServiceRegistry) insertService(svc Service) {
 	r.services[svc.Info().Name] = svc
 }
 
+// hostedCatalogURL returns the target URL of a CATALOG service this node hosts, if any.
+func (r *ServiceRegistry) hostedCatalogURL() (string, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, svc := range r.services {
+		if svc.Info().Type == api.ServiceType_SERVICE_TYPE_CATALOG {
+			return svc.TargetURL()
+		}
+	}
+	return "", false
+}
+
 // TeardownAll calls Teardown on every registered service and clears the
 // map. Per-service errors are logged; iteration continues.
 func (r *ServiceRegistry) TeardownAll() {

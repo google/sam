@@ -41,6 +41,7 @@ const (
 	ServiceType_SERVICE_TYPE_UNSPECIFIED ServiceType = 0
 	ServiceType_SERVICE_TYPE_MCP         ServiceType = 1
 	ServiceType_SERVICE_TYPE_INFERENCE   ServiceType = 2
+	ServiceType_SERVICE_TYPE_CATALOG     ServiceType = 3
 )
 
 // Enum value maps for ServiceType.
@@ -49,11 +50,13 @@ var (
 		0: "SERVICE_TYPE_UNSPECIFIED",
 		1: "SERVICE_TYPE_MCP",
 		2: "SERVICE_TYPE_INFERENCE",
+		3: "SERVICE_TYPE_CATALOG",
 	}
 	ServiceType_value = map[string]int32{
 		"SERVICE_TYPE_UNSPECIFIED": 0,
 		"SERVICE_TYPE_MCP":         1,
 		"SERVICE_TYPE_INFERENCE":   2,
+		"SERVICE_TYPE_CATALOG":     3,
 	}
 )
 
@@ -498,6 +501,98 @@ func (x *ServiceInfo) GetDescription() string {
 	return ""
 }
 
+type ServiceAnnounce struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Type          ServiceType            `protobuf:"varint,1,opt,name=type,proto3,enum=sam.v1.ServiceType" json:"type,omitempty"`
+	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	PeerId        string                 `protobuf:"bytes,3,opt,name=peer_id,json=peerId,proto3" json:"peer_id,omitempty"`
+	Addrs         []string               `protobuf:"bytes,4,rep,name=addrs,proto3" json:"addrs,omitempty"`
+	Timestamp     int64                  `protobuf:"varint,5,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	TtlMs         int64                  `protobuf:"varint,6,opt,name=ttl_ms,json=ttlMs,proto3" json:"ttl_ms,omitempty"`
+	Signature     []byte                 `protobuf:"bytes,7,opt,name=signature,proto3" json:"signature,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ServiceAnnounce) Reset() {
+	*x = ServiceAnnounce{}
+	mi := &file_api_sam_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ServiceAnnounce) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ServiceAnnounce) ProtoMessage() {}
+
+func (x *ServiceAnnounce) ProtoReflect() protoreflect.Message {
+	mi := &file_api_sam_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ServiceAnnounce.ProtoReflect.Descriptor instead.
+func (*ServiceAnnounce) Descriptor() ([]byte, []int) {
+	return file_api_sam_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *ServiceAnnounce) GetType() ServiceType {
+	if x != nil {
+		return x.Type
+	}
+	return ServiceType_SERVICE_TYPE_UNSPECIFIED
+}
+
+func (x *ServiceAnnounce) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *ServiceAnnounce) GetPeerId() string {
+	if x != nil {
+		return x.PeerId
+	}
+	return ""
+}
+
+func (x *ServiceAnnounce) GetAddrs() []string {
+	if x != nil {
+		return x.Addrs
+	}
+	return nil
+}
+
+func (x *ServiceAnnounce) GetTimestamp() int64 {
+	if x != nil {
+		return x.Timestamp
+	}
+	return 0
+}
+
+func (x *ServiceAnnounce) GetTtlMs() int64 {
+	if x != nil {
+		return x.TtlMs
+	}
+	return 0
+}
+
+func (x *ServiceAnnounce) GetSignature() []byte {
+	if x != nil {
+		return x.Signature
+	}
+	return nil
+}
+
 type CommandBackend struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Command       []string               `protobuf:"bytes,1,rep,name=command,proto3" json:"command,omitempty"`
@@ -508,7 +603,7 @@ type CommandBackend struct {
 
 func (x *CommandBackend) Reset() {
 	*x = CommandBackend{}
-	mi := &file_api_sam_proto_msgTypes[6]
+	mi := &file_api_sam_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -520,7 +615,7 @@ func (x *CommandBackend) String() string {
 func (*CommandBackend) ProtoMessage() {}
 
 func (x *CommandBackend) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[6]
+	mi := &file_api_sam_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -533,7 +628,7 @@ func (x *CommandBackend) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CommandBackend.ProtoReflect.Descriptor instead.
 func (*CommandBackend) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{6}
+	return file_api_sam_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *CommandBackend) GetCommand() []string {
@@ -564,7 +659,7 @@ type RegisterServiceRequest struct {
 
 func (x *RegisterServiceRequest) Reset() {
 	*x = RegisterServiceRequest{}
-	mi := &file_api_sam_proto_msgTypes[7]
+	mi := &file_api_sam_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -576,7 +671,7 @@ func (x *RegisterServiceRequest) String() string {
 func (*RegisterServiceRequest) ProtoMessage() {}
 
 func (x *RegisterServiceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[7]
+	mi := &file_api_sam_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -589,7 +684,7 @@ func (x *RegisterServiceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegisterServiceRequest.ProtoReflect.Descriptor instead.
 func (*RegisterServiceRequest) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{7}
+	return file_api_sam_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *RegisterServiceRequest) GetService() *ServiceInfo {
@@ -652,7 +747,7 @@ type DiscoveredProvider struct {
 
 func (x *DiscoveredProvider) Reset() {
 	*x = DiscoveredProvider{}
-	mi := &file_api_sam_proto_msgTypes[8]
+	mi := &file_api_sam_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -664,7 +759,7 @@ func (x *DiscoveredProvider) String() string {
 func (*DiscoveredProvider) ProtoMessage() {}
 
 func (x *DiscoveredProvider) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[8]
+	mi := &file_api_sam_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -677,7 +772,7 @@ func (x *DiscoveredProvider) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DiscoveredProvider.ProtoReflect.Descriptor instead.
 func (*DiscoveredProvider) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{8}
+	return file_api_sam_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *DiscoveredProvider) GetPeerId() string {
@@ -720,7 +815,7 @@ type HubInfoResponse struct {
 
 func (x *HubInfoResponse) Reset() {
 	*x = HubInfoResponse{}
-	mi := &file_api_sam_proto_msgTypes[9]
+	mi := &file_api_sam_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -732,7 +827,7 @@ func (x *HubInfoResponse) String() string {
 func (*HubInfoResponse) ProtoMessage() {}
 
 func (x *HubInfoResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[9]
+	mi := &file_api_sam_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -745,7 +840,7 @@ func (x *HubInfoResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HubInfoResponse.ProtoReflect.Descriptor instead.
 func (*HubInfoResponse) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{9}
+	return file_api_sam_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *HubInfoResponse) GetOidcIssuer() string {
@@ -811,7 +906,15 @@ const file_api_sam_proto_rawDesc = "" +
 	"\vServiceInfo\x12'\n" +
 	"\x04type\x18\x01 \x01(\x0e2\x13.sam.v1.ServiceTypeR\x04type\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12 \n" +
-	"\vdescription\x18\x03 \x01(\tR\vdescription\"\x95\x01\n" +
+	"\vdescription\x18\x03 \x01(\tR\vdescription\"\xd0\x01\n" +
+	"\x0fServiceAnnounce\x12'\n" +
+	"\x04type\x18\x01 \x01(\x0e2\x13.sam.v1.ServiceTypeR\x04type\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x17\n" +
+	"\apeer_id\x18\x03 \x01(\tR\x06peerId\x12\x14\n" +
+	"\x05addrs\x18\x04 \x03(\tR\x05addrs\x12\x1c\n" +
+	"\ttimestamp\x18\x05 \x01(\x03R\ttimestamp\x12\x15\n" +
+	"\x06ttl_ms\x18\x06 \x01(\x03R\x05ttlMs\x12\x1c\n" +
+	"\tsignature\x18\a \x01(\fR\tsignature\"\x95\x01\n" +
 	"\x0eCommandBackend\x12\x18\n" +
 	"\acommand\x18\x01 \x03(\tR\acommand\x121\n" +
 	"\x03env\x18\x02 \x03(\v2\x1f.sam.v1.CommandBackend.EnvEntryR\x03env\x1a6\n" +
@@ -834,11 +937,12 @@ const file_api_sam_proto_rawDesc = "" +
 	"oidcIssuer\x12\x1b\n" +
 	"\tclient_id\x18\x02 \x01(\tR\bclientId\x12\x1a\n" +
 	"\baudience\x18\x03 \x01(\tR\baudience\x12#\n" +
-	"\rhub_addresses\x18\x04 \x03(\tR\fhubAddresses*]\n" +
+	"\rhub_addresses\x18\x04 \x03(\tR\fhubAddresses*w\n" +
 	"\vServiceType\x12\x1c\n" +
 	"\x18SERVICE_TYPE_UNSPECIFIED\x10\x00\x12\x14\n" +
 	"\x10SERVICE_TYPE_MCP\x10\x01\x12\x1a\n" +
-	"\x16SERVICE_TYPE_INFERENCE\x10\x02B\x1bZ\x19github.com/google/sam/apib\x06proto3"
+	"\x16SERVICE_TYPE_INFERENCE\x10\x02\x12\x18\n" +
+	"\x14SERVICE_TYPE_CATALOG\x10\x03B\x1bZ\x19github.com/google/sam/apib\x06proto3"
 
 var (
 	file_api_sam_proto_rawDescOnce sync.Once
@@ -853,7 +957,7 @@ func file_api_sam_proto_rawDescGZIP() []byte {
 }
 
 var file_api_sam_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_api_sam_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
+var file_api_sam_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_api_sam_proto_goTypes = []any{
 	(ServiceType)(0),               // 0: sam.v1.ServiceType
 	(MeshEvent_Type)(0),            // 1: sam.v1.MeshEvent.Type
@@ -863,23 +967,25 @@ var file_api_sam_proto_goTypes = []any{
 	(*EnrollRequest)(nil),          // 5: sam.v1.EnrollRequest
 	(*EnrollResponse)(nil),         // 6: sam.v1.EnrollResponse
 	(*ServiceInfo)(nil),            // 7: sam.v1.ServiceInfo
-	(*CommandBackend)(nil),         // 8: sam.v1.CommandBackend
-	(*RegisterServiceRequest)(nil), // 9: sam.v1.RegisterServiceRequest
-	(*DiscoveredProvider)(nil),     // 10: sam.v1.DiscoveredProvider
-	(*HubInfoResponse)(nil),        // 11: sam.v1.HubInfoResponse
-	nil,                            // 12: sam.v1.CommandBackend.EnvEntry
+	(*ServiceAnnounce)(nil),        // 8: sam.v1.ServiceAnnounce
+	(*CommandBackend)(nil),         // 9: sam.v1.CommandBackend
+	(*RegisterServiceRequest)(nil), // 10: sam.v1.RegisterServiceRequest
+	(*DiscoveredProvider)(nil),     // 11: sam.v1.DiscoveredProvider
+	(*HubInfoResponse)(nil),        // 12: sam.v1.HubInfoResponse
+	nil,                            // 13: sam.v1.CommandBackend.EnvEntry
 }
 var file_api_sam_proto_depIdxs = []int32{
 	1,  // 0: sam.v1.MeshEvent.type:type_name -> sam.v1.MeshEvent.Type
 	0,  // 1: sam.v1.ServiceInfo.type:type_name -> sam.v1.ServiceType
-	12, // 2: sam.v1.CommandBackend.env:type_name -> sam.v1.CommandBackend.EnvEntry
-	7,  // 3: sam.v1.RegisterServiceRequest.service:type_name -> sam.v1.ServiceInfo
-	8,  // 4: sam.v1.RegisterServiceRequest.command:type_name -> sam.v1.CommandBackend
-	5,  // [5:5] is the sub-list for method output_type
-	5,  // [5:5] is the sub-list for method input_type
-	5,  // [5:5] is the sub-list for extension type_name
-	5,  // [5:5] is the sub-list for extension extendee
-	0,  // [0:5] is the sub-list for field type_name
+	0,  // 2: sam.v1.ServiceAnnounce.type:type_name -> sam.v1.ServiceType
+	13, // 3: sam.v1.CommandBackend.env:type_name -> sam.v1.CommandBackend.EnvEntry
+	7,  // 4: sam.v1.RegisterServiceRequest.service:type_name -> sam.v1.ServiceInfo
+	9,  // 5: sam.v1.RegisterServiceRequest.command:type_name -> sam.v1.CommandBackend
+	6,  // [6:6] is the sub-list for method output_type
+	6,  // [6:6] is the sub-list for method input_type
+	6,  // [6:6] is the sub-list for extension type_name
+	6,  // [6:6] is the sub-list for extension extendee
+	0,  // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_api_sam_proto_init() }
@@ -887,7 +993,7 @@ func file_api_sam_proto_init() {
 	if File_api_sam_proto != nil {
 		return
 	}
-	file_api_sam_proto_msgTypes[7].OneofWrappers = []any{
+	file_api_sam_proto_msgTypes[8].OneofWrappers = []any{
 		(*RegisterServiceRequest_TargetUrl)(nil),
 		(*RegisterServiceRequest_Command)(nil),
 	}
@@ -897,7 +1003,7 @@ func file_api_sam_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_sam_proto_rawDesc), len(file_api_sam_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   11,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

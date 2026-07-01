@@ -120,6 +120,7 @@ type SamNode struct {
 	peerLastEventTime map[string]int64
 	receivedMsgs      map[string][]string
 	topics            map[string]*pubsub.Topic
+	subscribedTopics  map[string]bool
 	mu                sync.Mutex
 	LocalPolicy       *NodeConfigComplete
 	revokedPeers      *lru.Cache[string, int64]
@@ -137,6 +138,8 @@ type SamNode struct {
 	currentRelays     []peer.AddrInfo
 	reprovideTrigger  chan struct{}
 	BiscuitTimeout    time.Duration
+	catalogPeer       peer.ID
+	catalogMu         sync.Mutex
 }
 
 // UpdateRelays updates the current relays used by AutoRelay.
@@ -221,6 +224,7 @@ func NewSamNode(ctx context.Context, cfg SamNodeConfig) (*SamNode, error) {
 		peerLastEventTime: make(map[string]int64),
 		receivedMsgs:      make(map[string][]string),
 		topics:            make(map[string]*pubsub.Topic),
+		subscribedTopics:  map[string]bool{},
 		authenticatedHubs: make(map[peer.ID]bool),
 		LocalPolicy:       cfg.NodeConfig,
 		AllowLoopback:     cfg.AllowLoopback,
@@ -504,6 +508,7 @@ func (n *SamNode) startReprovideLoop(ctx context.Context, interval time.Duration
 			return
 		case <-time.After(5 * time.Second):
 			n.services.ReprovideAll(ctx)
+			n.announceServices(ctx)
 		}
 
 		for {
@@ -512,8 +517,10 @@ func (n *SamNode) startReprovideLoop(ctx context.Context, interval time.Duration
 				return
 			case <-ticker.C:
 				n.services.ReprovideAll(ctx)
+				n.announceServices(ctx)
 			case <-n.reprovideTrigger:
 				n.services.ReprovideAll(ctx)
+				n.announceServices(ctx)
 			}
 		}
 	}()
@@ -1013,23 +1020,27 @@ func (n *SamNode) verifyEvent(event *api.MeshEvent) bool {
 
 func (n *SamNode) subscribeToTopic(ctx context.Context, topicName string) error {
 	n.mu.Lock()
-	defer n.mu.Unlock()
-
-	if _, ok := n.topics[topicName]; ok {
+	if n.subscribedTopics[topicName] {
+		n.mu.Unlock()
 		return nil
 	}
-
-	topic, err := n.PubSub.Join(topicName)
-	if err != nil {
-		return err
+	topic, ok := n.topics[topicName]
+	if !ok {
+		t, err := n.PubSub.Join(topicName)
+		if err != nil {
+			n.mu.Unlock()
+			return err
+		}
+		n.topics[topicName] = t
+		topic = t
 	}
-
 	sub, err := topic.Subscribe()
 	if err != nil {
+		n.mu.Unlock()
 		return err
 	}
-
-	n.topics[topicName] = topic
+	n.subscribedTopics[topicName] = true
+	n.mu.Unlock()
 
 	logger.Infof("[PubSub] Started subscription background loop for topic: %s", topicName)
 	go func() {
@@ -1323,6 +1334,9 @@ func (n *SamNode) DiscoverRemoteServices(ctx context.Context, serviceType api.Se
 	if err != nil {
 		return nil, err
 	}
+	if providers, ok := n.queryCatalog(ctx, typeStr, serviceName); ok {
+		return providers, nil
+	}
 	if serviceName == "" {
 		return n.discoverServicesByType(ctx, serviceType, typeStr)
 	}
@@ -1341,6 +1355,17 @@ func (n *SamNode) DiscoverRemoteServicesStream(ctx context.Context, serviceType 
 
 	go func() {
 		defer close(out)
+
+		if providers, ok := n.queryCatalog(ctx, typeStr, serviceName); ok {
+			for _, dp := range providers {
+				select {
+				case <-ctx.Done():
+					return
+				case out <- dp:
+				}
+			}
+			return
+		}
 
 		if serviceName != "" {
 			peers, err := n.FindProvidersByName(ctx, serviceType, serviceName)

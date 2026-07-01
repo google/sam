@@ -36,6 +36,7 @@ func (t *testService) Info() *api.ServiceInfo       { return t.info }
 func (t *testService) Init(_ context.Context) error { return nil }
 func (t *testService) Handler() http.Handler        { return t.handler }
 func (t *testService) Teardown() error              { return nil }
+func (t *testService) TargetURL() (string, bool)    { return "", false }
 
 func TestBaseService_InitURLBackend_BuildsReverseProxy(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -189,5 +190,32 @@ func TestBuildRegisterRequest_MissingBackend(t *testing.T) {
 func TestBuildRegisterRequest_InvalidType(t *testing.T) {
 	if _, err := buildRegisterRequest(api.ServiceConfig{Type: "bogus", Name: "demo", TargetURL: "http://x"}); err == nil {
 		t.Fatal("expected error for invalid type, got nil")
+	}
+}
+
+func TestBaseServiceTargetURL_URLBacked(t *testing.T) {
+	b := &baseService{
+		info:    &api.ServiceInfo{Type: api.ServiceType_SERVICE_TYPE_MCP, Name: "svc"},
+		backend: &api.RegisterServiceRequest_TargetUrl{TargetUrl: "http://localhost:8080"},
+	}
+	got, ok := b.TargetURL()
+	if !ok {
+		t.Fatal("TargetURL: want true for URL-backed service")
+	}
+	if got != "http://localhost:8080" {
+		t.Errorf("TargetURL = %q, want http://localhost:8080", got)
+	}
+}
+
+func TestBaseServiceTargetURL_CommandBacked(t *testing.T) {
+	b := &baseService{
+		info: &api.ServiceInfo{Type: api.ServiceType_SERVICE_TYPE_MCP, Name: "svc"},
+		backend: &api.RegisterServiceRequest_Command{
+			Command: &api.CommandBackend{Command: []string{"/bin/cat"}},
+		},
+	}
+	got, ok := b.TargetURL()
+	if ok {
+		t.Fatalf("TargetURL: want false for command-backed service, got url=%q", got)
 	}
 }
