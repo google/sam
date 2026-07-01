@@ -41,7 +41,7 @@ jobs:
     concurrency:
       group: ${{ github.workflow }}-${{ github.ref }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0         # Fetch all history for .GitInfo and .Lastmod
           submodules: recursive  # Fetch any git submodules if configured
