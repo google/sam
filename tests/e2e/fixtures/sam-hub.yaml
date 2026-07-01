@@ -14,9 +14,9 @@ data:
     roles:
       admin:
         allowed_services:
-          - "*:*"
+          - "*"
         allowed_targets:
-          - "*:*"
+          - "*"
 ---
 apiVersion: v1
 kind: Service
