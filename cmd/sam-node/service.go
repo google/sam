@@ -60,8 +60,8 @@ func newReverseProxyHandler(targetURL string) (http.Handler, error) {
 		originalRewrite := proxy.Rewrite
 		proxy.Rewrite = func(pr *httputil.ProxyRequest) {
 			noTrailingSlash := pr.In.Header.Get(api.HeaderSamNoTrailingSlash) == "true"
-			pr.Out.Header.Del(api.HeaderSamNoTrailingSlash)
 			originalRewrite(pr)
+			pr.Out.Header.Del(api.HeaderSamNoTrailingSlash)
 			if noTrailingSlash && !strings.HasSuffix(u.Path, "/") && strings.HasSuffix(pr.Out.URL.Path, "/") {
 				pr.Out.URL.Path = strings.TrimSuffix(pr.Out.URL.Path, "/")
 			}
