@@ -190,7 +190,9 @@ func (n *SamNode) Authorize(rawToken []byte, req RequestContext, pubKey ed25519.
 	authorizer.AddCheck(api.BaselineReplayCheck)
 
 	// Inject facts from our own identity token to support target matching
-	n.injectIdentityFacts(authorizer, pubKey)
+	if err := n.injectIdentityFacts(authorizer, pubKey); err != nil {
+		return fmt.Errorf("failed to inject target facts: %w", err)
+	}
 
 	if n.LocalPolicy != nil {
 		for _, p := range n.LocalPolicy.Policies {
@@ -221,16 +223,15 @@ func (n *SamNode) Authorize(rawToken []byte, req RequestContext, pubKey ed25519.
 	return err
 }
 
-func (n *SamNode) injectIdentityFacts(authorizer biscuit.Authorizer, pubKey ed25519.PublicKey) {
+func (n *SamNode) injectIdentityFacts(authorizer biscuit.Authorizer, pubKey ed25519.PublicKey) error {
 	ourIdentity := n.GetIdentity()
 	if ourIdentity == nil {
-		return
+		return fmt.Errorf("node identity is missing")
 	}
 
 	ourB, err := biscuit.Unmarshal(ourIdentity)
 	if err != nil {
-		logger.Warnf("Failed to unmarshal our own identity: %v", err)
-		return
+		return fmt.Errorf("failed to unmarshal node identity: %w", err)
 	}
 
 	n.keysMu.RLock()
@@ -249,15 +250,13 @@ func (n *SamNode) injectIdentityFacts(authorizer biscuit.Authorizer, pubKey ed25
 	}
 
 	if auth == nil {
-		logger.Warnf("Failed to create authorizer for our own identity: %v", authErr)
-		return
+		return fmt.Errorf("failed to create authorizer for node identity (signature verification mismatch): %w", authErr)
 	}
 
 	// We must Authorize() to evaluate the token's facts into the world
 	auth.AddPolicy(api.AllowIfTruePolicy)
 	if err := auth.Authorize(); err != nil {
-		logger.Warnf("Failed to authorize our own identity token: %v", err)
-		// we continue anyway, as we just want the facts, but ideally it shouldn't fail
+		return fmt.Errorf("failed to validate node identity token (e.g. expired): %w", err)
 	}
 
 	for _, rule := range api.TargetFactRules {
@@ -267,4 +266,5 @@ func (n *SamNode) injectIdentityFacts(authorizer biscuit.Authorizer, pubKey ed25
 			}
 		}
 	}
+	return nil
 }
