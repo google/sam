@@ -226,7 +226,13 @@ func (n *SamNode) handleConnectPeer(ctx context.Context, req *mcp.CallToolReques
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := n.Host.Connect(ctx, *addrInfo); err != nil {
+	conns := n.Host.Network().ConnsToPeer(addrInfo.ID)
+	connectedness := n.Host.Network().Connectedness(addrInfo.ID)
+	logger.Debugf("[connect_peer] Target peer %s, connectedness: %v, active conns: %d", addrInfo.ID, connectedness, len(conns))
+
+	err = n.Host.Connect(ctx, *addrInfo)
+	logger.Debugf("[connect_peer] Host.Connect returned error: %v", err)
+	if err != nil {
 		return nil, nil, err
 	}
 	return &mcp.CallToolResult{
