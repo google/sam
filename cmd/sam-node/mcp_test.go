@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/sam/api"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	"github.com/libp2p/go-libp2p/core/peerstore"
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
@@ -151,5 +152,72 @@ func TestResolveRelayAddresses(t *testing.T) {
 
 	if !foundDirect {
 		t.Errorf("Expected generic circuit address %s not found in peerstore. Got: %v", expectedDirectAddrStr, addrs)
+	}
+}
+
+func TestSplitToolName(t *testing.T) {
+	tests := []struct {
+		name        string
+		input       string
+		wantService string
+		wantTool    string
+		wantErr     bool
+	}{
+		{
+			name:    "Empty input",
+			input:   "",
+			wantErr: true,
+		},
+		{
+			name:        "Modern URI format",
+			input:       "mcp://my-service/my-tool",
+			wantService: "mcp://my-service",
+			wantTool:    "my-tool",
+			wantErr:     false,
+		},
+		{
+			name:        "Modern URI format with path depth",
+			input:       "mcp://my-service/my-tool/sub-tool",
+			wantService: "mcp://my-service",
+			wantTool:    "my-tool/sub-tool",
+			wantErr:     false,
+		},
+		{
+			name:    "Missing tool path",
+			input:   "mcp://my-service",
+			wantErr: true,
+		},
+		{
+			name:    "No scheme path",
+			input:   "sam.catalog/some-tool",
+			wantErr: true,
+		},
+		{
+			name:    "Just tool name",
+			input:   "some-tool",
+			wantErr: true,
+		},
+		{
+			name:        "Strict system catalog URI",
+			input:       "system://sam.catalog/some-tool",
+			wantService: "system://sam.catalog",
+			wantTool:    "some-tool",
+			wantErr:     false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotSvc, gotTool, err := api.SplitToolName(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("SplitToolName(%q) returned error: %v, wantErr: %v", tt.input, err, tt.wantErr)
+			}
+			if !tt.wantErr {
+				if gotSvc != tt.wantService || gotTool != tt.wantTool {
+					t.Errorf("splitToolName(%q) = (%q, %q), want (%q, %q)",
+						tt.input, gotSvc, gotTool, tt.wantService, tt.wantTool)
+				}
+			}
+		})
 	}
 }

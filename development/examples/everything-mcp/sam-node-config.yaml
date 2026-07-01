@@ -2,7 +2,7 @@ version: "v1alpha1"
 attenuation:
   policies:
     - 'allow if service("mcp", "everything");'
-    - 'allow if service("system", "/sam/catalog");'
+    - 'allow if service("system", "sam.catalog");'
 services:
   - type: "mcp"
     name: "everything"

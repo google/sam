@@ -1,33 +1,22 @@
 #!/usr/bin/env bash
 
 # Shared BATS helpers for containerized SAM mesh tests.
+# Refactored to use Kind-hosted unified OIDC and Hub services.
 
 if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
   MESH_HELPERS_LOADED=1
 
   MESH_RUNTIME_IMAGE="${MESH_RUNTIME_IMAGE:-sam-e2e-runtime:local}"
-  MESH_NETWORK_SUBNET_BASE="${MESH_NETWORK_SUBNET_BASE:-172.31}"
-  MESH_NETWORK=""
+  MESH_NETWORK="kind"
   MESH_CONTAINERS=()
   MESH_PREFIX=""
   MESH_SOCKET_DIR=""
 
-  # Best-effort cleanup of leaked resources from prior failed runs.
   mesh_cleanup_stale_resources() {
-    local ids
-    ids="$(docker ps -aq --filter "name=mesh-")"
-    if [[ -n "${ids}" ]]; then
-      # shellcheck disable=SC2086
-      docker rm -f ${ids} >/dev/null 2>&1 || true
-    fi
-
-    local nets
-    nets="$(docker network ls --format '{{.Name}}' | grep '^mesh-.*-net$' || true)"
-    if [[ -n "${nets}" ]]; then
-      while IFS= read -r net; do
-        [[ -z "${net}" ]] && continue
-        docker network rm "${net}" >/dev/null 2>&1 || true
-      done <<< "${nets}"
+    local stale_containers
+    stale_containers=$(docker ps -aq --filter "name=mesh-")
+    if [[ -n "${stale_containers}" ]]; then
+      docker rm -f ${stale_containers} >/dev/null 2>&1 || true
     fi
   }
 
@@ -47,50 +36,44 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
   }
 
   mesh_setup_env() {
-    if [[ -n "${MESH_NETWORK:-}" ]]; then
+    if [[ -n "${MESH_PREFIX:-}" ]]; then
       return 0
     fi
-    mesh_cleanup_stale_resources
-    
     mesh_build_runtime_image
 
     MESH_PREFIX="mesh-${BATS_TEST_NUMBER}-$$-$(date +%s)"
-    MESH_NETWORK="${MESH_PREFIX}-net"
-
-    # Use a deterministic subnet slice to reduce chance of Docker IPAM exhaustion.
-    local subnet
-    local octet
-    octet=$(( (BATS_TEST_NUMBER % 200) + 20 ))
-    subnet="${MESH_NETWORK_SUBNET_BASE}.${octet}.0/24"
-
-    if ! docker network create --subnet "${subnet}" "${MESH_NETWORK}" >/dev/null 2>&1; then
-      docker network create "${MESH_NETWORK}" >/dev/null
-    fi
-
     MESH_SOCKET_DIR="/tmp/${MESH_PREFIX}-sockets"
     mkdir -p "${MESH_SOCKET_DIR}"
-
-    if ! docker image inspect sam-mock-oidc:local >/dev/null 2>&1; then
-      docker build -t sam-mock-oidc:local -f tests/e2e/docker/Dockerfile.mock-oidc . >/dev/null
-    fi
+    CLEANUP_VOLUMES=()
   }
 
   mesh_cleanup_test_resources() {
+    if [[ "${BATS_TEST_COMPLETED:-0}" -ne 1 ]]; then
+      mkdir -p tests/e2e/logs
+      local c
+      for c in "${MESH_CONTAINERS[@]}"; do
+        docker logs "${c}" > "tests/e2e/logs/${c}.log" 2>&1 || true
+      done
+    fi
+
     local c
     for c in "${MESH_CONTAINERS[@]}"; do
       docker rm -f "${c}" >/dev/null 2>&1 || true
     done
     MESH_CONTAINERS=()
+
+    local v
+    for v in "${CLEANUP_VOLUMES[@]}"; do
+      docker volume rm "${v}" >/dev/null 2>&1 || true
+    done
+    CLEANUP_VOLUMES=()
   }
 
   mesh_cleanup_env() {
     mesh_cleanup_test_resources
-    # We leave the network and socket dir alive for the suite
   }
   
-  mesh_cleanup_suite() {
-    mesh_cleanup_stale_resources
-  }
+
 
   mesh_gen_hex32() {
     hexdump -vn 32 -e '1/1 "%02x"' /dev/urandom
@@ -190,59 +173,125 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
     return 1
   }
 
-  mesh_start_mock_oidc() {
-    local name="${MESH_PREFIX}-oidc"
-    if docker inspect -f '{{.State.Running}}' "${name}" 2>/dev/null | grep -q "true"; then
-      return 0
-    fi
-    docker run -d \
-      --name "${name}" \
-      --network "${MESH_NETWORK}" \
-      --network-alias mock-oidc \
-      sam-mock-oidc:local >/dev/null
 
-    MESH_CONTAINERS+=("${name}")
-    mesh_wait_for_log "${name}" "Mock OIDC server ready" 30
+  mesh_get_add_hosts() {
+    local net="${MESH_NETWORK:-kind}"
+    # Resolve mock-oidc node IP
+    local oidc_node
+    oidc_node=$(kubectl --context="${KUBECONTEXT:-kind-sam-wi-test}" get pod -l app=mock-oidc -o jsonpath='{.items[0].spec.nodeName}')
+    local oidc_node_ip
+    oidc_node_ip=$(docker inspect -f "{{(index .NetworkSettings.Networks \"${net}\").IPAddress}}" "${oidc_node}")
+
+    # Check if a custom local Hub container exists in this test scope
+    local hub_ip=""
+    local custom_hub="${MESH_PREFIX}-hub"
+    if docker inspect "${custom_hub}" >/dev/null 2>&1; then
+      hub_ip=$(docker inspect -f "{{(index .NetworkSettings.Networks \"${net}\").IPAddress}}" "${custom_hub}")
+      echo "--add-host mock-oidc:${oidc_node_ip} --add-host sam-hub:${hub_ip}"
+    else
+      # Resolve sam-hub-0 node IP
+      local hub_node
+      hub_node=$(kubectl --context="${KUBECONTEXT:-kind-sam-wi-test}" get pod sam-hub-0 -o jsonpath='{.spec.nodeName}')
+      local hub_node_ip
+      hub_node_ip=$(docker inspect -f "{{(index .NetworkSettings.Networks \"${net}\").IPAddress}}" "${hub_node}")
+      echo "--add-host mock-oidc:${oidc_node_ip} --add-host sam-hub:${hub_node_ip} --add-host ${hub_node}:${hub_node_ip}"
+    fi
   }
 
-  mesh_start_hub() {
-    local name="${MESH_PREFIX}-hub"
-    if docker inspect -f '{{.State.Running}}' "${name}" 2>/dev/null | grep -q "true"; then
-      return 0
+  mesh_setup_suite() {
+    export PATH="${HOME}/go/bin:$PATH"
+    mesh_cleanup_stale_resources
+    if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
+      echo "docker not available or daemon not running" >&2
+      return 1
     fi
-    local key
-    key="$(mesh_gen_hex32)"
+    if ! command -v kind >/dev/null 2>&1; then
+      echo "kind not available" >&2
+      return 1
+    fi
+    if ! command -v kubectl >/dev/null 2>&1; then
+      echo "kubectl not available" >&2
+      return 1
+    fi
+    if ! command -v jq >/dev/null 2>&1; then
+      echo "jq not available" >&2
+      return 1
+    fi
 
-    docker run -d \
-      --name "${name}" \
-      --network "${MESH_NETWORK}" \
-      --network-alias sam-hub \
-      "sam-hub:local" \
-      --issuer "http://mock-oidc:18080" \
-      --client-id "sam-e2e" \
-      --allowed-audiences "sam-e2e,sam-mesh-audience" \
-      --key "${key}" \
-      --listen "/ip4/0.0.0.0/tcp/4002" \
-      --external-multiaddr "/dns4/sam-hub/tcp/4002" \
-      --mesh "e2e-mesh" >/dev/null
+    cd "${BATS_TEST_DIRNAME}/../.."
+    make
+    make docker-build
 
-    MESH_CONTAINERS+=("${name}")
-    mesh_wait_for_log "${name}" "PeerID:" 20
-    
-    # Extract Peer ID for nodes to use
-    local peer_id
-    peer_id=$(docker logs "${name}" 2>&1 | grep -oE '12D3Koo[a-zA-Z0-9]+' | head -n 1)
-    echo "${peer_id}" > "/tmp/${MESH_PREFIX}-hub-peer-id"
-    echo "Extracted Hub PeerID: ${peer_id}"
+    if [[ ! -x "./bin/sam-node" || ! -x "./bin/sam-hub" || ! -x "./bin/mcp-client" ]]; then
+      echo "missing binaries; run: make build" >&2
+      return 1
+    fi
+
+    export KUBERNETES_CLUSTER_NAME="sam-wi-test"
+    export KUBECONTEXT="kind-${KUBERNETES_CLUSTER_NAME}"
+
+    if ! kind get clusters | grep -q "^${KUBERNETES_CLUSTER_NAME}$"; then
+      kind delete cluster --name "${KUBERNETES_CLUSTER_NAME}" >/dev/null 2>&1 || true
+      cat <<KIND | kind create cluster --name "${KUBERNETES_CLUSTER_NAME}" --config=-
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+- role: control-plane
+- role: worker
+- role: worker
+KIND
+
+      kind load docker-image sam-hub:local --name "${KUBERNETES_CLUSTER_NAME}"
+      kind load docker-image sam-node:local --name "${KUBERNETES_CLUSTER_NAME}"
+      kind load docker-image sam-mock-oidc:local --name "${KUBERNETES_CLUSTER_NAME}"
+    else
+      kind export kubeconfig --name "${KUBERNETES_CLUSTER_NAME}"
+    fi
+
+    kubectl --context="${KUBECONTEXT}" apply -f tests/e2e/fixtures/mock-oidc.yaml
+    kubectl --context="${KUBECONTEXT}" rollout status deployment/mock-oidc --timeout=60s
+
+    local kube_issuer
+    kube_issuer=$(kubectl --context="${KUBECONTEXT}" get --raw /.well-known/openid-configuration | jq -r .issuer)
+    [[ -n "${kube_issuer}" ]]
+
+    kubectl --context="${KUBECONTEXT}" apply -f tests/e2e/fixtures/allow-anonymous-oidc.yaml
+
+    export ISSUERS="${kube_issuer},http://mock-oidc:18080"
+    envsubst '$ISSUERS' < tests/e2e/fixtures/sam-hub.yaml | kubectl --context="${KUBECONTEXT}" apply -f -
+    kubectl --context="${KUBECONTEXT}" rollout restart statefulset/sam-hub
+    kubectl --context="${KUBECONTEXT}" rollout status statefulset/sam-hub --timeout=60s
+
+    local i
+    for ((i=0; i<200; i++)); do
+      if kubectl --context="${KUBECONTEXT}" logs "sam-hub-0" 2>&1 | grep -q "PeerID:"; then
+        break
+      fi
+      sleep 0.1
+    done
+    local hub_peer_id
+    hub_peer_id=$(kubectl --context="${KUBECONTEXT}" logs "sam-hub-0" | grep -oE '12D3Koo[a-zA-Z0-9]+' | head -n 1 || true)
+    [[ -n "${hub_peer_id}" ]]
+
+    echo "${hub_peer_id}" > "/tmp/sam-wi-test-hub-peer-id"
+    return 0
   }
 
-  # Optional 3rd arg: host-relative path to a sam-node config yaml.
-  # When set, mounted into the container and passed via --config.
+  mesh_teardown_suite() {
+    cd "${BATS_TEST_DIRNAME}/../.."
+    mesh_cleanup_stale_resources
+    kind delete cluster --name "${KUBERNETES_CLUSTER_NAME:-sam-wi-test}" >/dev/null 2>&1 || true
+    echo "teardown suite"
+  }
+
   mesh_start_node() {
     local idx="$1"
     local flags="${2:-}"
     local config_path="${3:-}"
     local name="${MESH_PREFIX}-node-${idx}"
+
+    local add_hosts
+    add_hosts=$(mesh_get_add_hosts)
 
     local hub_peer_id
     hub_peer_id=$(cat "/tmp/${MESH_PREFIX}-hub-peer-id")
@@ -250,7 +299,9 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
     local mount_args=()
     local config_args=()
     if [[ -n "${config_path}" ]]; then
-      mount_args+=(-v "$(pwd)/${config_path}:/etc/sam/node-config.yaml:ro")
+      local abs_config
+      abs_config=$(realpath "${config_path}")
+      mount_args+=(-v "${abs_config}:/etc/sam/node-config.yaml:ro")
       config_args+=(--config /etc/sam/node-config.yaml)
     fi
 
@@ -258,10 +309,12 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
       --name "${name}" \
       --network "${MESH_NETWORK}" \
       --network-alias "sam-node-${idx}" \
+      ${add_hosts} \
       "${mount_args[@]}" \
       "${MESH_RUNTIME_IMAGE}" \
       /usr/local/bin/sam-node run \
       ${flags} \
+      --log-level debug \
       --discovery-interval 2s \
       --hub "http://sam-hub:9090" \
       --client-id "sam-mesh-audience" \
@@ -271,14 +324,31 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
       --listen "/ip4/0.0.0.0/tcp/5002" \
       --bind-addr "0.0.0.0:8080" \
       --api-token "secret-token" \
-      --mesh "e2e-mesh" \
+      --mesh "${MESH_PREFIX}" \
       "${config_args[@]}" >/dev/null
 
     MESH_CONTAINERS+=("${name}")
   }
 
+  mesh_start_mock_oidc() {
+    # No-op: Mock OIDC is running in k8s
+    return 0
+  }
+
+  mesh_start_hub() {
+    # No-op: Hub is running in k8s
+    local peer_id
+    peer_id=$(cat "/tmp/sam-wi-test-hub-peer-id")
+    echo "${peer_id}" > "/tmp/${MESH_PREFIX}-hub-peer-id"
+    return 0
+  }
+
   mesh_assert_container_running() {
     local name="$1"
+    if [[ "${name}" == *"-hub" ]]; then
+      kubectl --context="${KUBECONTEXT:-kind-sam-wi-test}" get pod sam-hub-0 -o jsonpath='{.status.phase}' | grep -q "Running"
+      return $?
+    fi
     local state
     state="$(docker inspect -f '{{.State.Running}}' "${name}" 2>/dev/null || true)"
     [[ "${state}" == "true" ]]

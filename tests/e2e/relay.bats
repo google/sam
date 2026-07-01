@@ -4,21 +4,25 @@ load "lib/container_mesh.bash"
 
 setup() {
   mesh_setup_env
-  mkdir -p tests/e2e/logs
+  CLEANUP_NETWORKS=()
+  DISCONNECT_CONTAINERS=()
 }
 
 teardown() {
-  if [[ "${BATS_TEST_COMPLETED:-0}" -ne 1 ]]; then
-    mkdir -p tests/e2e/logs
-    local ids
-    ids="$(docker ps -aq --filter "name=mesh-")"
-    for id in ${ids}; do
-      local name
-      name="$(docker inspect -f '{{.Name}}' "${id}" | tr -d '/')"
-      docker logs "${id}" > "tests/e2e/logs/${name}.log" 2>&1 || true
-    done
-  fi
+  local item
+  for item in "${DISCONNECT_CONTAINERS[@]}"; do
+    local container="${item%%:*}"
+    local net="${item#*:}"
+    docker network disconnect "${net}" "${container}" >/dev/null 2>&1 || true
+  done
+  DISCONNECT_CONTAINERS=()
+
   mesh_cleanup_env
+  local net
+  for net in "${CLEANUP_NETWORKS[@]}"; do
+    docker network rm "${net}" >/dev/null 2>&1 || true
+  done
+  CLEANUP_NETWORKS=()
 }
 
 @test "node starts with --enable-relay=true and logs message" {
@@ -29,8 +33,7 @@ teardown() {
   [[ "$status" -eq 0 ]]
 
   # Start node with relay flag
-  run mesh_start_node "1" "--enable-relay=true --log-level=debug"
-  [[ "$status" -eq 0 ]]
+  mesh_start_node "1" "--enable-relay=true --log-level=debug"
 
   # Wait for log message
   run mesh_wait_for_log "${MESH_PREFIX}-node-1" "Enabling Relay Service" 20
@@ -46,17 +49,25 @@ teardown() {
 
   local MESH_NETWORK_2="${MESH_PREFIX}-2-net"
   docker network create "${MESH_NETWORK_2}"
+  CLEANUP_NETWORKS+=("${MESH_NETWORK_2}")
 
-  docker network connect --alias sam-hub "${MESH_NETWORK_2}" "${MESH_PREFIX}-hub"
-  docker network connect --alias mock-oidc "${MESH_NETWORK_2}" "${MESH_PREFIX}-oidc"
+  local hub_node
+  hub_node=$(kubectl --context="${KUBECONTEXT}" get pod sam-hub-0 -o jsonpath='{.spec.nodeName}')
+  local oidc_node
+  oidc_node=$(kubectl --context="${KUBECONTEXT}" get pod -l app=mock-oidc -o jsonpath='{.items[0].spec.nodeName}')
 
-  run mesh_start_node "1" "--enable-relay=true --log-level=debug"
-  [[ "$status" -eq 0 ]]
+  docker network connect "${MESH_NETWORK_2}" "${hub_node}"
+  DISCONNECT_CONTAINERS+=("${hub_node}:${MESH_NETWORK_2}")
+  if [[ "${oidc_node}" != "${hub_node}" ]]; then
+    docker network connect "${MESH_NETWORK_2}" "${oidc_node}"
+    DISCONNECT_CONTAINERS+=("${oidc_node}:${MESH_NETWORK_2}")
+  fi
+
+  mesh_start_node "1" "--enable-relay=true --log-level=debug"
 
   OLD_NET=$MESH_NETWORK
   MESH_NETWORK=$MESH_NETWORK_2
-  run mesh_start_node "2" "--log-level=debug"
-  [[ "$status" -eq 0 ]]
+  mesh_start_node "2" "--log-level=debug"
   MESH_NETWORK=$OLD_NET
 
   run mesh_wait_for_log "${MESH_PREFIX}-node-1" "PeerID:" 20

@@ -19,7 +19,7 @@ teardown() {
   rm -rf "$TEST_TMPDIR"
 }
 
-@test "sam-node run --trust-hub-rbac with stored identity fails if hub is unreachable" {
+@test "sam-node run with stored identity fails if hub is unreachable" {
   run "$SAM_NODE_BINARY" run --listen /ip4/127.0.0.1/udp/0/quic-v1 --listen /ip4/127.0.0.1/tcp/0
   
   if [[ "$status" -eq 0 ]]; then

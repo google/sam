@@ -16,68 +16,16 @@ package main
 
 import (
 	"crypto/ed25519"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 
 	"github.com/biscuit-auth/biscuit-go/v2"
 	"github.com/biscuit-auth/biscuit-go/v2/datalog"
-	"github.com/biscuit-auth/biscuit-go/v2/parser"
 	"github.com/google/sam/api"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-msgio"
 	"google.golang.org/protobuf/proto"
 )
-
-var (
-	baselineRule1       biscuit.Policy
-	baselineRule2       biscuit.Policy
-	baselineRule3       biscuit.Policy
-	baselineRule4       biscuit.Policy
-	baselineReplayCheck biscuit.Check
-)
-
-// init compiles the baseline Datalog rules and checks for the node.
-// These rules are loaded at initialization to avoid runtime parsing overhead.
-// Baseline Rules:
-// 1. Exact Match: Allows the request if the token explicitly allows the specific service type and name.
-// 2. Global Wildcard: Allows the request if the token explicitly grants access to all services ("*", "*").
-// 3. Catalog Target: Allows access to the service discovery catalog ("system", "catalog").
-// 4. Type Wildcard: Allows the request if the token explicitly grants access to all names under a specific service type ($type, "*").
-// 5. Replay Check: Enforces that the peer identity bound in the token matches the physical connection peer ID.
-func init() {
-	var err error
-	rule1Str := fmt.Sprintf(`allow if service($type, $name), %s($type, $name)`, api.FactAllowService)
-	baselineRule1, err = parser.FromStringPolicy(rule1Str)
-	if err != nil {
-		panic(fmt.Sprintf("failed to parse baseline rule 1: %v", err))
-	}
-
-	rule2Str := fmt.Sprintf(`allow if service($type, $name), %s("*", "*")`, api.FactAllowService)
-	baselineRule2, err = parser.FromStringPolicy(rule2Str)
-	if err != nil {
-		panic(fmt.Sprintf("failed to parse baseline rule 2: %v", err))
-	}
-
-	rule3Str := fmt.Sprintf(`allow if service("system", "%s")`, api.CatalogTarget)
-	baselineRule3, err = parser.FromStringPolicy(rule3Str)
-	if err != nil {
-		panic(fmt.Sprintf("failed to parse baseline rule 3: %v", err))
-	}
-
-	rule4Str := fmt.Sprintf(`allow if service($type, $name), %s($type, "*")`, api.FactAllowService)
-	baselineRule4, err = parser.FromStringPolicy(rule4Str)
-	if err != nil {
-		panic(fmt.Sprintf("failed to parse baseline rule 4: %v", err))
-	}
-
-	replayCheckStr := `check if client_peer_id($id), connection_peer_id($id)`
-	baselineReplayCheck, err = parser.FromStringCheck(replayCheckStr)
-	if err != nil {
-		panic(fmt.Sprintf("failed to parse replay check: %v", err))
-	}
-}
 
 // RequestContext carries the security metadata for a specific stream request
 type RequestContext struct {
@@ -127,84 +75,14 @@ func (n *SamNode) WithBiscuitAuth(next func(network.Stream, RequestContext)) net
 
 		writer := msgio.NewVarintWriter(s)
 
-		// Check revocation cache
-		if _, isRevoked := n.revokedPeers.Get(remotePeer.String()); isRevoked {
-			logger.Warnf("[Auth] Peer %s is revoked", remotePeer)
-			resp := &api.AuthResponse{Success: false, Error: "Peer is revoked"}
-			respBytes, err := proto.Marshal(resp)
-			if err != nil {
-				logger.Errorf("[Auth] Failed to marshal revocation response: %v", err)
-				return
-			}
-			_ = writer.WriteMsg(respBytes)
-			return
-		}
-
-		// Check verification cache
-		tokenHash := sha256.Sum256(authFrame.Biscuit)
-		hashStr := hex.EncodeToString(tokenHash[:]) + "\x00" + remotePeer.String() + "\x00" + reqCtx.Protocol + "\x00" + reqCtx.Target
-
-		if pubKeyStr, ok := n.verificationCache.Get(hashStr); ok {
-			n.keysMu.RLock()
-			keys := n.trustedKeys
-			n.keysMu.RUnlock()
-
-			trusted := false
-			for _, tk := range keys {
-				if hex.EncodeToString(tk.Key) == pubKeyStr {
-					trusted = true
-					break
-				}
-			}
-			if trusted {
-				logger.Infof("[Auth] Token cache hit for %s", remotePeer)
-				// Valid
-				resp := &api.AuthResponse{Success: true}
-				respBytes, err := proto.Marshal(resp)
-				if err != nil {
-					logger.Errorf("[Auth] Failed to marshal ACK response: %v", err)
-					return
-				}
-				if err := writer.WriteMsg(respBytes); err != nil {
-					logger.Errorf("[Auth] Failed to write ACK to %s: %v", remotePeer, err)
-					return
-				}
-				next(s, reqCtx)
-				return
-			}
-		}
-
-		n.keysMu.RLock()
-		keys := n.trustedKeys
-		n.keysMu.RUnlock()
-
-		var authorized bool
-		var lastErr error
-		var successfulKey ed25519.PublicKey
-		for _, pubKey := range keys {
-			logger.Infof("[Auth] Trying key: %x", pubKey.Key)
-			if err := n.Authorize(authFrame.Biscuit, reqCtx, pubKey.Key); err == nil {
-				authorized = true
-				successfulKey = pubKey.Key
-				break
-			} else {
-				lastErr = err
-			}
-		}
-
-		if !authorized {
-			logger.Warnf("[Auth] AuthZ Denied %s: %v", remotePeer, lastErr)
-			resp := &api.AuthResponse{Success: false, Error: "Authorization failed"}
-			if lastErr != nil {
-				resp.Error = lastErr.Error()
-			}
+		err = n.VerifyBiscuitToken(authFrame.Biscuit, reqCtx)
+		if err != nil {
+			logger.Warnf("[Auth] AuthZ Denied %s: %v", remotePeer, err)
+			resp := &api.AuthResponse{Success: false, Error: err.Error()}
 			respBytes, _ := proto.Marshal(resp)
 			_ = writer.WriteMsg(respBytes)
 			return
 		}
-
-		// Cache successful verification
-		n.verificationCache.Add(hashStr, hex.EncodeToString(successfulKey))
 
 		// Valid
 		resp := &api.AuthResponse{Success: true}
@@ -216,6 +94,44 @@ func (n *SamNode) WithBiscuitAuth(next func(network.Stream, RequestContext)) net
 
 		next(s, reqCtx)
 	}
+}
+
+// VerifyBiscuitToken checks revocation, cache, and evaluates the token against trusted keys and local policies.
+func (n *SamNode) VerifyBiscuitToken(biscuitBytes []byte, reqCtx RequestContext) error {
+	remotePeer := reqCtx.PeerID
+
+	// Check revocation cache
+	if n.revokedPeers != nil {
+		if _, isRevoked := n.revokedPeers.Get(remotePeer.String()); isRevoked {
+			logger.Warnf("[Auth] Peer %s is revoked", remotePeer)
+			return fmt.Errorf("peer is revoked")
+		}
+	}
+
+	n.keysMu.RLock()
+	keys := n.trustedKeys
+	n.keysMu.RUnlock()
+
+	var authorized bool
+	var lastErr error
+	for _, pubKey := range keys {
+		logger.Infof("[Auth] Trying key: %x", pubKey.Key)
+		if err := n.Authorize(biscuitBytes, reqCtx, pubKey.Key); err == nil {
+			authorized = true
+			break
+		} else {
+			lastErr = err
+		}
+	}
+
+	if !authorized {
+		if lastErr != nil {
+			return lastErr
+		}
+		return fmt.Errorf("authorization failed")
+	}
+
+	return nil
 }
 
 func (n *SamNode) Authorize(rawToken []byte, req RequestContext, pubKey ed25519.PublicKey) error {
@@ -248,14 +164,16 @@ func (n *SamNode) Authorize(rawToken []byte, req RequestContext, pubKey ed25519.
 	// Inject the current action context (Standard Vocabulary)
 	var opType, opName string
 	if req.Target == "" {
-		opType = api.DefaultServiceType
+		// When no explicit target is requested, the operation is scoped to the connection protocol itself,
+		// which resides in the "system" namespace.
+		opType = api.SystemNamespace
 		opName = req.Protocol
 	} else {
 		opType, opName = api.ParseServiceTarget(req.Target)
 	}
 	authorizer.AddFact(biscuit.Fact{
 		Predicate: biscuit.Predicate{
-			Name: "service",
+			Name: api.FactService,
 			IDs:  []biscuit.Term{biscuit.String(opType), biscuit.String(opName)},
 		},
 	})
@@ -263,15 +181,19 @@ func (n *SamNode) Authorize(rawToken []byte, req RequestContext, pubKey ed25519.
 	// Inject connection_peer_id fact for replay defense
 	authorizer.AddFact(biscuit.Fact{
 		Predicate: biscuit.Predicate{
-			Name: "connection_peer_id",
+			Name: api.FactConnectionPeerID,
 			IDs:  []biscuit.Term{biscuit.String(req.PeerID.String())},
 		},
 	})
 
 	// Enforce client_peer_id matches connection_peer_id
-	authorizer.AddCheck(baselineReplayCheck)
+	authorizer.AddCheck(api.BaselineReplayCheck)
 
-	// Apply Pre-compiled Local Attenuation
+	// Inject facts from our own identity token to support target matching
+	if err := n.injectIdentityFacts(authorizer, pubKey); err != nil {
+		return fmt.Errorf("failed to inject target facts: %w", err)
+	}
+
 	if n.LocalPolicy != nil {
 		for _, p := range n.LocalPolicy.Policies {
 			authorizer.AddPolicy(p)
@@ -284,18 +206,67 @@ func (n *SamNode) Authorize(rawToken []byte, req RequestContext, pubKey ed25519.
 		}
 	}
 
-	// Baseline Rules
-	if n.TrustHubRBAC {
-		authorizer.AddPolicy(baselineRule1)
-		authorizer.AddPolicy(baselineRule2)
-		authorizer.AddPolicy(baselineRule3)
-		authorizer.AddPolicy(baselineRule4)
+	// Apply Baseline Policies and Rules
+	authorizer.AddCheck(api.BaselineTargetCheck)
+	for _, p := range api.BaselinePolicies {
+		authorizer.AddPolicy(p)
+	}
+	for _, r := range api.BaselineRules {
+		authorizer.AddRule(r)
 	}
 
 	err = authorizer.Authorize()
 	if err != nil {
-		logger.Errorf("Authorizer failure: %v", err)
+		logger.Errorf("Authorizer failure: %v, token: %s", err, b.String())
 		logger.Debugf("Authorizer state: %s", authorizer.PrintWorld())
 	}
 	return err
+}
+
+func (n *SamNode) injectIdentityFacts(authorizer biscuit.Authorizer, pubKey ed25519.PublicKey) error {
+	ourIdentity := n.GetIdentity()
+	if ourIdentity == nil {
+		logger.Debugf("[Auth] Node identity is missing, skipping target fact injection")
+		return nil
+	}
+
+	ourB, err := biscuit.Unmarshal(ourIdentity)
+	if err != nil {
+		return fmt.Errorf("failed to unmarshal node identity: %w", err)
+	}
+
+	n.keysMu.RLock()
+	keys := make([]TrustedKey, len(n.trustedKeys))
+	copy(keys, n.trustedKeys)
+	n.keysMu.RUnlock()
+
+	var auth biscuit.Authorizer
+	var authErr error
+	for _, tk := range keys {
+		if a, err := ourB.Authorizer(tk.Key); err == nil {
+			auth = a
+			break
+		} else {
+			authErr = err
+		}
+	}
+
+	if auth == nil {
+		return fmt.Errorf("failed to create authorizer for node identity (signature verification mismatch): %w", authErr)
+	}
+
+	// We must Authorize() to evaluate the token's facts into the world
+	auth.AddPolicy(api.AllowIfTruePolicy)
+	if err := auth.Authorize(); err != nil {
+		return fmt.Errorf("failed to validate node identity token (e.g. expired): %w", err)
+	}
+
+	for _, rule := range api.TargetFactRules {
+		if factSet, err := auth.Query(rule); err == nil {
+			for _, fact := range factSet {
+				authorizer.AddFact(fact)
+			}
+		}
+	}
+	return nil
 }

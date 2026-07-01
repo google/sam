@@ -23,11 +23,12 @@ teardown() {
     --name "${hub_name}" \
     --network "${MESH_NETWORK}" \
     --network-alias sam-hub \
+    $(mesh_get_add_hosts) \
     "sam-hub:local" \
     --issuer "http://mock-oidc:18080" \
     --client-id "sam-e2e" \
     --key "${hub_key}" \
-    --mesh "e2e-mesh" \
+    --mesh "${MESH_PREFIX}" \
     --admin-token "e2e-token" \
     --listen "/ip4/0.0.0.0/tcp/4002" \
     --external-multiaddr "/dns4/sam-hub/tcp/4002" \
@@ -42,8 +43,7 @@ teardown() {
 
   # Start Node 1
   echo "[$(date +%T)] Starting Node 1"
-  run mesh_start_node 1 "--log-level debug"
-  [[ "$status" -eq 0 ]]
+  mesh_start_node 1 "--log-level debug"
   local node1_name="${MESH_PREFIX}-node-1"
   mesh_wait_for_log "${node1_name}" "SAM Node Online" 20
   mesh_wait_for_mcp_ready 1 20
@@ -53,8 +53,7 @@ teardown() {
 
   # Start Node 2
   echo "[$(date +%T)] Starting Node 2"
-  run mesh_start_node 2 "--log-level debug"
-  [[ "$status" -eq 0 ]]
+  mesh_start_node 2 "--log-level debug"
   local node2_name="${MESH_PREFIX}-node-2"
   mesh_wait_for_log "${node2_name}" "SAM Node Online" 20
   mesh_wait_for_mcp_ready 2 20
@@ -106,10 +105,21 @@ teardown() {
   run mesh_wait_for_peer_disconnection 1 "${node2_peer_id}" 20
   [[ "$status" -eq 0 ]]
 
+  # Allow connection state to settle in libp2p swarm
+  sleep 2
+
   # Verify Node 1 cannot reconnect to Node 2
   echo "[$(date +%T)] Attempting to reconnect (should fail)"
   local node2_addr="/dns4/sam-node-2/tcp/5002/p2p/${node2_peer_id}"
   run docker run --rm --network "${MESH_NETWORK}" "${MESH_RUNTIME_IMAGE}" mcp-client -url "http://sam-node-1:8080/mcp" -tool "connect_peer" -args "{\"peer_addr\":\"${node2_addr}\"}"
   echo "Reconnect output: $output"
+
+  local info_output
+  info_output="$(docker run --rm --network "${MESH_NETWORK}" "${MESH_RUNTIME_IMAGE}" mcp-client -url "http://sam-node-1:8080/mcp" -tool "get_mesh_info" 2>/dev/null)"
+  echo "After reconnect mesh info: ${info_output}"
+  local connected
+  connected="$(echo "${info_output}" | jq -r --arg peer "${node2_peer_id}" '.connected_peers | index($peer) != null')"
+  echo "Connected after reconnect: ${connected}"
+
   [[ "$output" == *"gater disallows connection"* ]]
 }

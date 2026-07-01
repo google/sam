@@ -17,9 +17,7 @@ package main
 import (
 	"context"
 	"crypto/ed25519"
-	"crypto/sha256"
-	"encoding/hex"
-	"fmt"
+
 	"io"
 	"os"
 	"path/filepath"
@@ -107,6 +105,7 @@ func TestAuthorize(t *testing.T) {
 	}
 
 	builder := biscuit.NewBuilder(priv)
+	_ = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{Name: "target_unrestricted"}})
 	dummyPeer := peer.ID("dummy-peer")
 
 	// Bind to peer
@@ -129,7 +128,7 @@ func TestAuthorize(t *testing.T) {
 
 	// Add fact to match baseline rule
 	err = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
-		Name: api.FactAllowService,
+		Name: "granted_service_exact",
 		IDs:  []biscuit.Term{biscuit.String("system"), biscuit.String("/test/proto")},
 	}})
 	if err != nil {
@@ -149,7 +148,6 @@ func TestAuthorize(t *testing.T) {
 	node := &SamNode{
 		Store:          store,
 		trustedKeys:    []TrustedKey{{Key: pub, ReceivedAt: time.Now()}},
-		TrustHubRBAC:   true,
 		BiscuitTimeout: 500 * time.Millisecond,
 	}
 
@@ -181,23 +179,23 @@ func TestBaselineRules(t *testing.T) {
 		{
 			name: "Baseline Rule 1: Exact Match",
 			mintToken: func(t *testing.T, builder biscuit.Builder) {
-				factStr := fmt.Sprintf(`%s("mcp", "test_tool")`, api.FactAllowService)
+				factStr := `granted_service_exact("mcp", "test_tool")`
 				fact, _ := parser.FromStringFact(factStr)
 				_ = builder.AddAuthorityFact(fact)
 			},
 			protocol:      "test_tool",
-			target:        "mcp:test_tool",
+			target:        "mcp://test_tool",
 			expectSuccess: true,
 		},
 		{
 			name: "Baseline Rule 2: Global Wildcard",
 			mintToken: func(t *testing.T, builder biscuit.Builder) {
-				factStr := fmt.Sprintf(`%s("*", "*")`, api.FactAllowService)
+				factStr := `granted_service_all_types()`
 				fact, _ := parser.FromStringFact(factStr)
 				_ = builder.AddAuthorityFact(fact)
 			},
 			protocol:      "anything",
-			target:        "mcp:anything",
+			target:        "mcp://anything",
 			expectSuccess: true,
 		},
 		{
@@ -206,35 +204,35 @@ func TestBaselineRules(t *testing.T) {
 				// No specific allowed_service facts needed
 			},
 			protocol:      api.CatalogTarget, // "catalog"
-			target:        "system:" + api.CatalogTarget,
+			target:        "system://" + api.CatalogTarget,
 			expectSuccess: true,
 		},
 		{
 			name: "Baseline Rule 4: Type Wildcard",
 			mintToken: func(t *testing.T, builder biscuit.Builder) {
-				factStr := fmt.Sprintf(`%s("mcp", "*")`, api.FactAllowService)
+				factStr := `granted_service_all("mcp")`
 				fact, _ := parser.FromStringFact(factStr)
 				_ = builder.AddAuthorityFact(fact)
 			},
 			protocol:      "test_tool",
-			target:        "mcp:test_tool",
+			target:        "mcp://test_tool",
 			expectSuccess: true,
 		},
 		{
 			name: "Baseline Rule Rejection: Type Wildcard does not allow other types",
 			mintToken: func(t *testing.T, builder biscuit.Builder) {
-				factStr := fmt.Sprintf(`%s("mcp", "*")`, api.FactAllowService)
+				factStr := `granted_service_all("mcp")`
 				fact, _ := parser.FromStringFact(factStr)
 				_ = builder.AddAuthorityFact(fact)
 			},
 			protocol:      "test_tool",
-			target:        "system:test_tool",
+			target:        "system://test_tool",
 			expectSuccess: false,
 		},
 		{
 			name: "Baseline Replay Check Rejection: mismatched peer ID",
 			mintToken: func(t *testing.T, builder biscuit.Builder) {
-				factStr := fmt.Sprintf(`%s("mcp", "test_tool")`, api.FactAllowService)
+				factStr := `granted_service_exact("mcp", "test_tool")`
 				fact, _ := parser.FromStringFact(factStr)
 				_ = builder.AddAuthorityFact(fact)
 				// deliberately add a different client_peer_id than the connection peer ID
@@ -244,7 +242,7 @@ func TestBaselineRules(t *testing.T) {
 				}})
 			},
 			protocol:      "test_tool",
-			target:        "mcp:test_tool",
+			target:        "mcp://test_tool",
 			expectSuccess: false, // Should fail the connection_peer_id check
 		},
 	}
@@ -252,6 +250,7 @@ func TestBaselineRules(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			builder := biscuit.NewBuilder(priv)
+			_ = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{Name: "target_unrestricted"}})
 			_ = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
 				Name: "node",
 				IDs:  []biscuit.Term{biscuit.String(dummyPeer.String())},
@@ -272,7 +271,6 @@ func TestBaselineRules(t *testing.T) {
 
 			node := &SamNode{
 				trustedKeys:    []TrustedKey{{Key: pub, ReceivedAt: time.Now()}},
-				TrustHubRBAC:   true,
 				BiscuitTimeout: 500 * time.Millisecond,
 			}
 
@@ -310,7 +308,7 @@ func TestEnterprisePolicyEngine(t *testing.T) {
 		{
 			name: "Case 1 (Happy Path)",
 			mintToken: func(t *testing.T, builder biscuit.Builder) {
-				fact, err := parser.FromStringFact(`allow_service("system", "query_db")`)
+				fact, err := parser.FromStringFact(`granted_service_exact("system", "query_db")`)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -324,7 +322,7 @@ func TestEnterprisePolicyEngine(t *testing.T) {
 		{
 			name: "Case 2 (Unauthorized Tool)",
 			mintToken: func(t *testing.T, builder biscuit.Builder) {
-				fact, err := parser.FromStringFact(`allow_service("system", "query_db")`)
+				fact, err := parser.FromStringFact(`granted_service_exact("system", "query_db")`)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -338,7 +336,7 @@ func TestEnterprisePolicyEngine(t *testing.T) {
 		{
 			name: "Case 3 (Wildcard Access)",
 			mintToken: func(t *testing.T, builder biscuit.Builder) {
-				fact, err := parser.FromStringFact(`allow_service("*", "*")`)
+				fact, err := parser.FromStringFact(`granted_service_all_types()`)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -352,7 +350,7 @@ func TestEnterprisePolicyEngine(t *testing.T) {
 		{
 			name: "Case 4 (Local Attenuation Override)",
 			mintToken: func(t *testing.T, builder biscuit.Builder) {
-				fact1, err := parser.FromStringFact(`allow_service("*", "*")`)
+				fact1, err := parser.FromStringFact(`granted_service_all_types()`)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -381,6 +379,7 @@ attenuation:
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			builder := biscuit.NewBuilder(priv)
+			_ = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{Name: "target_unrestricted"}})
 
 			err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
 				Name: "node",
@@ -428,7 +427,6 @@ attenuation:
 			node := &SamNode{
 				trustedKeys:    []TrustedKey{{Key: pub, ReceivedAt: time.Now()}},
 				LocalPolicy:    localPolicy,
-				TrustHubRBAC:   true,
 				BiscuitTimeout: 500 * time.Millisecond,
 			}
 
@@ -460,6 +458,7 @@ func TestRevocation(t *testing.T) {
 	dummyPeer := peer.ID("dummy-peer-id") // Must match mockStream.Conn().RemotePeer()
 
 	builder := biscuit.NewBuilder(priv)
+	_ = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{Name: "target_unrestricted"}})
 	err = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
 		Name: "node",
 		IDs:  []biscuit.Term{biscuit.String(dummyPeer.String())},
@@ -533,8 +532,8 @@ func TestRevocation(t *testing.T) {
 	if resp.Success {
 		t.Error("expected failure for revoked peer, got success")
 	}
-	if resp.Error != "Peer is revoked" {
-		t.Errorf("expected error 'Peer is revoked', got %q", resp.Error)
+	if resp.Error != "peer is revoked" {
+		t.Errorf("expected error 'peer is revoked', got %q", resp.Error)
 	}
 }
 
@@ -581,146 +580,121 @@ func TestVerifyEvent(t *testing.T) {
 	}
 }
 
-func TestVerifyBiscuitCache(t *testing.T) {
+func TestMiddlewareTargetChecks(t *testing.T) {
 	pub, priv, err := ed25519.GenerateKey(nil)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("failed to generate key: %v", err)
+	}
+	dummyPeer := peer.ID("dummy-peer")
+
+	tests := []struct {
+		name          string
+		mintToken     func(t *testing.T, builder biscuit.Builder)
+		req           RequestContext
+		expectSuccess bool
+	}{
+		{
+			name: "Target Check: Allowed by User Fact",
+			mintToken: func(t *testing.T, builder biscuit.Builder) {
+				_ = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+					Name: "granted_target_exact",
+					IDs:  []biscuit.Term{biscuit.String("user"), biscuit.String("bob")},
+				}})
+			},
+			req: RequestContext{
+				PeerID:   dummyPeer,
+				Protocol: "test_tool",
+				Target:   "mcp://test_tool",
+				User:     "bob",
+			},
+			expectSuccess: true,
+		},
+		{
+			name: "Target Check: Rejected by wrong User Fact",
+			mintToken: func(t *testing.T, builder biscuit.Builder) {
+				_ = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+					Name: "granted_target_exact",
+					IDs:  []biscuit.Term{biscuit.String("user"), biscuit.String("alice")},
+				}})
+			},
+			req: RequestContext{
+				PeerID:   dummyPeer,
+				Protocol: "test_tool",
+				Target:   "mcp://test_tool",
+				User:     "bob",
+			},
+			expectSuccess: false,
+		},
+		{
+			name: "Target Check: Allowed by Group Fact",
+			mintToken: func(t *testing.T, builder biscuit.Builder) {
+				_ = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+					Name: "granted_target_exact",
+					IDs:  []biscuit.Term{biscuit.String("group"), biscuit.String("eng")},
+				}})
+			},
+			req: RequestContext{
+				PeerID:   dummyPeer,
+				Protocol: "test_tool",
+				Target:   "mcp://test_tool",
+				Group:    "eng",
+			},
+			expectSuccess: true,
+		},
 	}
 
-	dummyPeer := peer.ID("dummy-peer-id")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			builder := biscuit.NewBuilder(priv)
+			// Required basic facts
+			_ = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+				Name: "client_peer_id",
+				IDs:  []biscuit.Term{biscuit.String(dummyPeer.String())},
+			}})
+			_ = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+				Name: "node",
+				IDs:  []biscuit.Term{biscuit.String(dummyPeer.String())},
+			}})
+			// Allow exact service
+			factStr := `granted_service_exact("mcp", "test_tool")`
+			fact, _ := parser.FromStringFact(factStr)
+			_ = builder.AddAuthorityFact(fact)
 
-	builder := biscuit.NewBuilder(priv)
-	err = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
-		Name: "node",
-		IDs:  []biscuit.Term{biscuit.String(dummyPeer.String())},
-	}})
-	if err != nil {
-		t.Fatal(err)
-	}
+			tt.mintToken(t, builder)
 
-	b, err := builder.Build()
-	if err != nil {
-		t.Fatal(err)
-	}
+			b, _ := builder.Build()
+			tokenBytes, _ := b.Serialize()
 
-	tokenBytes, err := b.Serialize()
-	if err != nil {
-		t.Fatal(err)
-	}
+			// Build the Node Identity Token
+			idBuilder := biscuit.NewBuilder(priv)
+			if tt.req.User != "" {
+				_ = idBuilder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+					Name: "user",
+					IDs:  []biscuit.Term{biscuit.String(tt.req.User)},
+				}})
+			}
+			if tt.req.Group != "" {
+				_ = idBuilder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+					Name: "group",
+					IDs:  []biscuit.Term{biscuit.String(tt.req.Group)},
+				}})
+			}
+			idB, _ := idBuilder.Build()
+			idTokenBytes, _ := idB.Serialize()
 
-	cache, _ := lru.New[string, string](10)
+			node := &SamNode{
+				trustedKeys:    []TrustedKey{{Key: pub, ReceivedAt: time.Now()}},
+				BiscuitTimeout: 500 * time.Millisecond,
+			}
+			node.SetIdentityCache(idTokenBytes)
 
-	node := &SamNode{
-		trustedKeys:       []TrustedKey{{Key: pub, ReceivedAt: time.Now()}},
-		verificationCache: cache,
-		BiscuitTimeout:    500 * time.Millisecond,
-	}
-
-	// Case 1: Fresh verification (uncached)
-	_, err = node.verifyBiscuit(tokenBytes, dummyPeer)
-	if err != nil {
-		t.Fatalf("Expected verifyBiscuit to succeed, got err: %v", err)
-	}
-
-	tokenHash := sha256.Sum256(tokenBytes)
-	hashStr := hex.EncodeToString(tokenHash[:]) + ":" + dummyPeer.String()
-
-	if pubKeyStr, ok := cache.Get(hashStr); !ok || pubKeyStr != hex.EncodeToString(pub) {
-		t.Fatal("Expected token to be in verification cache with correct key")
-	}
-
-	// Case 2: Key rotation - corrupt keys and try again.
-	// Even if the token is in the cache, it should fail if the key that verified it is no longer trusted.
-	node.keysMu.Lock()
-	invalidKey := make([]byte, ed25519.PublicKeySize)
-	copy(invalidKey, []byte("invalid-key"))
-	node.trustedKeys = []TrustedKey{{Key: invalidKey, ReceivedAt: time.Now()}}
-	node.keysMu.Unlock()
-
-	_, err = node.verifyBiscuit(tokenBytes, dummyPeer)
-	if err == nil {
-		t.Fatal("Expected verifyBiscuit to FAIL after key rotation, but it succeeded")
-	}
-}
-
-func TestAuthorizationCacheBypass(t *testing.T) {
-	pub, priv, err := ed25519.GenerateKey(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	dummyPeer := peer.ID("dummy-peer-id")
-
-	// Mint token allowing ONLY query_db
-	builder := biscuit.NewBuilder(priv)
-	_ = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
-		Name: "node",
-		IDs:  []biscuit.Term{biscuit.String(dummyPeer.String())},
-	}})
-	_ = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
-		Name: "client_peer_id",
-		IDs:  []biscuit.Term{biscuit.String(dummyPeer.String())},
-	}})
-	_ = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
-		Name: "allow_service",
-		IDs:  []biscuit.Term{biscuit.String("system"), biscuit.String("query_db")},
-	}})
-
-	b, _ := builder.Build()
-	tokenBytes, _ := b.Serialize()
-
-	cache, _ := lru.New[string, string](10)
-	revCache, _ := lru.New[string, int64](10)
-	rl, _ := NewPeerRateLimiter(100)
-	node := &SamNode{
-		trustedKeys:       []TrustedKey{{Key: pub, ReceivedAt: time.Now()}},
-		verificationCache: cache,
-		revokedPeers:      revCache,
-		rateLimiter:       rl,
-		TrustHubRBAC:      true,
-		BiscuitTimeout:    500 * time.Millisecond,
-	}
-
-	// Helper to simulate request
-	doRequest := func(target string) bool {
-		pr1, pw1 := io.Pipe()
-		pr2, pw2 := io.Pipe()
-		serverStream := &mockStream{r: pr1, w: pw2, protocol: protocol.ID("mcp"), conn: &mockConn{remotePeer: dummyPeer}}
-
-		done := make(chan bool, 1)
-		go func() {
-			handler := node.WithBiscuitAuth(func(s network.Stream, reqCtx RequestContext) {
-				done <- true
-			})
-			handler(serverStream)
-			close(done)
-		}()
-
-		writer := msgio.NewVarintWriter(pw1)
-		authFrame := &api.AuthFrame{Biscuit: tokenBytes, TargetService: target}
-		data, _ := proto.Marshal(authFrame)
-		_ = writer.WriteMsg(data)
-		pw1.Close() //nolint:errcheck
-
-		reader := msgio.NewVarintReaderSize(pr2, 1024*64)
-		msg, err := reader.ReadMsg()
-		if err != nil {
-			return false
-		}
-		var resp api.AuthResponse
-		_ = proto.Unmarshal(msg, &resp)
-
-		success := <-done
-		return resp.Success && success
-	}
-
-	// 1. Authorized target should succeed
-	if !doRequest("system:query_db") {
-		t.Fatal("Expected authorized target to succeed")
-	}
-
-	// 2. Unauthorized target with the same token should FAIL
-	if doRequest("system:reboot_server") {
-		t.Fatal("SECURITY BUG: Unauthorized target succeeded due to cache bypass!")
+			err = node.Authorize(tokenBytes, tt.req, pub)
+			if tt.expectSuccess && err != nil {
+				t.Errorf("expected success, got error: %v", err)
+			}
+			if !tt.expectSuccess && err == nil {
+				t.Errorf("expected failure, got success")
+			}
+		})
 	}
 }

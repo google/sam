@@ -67,15 +67,13 @@ allow if group("engineering");
 ## 2. Hub Policy Schema (`policies.yaml`)
 Admins define central permissions by mapping OIDC roles to specific capabilities. 
 
-* **`allowed_targets`**: Defines which logical groups or specific peers a user can route messages to, analogous to Active Directory security groups. Target definitions must be formatted as resolved facts (e.g., `group:<name>`, `user:<sub-id>`, `email:<email>`, `role:<role-name>`, or `node:<peer-id>`). *Note: These are evaluated exclusively by the destination node (see Section 3.1).*
-* **`allowed_services`**: Defines the application-level tools or endpoints a user can access. Services use a strict `type:name` convention (e.g., `mcp:db-agent` or `inference:openrouter`).
-  * **Default Namespace (`system`)**: If a service string does not contain a `:` separator (e.g., `my-tool`), it automatically defaults to the `system` type (parsed as `system:my-tool`).
-  * **Wildcards**: Because `allowed_services` translates to the two-argument Biscuit fact `service($type, $name)`, SAM natively supports wildcards. You can grant access to an entire type via `type:*` (e.g., `mcp:*`), or grant global access to everything via `*`.
-  * **MCP Namespace Convention**: The `mcp:` prefix (`api.MCPServicePrefix`) is the explicit convention for all Model Context Protocol targets. When remote nodes query local nodes for tool catalogs, if the local service is an MCP server and is missing the `mcp:` prefix in its name, the proxy layer will automatically prepend `mcp:` prior to enforcing the authorization policy to prevent it from accidentally falling back into the `system:` namespace.
-  * **Custom Namespaces & Authorization Boundaries**: The system allows arbitrary prefixes (e.g., `plugin:my-tool`). The string is strictly split at the *first* colon. The left side (`plugin`) becomes the namespace used exclusively for Biscuit authorization checks (`service("plugin", "my-tool")`). If an administrator registers a service as `system:my-tool`, they are intentionally placing it behind the strict `system` authorization policy. Users cannot bypass security by adding prefixes—they only restrict access further.
-  * **Service Routing Fallback**: When authorizing a connection, the node first looks up the stripped target name (`my-tool`). If it fails, it explicitly falls back to the full original target string (`system:my-tool`). This allows users to register custom namespaced tools (e.g., `Name: "plugin:linter"`) and route to them securely while still strictly enforcing the `plugin` authorization policy.
+* **`allowed_targets`**: Defines which logical groups or specific peers a user can route messages to, analogous to Active Directory security groups. Target definitions must be formatted as resolved facts (e.g., `group:<name>`, `user:<sub-id>`, `email:<email>`, `role:<role-name>`, or `node:<peer-id>`). *Note: These are evaluated dynamically at the destination node using its own identity (see Section 3.1).*
+* **`allowed_services`**: Defines the application-level tools or endpoints a user can access. Services use a strict `type://name` convention (e.g., `mcp://db-agent` or `inference://openrouter`).
+  * **Strict Namespaces**: There are no implicit fallbacks. `system://...` is used for internal services, `mcp://...` for node services, `inference://...` for AI models, etc. Service names must be valid domain labels (e.g. `value1.value2.value3`).
+  * **Wildcards**: SAM natively supports domain-level wildcards to build complex policies. The hub generates specific facts like `granted_service_exact($type, $name)`, `granted_service_prefix($type, $prefix)`, `granted_service_suffix($type, $suffix)`, `granted_service_all_in_type($type)`, or `granted_service_all_types()`. You can grant access to an entire type via `mcp://*`, allow prefix-based wildcard matching like `mcp://*.service.local` (which matches services ending in `.service.local`), suffix-based wildcard matching like `mcp://service.*` (which matches services starting with `service.`), or global access to everything via `*`. Note that arbitrary partial matches (e.g., `dev-*` or `*-prod`) are not supported because they do not align with domain boundaries and will fail DNS name validation.
+  * **MCP Namespace Convention**: The `mcp://` prefix (`api.MCPServicePrefix`) is the explicit convention for all Model Context Protocol targets. When remote nodes query local nodes for tool catalogs, if the local service is an MCP server, the proxy layer strictly enforces the authorization policy against the `mcp://` prefix.
 > [!NOTE]
-> The `*` global wildcard is a special case. It maps exactly to type `*` and name `*`. It does *not* default to the `system` type.
+> The `*` global wildcard is a special case. It grants `granted_service_all_types()` fact, allowing the caller to invoke any tool regardless of its namespace or name.
 
 ```yaml
 version: "v1alpha1"
@@ -88,9 +86,9 @@ roles:
       - "user:auth0|123456"       # Node bound to a specific user sub
       - "email:db@example.com"    # Node bound to a specific email
     allowed_services: 
-      - "mcp:db-agent"            # Access to specific MCP server
-      - "inference:openrouter"    # Access to inference endpoints
-      - "mcp:*"                   # Wildcard access to all MCP servers
+      - "mcp://db-agent"            # Access to specific MCP server
+      - "inference://openrouter"    # Access to inference endpoints
+      - "mcp://*"                   # Wildcard access to all MCP servers
     custom_datalog:
       - 'department("analytics");' # Raw injected facts
 ```
@@ -108,32 +106,22 @@ attenuation:
 ```
 
 ### 3.1 Evaluating `allowed_targets` at the Destination
-The SAM network operates on a Zero Trust architecture. The origin node does not police its own traffic. When the Hub injects an `allowed_targets` permission (like `- "group:backend-nodes"`) into the token, it creates a `network_target("group:backend-nodes")` capability fact.
+The SAM network operates on a Zero Trust architecture. The origin node does not police its own traffic. When the Hub injects `allowed_targets` permissions (like `- "group:backend-nodes"`) into the token, it creates `granted_target_group("backend-nodes")` capability facts and seals the token with a `target_restricted()` fact. If no targets are specified, the Hub mints a `target_unrestricted()` fact.
 
-It is up to the **destination node** to mathematically prove that it is the intended target. To do this, the destination node injects its own identity into its local config using `rules`, and enforces the match using `policies`:
+It is up to the **destination node** to mathematically prove that it is the intended target. To do this, the destination node automatically injects its own identity into the local authorization context as target facts (e.g., `target_fact("group", "backend-nodes")`).
 
-```yaml
-version: "v1alpha1"
-attenuation:
-  rules:
-    # 1. The destination defines what it "is" locally
-    - 'target("group:backend-nodes") <- true;'
-    - 'target("email:db@example.com") <- true;'
-  policies:
-    # 2. The destination strictly enforces that the token contains the matching network_target
-    - 'allow if target($t), network_target($t);'
+The destination node enforces this via a baseline check:
+```datalog
+check if allow_network_target($fact, $val) or target_unrestricted();
 ```
 
-If the calling node's token does not contain a `network_target` fact that exactly matches one of the destination's `target` rules, the destination node's authorization middleware will reject the connection.
+Because the target logic is baked directly into the node's middleware, you don't need to write manual Datalog rules for it. The node dynamically deduces `allow_network_target($fact, $val)` if any of its injected `target_fact`s match the `granted_target_*` facts presented in the incoming token.
 
-> [!WARNING]
-> **What happens if a node does not set any local target policies?**
-> If a node does not define any `target` rules or `allow if target($t), network_target($t);` policies in its local configuration, it defaults to relying strictly on the Hub's **Baseline Security Rules** (Section 4). In this default state, the node is "open" to *any* peer in the mesh, provided the peer possesses the explicit `allow_service` permissions required to execute the tool. In other words, `allowed_targets` is an *opt-in* mechanism for the destination to attenuate traffic further; without it, the destination trusts the Hub's `allowed_services` whitelist implicitly.
->
-> **Does this mean the mesh is insecure by default?**
-> No. By default, `sam-hub` operates in a **Default-Deny** state. If a user is not explicitly mapped to a role in the Hub's `policies.yaml`, or if their role does not explicitly grant an `allowed_service` capability, their token will contain no service permissions. Because the destination node's Baseline Rules require an explicit `allow_service` fact to execute any tool, the connection will be instantly denied (even if no targets are defined).
->
-> It is entirely a **Mesh Operator decision** how the mesh behaves. Operators can choose to rely solely on service whitelists (granting broad mesh-wide execution), or strictly partition the network into isolated zones by injecting `allowed_targets` and enforcing them locally on the nodes.
+If the token is `target_restricted()` and the destination node does not possess an identity matching the granted targets, the connection is instantly rejected.
+
+> [!NOTE]
+> **Policy Evaluation Precedence**
+> Local policies defined in `sam-node-config.yaml` are evaluated **before** baseline rules. This means local administrators can write rules that explicitly `deny` access based on custom logic, effectively overriding any broad access granted by the Hub's baseline policies. Local policies can only attenuate (restrict) access, never expand it beyond what the Hub allowed.
 
 ## 4. Node Baseline Security Rules
 
@@ -145,13 +133,60 @@ Every request must prove that the libp2p cryptographic peer ID of the connection
 check if client_peer_id($id), connection_peer_id($id);
 ```
 
-### 4.2 The Catalog Service (`/sam/catalog`)
-To allow remote peers to discover tools and query connectivity, each node hosts a built-in catalog service at the special target `/sam/catalog`. This service exposes local metadata tools (e.g. `list_local_services`, `get_mesh_info`).
+### 4.2 The Catalog Service (`sam.catalog`)
+To allow remote peers to discover tools and query connectivity, each node hosts a built-in catalog service at the special target `sam.catalog`. This service exposes local metadata tools (e.g. `list_local_services`, `get_mesh_info`).
 
 To ensure tool discovery works out-of-the-box, the node automatically injects a baseline rule allowing all verified peers to access it:
 ```datalog
-allow if service("system", "/sam/catalog");
+allow if service("system", "sam.catalog");
 ```
 > [!IMPORTANT]
 > Without this baseline rule (or if a custom local attenuation policy explicitly blocks it), remote nodes will not be able to retrieve this node's tool catalog. As a result, agents across the mesh will fail to discover or call any of this node's tools.
+
+## 5. Ingress Authorization Pipeline (Execution Flow)
+
+When a node receives an incoming connection request (via P2P HTTP Ingress or wrapped protocol streams like MCP/Inference), it performs a multi-stage verification pipeline.
+
+### 5.1 Pipeline Stages
+
+```mermaid
+graph TD
+    A[Incoming Connection] --> B(Stage 1: Connection Gating)
+    B -->|Banned/Revoked| C[Drop Connection]
+    B -->|Allowed| D(Stage 2: Biscuit Token Verification)
+    D --> E[Run 1: Authorize Node's Own Identity Token]
+    E --> F[Query & Inject Destination Target Facts]
+    F --> G[Run 2: Authorize Caller's Request Token]
+    G -->|Success| H[Proxy to Downstream Service]
+    G -->|Denied| I[Return 403 Forbidden / Reject Auth Frame]
+```
+
+1. **Stage 1: Connection Gating (Layer 2)**
+   - Performed immediately at the connection manager level (`gate.go`).
+   - Checks the remote peer ID against local blacklist (`Store.IsBanned`) and revocation caches (`revokedPeers`).
+   - Does not parse Biscuit tokens. Connection is dropped early if matched.
+
+2. **Stage 2: Biscuit Token Verification (Layer 3/4)**
+   - Handled inside node middleware (`middleware.go`).
+   - Performs exactly **two Biscuit authorizer execution runs** to process authorization:
+
+#### Run 1: Destination Identity Fact Evaluation
+- **Target**: The node's **own identity token** (issued by the Hub during enrollment).
+- **Purpose**: We must mathematically evaluate the node's own OIDC group/user claims and node ID to produce `target_fact(...)` datalog assertions (e.g. `target_fact("group", "backend-nodes")`). These facts represent *who we are*.
+- **Mechanism**:
+  1. We create an authorizer for our own token signed by the Hub's public key.
+  2. We add a baseline `allow if true` policy. This policy is required by Biscuit so that the authorizer can execute (since the token itself holds only identity facts and has no operation-level authorization policies).
+  3. We execute `Authorize()` to verify our token signature and validate internal checks (such as expiration).
+  4. We query `api.TargetFactRules` against this authorizer to extract target facts.
+  5. We inject these extracted `target_fact` assertions into the main request authorizer.
+
+#### Run 2: Caller Request Authorization
+- **Target**: The caller's **request token** (the Biscuit token presented in the request's `X-Sam-Biscuit` header or `AuthFrame`).
+- **Purpose**: Verifies that the caller has been granted access by the Hub to the requested target service, checks for replay protection, and evaluates local attenuation constraints.
+- **Mechanism**:
+  1. We create an authorizer for the caller's token using the Hub's public key.
+  2. We inject the target matching facts derived from Run 1.
+  3. We add baseline rules (e.g. peer ID matching connection ID check, system catalog access policies) and local attenuation configurations (`sam-node-config.yaml`).
+  4. We execute `Authorize()` to check all signatures, checks, and policies. If successful, the request is forwarded to the underlying service.
+
 

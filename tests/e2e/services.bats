@@ -38,8 +38,7 @@ teardown() {
   mesh_start_hub
 
   echo "[$(date +%T)] Starting Node 1"
-  run mesh_start_node 1 "--log-level debug"
-  [[ "$status" -eq 0 ]]
+  mesh_start_node 1 "--log-level debug"
   local node1_name="${MESH_PREFIX}-node-1"
   mesh_wait_for_log "${node1_name}" "SAM Node Online" 60
   mesh_wait_for_mcp_ready 1 20
@@ -48,10 +47,9 @@ teardown() {
   start_calc_mcp
 
   echo "[$(date +%T)] Starting Node 2 (with calculator service config)"
-  run mesh_start_node 2 \
+  mesh_start_node 2 \
     "--log-level debug" \
     "tests/e2e/docker/calc-mcp/sam-node-config.yaml"
-  [[ "$status" -eq 0 ]]
   local node2_name="${MESH_PREFIX}-node-2"
   mesh_wait_for_log "${node2_name}" "SAM Node Online" 20
   mesh_wait_for_mcp_ready 2 20
@@ -75,6 +73,7 @@ teardown() {
   echo "[$(date +%T)] Discovering MCP services from Node 1 (type-only)"
   run docker run --rm --network "${MESH_NETWORK}" \
     "${MESH_RUNTIME_IMAGE}" mcp-client \
+    -timeout 30 \
     -url "http://sam-node-1:8080/mcp" \
     -tool "discover_remote_services" \
     -args '{"type":"mcp"}'
@@ -91,6 +90,15 @@ teardown() {
                  and .peer_id == $pid
                  and .srv_description == "Simple math operations")] | length
   ')
-  echo "Matching entries: ${match_count}"
+  echo "Matching entries for calculator: ${match_count}"
   [[ "${match_count}" -eq 1 ]]
+
+  local underscore_match_count
+  underscore_match_count=$(echo "$catalog" | jq --arg pid "${node2_peer_id}" '
+    [.[] | select(.srv_name == "calc_service"
+                 and .peer_id == $pid
+                 and .srv_description == "Simple math operations with underscore")] | length
+  ')
+  echo "Matching entries for calc_service: ${underscore_match_count}"
+  [[ "${underscore_match_count}" -eq 1 ]]
 }

@@ -24,8 +24,7 @@ teardown() {
 
   # Start Node 1
   echo "[$(date +%T)] Starting Node 1"
-  run mesh_start_node 1 "--log-level debug"
-  [[ "$status" -eq 0 ]]
+  mesh_start_node 1 "--log-level debug"
   local node1_name="${MESH_PREFIX}-node-1"
   mesh_wait_for_log "${node1_name}" "SAM Node Online" 20
   mesh_wait_for_mcp_ready 1 20
@@ -35,8 +34,7 @@ teardown() {
 
   # Start Node 2
   echo "[$(date +%T)] Starting Node 2"
-  run mesh_start_node 2 "--log-level debug"
-  [[ "$status" -eq 0 ]]
+  mesh_start_node 2 "--log-level debug"
   local node2_name="${MESH_PREFIX}-node-2"
   mesh_wait_for_log "${node2_name}" "SAM Node Online" 20
   mesh_wait_for_mcp_ready 2 20

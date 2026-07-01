@@ -18,6 +18,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -177,6 +178,7 @@ func handleReadyz(w http.ResponseWriter, r *http.Request) {
 func withMeshConnection(node *SamNode, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if node != nil && !node.IsConnected() {
+			logger.Warnf("[SidecarAuth] Request %s %s rejected: node not connected to mesh", r.Method, r.URL.Path)
 			http.Error(w, "Service Unavailable: Not connected to the mesh", http.StatusServiceUnavailable)
 			return
 		}
@@ -186,6 +188,7 @@ func withMeshConnection(node *SamNode, next http.Handler) http.Handler {
 
 func withAuth(token string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		logger.Debugf("[SidecarAuth] Incoming request: %s %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
 		if token == "" {
 			// If token is empty, we assume mTLS is handling authentication.
 			// startSidecarServer enforces that token is present if mTLS is not used.
@@ -195,6 +198,7 @@ func withAuth(token string, next http.Handler) http.Handler {
 
 		authHeader := r.Header.Get("Authorization")
 		if authHeader == "" {
+			logger.Warnf("[SidecarAuth] Request %s %s rejected: missing Authorization header", r.Method, r.URL.Path)
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
@@ -430,5 +434,30 @@ func createEgressProxy(node *SamNode) http.Handler {
 		Transport: transport,
 	}
 
-	return proxy
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if node == nil {
+			logger.Errorf("[Proxy] Node is nil, rejecting egress request.")
+			http.Error(w, "Service Unavailable: Node Not Initialized", http.StatusServiceUnavailable)
+			return
+		}
+		biscuitBytes := node.GetIdentity()
+		if biscuitBytes == nil {
+			logger.Errorf("[Proxy] Failed to load node identity for egress request, rejecting.")
+			http.Error(w, "Service Unavailable: Missing Node Identity", http.StatusServiceUnavailable)
+			return
+		}
+
+		r.Header.Set(api.HeaderSamBiscuit, base64.StdEncoding.EncodeToString(biscuitBytes))
+
+		// Map X-Sam-Authorization to Authorization header for the remote service,
+		// and delete the local sidecar Authorization header to prevent leaking it.
+		if upstreamAuth := r.Header.Get(api.HeaderSamAuthorization); upstreamAuth != "" {
+			r.Header.Set("Authorization", upstreamAuth)
+			r.Header.Del(api.HeaderSamAuthorization)
+		} else {
+			r.Header.Del("Authorization")
+		}
+
+		proxy.ServeHTTP(w, r)
+	})
 }

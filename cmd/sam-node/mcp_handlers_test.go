@@ -25,6 +25,7 @@ import (
 func buildAndSaveBiscuit(node *SamNode, rootPriv ed25519.PrivateKey) error {
 	callerID := node.Host.ID().String()
 	builder := biscuit.NewBuilder(rootPriv)
+	_ = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{Name: "target_unrestricted"}})
 	if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
 		Name: "node",
 		IDs:  []biscuit.Term{biscuit.String(callerID)},
@@ -38,8 +39,8 @@ func buildAndSaveBiscuit(node *SamNode, rootPriv ed25519.PrivateKey) error {
 		return err
 	}
 	if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
-		Name: api.FactAllowService,
-		IDs:  []biscuit.Term{biscuit.String("*"), biscuit.String("*")},
+		Name: "granted_service_all_types",
+		IDs:  []biscuit.Term{},
 	}}); err != nil {
 		return err
 	}
@@ -160,8 +161,8 @@ func TestHandleFindRemoteTools_SinglePeer(t *testing.T) {
 	}
 
 	wantNames := map[string]bool{
-		"mcp:code-reviewer.review_pr":   false,
-		"mcp:code-reviewer.add_comment": false,
+		"mcp://code-reviewer/review_pr":   false,
+		"mcp://code-reviewer/add_comment": false,
 	}
 	for _, row := range rows {
 		if row.PeerID != nodeB.Host.ID().String() {
@@ -232,13 +233,13 @@ func TestHandleFindRemoteTools_MeshWide(t *testing.T) {
 		t.Fatalf("RegisterService B: %v", err)
 	}
 	if err := nodeC.RegisterService(ctx, &api.RegisterServiceRequest{
-		Service: &api.ServiceInfo{Type: api.ServiceType_SERVICE_TYPE_MCP, Name: "mcp:summarizer"},
+		Service: &api.ServiceInfo{Type: api.ServiceType_SERVICE_TYPE_MCP, Name: "mcp://summarizer"},
 		Backend: &api.RegisterServiceRequest_TargetUrl{TargetUrl: cSrv.URL},
 	}); err != nil {
 		t.Fatalf("RegisterService C: %v", err)
 	}
 	if err := nodeD.RegisterService(ctx, &api.RegisterServiceRequest{
-		Service: &api.ServiceInfo{Type: api.ServiceType_SERVICE_TYPE_MCP, Name: "plugin:linter"},
+		Service: &api.ServiceInfo{Type: api.ServiceType_SERVICE_TYPE_MCP, Name: "plugin://linter"},
 		Backend: &api.RegisterServiceRequest_TargetUrl{TargetUrl: dSrv.URL},
 	}); err != nil {
 		t.Fatalf("RegisterService D: %v", err)
@@ -264,77 +265,17 @@ func TestHandleFindRemoteTools_MeshWide(t *testing.T) {
 		gotNames[tool.ToolName] = true
 	}
 
-	// Test permutation 1: no prefix gets "mcp:" automatically prepended.
-	if !gotNames["mcp:code-reviewer.review_pr"] {
-		t.Errorf("missing mcp:code-reviewer.review_pr; got %v", gotNames)
+	// Test permutation 1: no prefix gets "mcp://" automatically prepended.
+	if !gotNames["mcp://code-reviewer/review_pr"] {
+		t.Errorf("missing mcp://code-reviewer/review_pr; got %v", gotNames)
 	}
-	// Test permutation 2: "mcp:" prefix is preserved.
-	if !gotNames["mcp:summarizer.summarize"] {
-		t.Errorf("missing mcp:summarizer.summarize; got %v", gotNames)
+	// Test permutation 2: "mcp://" prefix is preserved.
+	if !gotNames["mcp://summarizer/summarize"] {
+		t.Errorf("missing mcp://summarizer/summarize; got %v", gotNames)
 	}
 	// Test permutation 3: custom namespace prefix is preserved.
-	if !gotNames["plugin:linter.lint"] {
-		t.Errorf("missing plugin:linter.lint; got %v", gotNames)
-	}
-}
-
-func TestHandleFindRemoteTools_MeshWideViaHandler(t *testing.T) {
-	t.Skip("requires DHT convergence; isolated libp2p hosts cannot form a functional provider store. Covered by e2e tests.")
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	bSrv := httptest.NewServer(newFakeMCPHandler(t, []*mcp.Tool{
-		{Name: "review_pr", Description: "x", InputSchema: map[string]any{"type": "object"}},
-	}))
-	defer bSrv.Close()
-
-	nodeA, cleanupA := startBareNode(t, ctx)
-	defer cleanupA()
-	nodeB, cleanupB := startBareNode(t, ctx)
-	defer cleanupB()
-
-	rootPub, rootPriv, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := buildAndSaveBiscuit(nodeA, rootPriv); err != nil {
-		t.Fatalf("buildAndSaveBiscuit: %v", err)
-	}
-	if err := nodeA.Host.Connect(ctx, peer.AddrInfo{ID: nodeB.Host.ID(), Addrs: nodeB.Host.Addrs()}); err != nil {
-		t.Fatal(err)
-	}
-	nodeB.keysMu.Lock()
-	nodeB.trustedKeys = append(nodeB.trustedKeys, TrustedKey{Key: rootPub, ReceivedAt: time.Now()})
-	nodeB.keysMu.Unlock()
-
-	if err := nodeB.RegisterService(ctx, &api.RegisterServiceRequest{
-		Service: &api.ServiceInfo{Type: api.ServiceType_SERVICE_TYPE_MCP, Name: "code-reviewer"},
-		Backend: &api.RegisterServiceRequest_TargetUrl{TargetUrl: bSrv.URL},
-	}); err != nil {
-		t.Fatalf("RegisterService: %v", err)
-	}
-
-	// Give the DHT a moment to record the provider.
-	time.Sleep(500 * time.Millisecond)
-
-	res, _, err := nodeA.handleFindRemoteTools(ctx, &mcp.CallToolRequest{}, FindRemoteToolsParams{})
-	if err != nil {
-		t.Fatalf("handler: %v", err)
-	}
-	tc := res.Content[0].(*mcp.TextContent)
-	var rows []remoteToolRow
-	if err := json.Unmarshal([]byte(tc.Text), &rows); err != nil {
-		t.Fatal(err)
-	}
-
-	found := false
-	for _, r := range rows {
-		if r.ToolName == "code-reviewer.review_pr" && r.PeerID == nodeB.Host.ID().String() {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("expected code-reviewer.review_pr from B; got rows=%+v", rows)
+	if !gotNames["plugin://linter/lint"] {
+		t.Errorf("missing plugin://linter/lint; got %v", gotNames)
 	}
 }
 
@@ -392,18 +333,22 @@ func TestHandleFindRemoteTools_PartialFailure(t *testing.T) {
 
 	gotSummarizer := false
 	for _, r := range rows {
-		if r.ToolName == "mcp:summarizer.summarize" {
+		if r.ToolName == "mcp://summarizer/summarize" {
 			gotSummarizer = true
 		}
 	}
 	if !gotSummarizer {
-		t.Errorf("expected mcp:summarizer.summarize from C even with B unreachable; got %+v", rows)
+		t.Errorf("expected mcp://summarizer/summarize from C even with B unreachable; got %+v", rows)
 	}
 }
 
 func buildAndSaveCustomBiscuit(node *SamNode, rootPriv ed25519.PrivateKey, allowedServices []string) error {
 	callerID := node.Host.ID().String()
 	builder := biscuit.NewBuilder(rootPriv)
+	err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{Name: "target_unrestricted"}})
+	if err != nil {
+		return err
+	}
 	if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
 		Name: "node",
 		IDs:  []biscuit.Term{biscuit.String(callerID)},
@@ -424,7 +369,7 @@ func buildAndSaveCustomBiscuit(node *SamNode, rootPriv ed25519.PrivateKey, allow
 			opName = parts[1]
 		}
 		if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
-			Name: api.FactAllowService,
+			Name: "granted_service_exact",
 			IDs:  []biscuit.Term{biscuit.String(opType), biscuit.String(opName)},
 		}}); err != nil {
 			return err
@@ -493,8 +438,8 @@ func TestFetchRemoteToolCatalogue_AuthRejected(t *testing.T) {
 	}
 
 	row := rows[0]
-	if row.ToolName != "mcp:summarizer" {
-		t.Errorf("expected ToolName 'mcp:summarizer', got %q", row.ToolName)
+	if row.ToolName != "mcp://summarizer" {
+		t.Errorf("expected ToolName 'mcp://summarizer', got %q", row.ToolName)
 	}
 	if !strings.Contains(row.Error, "auth rejected") {
 		t.Errorf("expected Error to contain 'auth rejected', got %q", row.Error)
@@ -546,7 +491,7 @@ func TestHandleDescribeRemoteTool_EmptyPeerID(t *testing.T) {
 	defer cleanup()
 
 	_, _, err := node.handleDescribeRemoteTool(ctx, &mcp.CallToolRequest{}, DescribeRemoteToolParams{
-		ToolName: "code-reviewer.review_pr",
+		ToolName: "code-reviewer/review_pr",
 	})
 	if err == nil {
 		t.Fatal("expected error for empty peer_id")
@@ -582,7 +527,7 @@ func TestHandleDescribeRemoteTool_NonNamespacedRejected(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for tool_name without '.'")
 	}
-	if !strings.Contains(err.Error(), "service.tool") {
+	if !strings.Contains(err.Error(), "service/tool") {
 		t.Errorf("error %q does not explain the namespacing requirement", err.Error())
 	}
 }
@@ -596,7 +541,7 @@ func TestHandleDescribeRemoteTool_SelfPeerRejected(t *testing.T) {
 
 	_, _, err := node.handleDescribeRemoteTool(ctx, &mcp.CallToolRequest{}, DescribeRemoteToolParams{
 		PeerID:   node.Host.ID().String(),
-		ToolName: "code-reviewer.review_pr",
+		ToolName: "mcp://code-reviewer/review_pr",
 	})
 	if err == nil {
 		t.Fatal("expected error when peer_id equals self peer ID")
@@ -612,7 +557,7 @@ func TestHandleDescribeRemoteTool_InvalidPeerID(t *testing.T) {
 
 	_, _, err := node.handleDescribeRemoteTool(ctx, &mcp.CallToolRequest{}, DescribeRemoteToolParams{
 		PeerID:   "not-a-valid-peer-id",
-		ToolName: "code-reviewer.review_pr",
+		ToolName: "mcp://code-reviewer/review_pr",
 	})
 	if err == nil {
 		t.Fatal("expected error for malformed peer_id")
@@ -676,7 +621,7 @@ func TestHandleDescribeRemoteTool_RoundTrip(t *testing.T) {
 
 	res, _, err := nodeA.handleDescribeRemoteTool(ctx, &mcp.CallToolRequest{}, DescribeRemoteToolParams{
 		PeerID:   nodeB.Host.ID().String(),
-		ToolName: "code-reviewer.review_pr",
+		ToolName: "mcp://code-reviewer/review_pr",
 	})
 	if err != nil {
 		t.Fatalf("handleDescribeRemoteTool: %v", err)
@@ -693,8 +638,8 @@ func TestHandleDescribeRemoteTool_RoundTrip(t *testing.T) {
 	if desc.PeerID != nodeB.Host.ID().String() {
 		t.Errorf("PeerID = %q, want %q", desc.PeerID, nodeB.Host.ID().String())
 	}
-	if desc.ToolName != "code-reviewer.review_pr" {
-		t.Errorf("ToolName = %q, want %q", desc.ToolName, "code-reviewer.review_pr")
+	if desc.ToolName != "mcp://code-reviewer/review_pr" {
+		t.Errorf("ToolName = %q, want %q", desc.ToolName, "mcp://code-reviewer/review_pr")
 	}
 	if desc.Description != "Run a code review" {
 		t.Errorf("Description = %q, want %q", desc.Description, "Run a code review")
@@ -754,7 +699,7 @@ func TestHandleDescribeRemoteTool_RoundTrip_UnknownTool(t *testing.T) {
 
 	_, _, err = nodeA.handleDescribeRemoteTool(ctx, &mcp.CallToolRequest{}, DescribeRemoteToolParams{
 		PeerID:   nodeB.Host.ID().String(),
-		ToolName: "code-reviewer.does-not-exist",
+		ToolName: "mcp://code-reviewer/does-not-exist",
 	})
 	if err == nil {
 		t.Fatal("expected error from peer when tool is not registered")

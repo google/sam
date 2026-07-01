@@ -55,11 +55,11 @@ func TestMintBiscuitToken(t *testing.T) {
 			},
 			Roles: map[string]api.RolePolicy{
 				"admin": {
-					AllowedServices: []string{"read", "write"},
-					AllowedTargets:  []string{"target1"},
+					AllowedServices: []string{"mcp:read", "mcp:write"},
+					AllowedTargets:  []string{"mcp:target1"},
 				},
 				"canary-role": {
-					AllowedServices: []string{"/sam/mcp/1.0.0"},
+					AllowedServices: []string{"mcp:1.0.0"},
 				},
 			},
 		},
@@ -108,6 +108,10 @@ func TestMintBiscuitToken(t *testing.T) {
 		},
 	}, Kind: biscuit.PolicyKindAllow}
 	authorizer1.AddPolicy(rule1)
+	authorizer1.AddFact(biscuit.Fact{Predicate: biscuit.Predicate{
+		Name: "allow_network_target",
+		IDs:  []biscuit.Term{biscuit.String("mcp"), biscuit.String("target1")},
+	}})
 	if err := authorizer1.Authorize(); err != nil {
 		t.Errorf("Expected direct role 'admin' to be authorized: %v", err)
 	}
@@ -295,7 +299,7 @@ func TestMintBiscuitToken_ClaimsTranslation(t *testing.T) {
 			},
 			Roles: map[string]api.RolePolicy{
 				"developer-role": {
-					AllowedServices: []string{"git-helper"},
+					AllowedServices: []string{"mcp:git-helper"},
 				},
 			},
 		},

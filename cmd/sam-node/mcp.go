@@ -33,18 +33,19 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// meshInstructions tells connecting clients a mesh is reachable here and how
-// the find → describe → call flow works. Sent at initialize time.
-const meshInstructions = `This MCP server connects this node to a SAM mesh: a network of remote agents that host their own MCP tools. The tools listed here are infrastructure for reaching tools on other peers when no local tool or capability covers the task.
+// meshInstructions tells connecting clients how the SAM mesh is composed and how
+// to discover and call remote tools/services. Sent at initialize time.
+const meshInstructions = `This MCP server connects this node to a SAM mesh: a network of remote agents that host their own services (e.g., MCP servers or inference services) and tools.
 
-Reach into the mesh only when the needed tool isn't available locally. To do so:
+The mesh allows you to discover these remote services, list their tools, and call them.
+To use these remote services and their tools, the client can use the following flow:
   1. find_remote_tools — discover what tools exist across the mesh (returns peer_id + namespaced tool_name + description). Optionally narrow by service_name or peer_id.
   2. describe_remote_tool — fetch a specific tool's input_schema before calling it. Always do this so you know the argument shape.
-  3. call_remote_tool — invoke it. Pass peer_id, the namespaced tool_name, and arguments as a JSON object whose keys match the input_schema from step 2 (not a stringified blob).
+  3. call_remote_tool — invoke it. Pass peer_id, the namespaced tool_name (scheme://service/tool, e.g. 'mcp://code-reviewer/review_pr'), and arguments as a JSON object whose keys match the input_schema.
 
-Other useful tools: discover_remote_services browses services by type, get_mesh_info reports connected peers and mesh state, list_local_services shows what this node hosts.
+Other useful tools: discover_remote_services browses services by type (e.g. 'MCP' or 'Inference'), get_mesh_info reports connected peers and mesh state, list_local_services shows what this node hosts.
 
-Remote tool names are namespaced as '<service>.<tool>' (e.g. 'code-reviewer.review_pr'). Prefer discovering and describing a tool before calling it rather than guessing arguments.`
+Tools on remote services are identified via the format 'scheme://service-name/tool-name' (where 'scheme://service-name' represents the well-known local address of the service, and 'tool-name' is the individual tool to execute on it. Tool names themselves can contain any characters).`
 
 // NewMCPServer creates a new MCP server instance with all tools registered.
 func NewMCPServer(node *SamNode) *mcp.Server {
@@ -116,7 +117,7 @@ func NewMCPServer(node *SamNode) *mcp.Server {
 	// Add the describe_remote_tool tool.
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "describe_remote_tool",
-		Description: "Return the description, input schema, and output schema for a specific aggregated tool on a specific peer. peer_id and tool_name are both required; tool_name must be a namespaced '<service>.<tool>' name as returned by find_remote_tools.",
+		Description: "Return the description, input schema, and output schema for a specific aggregated tool on a specific peer. peer_id and tool_name are both required; tool_name must be a namespaced 'scheme://service/tool' name as returned by find_remote_tools.",
 	}, node.handleDescribeRemoteTool)
 
 	// Add the check_connectivity tool.
@@ -363,11 +364,9 @@ func (n *SamNode) ConnectMCPSession(ctx context.Context, targetPeer peer.ID, tar
 }
 
 func (n *SamNode) callMCPToolOnce(ctx context.Context, targetPeer peer.ID, toolName string, params any) (*mcp.CallToolResult, error) {
-	targetService := api.CatalogTarget
-	originalToolName := toolName
-	if parts := strings.SplitN(toolName, ".", 2); len(parts) == 2 {
-		targetService = parts[0]
-		originalToolName = parts[1]
+	targetService, originalToolName, err := api.SplitToolName(toolName)
+	if err != nil {
+		return nil, err
 	}
 
 	session, cleanup, err := n.ConnectMCPSession(ctx, targetPeer, targetService)
@@ -396,7 +395,7 @@ func (n *SamNode) callMCPToolOnce(ctx context.Context, targetPeer peer.ID, toolN
 func (n *SamNode) fetchRemoteServiceCatalog(ctx context.Context, peerID peer.ID, typeStr string) ([]*api.ServiceInfo, error) {
 	n.preparePeerAddrs(ctx, peerID)
 
-	session, cleanup, err := n.ConnectMCPSession(ctx, peerID, api.CatalogTarget)
+	session, cleanup, err := n.ConnectMCPSession(ctx, peerID, "system://"+api.CatalogTarget)
 	if err != nil {
 		return nil, err
 	}

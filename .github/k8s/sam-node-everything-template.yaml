@@ -7,9 +7,7 @@ data:
   sam-node.yaml: |
     version: "v1alpha1"
     attenuation:
-      policies:
-        - 'allow if service("mcp", "everything");'
-        - 'allow if service("system", "/sam/catalog");'
+      policies: []
       checks: []
       rules: []
     services:

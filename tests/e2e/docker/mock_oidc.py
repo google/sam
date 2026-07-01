@@ -1,13 +1,11 @@
 import json
 import time
 import jwt
+import urllib.parse
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 # The following RSA private key and JWKS were generated for testing purposes.
 # They are used by the mock OIDC server to sign JWTs.
-# To generate a new key pair:
-#   openssl genpkey -algorithm RSA -out private.pem -pkeyopt rsa_keygen_bits:2048
-#   openssl rsa -pubout -in private.pem -out public.pem
 # Parameters: RSA 2048 bits, Algorithm: RS256, kid: test-key-id
 PRIVATE_KEY = """-----BEGIN PRIVATE KEY-----
 MIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQDGtPD85uaT342Y
@@ -79,6 +77,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.end_headers()
         self.wfile.write(b'ok')
+        return
 
     def do_POST(self):
         if self.path == '/device/code':
@@ -97,12 +96,24 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(data)
             return
         if self.path == '/token':
+            # Parse form data from post body
+            content_length = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(content_length).decode('utf-8')
+            params = urllib.parse.parse_qs(body) if body else {}
+
+            client_id = params.get('client_id', [''])[0]
+
+            # Assign groups based on client_id
+            groups = ['data-scientist']
+            if client_id == 'admin-client':
+                groups = ['admin']
+
             payload = {
                 'iss': 'http://mock-oidc:18080',
                 'aud': 'sam-mesh-audience',
                 'sub': 'test-user',
                 'exp': int(time.time()) + 3600,
-                'roles': ['admin', 'user']
+                'groups': groups
             }
             token = jwt.encode(payload, PRIVATE_KEY, algorithm='RS256', headers={'kid': 'test-key-id'})
             body = {

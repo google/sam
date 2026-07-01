@@ -3,9 +3,12 @@ attenuation:
   # Receiver-side: allow MCP only when the caller's biscuit was minted by
   # our hub for some peer (zero-trust narrow than "any valid OIDC token").
   policies:
-    - 'allow if service($type, $name), node($peer)'
 services:
   - type: "mcp"
     name: "calculator"
     description: "Simple math operations"
+    target_url: "http://calc-mcp:7777/mcp"
+  - type: "mcp"
+    name: "calc_service"
+    description: "Simple math operations with underscore"
     target_url: "http://calc-mcp:7777/mcp"

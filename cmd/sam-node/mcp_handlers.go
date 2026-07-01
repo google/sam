@@ -226,7 +226,19 @@ func (n *SamNode) handleConnectPeer(ctx context.Context, req *mcp.CallToolReques
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := n.Host.Connect(ctx, *addrInfo); err != nil {
+	if n.revokedPeers != nil && n.revokedPeers.Contains(addrInfo.ID.String()) {
+		return nil, nil, fmt.Errorf("failed to dial: failed to dial %s: gater disallows connection to peer", addrInfo.ID)
+	}
+	if n.Store.IsBanned(addrInfo.ID) {
+		return nil, nil, fmt.Errorf("failed to dial: failed to dial %s: gater disallows connection to peer", addrInfo.ID)
+	}
+	conns := n.Host.Network().ConnsToPeer(addrInfo.ID)
+	connectedness := n.Host.Network().Connectedness(addrInfo.ID)
+	logger.Debugf("[connect_peer] Target peer %s, connectedness: %v, active conns: %d", addrInfo.ID, connectedness, len(conns))
+
+	err = n.Host.Connect(ctx, *addrInfo)
+	logger.Debugf("[connect_peer] Host.Connect returned error: %v", err)
+	if err != nil {
 		return nil, nil, err
 	}
 	return &mcp.CallToolResult{
@@ -338,7 +350,7 @@ func (n *SamNode) fetchRemoteToolCatalogue(ctx context.Context, targetPeer peer.
 
 		targetService := svc.Name
 		connectService := targetService
-		if !strings.Contains(connectService, ":") {
+		if !strings.Contains(connectService, "://") && !strings.Contains(connectService, ":") {
 			connectService = api.MCPServicePrefix + connectService
 		}
 
@@ -362,8 +374,8 @@ func (n *SamNode) fetchRemoteToolCatalogue(ctx context.Context, targetPeer peer.
 				if t == nil {
 					continue
 				}
-				t.Name = connectService + "." + t.Name
-				if serviceNameFilter != "" && !strings.HasPrefix(t.Name, serviceNameFilter+".") {
+				t.Name = connectService + "/" + t.Name
+				if serviceNameFilter != "" && !strings.HasPrefix(t.Name, serviceNameFilter+"/") {
 					continue
 				}
 				rows = append(rows, remoteToolRow{
@@ -453,7 +465,7 @@ type remoteToolDescription struct {
 // sidecar tool.
 type DescribeRemoteToolParams struct {
 	PeerID   string `json:"peer_id" jsonschema:"Peer ID of the node hosting the server. Required."`
-	ToolName string `json:"tool_name" jsonschema:"Namespaced server name as returned by find_remote_tools (e.g. 'code-reviewer.review_pr'). Required."`
+	ToolName string `json:"tool_name" jsonschema:"Namespaced server name as returned by find_remote_tools (e.g. 'mcp://code-reviewer/review_pr'). Required."`
 }
 
 // handleDescribeRemoteTool implements the describe_remote_tool client-facing tool.
@@ -470,12 +482,13 @@ func (n *SamNode) handleDescribeRemoteTool(ctx context.Context, req *mcp.CallToo
 		return nil, nil, fmt.Errorf("invalid peer_id: %w", err)
 	}
 
-	parts := strings.SplitN(params.ToolName, ".", 2)
-	if len(parts) != 2 {
-		return nil, nil, fmt.Errorf("invalid tool_name format, expected 'service.tool'")
+	serviceName, actualToolName, err := api.SplitToolName(params.ToolName)
+	if err != nil {
+		return nil, nil, err
 	}
-	serviceName := parts[0]
-	actualToolName := parts[1]
+	if serviceName == "system://"+api.CatalogTarget {
+		return nil, nil, fmt.Errorf("cannot describe system catalog tools via describe_remote_tool")
+	}
 	n.preparePeerAddrs(ctx, pid)
 
 	session, cleanup, err := n.ConnectMCPSession(ctx, pid, serviceName)

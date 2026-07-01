@@ -88,7 +88,11 @@ func (s *Store) LoadIdentity() ([]byte, error) {
 	var val []byte
 	_ = s.db.View(func(tx *bbolt.Tx) error {
 		b := tx.Bucket([]byte(bucketIdentity))
-		val = b.Get([]byte(keyBiscuit))
+		dbVal := b.Get([]byte(keyBiscuit))
+		if len(dbVal) > 0 {
+			val = make([]byte, len(dbVal))
+			copy(val, dbVal)
+		}
 		return nil
 	})
 	if len(val) == 0 {
@@ -178,7 +182,11 @@ func (s *Store) LoadKey() ([]byte, error) {
 	var val []byte
 	_ = s.db.View(func(tx *bbolt.Tx) error {
 		b := tx.Bucket([]byte(bucketIdentity))
-		val = b.Get([]byte(keyPrivKey))
+		dbVal := b.Get([]byte(keyPrivKey))
+		if len(dbVal) > 0 {
+			val = make([]byte, len(dbVal))
+			copy(val, dbVal)
+		}
 		return nil
 	})
 	return val, nil
@@ -200,7 +208,11 @@ func (s *Store) LoadHubConfig() ([]byte, []string, error) {
 	var addrs []string
 	err := s.db.View(func(tx *bbolt.Tx) error {
 		b := tx.Bucket([]byte(bucketIdentity))
-		pubKey = b.Get([]byte("hub_public_key"))
+		dbVal := b.Get([]byte("hub_public_key"))
+		if len(dbVal) > 0 {
+			pubKey = make([]byte, len(dbVal))
+			copy(pubKey, dbVal)
+		}
 		addrsBytes := b.Get([]byte("hub_addresses"))
 		if len(addrsBytes) > 0 {
 			return json.Unmarshal(addrsBytes, &addrs)

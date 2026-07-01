@@ -116,9 +116,8 @@ data:
     roles:
       sam-canary:
         allowed_services:
-          - "/sam/mcp/1.0.0"
-          - "/sam/catalog"
-          - "inference:openrouter"
+          - "*"
+        allowed_targets:
           - "*"
 ---
 apiVersion: monitoring.googleapis.com/v1

@@ -39,6 +39,12 @@ func LoadNodeConfig(path string) (*NodeConfigComplete, error) {
 		Services: config.Services,
 	}
 
+	for i, svc := range config.Services {
+		if err := api.ValidateServiceFormat(svc.Type + "://" + svc.Name); err != nil {
+			return nil, fmt.Errorf("invalid service config at index %d: %w", i, err)
+		}
+	}
+
 	for _, pStr := range config.Attenuation.Policies {
 		trimmed := strings.TrimRight(strings.TrimSpace(pStr), ";")
 		p, err := parser.FromStringPolicy(trimmed)

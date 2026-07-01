@@ -8,16 +8,6 @@ setup() {
 }
 
 teardown() {
-  if [[ "${BATS_TEST_COMPLETED:-0}" -ne 1 ]]; then
-    mkdir -p tests/e2e/logs
-    local ids
-    ids="$(docker ps -aq --filter "name=mesh-")"
-    for id in ${ids}; do
-      local name
-      name="$(docker inspect -f '{{.Name}}' "${id}" | tr -d '/')"
-      docker logs "${id}" > "tests/e2e/logs/${name}.log" 2>&1 || true
-    done
-  fi
   mesh_cleanup_env
 }
 
@@ -31,8 +21,7 @@ teardown() {
   local node_count=5
   local i
   for i in $(seq 1 "$node_count"); do
-    run mesh_start_node "$i"
-    [[ "$status" -eq 0 ]]
+    mesh_start_node "$i"
     sleep 2
   done
 

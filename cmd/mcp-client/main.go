@@ -157,9 +157,22 @@ func main() {
 			},
 		}
 	}
-	session, err := client.Connect(ctx, mcpTransport, nil)
+	var session *mcp.ClientSession
+	var err error
+	for attempt := 1; attempt <= 5; attempt++ {
+		session, err = client.Connect(ctx, mcpTransport, nil)
+		if err == nil {
+			break
+		}
+		log.Printf("Connection attempt %d failed: %v. Retrying in 500ms...", attempt, err)
+		select {
+		case <-ctx.Done():
+			log.Fatalf("Context cancelled during connection: %v", ctx.Err())
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
 	if err != nil {
-		log.Fatalf("Failed to connect: %v", err)
+		log.Fatalf("Failed to connect after 5 attempts: %v", err)
 	}
 	defer func() {
 		if err := session.Close(); err != nil {

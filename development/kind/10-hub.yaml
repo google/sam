@@ -88,11 +88,13 @@ data:
   policies.yaml: |
     version: "v1alpha1"
     bindings:
-      - group: "system:serviceaccounts"
+      - user: "system:serviceaccount:${NAMESPACE}:node-a-sa"
         role: "sam-admin"
-      - group: "system:authenticated"
+      - user: "system:serviceaccount:${NAMESPACE}:node-b-sa"
         role: "sam-admin"
-      - group: "system:serviceaccounts:${NAMESPACE}"
+      - user: "system:serviceaccount:${NAMESPACE}:node-c-sa"
+        role: "sam-admin"
+      - user: "system:serviceaccount:${NAMESPACE}:local-node-sa"
         role: "sam-admin"
     roles:
       sam-admin:

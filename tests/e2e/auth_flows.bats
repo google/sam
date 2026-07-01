@@ -18,8 +18,7 @@ teardown() {
   [[ "$status" -eq 0 ]]
 
   # mesh_start_node uses --token-url by default, which implements Client Credentials flow
-  run mesh_start_node 1
-  [[ "$status" -eq 0 ]]
+  mesh_start_node 1
 
   run mesh_assert_container_running "${MESH_PREFIX}-node-1"
   [[ "$status" -eq 0 ]]
@@ -34,7 +33,7 @@ teardown() {
 
   # 1. Get a token from mock provider using Python helper
   local token
-  token=$(docker run --rm --network "${MESH_NETWORK}" python:3.12 python3 -c "import urllib.request; import json; req = urllib.request.Request('http://mock-oidc:18080/token', data=b''); resp = urllib.request.urlopen(req); print(json.loads(resp.read().decode())['access_token'])")
+  token=$(docker run --rm --network "${MESH_NETWORK}" $(mesh_get_add_hosts) python:3.12 python3 -c "import urllib.request; import json; req = urllib.request.Request('http://mock-oidc:18080/token', data=b''); resp = urllib.request.urlopen(req); print(json.loads(resp.read().decode())['access_token'])")
   
   [[ -n "${token}" ]]
 
@@ -45,13 +44,16 @@ teardown() {
 
   local data_vol="${MESH_PREFIX}-data"
   docker volume create "${data_vol}"
+  CLEANUP_VOLUMES+=("${data_vol}")
   
   docker run --name "${node_name}-join" \
     --network "${MESH_NETWORK}" \
+    $(mesh_get_add_hosts) \
     -v "${data_vol}:/root/.config/sam-mesh" \
     "sam-node:local" \
     join "http://sam-hub:9090" > "/tmp/${node_name}-join.out" 2>&1 &
   local join_pid=$!
+  MESH_CONTAINERS+=("${node_name}-join")
 
   # Wait for redirect_uri and state in the output
   local redirect_uri=""
@@ -90,15 +92,14 @@ teardown() {
   docker run -d \
     --name "${node_name}" \
     --network "${MESH_NETWORK}" \
+    $(mesh_get_add_hosts) \
     -v "${data_vol}:/root/.config/sam-mesh" \
     "sam-node:local" \
     run \
     --hub "http://sam-hub:9090"
+  MESH_CONTAINERS+=("${node_name}")
 
   mesh_wait_for_log "${node_name}" "Using stored identity." 20
-  
-  # Cleanup volume
-  docker volume rm "${data_vol}" >/dev/null 2>&1 || true
 }
 
 @test "Authentication Flow 3: Workload Identity Federation (JWT Path)" {
@@ -110,13 +111,14 @@ teardown() {
 
   # 1. Get a token from mock provider
   local token
-  token=$(docker run --rm --network "${MESH_NETWORK}" python:3.12 python3 -c "import urllib.request; import json; req = urllib.request.Request('http://mock-oidc:18080/token', data=b''); resp = urllib.request.urlopen(req); print(json.loads(resp.read().decode())['access_token'])")
+  token=$(docker run --rm --network "${MESH_NETWORK}" $(mesh_get_add_hosts) python:3.12 python3 -c "import urllib.request; import json; req = urllib.request.Request('http://mock-oidc:18080/token', data=b''); resp = urllib.request.urlopen(req); print(json.loads(resp.read().decode())['access_token'])")
 
   [[ -n "${token}" ]]
 
   # 2. Save it to a file in a volume
   local token_vol="${MESH_PREFIX}-token"
   docker volume create "${token_vol}"
+  CLEANUP_VOLUMES+=("${token_vol}")
   
   docker run --rm \
     -v "${token_vol}:/tokens" \
@@ -131,15 +133,14 @@ teardown() {
   docker run -d \
     --name "${node_name}" \
     --network "${MESH_NETWORK}" \
+    $(mesh_get_add_hosts) \
     -v "${token_vol}:/var/run/secrets/tokens" \
     "sam-node:local" \
     run \
     --hub "http://sam-hub:9090" \
     --jwt-path "/var/run/secrets/tokens/sa-token" \
     --api-token "secret-token"
+  MESH_CONTAINERS+=("${node_name}")
 
   mesh_wait_for_log "${node_name}" "SAM Node Online" 20
-  
-  # Cleanup volume
-  docker volume rm "${token_vol}" >/dev/null 2>&1 || true
 }

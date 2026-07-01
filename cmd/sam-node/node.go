@@ -22,8 +22,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
-	"crypto/sha256"
-	"encoding/hex"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"net"
@@ -31,12 +30,12 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"time"
 
 	"github.com/biscuit-auth/biscuit-go/v2"
 	"github.com/biscuit-auth/biscuit-go/v2/datalog"
-	"github.com/biscuit-auth/biscuit-go/v2/parser"
 	"github.com/google/sam/api"
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/ipfs/go-cid"
@@ -123,7 +122,6 @@ type SamNode struct {
 	mu                sync.Mutex
 	LocalPolicy       *NodeConfigComplete
 	revokedPeers      *lru.Cache[string, int64]
-	verificationCache *lru.Cache[string, string]
 	authPeers         sync.Map
 	trustedKeys       []TrustedKey
 	keysMu            sync.RWMutex
@@ -131,12 +129,13 @@ type SamNode struct {
 	services          *ServiceRegistry
 	BoundHTTPAddr     string
 	AllowLoopback     bool
-	TrustHubRBAC      bool
-	authSuccess       chan struct{}
-	authOnce          sync.Once
-	currentRelays     []peer.AddrInfo
-	reprovideTrigger  chan struct{}
-	BiscuitTimeout    time.Duration
+
+	authSuccess      chan struct{}
+	authOnce         sync.Once
+	currentRelays    []peer.AddrInfo
+	reprovideTrigger chan struct{}
+	BiscuitTimeout   time.Duration
+	cachedIdentity   atomic.Value
 }
 
 // UpdateRelays updates the current relays used by AutoRelay.
@@ -158,6 +157,30 @@ func (n *SamNode) UpdateRelays(addrs []multiaddr.Multiaddr) {
 	}
 	n.currentRelays = newRelays
 	logger.Infof("[Relay] Updated current relays for AutoRelay: %v", newRelays)
+}
+
+// GetIdentity returns the node's biscuit identity, caching it in memory.
+func (n *SamNode) GetIdentity() []byte {
+	if val := n.cachedIdentity.Load(); val != nil {
+		b := val.([]byte)
+		if len(b) > 0 {
+			return b
+		}
+	}
+	if n.Store != nil {
+		if biscuitBytes, err := n.Store.LoadIdentity(); err == nil && len(biscuitBytes) > 0 {
+			n.cachedIdentity.Store(biscuitBytes)
+			return biscuitBytes
+		}
+	}
+	return nil
+}
+
+// SetIdentityCache explicitly updates the cached identity.
+func (n *SamNode) SetIdentityCache(b []byte) {
+	if len(b) > 0 {
+		n.cachedIdentity.Store(b)
+	}
 }
 
 func stripP2pFromDnsaddr(addr multiaddr.Multiaddr) multiaddr.Multiaddr {
@@ -204,8 +227,8 @@ type SamNodeConfig struct {
 	AutoRelayMinInterval time.Duration
 	AutoRelayBootDelay   time.Duration
 	AutoRelayBackoff     time.Duration
-	TrustHubRBAC         bool
-	BiscuitTimeout       time.Duration
+
+	BiscuitTimeout time.Duration
 }
 
 // NewSamNode creates a new Agent instance secured with the 4-layer pipeline.
@@ -224,9 +247,9 @@ func NewSamNode(ctx context.Context, cfg SamNodeConfig) (*SamNode, error) {
 		authenticatedHubs: make(map[peer.ID]bool),
 		LocalPolicy:       cfg.NodeConfig,
 		AllowLoopback:     cfg.AllowLoopback,
-		TrustHubRBAC:      cfg.TrustHubRBAC,
-		authSuccess:       make(chan struct{}),
-		reprovideTrigger:  make(chan struct{}, 1),
+
+		authSuccess:      make(chan struct{}),
+		reprovideTrigger: make(chan struct{}, 1),
 	}
 
 	node.BiscuitTimeout = cfg.BiscuitTimeout
@@ -239,11 +262,6 @@ func NewSamNode(ctx context.Context, cfg SamNodeConfig) (*SamNode, error) {
 	node.revokedPeers, err = lru.New[string, int64](RevocationCacheSize)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create revocation cache: %w", err)
-	}
-
-	node.verificationCache, err = lru.New[string, string](VerificationCacheSize)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create verification cache: %w", err)
 	}
 
 	// Layer 2: Attach the Bouncer (Gater)
@@ -934,7 +952,9 @@ func (n *SamNode) handleBannedEvent(event *api.MeshEvent) {
 
 	logger.Infof("[Mesh Event] Peer banned: %s", event.PeerId)
 
-	n.revokedPeers.Add(event.PeerId, event.Timestamp)
+	if n.revokedPeers != nil {
+		n.revokedPeers.Add(event.PeerId, event.Timestamp)
+	}
 	if p, err := peer.Decode(event.PeerId); err == nil {
 		if n.Host != nil {
 			_ = n.Host.Network().ClosePeer(p)
@@ -1167,21 +1187,6 @@ func (n *SamNode) verifyBiscuit(biscuitData []byte, remotePeer peer.ID) (*biscui
 		return nil, fmt.Errorf("malformed biscuit: %w", err)
 	}
 
-	tokenHash := sha256.Sum256(biscuitData)
-	hashStr := hex.EncodeToString(tokenHash[:]) + ":" + remotePeer.String()
-
-	if pubKeyStr, ok := n.verificationCache.Get(hashStr); ok {
-		n.keysMu.RLock()
-		keys := n.trustedKeys
-		n.keysMu.RUnlock()
-
-		for _, tk := range keys {
-			if hex.EncodeToString(tk.Key) == pubKeyStr {
-				return b, nil
-			}
-		}
-	}
-
 	n.keysMu.RLock()
 	keys := n.trustedKeys
 	n.keysMu.RUnlock()
@@ -1199,15 +1204,9 @@ func (n *SamNode) verifyBiscuit(biscuitData []byte, remotePeer peer.ID) (*biscui
 			continue
 		}
 
-		rule, err := parser.FromStringPolicy("allow if true")
-		if err != nil {
-			lastErr = fmt.Errorf("policy error: %w", err)
-			continue
-		}
-		authorizer.AddPolicy(rule)
+		authorizer.AddPolicy(api.AllowIfTruePolicy)
 
 		if err := authorizer.Authorize(); err == nil {
-			n.verificationCache.Add(hashStr, hex.EncodeToString(tk.Key))
 			return b, nil
 		} else {
 			lastErr = fmt.Errorf("authorize error: %w", err)
@@ -1514,6 +1513,42 @@ func (n *SamNode) StartIngressServer(ctx context.Context) error {
 				return
 			}
 
+			// Extract biscuit from X-Sam-Biscuit header
+			biscuitB64 := r.Header.Get(api.HeaderSamBiscuit)
+			if biscuitB64 == "" {
+				http.Error(w, "Missing X-Sam-Biscuit header", http.StatusUnauthorized)
+				return
+			}
+			biscuitBytes, err := base64.StdEncoding.DecodeString(biscuitB64)
+			if err != nil {
+				http.Error(w, "Invalid X-Sam-Biscuit encoding", http.StatusBadRequest)
+				return
+			}
+
+			// Parse remote peer from RemoteAddr
+			remotePeer, err := peer.Decode(r.RemoteAddr)
+			if err != nil {
+				http.Error(w, "Invalid remote peer", http.StatusBadRequest)
+				return
+			}
+
+			reqCtx := RequestContext{
+				PeerID:   remotePeer,
+				User:     "", // Extracted implicitly if needed, or left empty
+				Protocol: "/libp2p-http",
+				Target:   strings.ToLower(serviceTypeStr) + "://" + serviceName,
+			}
+
+			// Verify authorization
+			if err := n.VerifyBiscuitToken(biscuitBytes, reqCtx); err != nil {
+				logger.Warnf("[Ingress] AuthZ Denied for %s: %v", remotePeer, err)
+				http.Error(w, "Authorization failed", http.StatusForbidden)
+				return
+			}
+
+			// Strip the biscuit header so it doesn't leak to the backend service
+			r.Header.Del(api.HeaderSamBiscuit)
+
 			svc, ok := n.services.Get(serviceName)
 			if !ok {
 				logger.Errorf("[Ingress] Service not found: %s", serviceName)
@@ -1530,7 +1565,7 @@ func (n *SamNode) StartIngressServer(ctx context.Context) error {
 			if upstreamPath == "" {
 				r.URL.Path = "/"
 				if len(parts) == 2 {
-					r.Header.Set("X-Sam-No-Trailing-Slash", "true")
+					r.Header.Set(api.HeaderSamNoTrailingSlash, "true")
 				}
 			} else {
 				r.URL.Path = "/" + upstreamPath

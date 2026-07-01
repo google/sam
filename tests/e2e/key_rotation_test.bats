@@ -24,13 +24,14 @@ teardown() {
     --name "${hub_name}" \
     --network "${MESH_NETWORK}" \
     --network-alias sam-hub \
+    $(mesh_get_add_hosts) \
     "sam-hub:local" \
     --issuer "http://mock-oidc:18080" \
     --client-id "sam-e2e" \
     --key "${key}" \
     --listen "/ip4/0.0.0.0/tcp/4002" \
     --external-multiaddr "/dns4/sam-hub/tcp/4002" \
-    --mesh "e2e-mesh" \
+    --mesh "${MESH_PREFIX}" \
     --key-rotation-interval 5s >/dev/null
 
   MESH_CONTAINERS+=("${hub_name}")
@@ -41,8 +42,7 @@ teardown() {
   echo "${hub_peer_id}" > "/tmp/${MESH_PREFIX}-hub-peer-id"
 
   # Start Node
-  run mesh_start_node 1
-  [[ "$status" -eq 0 ]]
+  mesh_start_node 1
 
   local node_name="${MESH_PREFIX}-node-1"
   mesh_wait_for_log "${node_name}" "SAM Node Online" 20
