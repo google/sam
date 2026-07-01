@@ -105,6 +105,9 @@ teardown() {
   run mesh_wait_for_peer_disconnection 1 "${node2_peer_id}" 20
   [[ "$status" -eq 0 ]]
 
+  # Allow connection state to settle in libp2p swarm
+  sleep 2
+
   # Verify Node 1 cannot reconnect to Node 2
   echo "[$(date +%T)] Attempting to reconnect (should fail)"
   local node2_addr="/dns4/sam-node-2/tcp/5002/p2p/${node2_peer_id}"
