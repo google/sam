@@ -14,21 +14,19 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
 
   # Best-effort cleanup of leaked resources from prior failed runs.
   mesh_cleanup_stale_resources() {
-    local ids
-    ids="$(docker ps -aq --filter "name=mesh-")"
-    if [[ -n "${ids}" ]]; then
-      # shellcheck disable=SC2086
-      docker rm -f ${ids} >/dev/null 2>&1 || true
-    fi
+    local id
+    for id in $(docker ps -aq --filter "name=mesh-"); do
+      docker rm -f "${id}" >/dev/null 2>&1 || true
+    done
 
-    local nets
-    nets="$(docker network ls --format '{{.Name}}' | grep '^mesh-.*-net$' || true)"
-    if [[ -n "${nets}" ]]; then
-      while IFS= read -r net; do
-        [[ -z "${net}" ]] && continue
-        docker network rm "${net}" >/dev/null 2>&1 || true
-      done <<< "${nets}"
-    fi
+    local net
+    for net in $(docker network ls --format '{{.Name}}'); do
+      case "${net}" in
+        mesh-*-net)
+          docker network rm "${net}" >/dev/null 2>&1 || true
+          ;;
+      esac
+    done
   }
 
   mesh_require_docker() {

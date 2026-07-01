@@ -10,17 +10,19 @@ func TestValidateServiceFormat(t *testing.T) {
 		svc     string
 		wantErr bool
 	}{
-		{"valid exact", "mcp:my-service.local", false},
-		{"valid prefix wildcard", "mcp:*.service.local", false},
-		{"valid suffix wildcard", "mcp:service.*", false},
-		{"valid just wildcard", "mcp:*", false},
-		{"valid subdomains", "mcp:a.b.c.d", false},
-		{"invalid no type", ":my-service", true},
-		{"invalid no colon", "mcp-service", true},
-		{"invalid consecutive dots", "mcp:my..service", true},
-		{"invalid wildcard middle", "mcp:my.*.service", true},
-		{"invalid invalid chars", "mcp:service_name", true},
-		{"invalid exact with path", "mcp:my-service/local", true},
+		{"valid exact", "mcp://my-service.local", false},
+		{"valid prefix wildcard", "mcp://*.service.local", false},
+		{"valid suffix wildcard", "mcp://service.*", false},
+		{"valid just wildcard", "mcp://*", false},
+		{"valid subdomains", "mcp://a.b.c.d", false},
+		{"invalid no type", "://my-service", true},
+		{"invalid fallback", "mcp-service", true},
+		{"invalid consecutive dots", "mcp://my..service", true},
+		{"invalid wildcard middle", "mcp://my.*.service", true},
+		{"invalid invalid chars", "mcp://service_name", true},
+		{"invalid suffix wildcard without dot", "mcp://service.inc*", true},
+		{"valid exact with path", "mcp://my-service/local", false},
+		{"invalid legacy mcp: format", "mcp:my-service.local", true},
 	}
 
 	for _, tt := range tests {
@@ -41,6 +43,7 @@ func TestValidateTargetFormat(t *testing.T) {
 	}{
 		{"valid target", "group:backend", false},
 		{"valid email", "email:foo@bar.com", false},
+		{"valid wildcard", "*", false},
 		{"invalid no colon", "group-backend", true},
 		{"invalid empty fact", ":backend", true},
 		{"invalid empty value", "group:", true},

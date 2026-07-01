@@ -47,13 +47,13 @@ func TestParseServiceTarget(t *testing.T) {
 		{
 			name:     "System fallback (no colon)",
 			target:   "catalog",
-			wantType: DefaultServiceType,
+			wantType: "",
 			wantName: "catalog",
 		},
 		{
 			name:     "Empty string",
 			target:   "",
-			wantType: DefaultServiceType,
+			wantType: "",
 			wantName: "",
 		},
 		{

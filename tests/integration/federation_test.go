@@ -35,7 +35,7 @@ bindings:
 roles:
   admin:
     allowed_services: 
-      - "mcp:*"
+      - "mcp://*"
 `
 	if err := os.WriteFile(policyFile, []byte(policyContent), 0644); err != nil {
 		t.Fatal(err)

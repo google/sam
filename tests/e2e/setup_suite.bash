@@ -3,6 +3,7 @@
 set -eu
 
 function setup_suite {
+  export PATH="${HOME}/go/bin:$PATH"
   export BATS_TEST_TIMEOUT=150
 
   if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then

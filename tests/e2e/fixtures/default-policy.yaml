@@ -5,6 +5,6 @@ bindings:
 roles:
   admin:
     allowed_services:
-      - "*:*"
+      - "*"
     allowed_targets:
-      - "*:*"
+      - "*"

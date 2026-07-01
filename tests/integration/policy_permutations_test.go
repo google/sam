@@ -80,22 +80,22 @@ func TestPolicyPermutations(t *testing.T) {
 	hubPolicyYAML := `version: "v1alpha1"
 roles:
   role-user:
-    allowed_services: ["mcp:test-user"]
+    allowed_services: ["mcp://test-user"]
     allowed_targets: ["user:bob-subject"]
   role-email:
-    allowed_services: ["mcp:test-email"]
+    allowed_services: ["mcp://test-email"]
     allowed_targets: ["email:nodeB@example.com"]
   role-group:
-    allowed_services: ["mcp:test-group"]
+    allowed_services: ["mcp://test-group"]
     allowed_targets: ["group:compute"]
   role-node:
-    allowed_services: ["mcp:test-node"]
+    allowed_services: ["mcp://test-node"]
     allowed_targets: ["group:backend"]
   role-direct:
-    allowed_services: ["mcp:test-role"]
+    allowed_services: ["mcp://test-role"]
     allowed_targets: ["group:compute"]
   admin:
-    allowed_services: ["*:*"]
+    allowed_services: ["*"]
     allowed_targets: ["*:*"]
 
 bindings:
@@ -209,37 +209,37 @@ services:
 		{
 			name:        "Fact sub: user(bob-subject)",
 			jwtClaims:   map[string]interface{}{"sub": "bob-subject"},
-			targetSvc:   "mcp:test-user",
+			targetSvc:   "mcp://test-user",
 			expectAllow: true,
 		},
 		{
 			name:        "Fact email: email(bob@example.com)",
 			jwtClaims:   map[string]interface{}{"sub": "some-id", "email": "bob@example.com"},
-			targetSvc:   "mcp:test-email",
+			targetSvc:   "mcp://test-email",
 			expectAllow: true,
 		},
 		{
 			name:        "Fact groups: group(eng-team)",
 			jwtClaims:   map[string]interface{}{"sub": "some-id", "groups": []string{"eng-team"}},
-			targetSvc:   "mcp:test-group",
+			targetSvc:   "mcp://test-group",
 			expectAllow: true,
 		},
 		{
 			name:        "Fact roles: role(role-direct)",
 			jwtClaims:   map[string]interface{}{"sub": "some-id", "roles": []string{"role-direct"}},
-			targetSvc:   "mcp:test-role",
+			targetSvc:   "mcp://test-role",
 			expectAllow: true,
 		},
 		{
 			name:        "Fact node: node(peerID)",
 			jwtClaims:   map[string]interface{}{"sub": "node-user"},
-			targetSvc:   "mcp:test-node",
+			targetSvc:   "mcp://test-node",
 			expectAllow: true,
 		},
 		{
 			name:        "Unknown User / No Roles -> Hub Error",
 			jwtClaims:   map[string]interface{}{"sub": "unknown"},
-			targetSvc:   "mcp:test-user",
+			targetSvc:   "mcp://test-user",
 			expectAllow: false,
 		},
 	}

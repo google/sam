@@ -184,7 +184,7 @@ func TestBaselineRules(t *testing.T) {
 				_ = builder.AddAuthorityFact(fact)
 			},
 			protocol:      "test_tool",
-			target:        "mcp:test_tool",
+			target:        "mcp://test_tool",
 			expectSuccess: true,
 		},
 		{
@@ -195,7 +195,7 @@ func TestBaselineRules(t *testing.T) {
 				_ = builder.AddAuthorityFact(fact)
 			},
 			protocol:      "anything",
-			target:        "mcp:anything",
+			target:        "mcp://anything",
 			expectSuccess: true,
 		},
 		{
@@ -204,7 +204,7 @@ func TestBaselineRules(t *testing.T) {
 				// No specific allowed_service facts needed
 			},
 			protocol:      api.CatalogTarget, // "catalog"
-			target:        "system:" + api.CatalogTarget,
+			target:        "system://" + api.CatalogTarget,
 			expectSuccess: true,
 		},
 		{
@@ -215,7 +215,7 @@ func TestBaselineRules(t *testing.T) {
 				_ = builder.AddAuthorityFact(fact)
 			},
 			protocol:      "test_tool",
-			target:        "mcp:test_tool",
+			target:        "mcp://test_tool",
 			expectSuccess: true,
 		},
 		{
@@ -226,7 +226,7 @@ func TestBaselineRules(t *testing.T) {
 				_ = builder.AddAuthorityFact(fact)
 			},
 			protocol:      "test_tool",
-			target:        "system:test_tool",
+			target:        "system://test_tool",
 			expectSuccess: false,
 		},
 		{
@@ -242,7 +242,7 @@ func TestBaselineRules(t *testing.T) {
 				}})
 			},
 			protocol:      "test_tool",
-			target:        "mcp:test_tool",
+			target:        "mcp://test_tool",
 			expectSuccess: false, // Should fail the connection_peer_id check
 		},
 	}
@@ -604,7 +604,7 @@ func TestMiddlewareTargetChecks(t *testing.T) {
 			req: RequestContext{
 				PeerID:   dummyPeer,
 				Protocol: "test_tool",
-				Target:   "mcp:test_tool",
+				Target:   "mcp://test_tool",
 				User:     "bob",
 			},
 			expectSuccess: true,
@@ -620,7 +620,7 @@ func TestMiddlewareTargetChecks(t *testing.T) {
 			req: RequestContext{
 				PeerID:   dummyPeer,
 				Protocol: "test_tool",
-				Target:   "mcp:test_tool",
+				Target:   "mcp://test_tool",
 				User:     "bob",
 			},
 			expectSuccess: false,
@@ -636,7 +636,7 @@ func TestMiddlewareTargetChecks(t *testing.T) {
 			req: RequestContext{
 				PeerID:   dummyPeer,
 				Protocol: "test_tool",
-				Target:   "mcp:test_tool",
+				Target:   "mcp://test_tool",
 				Group:    "eng",
 			},
 			expectSuccess: true,

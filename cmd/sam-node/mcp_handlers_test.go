@@ -161,8 +161,8 @@ func TestHandleFindRemoteTools_SinglePeer(t *testing.T) {
 	}
 
 	wantNames := map[string]bool{
-		"mcp:code-reviewer/review_pr":   false,
-		"mcp:code-reviewer/add_comment": false,
+		"mcp://code-reviewer/review_pr":   false,
+		"mcp://code-reviewer/add_comment": false,
 	}
 	for _, row := range rows {
 		if row.PeerID != nodeB.Host.ID().String() {
@@ -233,13 +233,13 @@ func TestHandleFindRemoteTools_MeshWide(t *testing.T) {
 		t.Fatalf("RegisterService B: %v", err)
 	}
 	if err := nodeC.RegisterService(ctx, &api.RegisterServiceRequest{
-		Service: &api.ServiceInfo{Type: api.ServiceType_SERVICE_TYPE_MCP, Name: "mcp:summarizer"},
+		Service: &api.ServiceInfo{Type: api.ServiceType_SERVICE_TYPE_MCP, Name: "mcp://summarizer"},
 		Backend: &api.RegisterServiceRequest_TargetUrl{TargetUrl: cSrv.URL},
 	}); err != nil {
 		t.Fatalf("RegisterService C: %v", err)
 	}
 	if err := nodeD.RegisterService(ctx, &api.RegisterServiceRequest{
-		Service: &api.ServiceInfo{Type: api.ServiceType_SERVICE_TYPE_MCP, Name: "plugin:linter"},
+		Service: &api.ServiceInfo{Type: api.ServiceType_SERVICE_TYPE_MCP, Name: "plugin://linter"},
 		Backend: &api.RegisterServiceRequest_TargetUrl{TargetUrl: dSrv.URL},
 	}); err != nil {
 		t.Fatalf("RegisterService D: %v", err)
@@ -265,17 +265,17 @@ func TestHandleFindRemoteTools_MeshWide(t *testing.T) {
 		gotNames[tool.ToolName] = true
 	}
 
-	// Test permutation 1: no prefix gets "mcp:" automatically prepended.
-	if !gotNames["mcp:code-reviewer/review_pr"] {
-		t.Errorf("missing mcp:code-reviewer/review_pr; got %v", gotNames)
+	// Test permutation 1: no prefix gets "mcp://" automatically prepended.
+	if !gotNames["mcp://code-reviewer/review_pr"] {
+		t.Errorf("missing mcp://code-reviewer/review_pr; got %v", gotNames)
 	}
-	// Test permutation 2: "mcp:" prefix is preserved.
-	if !gotNames["mcp:summarizer/summarize"] {
-		t.Errorf("missing mcp:summarizer/summarize; got %v", gotNames)
+	// Test permutation 2: "mcp://" prefix is preserved.
+	if !gotNames["mcp://summarizer/summarize"] {
+		t.Errorf("missing mcp://summarizer/summarize; got %v", gotNames)
 	}
 	// Test permutation 3: custom namespace prefix is preserved.
-	if !gotNames["plugin:linter/lint"] {
-		t.Errorf("missing plugin:linter/lint; got %v", gotNames)
+	if !gotNames["plugin://linter/lint"] {
+		t.Errorf("missing plugin://linter/lint; got %v", gotNames)
 	}
 }
 
@@ -333,12 +333,12 @@ func TestHandleFindRemoteTools_PartialFailure(t *testing.T) {
 
 	gotSummarizer := false
 	for _, r := range rows {
-		if r.ToolName == "mcp:summarizer/summarize" {
+		if r.ToolName == "mcp://summarizer/summarize" {
 			gotSummarizer = true
 		}
 	}
 	if !gotSummarizer {
-		t.Errorf("expected mcp:summarizer/summarize from C even with B unreachable; got %+v", rows)
+		t.Errorf("expected mcp://summarizer/summarize from C even with B unreachable; got %+v", rows)
 	}
 }
 
@@ -438,8 +438,8 @@ func TestFetchRemoteToolCatalogue_AuthRejected(t *testing.T) {
 	}
 
 	row := rows[0]
-	if row.ToolName != "mcp:summarizer" {
-		t.Errorf("expected ToolName 'mcp:summarizer', got %q", row.ToolName)
+	if row.ToolName != "mcp://summarizer" {
+		t.Errorf("expected ToolName 'mcp://summarizer', got %q", row.ToolName)
 	}
 	if !strings.Contains(row.Error, "auth rejected") {
 		t.Errorf("expected Error to contain 'auth rejected', got %q", row.Error)
@@ -541,7 +541,7 @@ func TestHandleDescribeRemoteTool_SelfPeerRejected(t *testing.T) {
 
 	_, _, err := node.handleDescribeRemoteTool(ctx, &mcp.CallToolRequest{}, DescribeRemoteToolParams{
 		PeerID:   node.Host.ID().String(),
-		ToolName: "code-reviewer/review_pr",
+		ToolName: "mcp://code-reviewer/review_pr",
 	})
 	if err == nil {
 		t.Fatal("expected error when peer_id equals self peer ID")
@@ -557,7 +557,7 @@ func TestHandleDescribeRemoteTool_InvalidPeerID(t *testing.T) {
 
 	_, _, err := node.handleDescribeRemoteTool(ctx, &mcp.CallToolRequest{}, DescribeRemoteToolParams{
 		PeerID:   "not-a-valid-peer-id",
-		ToolName: "code-reviewer/review_pr",
+		ToolName: "mcp://code-reviewer/review_pr",
 	})
 	if err == nil {
 		t.Fatal("expected error for malformed peer_id")
@@ -621,7 +621,7 @@ func TestHandleDescribeRemoteTool_RoundTrip(t *testing.T) {
 
 	res, _, err := nodeA.handleDescribeRemoteTool(ctx, &mcp.CallToolRequest{}, DescribeRemoteToolParams{
 		PeerID:   nodeB.Host.ID().String(),
-		ToolName: "code-reviewer/review_pr",
+		ToolName: "mcp://code-reviewer/review_pr",
 	})
 	if err != nil {
 		t.Fatalf("handleDescribeRemoteTool: %v", err)
@@ -638,8 +638,8 @@ func TestHandleDescribeRemoteTool_RoundTrip(t *testing.T) {
 	if desc.PeerID != nodeB.Host.ID().String() {
 		t.Errorf("PeerID = %q, want %q", desc.PeerID, nodeB.Host.ID().String())
 	}
-	if desc.ToolName != "code-reviewer/review_pr" {
-		t.Errorf("ToolName = %q, want %q", desc.ToolName, "code-reviewer/review_pr")
+	if desc.ToolName != "mcp://code-reviewer/review_pr" {
+		t.Errorf("ToolName = %q, want %q", desc.ToolName, "mcp://code-reviewer/review_pr")
 	}
 	if desc.Description != "Run a code review" {
 		t.Errorf("Description = %q, want %q", desc.Description, "Run a code review")
@@ -699,7 +699,7 @@ func TestHandleDescribeRemoteTool_RoundTrip_UnknownTool(t *testing.T) {
 
 	_, _, err = nodeA.handleDescribeRemoteTool(ctx, &mcp.CallToolRequest{}, DescribeRemoteToolParams{
 		PeerID:   nodeB.Host.ID().String(),
-		ToolName: "code-reviewer/does-not-exist",
+		ToolName: "mcp://code-reviewer/does-not-exist",
 	})
 	if err == nil {
 		t.Fatal("expected error from peer when tool is not registered")

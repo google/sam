@@ -116,9 +116,9 @@ data:
     roles:
       sam-canary:
         allowed_services:
-          - "*:*"
+          - "*"
         allowed_targets:
-          - "*:*"
+          - "*"
 ---
 apiVersion: monitoring.googleapis.com/v1
 kind: PodMonitoring

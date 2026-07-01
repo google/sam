@@ -43,10 +43,10 @@ The hub dynamically issues permissions inside the Biscuit token based on identit
 
 The policy defines what endpoints and services agents are permitted to use:
 * **`allowed_targets`**: Acts similar to Active Directory network groups. This restricts which logical endpoints the agent can route connections to. **Note: IP address ranges are not allowed.** Instead, use the format of the resolved Biscuit facts: `group:<name>`, `user:<sub-id>`, `email:<email>`, `role:<role-name>`, or `node:<peer-id>`.
-* **`allowed_services`**: Restricts the application-level services the agent can invoke. Services are prefixed by their protocol type (e.g., `mcp:local-shell-tools` or `inference:openrouter`).
+* **`allowed_services`**: Restricts the application-level services the agent can invoke. Services are prefixed by their protocol type and URI scheme (e.g., `mcp://local-shell-tools` or `inference://openrouter`).
 
 > [!NOTE]
-> SAM natively supports prefix and suffix wildcards in `allowed_services`. You can grant access to an entire type via `mcp:*`, allow prefix matching like `mcp:dev-*`, suffix matching like `mcp:*-prod`, or grant global access to everything via `*`.
+> SAM natively supports domain-level prefix and suffix wildcards in `allowed_services`. You can grant access to an entire type via `mcp://*`, allow prefix wildcard matching like `mcp://*.service.local` (matching services ending in `.service.local`), suffix wildcard matching like `mcp://service.*` (matching services starting with `service.`), or grant global access to everything via `*`. Note that arbitrary partial matches (e.g., `dev-*` or `*-prod`) are not supported because they do not align with domain boundaries and will fail DNS name validation.
 
 ### Example Policy Mapping
 Create a `policies.yaml` file in the directory where you run `sam-hub`:
@@ -63,18 +63,18 @@ roles:
       - "user:auth0|123456"
       - "node:12D3KooWSpecificDevNodeId"
     allowed_services:
-      - "mcp:local-shell-tools"
-      - "mcp:git-helper"
-      - "inference:openrouter"
+      - "mcp://local-shell-tools"
+      - "mcp://git-helper"
+      - "inference://openrouter"
   
   admin-role:
     allowed_targets:
       - "group:all-nodes"
       - "role:admin"
     allowed_services:
-      - "mcp:*"
-      - "inference:*"
-      - "system:*"
+      - "mcp://*"
+      - "inference://*"
+      - "system://*"
 
 # Bind OIDC user subs, emails, or group claims to roles
 bindings:

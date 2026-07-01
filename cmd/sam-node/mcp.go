@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -44,7 +45,7 @@ Reach into the mesh only when the needed tool isn't available locally. To do so:
 
 Other useful tools: discover_remote_services browses services by type, get_mesh_info reports connected peers and mesh state, list_local_services shows what this node hosts.
 
-Remote tool names are namespaced as '<service>/<tool>' (e.g. 'code-reviewer/review_pr'). Prefer discovering and describing a tool before calling it rather than guessing arguments.`
+Remote tool names are namespaced as 'scheme://service/tool' (e.g. 'mcp://code-reviewer/review_pr'). Prefer discovering and describing a tool before calling it rather than guessing arguments.`
 
 // NewMCPServer creates a new MCP server instance with all tools registered.
 func NewMCPServer(node *SamNode) *mcp.Server {
@@ -116,7 +117,7 @@ func NewMCPServer(node *SamNode) *mcp.Server {
 	// Add the describe_remote_tool tool.
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "describe_remote_tool",
-		Description: "Return the description, input schema, and output schema for a specific aggregated tool on a specific peer. peer_id and tool_name are both required; tool_name must be a namespaced '<service>.<tool>' name as returned by find_remote_tools.",
+		Description: "Return the description, input schema, and output schema for a specific aggregated tool on a specific peer. peer_id and tool_name are both required; tool_name must be a namespaced 'scheme://service/tool' name as returned by find_remote_tools.",
 	}, node.handleDescribeRemoteTool)
 
 	// Add the check_connectivity tool.
@@ -363,11 +364,9 @@ func (n *SamNode) ConnectMCPSession(ctx context.Context, targetPeer peer.ID, tar
 }
 
 func (n *SamNode) callMCPToolOnce(ctx context.Context, targetPeer peer.ID, toolName string, params any) (*mcp.CallToolResult, error) {
-	targetService := api.CatalogTarget
-	originalToolName := toolName
-	if parts := strings.SplitN(toolName, "/", 2); len(parts) == 2 {
-		targetService = parts[0]
-		originalToolName = parts[1]
+	targetService, originalToolName, err := splitToolName(toolName)
+	if err != nil {
+		return nil, err
 	}
 
 	session, cleanup, err := n.ConnectMCPSession(ctx, targetPeer, targetService)
@@ -396,7 +395,7 @@ func (n *SamNode) callMCPToolOnce(ctx context.Context, targetPeer peer.ID, toolN
 func (n *SamNode) fetchRemoteServiceCatalog(ctx context.Context, peerID peer.ID, typeStr string) ([]*api.ServiceInfo, error) {
 	n.preparePeerAddrs(ctx, peerID)
 
-	session, cleanup, err := n.ConnectMCPSession(ctx, peerID, api.CatalogTarget)
+	session, cleanup, err := n.ConnectMCPSession(ctx, peerID, "system://"+api.CatalogTarget)
 	if err != nil {
 		return nil, err
 	}
@@ -554,4 +553,24 @@ func (n *SamNode) preparePeerAddrs(ctx context.Context, targetPeer peer.ID) {
 		n.Host.Peerstore().AddAddrs(targetPeer, validAddrs, peerstore.TempAddrTTL)
 		logger.Debugf("[Discovery] Replaced addrs for %s with %d routable/circuit addrs", targetPeer, len(validAddrs))
 	}
+}
+
+// splitToolName splits a fully qualified MCP tool name into its target service URI
+// and the original tool name to be invoked on that service.
+//
+// Expected format: "scheme://service-name/tool-name" (e.g., "mcp://my-service/my-tool").
+// If the input is empty or invalid, it returns an error. No default fallback is applied.
+func splitToolName(toolName string) (targetService, originalToolName string, err error) {
+	if toolName == "" {
+		return "", "", fmt.Errorf("tool name cannot be empty")
+	}
+
+	u, parseErr := url.Parse(toolName)
+	if parseErr != nil || u.Scheme == "" || u.Host == "" || u.Path == "" || u.Opaque != "" {
+		return "", "", fmt.Errorf("invalid namespaced tool name %q: must follow explicit URI format 'scheme://service/tool'", toolName)
+	}
+
+	targetService = u.Scheme + "://" + u.Host
+	originalToolName = strings.TrimPrefix(u.Path, "/")
+	return targetService, originalToolName, nil
 }

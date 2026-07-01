@@ -2,6 +2,27 @@
 
 load "lib/container_mesh.bash"
 
+CALC_MCP_IMAGE="sam-calc-mcp:local"
+
+build_calc_mcp_image() {
+  if ! docker image inspect "${CALC_MCP_IMAGE}" >/dev/null 2>&1; then
+    docker build -t "${CALC_MCP_IMAGE}" \
+      -f tests/e2e/docker/calc-mcp/Dockerfile \
+      tests/e2e/docker/calc-mcp >/dev/null
+  fi
+}
+
+start_calc_mcp() {
+  local name="${MESH_PREFIX}-calc-mcp"
+  docker run -d \
+    --name "${name}" \
+    --network "${MESH_NETWORK}" \
+    --network-alias calc-mcp \
+    "${CALC_MCP_IMAGE}" >/dev/null
+  MESH_CONTAINERS+=("${name}")
+  mesh_wait_for_log "${name}" "Uvicorn running on" 20
+}
+
 # Custom mock OIDC server that returns 'data-scientist' role
 mesh_start_mock_oidc_custom() {
   local name="${MESH_PREFIX}-oidc"
@@ -124,18 +145,11 @@ EOF
     mesh_wait_for_log "${name}" "Mock OIDC server ready" 30
 }
 
-mesh_call_remote_tool() {
-  local caller_idx="$1"
-  local target_peer_id="$2"
-  local tool_name="$3"
-  
-  local args="{\"peer_id\":\"${target_peer_id}\",\"tool_name\":\"${tool_name}\",\"arguments\":{}}"
-  
-  docker run --rm --network "${MESH_NETWORK}" "${MESH_RUNTIME_IMAGE}" mcp-client -url "http://sam-node-${caller_idx}:8080/mcp" -tool "call_remote_tool" -args "${args}"
-}
+
 
 setup() {
   mesh_setup_env
+  build_calc_mcp_image
   mkdir -p tests/e2e/logs
 
   # Create volume for policies
@@ -150,13 +164,22 @@ bindings:
 roles:
   mesh-member:
     allowed_services:
-      - \"mcp:query_database\"
-      - \"mcp:delete_tables\""
+      - \"mcp://calculator\"
+      - \"mcp://db-agent\""
 
   local node_policy="version: \"v1alpha1\"
+services:
+  - type: \"mcp\"
+    name: \"calculator\"
+    description: \"Simple math operations\"
+    target_url: \"http://calc-mcp:7777/mcp\"
+  - type: \"mcp\"
+    name: \"db-agent\"
+    description: \"Database operations\"
+    target_url: \"http://calc-mcp:7777/mcp\"
 attenuation:
   policies:
-    - 'deny if service(\"mcp\", \"delete_tables\");'"
+    - 'deny if service(\"mcp\", \"db-agent\");'"
 
   docker run --rm -v "${POLICY_VOL}:/policies" busybox sh -c "cat <<'EOF' > /policies/policies.yaml
 ${hub_policy}
@@ -168,6 +191,8 @@ EOF"
   # Start services
   run mesh_start_mock_oidc_custom
   [[ "$status" -eq 0 ]]
+
+  start_calc_mcp
 
   # Start Hub with policy file
   local hub_name="${MESH_PREFIX}-hub"
@@ -271,19 +296,23 @@ teardown() {
 }
 
 @test "Policy E2E: Positive Path (Allowed by Hub, Not blocked by Node)" {
-  run mesh_call_remote_tool 2 "${TARGET_PEER_ID}" "query_database"
+  local call_args="{\"peer_id\":\"${TARGET_PEER_ID}\",\"tool_name\":\"mcp://calculator/add\",\"arguments\":{\"a\":2,\"b\":3}}"
+  run docker run --rm --network "${MESH_NETWORK}" "${MESH_RUNTIME_IMAGE}" mcp-client -url "http://sam-node-2:8080/mcp" -tool "call_remote_tool" -args "${call_args}"
   echo "Output: $output"
   [ "$status" -eq 0 ]
+  [[ "$output" == *"5"* ]]
 }
 
 @test "Policy E2E: Negative Path (Denied by Hub)" {
-  run mesh_call_remote_tool 2 "${TARGET_PEER_ID}" "reboot_server"
+  local call_args="{\"peer_id\":\"${TARGET_PEER_ID}\",\"tool_name\":\"mcp://unauthorized-service/reboot_server\",\"arguments\":{}}"
+  run docker run --rm --network "${MESH_NETWORK}" "${MESH_RUNTIME_IMAGE}" mcp-client -url "http://sam-node-2:8080/mcp" -tool "call_remote_tool" -args "${call_args}"
   echo "Output: $output"
   [[ "$output" == *"denied"* ]]
 }
 
 @test "Policy E2E: Attenuation Path (Allowed by Hub, Blocked by Node)" {
-  run mesh_call_remote_tool 2 "${TARGET_PEER_ID}" "delete_tables"
+  local call_args="{\"peer_id\":\"${TARGET_PEER_ID}\",\"tool_name\":\"mcp://db-agent/delete_tables\",\"arguments\":{}}"
+  run docker run --rm --network "${MESH_NETWORK}" "${MESH_RUNTIME_IMAGE}" mcp-client -url "http://sam-node-2:8080/mcp" -tool "call_remote_tool" -args "${call_args}"
   echo "Output: $output"
   [[ "$output" == *"denied"* ]]
 }

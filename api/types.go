@@ -17,32 +17,62 @@ package api
 import (
 	"fmt"
 	"maps"
+	"net/url"
 	"strings"
 
 	"github.com/libp2p/go-libp2p/core/protocol"
 )
 
-const EnrollProtocolID protocol.ID = "/sam/enroll/1.0.0"
-const MCPProtocolID protocol.ID = "/sam/mcp/1.0.0"
-const GossipEvents = "/sam/mesh/events/v1"
-const GossipHubSync = "/sam/hub/sync/v1"
-const AuthProtocolID protocol.ID = "/sam/auth/1.0.0"
+// ============================================================================
+// Libp2p Protocol & Network Constants
+// ============================================================================
 
-// CatalogTarget is the special target service name used to retrieve tool catalogs from remote nodes.
-const CatalogTarget = "sam.catalog"
+const (
+	// EnrollProtocolID is the libp2p protocol identifier for node enrollment.
+	EnrollProtocolID protocol.ID = "/sam/enroll/1.0.0"
 
-// DefaultServiceType is the default type for services without a namespace.
-const DefaultServiceType = "system"
+	// MCPProtocolID is the libp2p protocol identifier for Model Context Protocol streams.
+	MCPProtocolID protocol.ID = "/sam/mcp/1.0.0"
 
-const DefaultAudience = "sam-mesh-audience"
+	// AuthProtocolID is the libp2p protocol identifier for the zero-trust auth handshake.
+	AuthProtocolID protocol.ID = "/sam/auth/1.0.0"
 
-// MCPServicePrefix is the conventional prefix (namespace + separator) used for Model Context Protocol (MCP) services.
-// When an MCP client attempts to connect to an MCP service on a remote peer, and the target service name
-// does not contain a namespace separator (':'), this prefix is automatically prepended to the service name
-// prior to routing and policy evaluation.
-const MCPServicePrefix = "mcp:"
+	// GossipEvents is the GossipSub topic used to broadcast mesh event updates (e.g., node bans).
+	GossipEvents = "/sam/mesh/events/v1"
 
-// Biscuit fact names
+	// GossipHubSync is the GossipSub topic used by the Hub to sync cluster state.
+	GossipHubSync = "/sam/hub/sync/v1"
+
+	// DefaultAudience is the default audience string used in OIDC token validation.
+	DefaultAudience = "sam-mesh-audience"
+)
+
+// ============================================================================
+// Service Classification & Namespaces
+// ============================================================================
+
+const (
+	// SystemNamespace is the namespace reserved for built-in mesh services and protocols.
+	SystemNamespace = "system"
+
+	// CatalogTarget is the special system service name used to retrieve tool catalogs.
+	// In policy rules, it must be referred to explicitly as: system://sam.catalog
+	CatalogTarget = "sam.catalog"
+
+	// MCPServicePrefix is the scheme prefix for Model Context Protocol services.
+	// Fully qualified MCP services use the URI format: mcp://<service-name>
+	MCPServicePrefix = "mcp://"
+
+	// InferenceServicePrefix is the scheme prefix for LLM Inference services.
+	// Fully qualified inference services use the URI format: inference://<service-name>
+	InferenceServicePrefix = "inference://"
+)
+
+// ============================================================================
+// Biscuit Authorization Facts
+// ============================================================================
+
+// Biscuit fact names represent the Datalog predicates used in auth tokens and policy evaluation.
 const (
 	FactExpiration             = "expiration"
 	FactNode                   = "node"
@@ -74,7 +104,7 @@ const (
 //     https://doc.biscuitsec.org/reference/specifications.html#symbol-table
 //
 // How to add a new translation:
-//  1. Define a constant for the Biscuit fact name in the "Biscuit fact names" block above
+//  1. Define a constant for the Biscuit fact name in the constants block above
 //     (e.g., FactMyNewClaim = "my_new_fact").
 //  2. Add an entry to the oidcClaimToFact map below (e.g., "my_oidc_claim": FactMyNewClaim).
 //  3. Update translateClaimsToFacts in cmd/sam-hub/biscuit.go to handle parsing/type conversion
@@ -92,29 +122,17 @@ func OIDCClaimToFact() map[string]string {
 	return maps.Clone(oidcClaimToFact)
 }
 
-// ParseServiceTarget parses a service target string into its type and name components.
-// The target convention is "type:name" (e.g., "mcp:my_tool").
-// If no colon is present, the type defaults to the "system" namespace.
-// The global wildcard "*" is a special case that maps to type "*" and name "*".
-func ParseServiceTarget(target string) (svcType, svcName string) {
-	if target == "*" {
-		return "*", "*"
-	}
-	parts := strings.SplitN(target, ":", 2)
-	if len(parts) == 2 {
-		return parts[0], parts[1]
-	}
-	return DefaultServiceType, target
-}
+// ============================================================================
+// Protocol Types & String Mappings
+// ============================================================================
 
-// Protocol Type strings for REST and JSON mapping.
 const (
-	ServiceTypeStringMCP       = "mcp"
+	// ServiceTypeStringMCP is the string identifier for MCP services.
+	ServiceTypeStringMCP = "mcp"
+
+	// ServiceTypeStringInference is the string identifier for Inference services.
 	ServiceTypeStringInference = "inference"
 )
-
-// InferenceServicePrefix is the conventional prefix used for LLM gateway inference services.
-const InferenceServicePrefix = "inference:"
 
 // ParseServiceType converts a string identifier (e.g. from JSON or REST) to the ServiceType protobuf enum.
 func ParseServiceType(s string) (ServiceType, error) {
@@ -138,4 +156,34 @@ func ServiceTypeToString(t ServiceType) (string, error) {
 	default:
 		return "", fmt.Errorf("invalid or unspecified service type")
 	}
+}
+
+// ============================================================================
+// Parsing & Routing Utilities
+// ============================================================================
+
+// ParseServiceTarget parses a service target string into its type (scheme) and name components.
+//
+// Expected formats:
+//   - Hierarchical service URIs: "scheme://name" (e.g., "mcp://my_service") or "scheme://name/path" (e.g., "mcp://my_service/tool").
+//   - Target facts: "fact:value" (e.g., "group:backend" or "user:bob").
+//   - Wildcards: "*" (maps type to "*" and name to "*").
+//
+// If no scheme/colon is present, it returns an empty string for the type and the full target as the name.
+// No fallback namespace is applied; callers must be explicit.
+func ParseServiceTarget(target string) (svcType, svcName string) {
+	if target == "*" {
+		return "*", "*"
+	}
+	u, err := url.Parse(target)
+	if err != nil || u.Scheme == "" {
+		return "", target
+	}
+	name := u.Host
+	if u.Opaque != "" {
+		name = u.Opaque
+	} else if u.Path != "" {
+		name = u.Host + u.Path
+	}
+	return u.Scheme, name
 }

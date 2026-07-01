@@ -77,13 +77,13 @@ func (g *nodeConnGate) InterceptSecured(dir network.Direction, p peer.ID, n netw
 func (n *SamNode) HandleMCPStream(s network.Stream, reqCtx RequestContext) {
 	// If the TargetService is for a registered local backend, dumb-pipe proxy to it.
 	target := reqCtx.Target
-	if target != "" && target != api.CatalogTarget {
+	_, targetName := api.ParseServiceTarget(target)
+	if target != "" && targetName != api.CatalogTarget {
 		if n.services == nil {
 			logger.Errorf("[MCP] Service registry is not initialized")
 			_ = s.Reset()
 			return
 		}
-		_, targetName := api.ParseServiceTarget(target)
 		svc, ok := n.services.Get(targetName)
 		if !ok && targetName != target {
 			svc, ok = n.services.Get(target)

@@ -56,7 +56,7 @@ The `services` array allows you to register endpoints that remote peers in the S
 | Property | Description |
 | :--- | :--- |
 | `type` | The protocol protocol type. Supported values are `mcp` (Model Context Protocol), `inference`, or `a2a`. |
-| `name` | The unique name of the service (e.g., `git-helper`). This must exactly match the name authorized by the Hub's `policies.yaml` (e.g., `mcp:git-helper`). |
+| `name` | The unique name of the service (e.g., `git-helper`). This must exactly match the name authorized by the Hub's `policies.yaml` (e.g., `mcp://git-helper`). |
 | `description` | A human-readable description published to the mesh discovery catalogue. |
 | `command` | *(For MCP)* The executable command array to spawn as a local subprocess (e.g. `["node", "index.js"]`). |
 | `env` | *(For MCP)* Key-value environment variables passed to the subprocess. |

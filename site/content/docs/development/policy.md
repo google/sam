@@ -68,10 +68,10 @@ allow if group("engineering");
 Admins define central permissions by mapping OIDC roles to specific capabilities. 
 
 * **`allowed_targets`**: Defines which logical groups or specific peers a user can route messages to, analogous to Active Directory security groups. Target definitions must be formatted as resolved facts (e.g., `group:<name>`, `user:<sub-id>`, `email:<email>`, `role:<role-name>`, or `node:<peer-id>`). *Note: These are evaluated dynamically at the destination node using its own identity (see Section 3.1).*
-* **`allowed_services`**: Defines the application-level tools or endpoints a user can access. Services use a strict `type:name` convention (e.g., `mcp:db-agent` or `inference:openrouter`).
-  * **Strict Namespaces**: There are no implicit fallbacks. `system:...` is used for internal services, `mcp:...` for node services, `inference:...` for AI models, etc. Service names must be valid domain labels (e.g. `value1.value2.value3`).
-  * **Wildcards**: SAM natively supports prefix and suffix wildcards to build complex policies. The hub generates specific facts like `granted_service_exact($type, $name)`, `granted_service_prefix($type, $prefix)`, `granted_service_suffix($type, $suffix)`, `granted_service_all_in_type($type)`, or `granted_service_all_types()`. You can grant access to an entire type via `mcp:*`, allow prefix matching like `mcp:dev-*`, suffix matching like `mcp:*-prod`, or global access to everything via `*`.
-  * **MCP Namespace Convention**: The `mcp:` prefix (`api.MCPServicePrefix`) is the explicit convention for all Model Context Protocol targets. When remote nodes query local nodes for tool catalogs, if the local service is an MCP server, the proxy layer strictly enforces the authorization policy against the `mcp:` prefix.
+* **`allowed_services`**: Defines the application-level tools or endpoints a user can access. Services use a strict `type://name` convention (e.g., `mcp://db-agent` or `inference://openrouter`).
+  * **Strict Namespaces**: There are no implicit fallbacks. `system://...` is used for internal services, `mcp://...` for node services, `inference://...` for AI models, etc. Service names must be valid domain labels (e.g. `value1.value2.value3`).
+  * **Wildcards**: SAM natively supports domain-level wildcards to build complex policies. The hub generates specific facts like `granted_service_exact($type, $name)`, `granted_service_prefix($type, $prefix)`, `granted_service_suffix($type, $suffix)`, `granted_service_all_in_type($type)`, or `granted_service_all_types()`. You can grant access to an entire type via `mcp://*`, allow prefix-based wildcard matching like `mcp://*.service.local` (which matches services ending in `.service.local`), suffix-based wildcard matching like `mcp://service.*` (which matches services starting with `service.`), or global access to everything via `*`. Note that arbitrary partial matches (e.g., `dev-*` or `*-prod`) are not supported because they do not align with domain boundaries and will fail DNS name validation.
+  * **MCP Namespace Convention**: The `mcp://` prefix (`api.MCPServicePrefix`) is the explicit convention for all Model Context Protocol targets. When remote nodes query local nodes for tool catalogs, if the local service is an MCP server, the proxy layer strictly enforces the authorization policy against the `mcp://` prefix.
 > [!NOTE]
 > The `*` global wildcard is a special case. It grants `granted_service_all_types()` fact, allowing the caller to invoke any tool regardless of its namespace or name.
 
@@ -86,9 +86,9 @@ roles:
       - "user:auth0|123456"       # Node bound to a specific user sub
       - "email:db@example.com"    # Node bound to a specific email
     allowed_services: 
-      - "mcp:db-agent"            # Access to specific MCP server
-      - "inference:openrouter"    # Access to inference endpoints
-      - "mcp:*"                   # Wildcard access to all MCP servers
+      - "mcp://db-agent"            # Access to specific MCP server
+      - "inference://openrouter"    # Access to inference endpoints
+      - "mcp://*"                   # Wildcard access to all MCP servers
     custom_datalog:
       - 'department("analytics");' # Raw injected facts
 ```

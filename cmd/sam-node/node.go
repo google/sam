@@ -1540,7 +1540,7 @@ func (n *SamNode) StartIngressServer(ctx context.Context) error {
 				PeerID:   remotePeer,
 				User:     "", // Extracted implicitly if needed, or left empty
 				Protocol: "/libp2p-http",
-				Target:   strings.ToLower(serviceTypeStr) + ":" + serviceName,
+				Target:   strings.ToLower(serviceTypeStr) + "://" + serviceName,
 			}
 
 			// Verify authorization

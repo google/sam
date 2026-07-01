@@ -40,7 +40,7 @@ func LoadNodeConfig(path string) (*NodeConfigComplete, error) {
 	}
 
 	for i, svc := range config.Services {
-		if err := api.ValidateServiceFormat(svc.Type + ":" + svc.Name); err != nil {
+		if err := api.ValidateServiceFormat(svc.Type + "://" + svc.Name); err != nil {
 			return nil, fmt.Errorf("invalid service config at index %d: %w", i, err)
 		}
 	}

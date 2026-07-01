@@ -67,7 +67,7 @@ for i in $(seq 1 90); do
 done
 
 [ -n "$peer" ] || {
-  echo "mcp:calculator.add not discovered after 90s"
+  echo "mcp:calculator/add not discovered after 90s"
   echo "final find_remote_tools:"
   mcp -tool find_remote_tools -args '{}' || true
   echo "final mesh info:"

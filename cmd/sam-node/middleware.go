@@ -239,7 +239,9 @@ func (n *SamNode) Authorize(rawToken []byte, req RequestContext, pubKey ed25519.
 	// Inject the current action context (Standard Vocabulary)
 	var opType, opName string
 	if req.Target == "" {
-		opType = api.DefaultServiceType
+		// When no explicit target is requested, the operation is scoped to the connection protocol itself,
+		// which resides in the "system" namespace.
+		opType = api.SystemNamespace
 		opName = req.Protocol
 	} else {
 		opType, opName = api.ParseServiceTarget(req.Target)
