@@ -199,7 +199,7 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
   }
 
   mesh_setup_suite() {
-    export PATH="${HOME}/go/bin:/usr/local/bin:/usr/bin:$PATH"
+    export PATH="${HOME}/go/bin:$PATH"
     mesh_cleanup_stale_resources
     if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
       echo "docker not available or daemon not running" >&2
