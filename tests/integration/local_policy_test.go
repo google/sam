@@ -318,7 +318,11 @@ attenuation:
 
 	failed := false
 	if callErr != nil {
-		failed = true
+		if strings.Contains(callErr.Error(), "EOF") {
+			failed = false
+		} else {
+			failed = true
+		}
 	} else if strings.Contains(resp, "Authorization failed") || strings.Contains(resp, "failed to connect") || strings.Contains(resp, "token lacks") || strings.Contains(resp, "denied") || strings.Contains(resp, "biscuit") {
 		failed = true
 	}
