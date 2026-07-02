@@ -34,6 +34,7 @@ teardown() {
     -v "$(pwd)/sam-mcp-python:/sam-mcp-python" \
     -e PYTHONPATH=/sam-mcp-python/src \
     -e SAM_API_TOKEN=secret-token \
+    -e SAM_MCP_URL="http://${node1_name}:8080/mcp" \
     python:3.12 \
     bash -c 'pip install mcp httpx && python3 /sam-mcp-python/test_client.py'
   echo "Python SDK output: $output"

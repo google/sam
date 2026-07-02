@@ -9,6 +9,17 @@ setup() {
 }
 
 teardown() {
+  if [[ "${BATS_TEST_COMPLETED:-0}" -ne 1 ]]; then
+    mkdir -p tests/e2e/logs
+    local ids
+    ids="$(docker ps -aq --filter "name=mesh-")"
+    for id in ${ids}; do
+      local name
+      name="$(docker inspect -f '{{.Name}}' "${id}" | tr -d '/')"
+      docker logs "${id}" > "tests/e2e/logs/${name}.log" 2>&1 || true
+    done
+  fi
+
   local item
   for item in "${DISCONNECT_CONTAINERS[@]}"; do
     local container="${item%%:*}"
@@ -129,7 +140,7 @@ data = {
 }
 
 req = urllib.request.Request(
-    \"http://sam-node-1:8080/sam/service/register\",
+    \"http://${MESH_PREFIX}-node-1:8080/sam/service/register\",
     data=json.dumps(data).encode('utf-8'),
     headers={
         \"Content-Type\": \"application/json\",
@@ -148,7 +159,7 @@ with urllib.request.urlopen(req) as response:
     run docker run --rm --network "${MESH_NETWORK_2}" python:3.12 python3 -c "
 import urllib.request
 req = urllib.request.Request(
-    \"http://sam-node-2:8080/sam/${node1_peer_id}/mcp/http-tool/\",
+    \"http://${MESH_PREFIX}-node-2:8080/sam/${node1_peer_id}/mcp/http-tool/\",
     headers={\"Authorization\": \"Bearer secret-token\"}
 )
 with urllib.request.urlopen(req) as response:

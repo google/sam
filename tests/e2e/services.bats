@@ -58,10 +58,10 @@ teardown() {
   node2_peer_id=$(docker logs "${node2_name}" 2>&1 | grep "PeerID:" | head -n 1 | awk '{print $2}' | tr -d '\r')
 
   echo "[$(date +%T)] Connecting Node 1 to Node 2"
-  local node2_addr="/dns4/sam-node-2/tcp/5002/p2p/${node2_peer_id}"
+  local node2_addr="/dns4/${node2_name}/tcp/5002/p2p/${node2_peer_id}"
   run docker run --rm --network "${MESH_NETWORK}" \
     "${MESH_RUNTIME_IMAGE}" mcp-client \
-    -url "http://sam-node-1:8080/mcp" \
+    -url "http://${node1_name}:8080/mcp" \
     -tool "connect_peer" \
     -args "{\"peer_addr\":\"${node2_addr}\"}"
   [[ "$status" -eq 0 ]]
@@ -74,7 +74,7 @@ teardown() {
   run docker run --rm --network "${MESH_NETWORK}" \
     "${MESH_RUNTIME_IMAGE}" mcp-client \
     -timeout 30 \
-    -url "http://sam-node-1:8080/mcp" \
+    -url "http://${node1_name}:8080/mcp" \
     -tool "discover_remote_services" \
     -args '{"type":"mcp"}'
   echo "Discovery output: $output"

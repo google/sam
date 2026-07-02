@@ -195,7 +195,7 @@ attenuation:
   
   for ((i=0; i<40; i++)); do
     local output
-    output="$(docker run --rm --network "${MESH_NETWORK}" "${MESH_RUNTIME_IMAGE}" mcp-client -url "http://sam-node-2:8080/mcp" -tool "get_mesh_info")"
+    output="$(docker run --rm --network "${MESH_NETWORK}" "${MESH_RUNTIME_IMAGE}" mcp-client -url "http://${MESH_PREFIX}-node-2:8080/mcp" -tool "get_mesh_info")"
     TARGET_PEER_ID=$(echo "${output}" | grep -oE '12D3Koo[a-zA-Z0-9]+' | grep -v "${hub_id}" | grep -v "${node2_id}" | head -n 1)
     if [[ -n "${TARGET_PEER_ID}" ]]; then
       break
@@ -212,8 +212,8 @@ attenuation:
   fi
 
   # Explicitly connect Node 2 to Node 1 to avoid "no addresses" error
-  local node1_addr="/dns4/sam-node-1/tcp/5002/p2p/${TARGET_PEER_ID}"
-  docker run --rm --network "${MESH_NETWORK}" "${MESH_RUNTIME_IMAGE}" mcp-client -url "http://sam-node-2:8080/mcp" -tool "connect_peer" -args "{\"peer_addr\":\"${node1_addr}\"}" >/dev/null
+  local node1_addr="/dns4/${MESH_PREFIX}-node-1/tcp/5002/p2p/${TARGET_PEER_ID}"
+  docker run --rm --network "${MESH_NETWORK}" "${MESH_RUNTIME_IMAGE}" mcp-client -url "http://${MESH_PREFIX}-node-2:8080/mcp" -tool "connect_peer" -args "{\"peer_addr\":\"${node1_addr}\"}" >/dev/null
 }
 
 teardown() {
@@ -233,7 +233,7 @@ teardown() {
 
 @test "Policy E2E: Positive Path (Allowed by Hub, Not blocked by Node)" {
   local call_args="{\"peer_id\":\"${TARGET_PEER_ID}\",\"tool_name\":\"mcp://calculator/add\",\"arguments\":{\"a\":2,\"b\":3}}"
-  run docker run --rm --network "${MESH_NETWORK}" "${MESH_RUNTIME_IMAGE}" mcp-client -url "http://sam-node-2:8080/mcp" -tool "call_remote_tool" -args "${call_args}"
+  run docker run --rm --network "${MESH_NETWORK}" "${MESH_RUNTIME_IMAGE}" mcp-client -url "http://${MESH_PREFIX}-node-2:8080/mcp" -tool "call_remote_tool" -args "${call_args}"
   echo "Output: $output"
   [ "$status" -eq 0 ]
   [[ "$output" == *"5"* ]]
@@ -241,14 +241,14 @@ teardown() {
 
 @test "Policy E2E: Negative Path (Denied by Hub)" {
   local call_args="{\"peer_id\":\"${TARGET_PEER_ID}\",\"tool_name\":\"mcp://unauthorized-service/reboot_server\",\"arguments\":{}}"
-  run docker run --rm --network "${MESH_NETWORK}" "${MESH_RUNTIME_IMAGE}" mcp-client -url "http://sam-node-2:8080/mcp" -tool "call_remote_tool" -args "${call_args}"
+  run docker run --rm --network "${MESH_NETWORK}" "${MESH_RUNTIME_IMAGE}" mcp-client -url "http://${MESH_PREFIX}-node-2:8080/mcp" -tool "call_remote_tool" -args "${call_args}"
   echo "Output: $output"
   [[ "$output" == *"denied"* ]]
 }
 
 @test "Policy E2E: Attenuation Path (Allowed by Hub, Blocked by Node)" {
   local call_args="{\"peer_id\":\"${TARGET_PEER_ID}\",\"tool_name\":\"mcp://db-agent/delete_tables\",\"arguments\":{}}"
-  run docker run --rm --network "${MESH_NETWORK}" "${MESH_RUNTIME_IMAGE}" mcp-client -url "http://sam-node-2:8080/mcp" -tool "call_remote_tool" -args "${call_args}"
+  run docker run --rm --network "${MESH_NETWORK}" "${MESH_RUNTIME_IMAGE}" mcp-client -url "http://${MESH_PREFIX}-node-2:8080/mcp" -tool "call_remote_tool" -args "${call_args}"
   echo "Output: $output"
   [[ "$output" == *"denied"* ]]
 }
