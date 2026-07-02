@@ -94,21 +94,34 @@ func (h *Hub) mintBiscuitToken(claims jwt.MapClaims, token *oidc.IDToken, remote
 
 	builder := biscuit.NewBuilder(h.KeyRing.GetCurrentKey())
 
-	if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+	addedFacts := make(map[string]bool)
+	addFact := func(fact biscuit.Fact) error {
+		factStr := fact.String()
+		if addedFacts[factStr] {
+			return nil
+		}
+		if err := builder.AddAuthorityFact(fact); err != nil {
+			return err
+		}
+		addedFacts[factStr] = true
+		return nil
+	}
+
+	if err := addFact(biscuit.Fact{Predicate: biscuit.Predicate{
 		Name: api.FactExpiration,
 		IDs:  []biscuit.Term{biscuit.Date(token.Expiry)},
 	}}); err != nil {
 		return nil, fmt.Errorf("failed to add expiration fact: %w", err)
 	}
 
-	if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+	if err := addFact(biscuit.Fact{Predicate: biscuit.Predicate{
 		Name: api.FactNode,
 		IDs:  []biscuit.Term{biscuit.String(remotePeer.String())},
 	}}); err != nil {
 		return nil, fmt.Errorf("failed to add node fact: %w", err)
 	}
 
-	if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+	if err := addFact(biscuit.Fact{Predicate: biscuit.Predicate{
 		Name: api.FactClientPeerID,
 		IDs:  []biscuit.Term{biscuit.String(remotePeer.String())},
 	}}); err != nil {
@@ -116,7 +129,7 @@ func (h *Hub) mintBiscuitToken(claims jwt.MapClaims, token *oidc.IDToken, remote
 	}
 
 	// Dynamic claims to facts mapping using api.OIDCClaimToFact
-	if err := translateClaimsToFacts(builder, claims); err != nil {
+	if err := translateClaimsToFacts(addFact, claims); err != nil {
 		return nil, err
 	}
 
@@ -129,7 +142,7 @@ func (h *Hub) mintBiscuitToken(claims jwt.MapClaims, token *oidc.IDToken, remote
 
 	var errs []error
 	for _, role := range roles {
-		if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+		if err := addFact(biscuit.Fact{Predicate: biscuit.Predicate{
 			Name: api.FactRole,
 			IDs:  []biscuit.Term{biscuit.String(role)},
 		}}); err != nil {
@@ -143,14 +156,14 @@ func (h *Hub) mintBiscuitToken(claims jwt.MapClaims, token *oidc.IDToken, remote
 					svcType, svcName := api.ParseServiceTarget(svc)
 
 					if svcType == "*" && svcName == "*" {
-						if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+						if err := addFact(biscuit.Fact{Predicate: biscuit.Predicate{
 							Name: api.FactGrantedServiceAllTypes,
 							IDs:  []biscuit.Term{},
 						}}); err != nil {
 							errs = append(errs, fmt.Errorf("failed to add granted_service_all_types fact: %w", err))
 						}
 					} else if svcName == "*" {
-						if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+						if err := addFact(biscuit.Fact{Predicate: biscuit.Predicate{
 							Name: api.FactGrantedServiceAll,
 							IDs:  []biscuit.Term{biscuit.String(svcType)},
 						}}); err != nil {
@@ -158,7 +171,7 @@ func (h *Hub) mintBiscuitToken(claims jwt.MapClaims, token *oidc.IDToken, remote
 						}
 					} else if strings.HasPrefix(svcName, "*.") {
 						suffix := svcName[1:]
-						if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+						if err := addFact(biscuit.Fact{Predicate: biscuit.Predicate{
 							Name: api.FactGrantedServiceSuffix,
 							IDs:  []biscuit.Term{biscuit.String(svcType), biscuit.String(suffix)},
 						}}); err != nil {
@@ -166,14 +179,14 @@ func (h *Hub) mintBiscuitToken(claims jwt.MapClaims, token *oidc.IDToken, remote
 						}
 					} else if strings.HasSuffix(svcName, ".*") {
 						prefix := svcName[:len(svcName)-1]
-						if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+						if err := addFact(biscuit.Fact{Predicate: biscuit.Predicate{
 							Name: api.FactGrantedServicePrefix,
 							IDs:  []biscuit.Term{biscuit.String(svcType), biscuit.String(prefix)},
 						}}); err != nil {
 							errs = append(errs, fmt.Errorf("failed to add granted_service_prefix fact: %w", err))
 						}
 					} else {
-						if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+						if err := addFact(biscuit.Fact{Predicate: biscuit.Predicate{
 							Name: api.FactGrantedServiceExact,
 							IDs:  []biscuit.Term{biscuit.String(svcType), biscuit.String(svcName)},
 						}}); err != nil {
@@ -185,14 +198,14 @@ func (h *Hub) mintBiscuitToken(claims jwt.MapClaims, token *oidc.IDToken, remote
 					targetFact, targetVal := api.ParseServiceTarget(target)
 
 					if targetFact == "*" && targetVal == "*" {
-						if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+						if err := addFact(biscuit.Fact{Predicate: biscuit.Predicate{
 							Name: api.FactGrantedTargetAllFacts,
 							IDs:  []biscuit.Term{},
 						}}); err != nil {
 							errs = append(errs, fmt.Errorf("failed to add granted_target_all_facts fact: %w", err))
 						}
 					} else if targetVal == "*" {
-						if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+						if err := addFact(biscuit.Fact{Predicate: biscuit.Predicate{
 							Name: api.FactGrantedTargetAll,
 							IDs:  []biscuit.Term{biscuit.String(targetFact)},
 						}}); err != nil {
@@ -200,7 +213,7 @@ func (h *Hub) mintBiscuitToken(claims jwt.MapClaims, token *oidc.IDToken, remote
 						}
 					} else if strings.HasPrefix(targetVal, "*.") {
 						suffix := targetVal[1:]
-						if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+						if err := addFact(biscuit.Fact{Predicate: biscuit.Predicate{
 							Name: api.FactGrantedTargetSuffix,
 							IDs:  []biscuit.Term{biscuit.String(targetFact), biscuit.String(suffix)},
 						}}); err != nil {
@@ -208,14 +221,14 @@ func (h *Hub) mintBiscuitToken(claims jwt.MapClaims, token *oidc.IDToken, remote
 						}
 					} else if strings.HasSuffix(targetVal, ".*") {
 						prefix := targetVal[:len(targetVal)-1]
-						if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+						if err := addFact(biscuit.Fact{Predicate: biscuit.Predicate{
 							Name: api.FactGrantedTargetPrefix,
 							IDs:  []biscuit.Term{biscuit.String(targetFact), biscuit.String(prefix)},
 						}}); err != nil {
 							errs = append(errs, fmt.Errorf("failed to add granted_target_prefix fact: %w", err))
 						}
 					} else {
-						if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+						if err := addFact(biscuit.Fact{Predicate: biscuit.Predicate{
 							Name: api.FactGrantedTargetExact,
 							IDs:  []biscuit.Term{biscuit.String(targetFact), biscuit.String(targetVal)},
 						}}); err != nil {
@@ -240,7 +253,7 @@ func (h *Hub) mintBiscuitToken(claims jwt.MapClaims, token *oidc.IDToken, remote
 							factErr = fmt.Errorf("failed to parse custom fact %q: %w", trimmed, err)
 							return
 						}
-						if err := builder.AddAuthorityFact(fact); err != nil {
+						if err := addFact(fact); err != nil {
 							factErr = fmt.Errorf("failed to add custom fact %q: %w", trimmed, err)
 						}
 					}()
@@ -264,11 +277,11 @@ func (h *Hub) mintBiscuitToken(claims jwt.MapClaims, token *oidc.IDToken, remote
 		}
 	}
 	if hasTargets {
-		if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{Name: api.FactTargetRestricted}}); err != nil {
+		if err := addFact(biscuit.Fact{Predicate: biscuit.Predicate{Name: api.FactTargetRestricted}}); err != nil {
 			errs = append(errs, err)
 		}
 	} else {
-		if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{Name: api.FactTargetUnrestricted}}); err != nil {
+		if err := addFact(biscuit.Fact{Predicate: biscuit.Predicate{Name: api.FactTargetUnrestricted}}); err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -330,7 +343,7 @@ func (h *Hub) verifyBiscuit(biscuitData []byte, remotePeer peer.ID) (*biscuit.Bi
 	return nil, fmt.Errorf("no valid key found for verification: %v", lastErr)
 }
 
-func translateClaimsToFacts(builder biscuit.Builder, claims map[string]any) error {
+func translateClaimsToFacts(addFact func(biscuit.Fact) error, claims map[string]any) error {
 	claimMap := api.OIDCClaimToFact()
 	keys := make([]string, 0, len(claimMap))
 	for k := range claimMap {
@@ -347,7 +360,7 @@ func translateClaimsToFacts(builder biscuit.Builder, claims map[string]any) erro
 		switch factName {
 		case api.FactUser, api.FactEmail:
 			if strVal, ok := val.(string); ok && strVal != "" {
-				if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+				if err := addFact(biscuit.Fact{Predicate: biscuit.Predicate{
 					Name: factName,
 					IDs:  []biscuit.Term{biscuit.String(strVal)},
 				}}); err != nil {
@@ -362,7 +375,7 @@ func translateClaimsToFacts(builder biscuit.Builder, claims map[string]any) erro
 					continue
 				}
 				seen[g] = true
-				if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+				if err := addFact(biscuit.Fact{Predicate: biscuit.Predicate{
 					Name: factName,
 					IDs:  []biscuit.Term{biscuit.String(g)},
 				}}); err != nil {
