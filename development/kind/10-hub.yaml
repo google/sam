@@ -88,13 +88,13 @@ data:
   policies.yaml: |
     version: "v1alpha1"
     bindings:
-      - user: "system:serviceaccount:${NAMESPACE}:node-a-sa"
+      - members: ["user:system:serviceaccount:${NAMESPACE}:node-a-sa"]
         role: "sam-admin"
-      - user: "system:serviceaccount:${NAMESPACE}:node-b-sa"
+      - members: ["user:system:serviceaccount:${NAMESPACE}:node-b-sa"]
         role: "sam-admin"
-      - user: "system:serviceaccount:${NAMESPACE}:node-c-sa"
+      - members: ["user:system:serviceaccount:${NAMESPACE}:node-c-sa"]
         role: "sam-admin"
-      - user: "system:serviceaccount:${NAMESPACE}:local-node-sa"
+      - members: ["user:system:serviceaccount:${NAMESPACE}:local-node-sa"]
         role: "sam-admin"
     roles:
       sam-admin:
