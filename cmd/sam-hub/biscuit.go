@@ -62,21 +62,21 @@ func (h *Hub) mintBiscuitToken(claims jwt.MapClaims, token *oidc.IDToken, remote
 				value := parts[1]
 
 				switch prefix {
-				case "group":
+				case api.FactGroup:
 					for _, cg := range oidcGroups {
 						if value == cg {
 							resolvedRoles[b.Role] = true
 						}
 					}
-				case "user":
+				case api.FactUser:
 					if oidcSub != "" && value == oidcSub {
 						resolvedRoles[b.Role] = true
 					}
-				case "email":
+				case api.FactEmail:
 					if oidcEmail != "" && value == oidcEmail {
 						resolvedRoles[b.Role] = true
 					}
-				case "node":
+				case api.FactNode:
 					if value == remotePeer.String() {
 						resolvedRoles[b.Role] = true
 					}

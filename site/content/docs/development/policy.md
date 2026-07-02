@@ -106,11 +106,10 @@ Local developers can configure custom validation rules for their specific node u
 ```yaml
 version: "v1alpha1"
 attenuation:
-  rules:
-    - 'deny if user("untrusted_sub_id");'
   checks:
     - 'check if time($time), $time < 2026-12-31T00:00:00Z;'
   policies:
+    - 'deny if user("untrusted_sub_id");'
     - 'deny if service("mcp", "restricted-tool"), group("externals");'
 ```
 
@@ -296,19 +295,21 @@ services:
 
 # Local policies further restrict or override permissions on this specific node
 attenuation:
-  # local rules evaluate to block unauthorized actions
+  # local rules generate new facts based on existing ones
   rules:
-    # 1. Block db-writer calls during off-hours (9 PM to 6 AM)
-    - 'deny if service("mcp", "db-writer"), time($time), $time.hour() >= 21;'
-    - 'deny if service("mcp", "db-writer"), time($time), $time.hour() < 6;'
+    # e.g., 'is_off_hours() <- current_hour($h), $h >= 21;'
 
   # local checks must be satisfied for any connection to succeed
   checks:
-    # 2. Enforce strict TLS certificate expiry limit
+    # 1. Enforce strict TLS certificate expiry limit
     - 'check if time($time), $time < 2026-12-31T23:59:59Z;'
 
   # local policies can contain deny rules (to restrict Hub grants) or allow rules (to override implicit denies)
   policies:
+    # 2. Block db-writer calls during off-hours (9 PM to 6 AM)
+    - 'deny if service("mcp", "db-writer"), current_hour($hour), $hour >= 21;'
+    - 'deny if service("mcp", "db-writer"), current_hour($hour), $hour < 6;'
+    
     # 3. Restrict contractors from accessing db-writer even if Hub granted it
     - 'deny if service("mcp", "db-writer"), role("contractor");'
     
