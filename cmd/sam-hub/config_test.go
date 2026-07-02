@@ -31,6 +31,70 @@ func TestLoadPolicyConfig(t *testing.T) {
 		verify      func(t *testing.T, config *api.PolicyConfig)
 	}{
 		{
+			name: "Valid comprehensive config from docs",
+			yamlContent: `
+version: "v1alpha1"
+
+# Bindings map OIDC identities (sub/user, email, groups) to SAM Roles.
+# Note: Kubernetes projected service account tokens do not carry 'groups' claims,
+# so they must be bound explicitly using their 'user' claim format.
+bindings:
+  # 1. Global Admins (Infrastructure SAs, Lead Architects)
+  - members: ["user:system:serviceaccount:sam-mesh:admin-sa"]
+    role: "admin"
+  - members: ["group:infrastructure-leads"]
+    role: "admin"
+
+  # 2. Software Developers
+  - members: ["group:software-engineering-team"]
+    role: "developer"
+
+  # 3. Data Scientists & AI Engineers
+  - members: ["group:data-science-team"]
+    role: "data-scientist"
+
+  # 4. Contractors / Read-Only Audits
+  - members: ["email:audit-contractor@external.com"]
+    role: "auditor"
+
+# Roles define the allowed destinations (allowed_targets) and tools (allowed_services)
+roles:
+  # Admins have full, unrestricted access to the entire mesh
+  admin:
+    allowed_targets:
+      - "*"
+    allowed_services:
+      - "*"
+
+  # Developers can call development tools on dev nodes
+  developer:
+    allowed_targets:
+      - "group:dev-nodes"           # Can only call nodes in the 'dev-nodes' target group
+    allowed_services:
+      - "mcp://code-reviewer"       # Can call the code reviewer tool
+      - "mcp://git-helper"          # Can call git helper tools
+      - "mcp://build-runner.*"      # Wildcard: matches any build runner sub-service (e.g. build-runner.go)
+
+  # Data Scientists can call database tools and all AI inference endpoints
+  data-scientist:
+    allowed_targets:
+      - "group:data-nodes"          # Can call nodes in the 'data-nodes' target group
+      - "node:12D3KooWSpecialNode"  # Can call a specific high-compute node directly
+    allowed_services:
+      - "mcp://db-reader"           # Can query databases
+      - "inference://*"             # Wildcard: can access any LLM inference service
+
+  # Auditors can only query metadata catalogs and cannot call operational tools
+  auditor:
+    allowed_targets:
+      - "*"
+    allowed_services:
+      - "system://sam.catalog"      # Strictly limited to tool discovery/metadata
+
+`,
+			wantErr: false,
+		},
+		{
 			name: "Valid config with exact services",
 			yamlContent: `
 version: "v1alpha1"

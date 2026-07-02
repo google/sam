@@ -15,6 +15,49 @@ func TestLoadNodeConfig(t *testing.T) {
 		verify      func(t *testing.T, config *NodeConfigComplete)
 	}{
 		{
+			name: "Valid comprehensive config from docs",
+			yamlContent: `
+version: "v1alpha1"
+
+# Static services hosted by this local node
+services:
+  - type: "mcp"
+    name: "db-reader"
+    description: "Read-only SQL execution tool"
+    target_url: "http://127.0.0.1:5001/mcp"
+
+  - type: "mcp"
+    name: "db-writer"
+    description: "Database modification tool"
+    target_url: "http://127.0.0.1:5002/mcp"
+
+# Local policies further restrict or override permissions on this specific node
+attenuation:
+  # local rules generate new facts based on existing ones
+  rules:
+    # e.g., 'is_off_hours() <- current_hour($h), $h >= 21;'
+
+  # local checks must be satisfied for any connection to succeed
+  checks:
+    # 1. Enforce strict TLS certificate expiry limit
+    - 'check if time($time), $time < 2026-12-31T23:59:59Z;'
+
+  # local policies can contain deny rules (to restrict Hub grants) or allow rules (to override implicit denies)
+  policies:
+    # 2. Block db-writer calls during off-hours (9 PM to 6 AM)
+    - 'deny if service("mcp", "db-writer"), current_hour($hour), $hour >= 21;'
+    - 'deny if service("mcp", "db-writer"), current_hour($hour), $hour < 6;'
+    
+    # 3. Restrict contractors from accessing db-writer even if Hub granted it
+    - 'deny if service("mcp", "db-writer"), role("contractor");'
+    
+    # 4. Explicitly allow local admin bypass
+    - 'allow if user("local-admin");'
+
+`,
+			wantErr: false,
+		},
+		{
 			name: "Valid config with multiple services and attenuation",
 			yamlContent: `
 version: "v1alpha1"
