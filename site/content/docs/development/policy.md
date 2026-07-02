@@ -153,12 +153,12 @@ check if client_peer_id($id), connection_peer_id($id);
 ### 4.2 The Catalog Service (`sam.catalog`)
 To allow remote peers to discover tools and query connectivity, each node hosts a built-in catalog service at the special target `sam.catalog`. This service exposes local metadata tools (e.g. `list_local_services`, `get_mesh_info`).
 
-To ensure tool discovery works out-of-the-box, the node automatically injects a baseline rule allowing all verified peers to access it:
+Access to the catalog service is not granted by default and must be explicitly permitted (e.g. via a Hub role mapping allowing `system://sam.catalog` to verified nodes) to facilitate peer-to-peer discovery.
+
+Example policy allowing catalog discovery:
 ```datalog
 allow if service("system", "sam.catalog");
 ```
-> [!IMPORTANT]
-> Without this baseline rule (or if a custom local attenuation policy explicitly blocks it), remote nodes will not be able to retrieve this node's tool catalog. As a result, agents across the mesh will fail to discover or call any of this node's tools.
 
 ## 5. Ingress Authorization Pipeline (Execution Flow)
 
