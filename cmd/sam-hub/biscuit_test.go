@@ -44,14 +44,8 @@ func TestMintBiscuitToken(t *testing.T) {
 		KeyRing: kr,
 		Policy: &api.PolicyConfig{
 			Bindings: []api.Binding{
-				{
-					Group: "system:serviceaccounts:sam-canary",
-					Role:  "canary-role",
-				},
-				{
-					User: "system:serviceaccount:sam-canary:sam-node-sa",
-					Role: "canary-role",
-				},
+				{Role: "canary-role", Members: []string{"group:system:serviceaccounts:sam-canary"}},
+				{Role: "canary-role", Members: []string{"user:system:serviceaccount:sam-canary:sam-node-sa"}},
 			},
 			Roles: map[string]api.RolePolicy{
 				"admin": {
@@ -292,10 +286,7 @@ func TestMintBiscuitToken_ClaimsTranslation(t *testing.T) {
 		KeyRing: kr,
 		Policy: &api.PolicyConfig{
 			Bindings: []api.Binding{
-				{
-					Group: "engineering",
-					Role:  "developer-role",
-				},
+				{Role: "developer-role", Members: []string{"group:engineering"}},
 			},
 			Roles: map[string]api.RolePolicy{
 				"developer-role": {
@@ -473,10 +464,7 @@ func TestMintBiscuitToken_VariousClaimsTypes(t *testing.T) {
 		KeyRing: kr,
 		Policy: &api.PolicyConfig{
 			Bindings: []api.Binding{
-				{
-					Group: "eng-group",
-					Role:  "eng-role",
-				},
+				{Role: "eng-role", Members: []string{"group:eng-group"}},
 			},
 			Roles: map[string]api.RolePolicy{
 				"admin":    {},

@@ -223,21 +223,21 @@ version: "v1alpha1"
 # so they must be bound explicitly using their 'user' claim format.
 bindings:
   # 1. Global Admins (Infrastructure SAs, Lead Architects)
-  - user: "system:serviceaccount:sam-mesh:admin-sa"
+  - members: ["user:system:serviceaccount:sam-mesh:admin-sa"]
     role: "admin"
-  - group: "infrastructure-leads"
+  - members: ["group:infrastructure-leads"]
     role: "admin"
 
   # 2. Software Developers
-  - group: "software-engineering-team"
+  - members: ["group:software-engineering-team"]
     role: "developer"
 
   # 3. Data Scientists & AI Engineers
-  - group: "data-science-team"
+  - members: ["group:data-science-team"]
     role: "data-scientist"
 
   # 4. Contractors / Read-Only Audits
-  - email: "audit-contractor@external.com"
+  - members: ["email:audit-contractor@external.com"]
     role: "auditor"
 
 # Roles define the allowed destinations (allowed_targets) and tools (allowed_services)

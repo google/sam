@@ -30,12 +30,13 @@ func TestHubFederationAndRelay(t *testing.T) {
 	policyFile := filepath.Join(tmpDir, "policies.yaml")
 	policyContent := `version: "v1alpha1"
 bindings:
-  - user: mock-user
+  - members: ["user:mock-user"]
     role: admin
 roles:
   admin:
     allowed_services: 
       - "mcp://*"
+      - "system://sam.catalog"
 `
 	if err := os.WriteFile(policyFile, []byte(policyContent), 0644); err != nil {
 		t.Fatal(err)

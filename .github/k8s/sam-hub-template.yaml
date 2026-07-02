@@ -111,12 +111,19 @@ data:
   policies.yaml: |
     version: "v1alpha1"
     bindings:
-      - user: "system:serviceaccount:sam-canary-${ENV_NAME}:sam-node-sa"
+      - members: ["user:system:serviceaccount:sam-canary-${ENV_NAME}:sam-node-sa"]
         role: "sam-canary"
+      - members: ["system:authenticated"]
+        role: "public-mesh"
     roles:
       sam-canary:
         allowed_services:
           - "*"
+        allowed_targets:
+          - "*"
+      public-mesh:
+        allowed_services:
+          - "system://sam.catalog"
         allowed_targets:
           - "*"
 ---

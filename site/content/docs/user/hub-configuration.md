@@ -78,11 +78,11 @@ roles:
 
 # Bind OIDC user subs, emails, or group claims to roles
 bindings:
-  - email: "alice@example.com"
+  - members: ["email:alice@example.com"]
     role: "admin-role"
-  - user: "auth0|123456"
+  - members: ["user:auth0|123456"]
     role: "admin-role"
-  - group: "eng-team"
+  - members: ["group:eng-team"]
     role: "developer-role"
 ```
 

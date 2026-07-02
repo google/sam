@@ -362,11 +362,9 @@ func buildAndSaveCustomBiscuit(node *SamNode, rootPriv ed25519.PrivateKey, allow
 		return err
 	}
 	for _, svc := range allowedServices {
-		parts := strings.SplitN(svc, ":", 2)
-		opType := parts[0]
-		opName := "*"
-		if len(parts) > 1 {
-			opName = parts[1]
+		opType, opName := api.ParseServiceTarget(svc)
+		if opName == "" {
+			opName = "*"
 		}
 		if err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
 			Name: "granted_service_exact",
@@ -405,9 +403,8 @@ func TestFetchRemoteToolCatalogue_AuthRejected(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Create a biscuit that DOES NOT allow "summarizer", only "some_other_service".
-	// By baseline rules, it will STILL allow the catalog fetch.
-	if err := buildAndSaveCustomBiscuit(nodeA, rootPrivEd, []string{"some_other_service"}); err != nil {
+	// Create a biscuit that DOES NOT allow "summarizer", only "some_other_service" and "system://sam.catalog".
+	if err := buildAndSaveCustomBiscuit(nodeA, rootPrivEd, []string{"mcp://some_other_service", "system://sam.catalog"}); err != nil {
 		t.Fatalf("buildAndSaveCustomBiscuit: %v", err)
 	}
 

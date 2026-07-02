@@ -51,23 +51,24 @@ func LoadPolicyConfig(path string) (*api.PolicyConfig, error) {
 // ValidatePolicyConfig ensures that no wildcards are used in policies, and that all referenced roles in bindings exist.
 func ValidatePolicyConfig(config *api.PolicyConfig) error {
 	for _, b := range config.Bindings {
-		if b.Group == "" && b.User == "" && b.Email == "" {
-			return fmt.Errorf("binding must specify either 'group', 'user', or 'email'")
+		if len(b.Members) == 0 {
+			return fmt.Errorf("binding must specify at least one member")
 		}
-		// A binding should only specify one of them
-		count := 0
-		if b.Group != "" {
-			count++
+
+		for _, member := range b.Members {
+			if member == api.SystemAuthenticated {
+				continue
+			}
+			parts := strings.SplitN(member, ":", 2)
+			if len(parts) != 2 {
+				return fmt.Errorf("member %q is invalid, must be in format 'type:value' or '%s'", member, api.SystemAuthenticated)
+			}
+			prefix := parts[0]
+			if _, validPrefix := api.ValidMemberPrefixes[prefix]; !validPrefix {
+				return fmt.Errorf("member prefix %q is invalid, expected one of the standard identity facts (e.g., user, group, email, node)", prefix)
+			}
 		}
-		if b.User != "" {
-			count++
-		}
-		if b.Email != "" {
-			count++
-		}
-		if count > 1 {
-			return fmt.Errorf("binding cannot specify multiple identities (group/user/email) concurrently")
-		}
+
 		if b.Role == "" {
 			return fmt.Errorf("binding role cannot be empty")
 		}

@@ -198,15 +198,7 @@ func TestBaselineRules(t *testing.T) {
 			target:        "mcp://anything",
 			expectSuccess: true,
 		},
-		{
-			name: "Baseline Rule 3: Catalog Target",
-			mintToken: func(t *testing.T, builder biscuit.Builder) {
-				// No specific allowed_service facts needed
-			},
-			protocol:      api.CatalogTarget, // "catalog"
-			target:        "system://" + api.CatalogTarget,
-			expectSuccess: true,
-		},
+
 		{
 			name: "Baseline Rule 4: Type Wildcard",
 			mintToken: func(t *testing.T, builder biscuit.Builder) {

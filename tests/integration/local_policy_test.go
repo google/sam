@@ -25,9 +25,9 @@ roles:
     allowed_targets: []
 bindings:
   - role: none
-    user: "unprivileged-user"
+    members: ["user:unprivileged-user"]
   - role: none
-    user: "nodeB-user"
+    members: ["user:nodeB-user"]
 `
 	if err := os.WriteFile(hubPolicyFile, []byte(hubPolicyYAML), 0644); err != nil {
 		t.Fatal(err)
@@ -185,9 +185,9 @@ roles:
     allowed_targets: ["group:admin-only"]
 bindings:
   - role: restricted-role
-    user: "client-user"
+    members: ["user:client-user"]
   - role: restricted-role
-    user: "nodeB-user"
+    members: ["user:nodeB-user"]
 `
 	if err := os.WriteFile(hubPolicyFile, []byte(hubPolicyYAML), 0644); err != nil {
 		t.Fatal(err)

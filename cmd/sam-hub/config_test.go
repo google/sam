@@ -100,7 +100,7 @@ roles:
 			yamlContent: `
 version: "v1alpha1"
 bindings:
-  - group: "system:serviceaccounts:sam-canary-bananas"
+  - members: ["group:system:serviceaccounts:sam-canary-bananas"]
     role: "mesh-member"
 roles:
   mesh-member:
@@ -111,7 +111,7 @@ roles:
 				if len(config.Bindings) != 1 {
 					t.Errorf("expected 1 binding, got %d", len(config.Bindings))
 				}
-				if config.Bindings[0].Group != "system:serviceaccounts:sam-canary-bananas" || config.Bindings[0].Role != "mesh-member" {
+				if len(config.Bindings[0].Members) == 0 || config.Bindings[0].Members[0] != "group:system:serviceaccounts:sam-canary-bananas" || config.Bindings[0].Role != "mesh-member" {
 					t.Errorf("unexpected binding values: %+v", config.Bindings[0])
 				}
 			},
@@ -121,7 +121,7 @@ roles:
 			yamlContent: `
 version: "v1alpha1"
 bindings:
-  - group: "system:serviceaccounts:sam-canary-bananas"
+  - members: ["group:system:serviceaccounts:sam-canary-bananas"]
     role: "non-existent-role"
 roles:
   mesh-member:
@@ -134,7 +134,7 @@ roles:
 			yamlContent: `
 version: "v1alpha1"
 bindings:
-  - user: "system:serviceaccount:sam-canary:sam-node-sa"
+  - members: ["user:system:serviceaccount:sam-canary:sam-node-sa"]
     role: "mesh-member"
 roles:
   mesh-member:
@@ -145,13 +145,13 @@ roles:
 				if len(config.Bindings) != 1 {
 					t.Errorf("expected 1 binding, got %d", len(config.Bindings))
 				}
-				if config.Bindings[0].User != "system:serviceaccount:sam-canary:sam-node-sa" || config.Bindings[0].Role != "mesh-member" {
+				if len(config.Bindings[0].Members) == 0 || config.Bindings[0].Members[0] != "user:system:serviceaccount:sam-canary:sam-node-sa" || config.Bindings[0].Role != "mesh-member" {
 					t.Errorf("unexpected binding values: %+v", config.Bindings[0])
 				}
 			},
 		},
 		{
-			name: "Invalid binding with both group and user missing",
+			name: "Invalid binding with no members",
 			yamlContent: `
 version: "v1alpha1"
 bindings:
@@ -163,12 +163,45 @@ roles:
 			wantErr: true,
 		},
 		{
-			name: "Invalid binding with both group and user populated",
+			name: "Invalid binding with invalid prefix",
 			yamlContent: `
 version: "v1alpha1"
 bindings:
-  - group: "some-group"
-    user: "some-user"
+  - members: ["invalid-prefix:some-user"]
+    role: "mesh-member"
+roles:
+  mesh-member:
+    allowed_services: ["mcp://1.0.0"]
+`,
+			wantErr: true,
+		},
+		{
+			name: "Valid binding with all valid member prefixes",
+			yamlContent: `
+version: "v1alpha1"
+bindings:
+  - members: ["user:bob", "group:eng", "email:bob@example.com", "node:12D3KooW", "system:authenticated"]
+    role: "mesh-member"
+roles:
+  mesh-member:
+    allowed_services: ["mcp://1.0.0"]
+`,
+			wantErr: false,
+			verify: func(t *testing.T, config *api.PolicyConfig) {
+				if len(config.Bindings) != 1 {
+					t.Errorf("expected 1 binding, got %d", len(config.Bindings))
+				}
+				if len(config.Bindings[0].Members) != 5 {
+					t.Errorf("expected 5 members, got %d", len(config.Bindings[0].Members))
+				}
+			},
+		},
+		{
+			name: "Invalid binding missing colon in member string",
+			yamlContent: `
+version: "v1alpha1"
+bindings:
+  - members: ["userbob"]
     role: "mesh-member"
 roles:
   mesh-member:

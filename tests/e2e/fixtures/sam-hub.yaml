@@ -9,13 +9,13 @@ data:
   policy.yaml: |
     version: v1alpha1
     bindings:
-      - user: "system:serviceaccount:default:sam-node-sa"
+      - members: ["user:system:serviceaccount:default:sam-node-sa"]
         role: admin
-      - group: "data-scientist"
+      - members: ["group:data-scientist"]
         role: mesh-member
-      - group: "admin"
+      - members: ["group:admin"]
         role: admin
-      - user: "admin-user"
+      - members: ["user:admin-user"]
         role: admin
     roles:
       admin:
@@ -29,6 +29,7 @@ data:
           - "mcp://db-agent"
           - "mcp://http-tool"
           - "mcp://stdio-tool"
+          - "system://sam.catalog"
         allowed_targets:
           - "*"
 ---

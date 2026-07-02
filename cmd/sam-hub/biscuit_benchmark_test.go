@@ -40,10 +40,7 @@ func BenchmarkMintBiscuitToken(b *testing.B) {
 		KeyRing: kr,
 		Policy: &api.PolicyConfig{
 			Bindings: []api.Binding{
-				{
-					Group: "engineering",
-					Role:  "developer-role",
-				},
+				{Role: "developer-role", Members: []string{"group:engineering"}},
 			},
 			Roles: map[string]api.RolePolicy{
 				"developer-role": {

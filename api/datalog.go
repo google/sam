@@ -51,9 +51,6 @@ import (
 //      If target_unrestricted is present, target checking succeeds immediately.
 //      Otherwise, it requires a matching allow_network_target rule to succeed.
 //
-// For a high-level overview of policy translation and schemas, see the
-// documentation in site/content/docs/development/policy.md.
-//
 // ============================================================================
 
 // Biscuit fact names represent the Datalog predicates used in auth tokens and policy evaluation.
@@ -214,12 +211,25 @@ var (
 func init() {
 	// 1. Service Allow Policies
 	policyStrs := []string{
+		// Exact Match: Allows access if the token possesses a granted_service_exact fact
+		// that perfectly matches both the protocol type (e.g. "mcp") and the service name (e.g. "calculator").
 		fmt.Sprintf(`allow if %s($type, $name), %s($type, $name)`, FactService, FactGrantedServiceExact),
+
+		// Prefix Match: Allows access if the token possesses a granted_service_prefix fact
+		// for the given protocol type, and the requested service name starts with that prefix.
 		fmt.Sprintf(`allow if %s($type, $name), %s($type, $prefix), $name.starts_with($prefix)`, FactService, FactGrantedServicePrefix),
+
+		// Suffix Match: Allows access if the token possesses a granted_service_suffix fact
+		// for the given protocol type, and the requested service name ends with that suffix.
 		fmt.Sprintf(`allow if %s($type, $name), %s($type, $suffix), $name.ends_with($suffix)`, FactService, FactGrantedServiceSuffix),
+
+		// Type Wildcard: Allows access if the token possesses a granted_service_all fact
+		// for the given protocol type, granting access to ANY service name within that namespace.
 		fmt.Sprintf(`allow if %s($type, $name), %s($type)`, FactService, FactGrantedServiceAll),
+
+		// Global Wildcard: Allows access if the token possesses a granted_service_all_types fact,
+		// granting access to literally any service in any namespace (equivalent to '*').
 		fmt.Sprintf(`allow if %s($type, $name), %s()`, FactService, FactGrantedServiceAllTypes),
-		fmt.Sprintf(`allow if %s(%q, "%s")`, FactService, SystemNamespace, CatalogTarget),
 	}
 
 	for i, pStr := range policyStrs {
@@ -233,10 +243,19 @@ func init() {
 	// 2. Target Evaluation Rules
 	// These rules satisfy the check if allow_network_target($fact, $val) injected by the Hub.
 	ruleStrs := []string{
+		// Exact Match: Derives allow_network_target if the token has a granted_target_exact fact matching a target_fact exactly.
 		fmt.Sprintf(`%s($fact, $val) <- %s($fact, $val), %s($fact, $val)`, FactAllowNetworkTarget, FactTargetFact, FactGrantedTargetExact),
+
+		// Prefix Match: Derives allow_network_target if the token has a granted_target_prefix fact and the target_fact value starts with that prefix.
 		fmt.Sprintf(`%s($fact, $val) <- %s($fact, $val), %s($fact, $prefix), $val.starts_with($prefix)`, FactAllowNetworkTarget, FactTargetFact, FactGrantedTargetPrefix),
+
+		// Suffix Match: Derives allow_network_target if the token has a granted_target_suffix fact and the target_fact value ends with that suffix.
 		fmt.Sprintf(`%s($fact, $val) <- %s($fact, $val), %s($fact, $suffix), $val.ends_with($suffix)`, FactAllowNetworkTarget, FactTargetFact, FactGrantedTargetSuffix),
+
+		// Wildcard Fact Match: Derives allow_network_target if the token has a granted_target_all fact for a specific fact name (e.g. all values for "group").
 		fmt.Sprintf(`%s($fact, $val) <- %s($fact, $val), %s($fact)`, FactAllowNetworkTarget, FactTargetFact, FactGrantedTargetAll),
+
+		// Global Wildcard Match: Derives allow_network_target if the token has a granted_target_all_facts fact, unconditionally allowing any target_fact.
 		fmt.Sprintf(`%s($fact, $val) <- %s($fact, $val), %s()`, FactAllowNetworkTarget, FactTargetFact, FactGrantedTargetAllFacts),
 	}
 
@@ -249,16 +268,23 @@ func init() {
 	}
 
 	var err error
+
+	// BaselineReplayCheck prevents token theft/replay by ensuring the client_peer_id fact (embedded by the Hub during issuance)
+	// perfectly matches the connection_peer_id fact (provided by the local node verifying the incoming libp2p connection).
 	BaselineReplayCheck, err = parser.FromStringCheck(fmt.Sprintf(`check if %s($id), %s($id)`, FactClientPeerID, FactConnectionPeerID))
 	if err != nil {
 		panic(fmt.Sprintf("failed to parse replay check: %v", err))
 	}
 
+	// BaselineTargetCheck enforces network target restrictions. The token must either have an unrestricted target,
+	// or one of the Target Evaluation Rules must have successfully derived an allow_network_target fact.
 	BaselineTargetCheck, err = parser.FromStringCheck(fmt.Sprintf(`check if %s($fact, $val) or %s()`, FactAllowNetworkTarget, FactTargetUnrestricted))
 	if err != nil {
 		panic(fmt.Sprintf("failed to parse target check: %v", err))
 	}
 
+	// OIDC Claims to Target Facts: Maps dynamically generated OIDC facts (like `user("alice")`)
+	// into standard `target_fact("user", "alice")` facts for unified evaluation against network target policies.
 	for _, val := range OIDCClaimToFact() {
 		ruleStr := fmt.Sprintf(`%s(%q, $val) <- %s($val)`, FactTargetFact, val, val)
 		r, err := parser.FromStringRule(ruleStr)
@@ -268,17 +294,23 @@ func init() {
 		TargetFactRules = append(TargetFactRules, r)
 	}
 
+	// Node PeerID Target Fact: Ensures the target node's PeerID is also evaluated as a standard target_fact.
 	r, err := parser.FromStringRule(fmt.Sprintf(`%s(%q, $val) <- %s($val)`, FactTargetFact, FactNode, FactNode))
 	if err != nil {
 		panic(fmt.Sprintf("failed to parse node fact rule: %v", err))
 	}
 	TargetFactRules = append(TargetFactRules, r)
 
+	// HubStaticTimeCheck ensures the token is not expired at the time of evaluation.
 	HubStaticTimeCheck, err = parser.FromStringCheck(fmt.Sprintf(`check if %s($time), %s($exp), $time <= $exp`, FactTime, FactExpiration))
 	if err != nil {
 		panic(fmt.Sprintf("failed to parse static time check: %v", err))
 	}
 
+	// AllowIfTruePolicy is a permissive fallback policy used when explicit local node policies are omitted.
+	// Note that this does NOT mean all requests are automatically allowed. Biscuit requires at least one policy
+	// to evaluate to true AND all checks to pass. This simply satisfies the policy requirement, effectively
+	// deferring entirely to the Hub's checks and granted facts without imposing extra local restrictions.
 	AllowIfTruePolicy, err = parser.FromStringPolicy("allow if true")
 	if err != nil {
 		panic(fmt.Sprintf("failed to parse static allow policy: %v", err))
