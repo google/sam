@@ -699,3 +699,59 @@ func TestMintBiscuitToken_ErrorAggregation(t *testing.T) {
 		t.Errorf("Expected error to aggregate both failures, got: %s", errStr)
 	}
 }
+
+func TestMintBiscuitToken_FactDeduplication(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+
+	kr, err := NewKeyRing(dbPath, 24*time.Hour, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = kr.Close() }()
+
+	hub := &Hub{
+		KeyRing: kr,
+		Policy: &api.PolicyConfig{
+			Bindings: []api.Binding{
+				{Role: "role-a", Members: []string{"user:user-1"}},
+				{Role: "role-b", Members: []string{"user:user-1"}},
+			},
+			Roles: map[string]api.RolePolicy{
+				"role-a": {
+					AllowedTargets: []string{"*:*"},
+				},
+				"role-b": {
+					AllowedTargets: []string{"*:*"},
+				},
+			},
+		},
+		BiscuitTimeout: 500 * time.Millisecond,
+	}
+
+	priv, _, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dummyPeer, err := peer.IDFromPrivateKey(priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	token := &oidc.IDToken{
+		Expiry: time.Now().Add(1 * time.Hour),
+	}
+	claims := jwt.MapClaims{
+		"sub": "user-1",
+	}
+
+	// This should not fail with "fact already exists" since the target is duplicated across both roles.
+	biscuitData, err := hub.mintBiscuitToken(claims, token, dummyPeer)
+	if err != nil {
+		t.Fatalf("mintBiscuitToken failed with duplicate facts: %v", err)
+	}
+
+	if len(biscuitData) == 0 {
+		t.Error("Expected valid biscuit data, got empty")
+	}
+}
