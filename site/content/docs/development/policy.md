@@ -9,7 +9,7 @@ The `sam-hub` authenticates users via OIDC and injects **Facts** into their toke
 > **Default-Deny Security Posture**
 > SAM enforces a strict **default-deny** model. By default, when a node joins the mesh, **all of its services (MCP tools, LLM inference endpoints) are completely locked down and inaccessible to other peers**. 
 > Access is only permitted if the caller presents a Biscuit token containing capability facts (e.g., `granted_service_exact(...)`) explicitly issued by the Hub based on matched user roles.
-> The only built-in exception is the catalog service (`system://sam.catalog`), which is open to all verified nodes to facilitate peer-to-peer discovery.
+> There are no built-in exceptions; even the catalog service (system://sam.catalog) must be explicitly permitted (e.g., via a role mapping) to facilitate peer-to-peer discovery.
 
 
 ## 1. OIDC to Biscuit Translation
