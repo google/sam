@@ -46,23 +46,40 @@ func (h *Hub) mintBiscuitToken(claims jwt.MapClaims, token *oidc.IDToken, remote
 	// Resolve roles based on configured bindings and explicit OIDC roles
 	resolvedRoles := make(map[string]bool)
 	if h.Policy != nil {
-		// 1. Map OIDC groups, users, and emails to roles via configured bindings (RBAC mapping)
+		// 1. Evaluate explicit Policy Bindings
 		for _, b := range h.Policy.Bindings {
-			if b.Group != "" {
-				for _, cg := range oidcGroups {
-					if b.Group == cg {
+			for _, member := range b.Members {
+				if member == api.SystemAuthenticated {
+					resolvedRoles[b.Role] = true
+					break
+				}
+
+				parts := strings.SplitN(member, ":", 2)
+				if len(parts) != 2 {
+					continue // validated at startup, but ignore if broken
+				}
+				prefix := parts[0]
+				value := parts[1]
+
+				switch prefix {
+				case api.FactGroup:
+					for _, cg := range oidcGroups {
+						if value == cg {
+							resolvedRoles[b.Role] = true
+						}
+					}
+				case api.FactUser:
+					if oidcSub != "" && value == oidcSub {
 						resolvedRoles[b.Role] = true
 					}
-				}
-			}
-			if b.User != "" && oidcSub != "" {
-				if b.User == oidcSub {
-					resolvedRoles[b.Role] = true
-				}
-			}
-			if b.Email != "" && oidcEmail != "" {
-				if b.Email == oidcEmail {
-					resolvedRoles[b.Role] = true
+				case api.FactEmail:
+					if oidcEmail != "" && value == oidcEmail {
+						resolvedRoles[b.Role] = true
+					}
+				case api.FactNode:
+					if value == remotePeer.String() {
+						resolvedRoles[b.Role] = true
+					}
 				}
 			}
 		}

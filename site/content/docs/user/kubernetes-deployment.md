@@ -111,7 +111,7 @@ data:
   policies.yaml: |
     version: "v1alpha1"
     bindings:
-      - user: "system:serviceaccount:sam-nodes:sam-node-sa"
+      - members: ["user:system:serviceaccount:sam-nodes:sam-node-sa"]
         role: "node-role"
     roles:
       node-role:

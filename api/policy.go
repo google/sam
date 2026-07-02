@@ -14,6 +14,21 @@
 
 package api
 
+const (
+	// SystemAuthenticated is a special member string representing any authenticated user.
+	SystemAuthenticated = "system:authenticated"
+)
+
+var (
+	// ValidMemberPrefixes defines the allowed identity prefixes in policy configuration.
+	ValidMemberPrefixes = map[string]struct{}{
+		FactUser:  {},
+		FactGroup: {},
+		FactEmail: {},
+		FactNode:  {},
+	}
+)
+
 // PolicyConfig is the root authorization configuration for the SAM Hub.
 type PolicyConfig struct {
 	Version  string                `yaml:"version"`
@@ -22,10 +37,8 @@ type PolicyConfig struct {
 }
 
 type Binding struct {
-	Group string `yaml:"group,omitempty"`
-	User  string `yaml:"user,omitempty"`
-	Email string `yaml:"email,omitempty"`
-	Role  string `yaml:"role"`
+	Role    string   `yaml:"role"`
+	Members []string `yaml:"members"` // format: "type:value" e.g. "user:alice", "group:eng"
 }
 
 // RolePolicy defines the capabilities granted to a specific authorization role.

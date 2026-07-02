@@ -44,8 +44,8 @@ teardown() {
 
   # Explicitly connect Node 1 to Node 2 (DHT auto-discovery is slow/unreliable in this E2E setup)
   echo "[$(date +%T)] Explicitly connecting Node 1 to Node 2"
-  local node2_addr="/dns4/sam-node-2/tcp/5002/p2p/${node2_peer_id}"
-  run docker run --rm --network "${MESH_NETWORK}" "${MESH_RUNTIME_IMAGE}" mcp-client -url "http://sam-node-1:8080/mcp" -tool "connect_peer" -args "{\"peer_addr\":\"${node2_addr}\"}"
+  local node2_addr="/dns4/${node2_name}/tcp/5002/p2p/${node2_peer_id}"
+  run docker run --rm --network "${MESH_NETWORK}" "${MESH_RUNTIME_IMAGE}" mcp-client -url "http://${node1_name}:8080/mcp" -tool "connect_peer" -args "{\"peer_addr\":\"${node2_addr}\"}"
   [[ "$status" -eq 0 ]]
 
   # Verify connection
@@ -95,7 +95,7 @@ data = {
 }
 
 req = urllib.request.Request(
-    \"http://sam-node-1:8080/sam/service/register\",
+    \"http://${node1_name}:8080/sam/service/register\",
     data=json.dumps(data).encode(\"utf-8\"),
     headers={
         \"Authorization\": \"Bearer secret-token\",
@@ -128,7 +128,7 @@ data = {
 }
 
 req = urllib.request.Request(
-    'http://sam-node-2:8080/sam/service/register',
+    'http://${node2_name}:8080/sam/service/register',
     data=json.dumps(data).encode('utf-8'),
     headers={
         'Authorization': 'Bearer secret-token',
@@ -153,7 +153,7 @@ with urllib.request.urlopen(req) as response:
     run docker run --rm --network "${MESH_NETWORK}" python:3.12 python3 -c "
 import urllib.request
 req = urllib.request.Request(
-    \"http://sam-node-2:8080/sam/${node1_peer_id}/mcp/http-tool/\",
+    \"http://${node2_name}:8080/sam/${node1_peer_id}/mcp/http-tool/\",
     headers={\"Authorization\": \"Bearer secret-token\"}
 )
 with urllib.request.urlopen(req) as response:
@@ -179,7 +179,7 @@ with urllib.request.urlopen(req) as response:
     python:3.12 python3 -c "
 import urllib.request
 req = urllib.request.Request(
-    \"http://sam-node-1:8080/sam/${node2_peer_id}/mcp/stdio-tool/\",
+    \"http://${node1_name}:8080/sam/${node2_peer_id}/mcp/stdio-tool/\",
     headers={\"Authorization\": \"Bearer secret-token\"}
 )
 try:
@@ -207,7 +207,7 @@ except Exception as e:
 import urllib.request
 import os
 req = urllib.request.Request(
-    \"http://sam-node-1:8080/sam/${node2_peer_id}/mcp/stdio-tool/\",
+    \"http://${node1_name}:8080/sam/${node2_peer_id}/mcp/stdio-tool/\",
     data=os.environ['MSG'].encode('utf-8'),
     headers={
         \"Authorization\": \"Bearer secret-token\",

@@ -114,12 +114,6 @@ func TestBaselinePolicies(t *testing.T) {
 			requestTarget: "mcp://calculator",
 			expectAllow:   true,
 		},
-		{
-			name:          "System catalog is always allowed",
-			tokenFacts:    []biscuit.Fact{},
-			requestTarget: "system://sam.catalog",
-			expectAllow:   true,
-		},
 	}
 
 	for _, tt := range tests {

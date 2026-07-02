@@ -98,7 +98,7 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
     local timeout_s="${2:-20}"
     local i
     for ((i=0; i<timeout_s; i++)); do
-      if docker run --rm --network "${MESH_NETWORK}" python:3.12 curl -s -X POST -H "Content-Type: application/json" -H "Authorization: Bearer secret-token" -d '{"jsonrpc":"2.0","method":"ping","id":1}' --max-time 5 -D - http://sam-node-${idx}:8080/mcp | grep -q "200 OK"; then
+      if docker run --rm --network "${MESH_NETWORK}" python:3.12 curl -s -X POST -H "Content-Type: application/json" -H "Authorization: Bearer secret-token" -d '{"jsonrpc":"2.0","method":"ping","id":1}' --max-time 5 -D - http://${MESH_PREFIX}-node-${idx}:8080/mcp | grep -q "200 OK"; then
         return 0
       fi
       sleep 1
@@ -109,7 +109,7 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
   mesh_get_node_count_via_mcp() {
     local idx="$1"
     local output
-    output="$(timeout 15s docker run --rm --network "${MESH_NETWORK}" "${MESH_RUNTIME_IMAGE}" mcp-client -url "http://sam-node-${idx}:8080/mcp" -tool "get_mesh_info" 2>/dev/null)"
+    output="$(timeout 15s docker run --rm --network "${MESH_NETWORK}" "${MESH_RUNTIME_IMAGE}" mcp-client -url "http://${MESH_PREFIX}-node-${idx}:8080/mcp" -tool "get_mesh_info" 2>/dev/null)"
     echo "${output}" | jq 'if .connected_peers then (.connected_peers | length) - 1 else 0 end'
   }
 
@@ -120,7 +120,7 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
     local i
     for ((i=0; i<timeout_s; i++)); do
       local output
-      output="$(timeout 15s docker run --rm --network "${MESH_NETWORK}" "${MESH_RUNTIME_IMAGE}" mcp-client -url "http://sam-node-${idx}:8080/mcp" -tool "get_mesh_info" 2>/dev/null)"
+      output="$(timeout 15s docker run --rm --network "${MESH_NETWORK}" "${MESH_RUNTIME_IMAGE}" mcp-client -url "http://${MESH_PREFIX}-node-${idx}:8080/mcp" -tool "get_mesh_info" 2>/dev/null)"
       echo "Node ${idx} get_mesh_info raw output: ${output}"
       local count
       count="$(echo "${output}" | jq 'if .connected_peers then (.connected_peers | length) - 1 else 0 end')"
@@ -140,7 +140,7 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
     local i
     for ((i=0; i<timeout_s; i++)); do
       local output
-      output="$(timeout 15s docker run --rm --network "${MESH_NETWORK}" "${MESH_RUNTIME_IMAGE}" mcp-client -url "http://sam-node-${idx}:8080/mcp" -tool "get_mesh_info" 2>/dev/null)"
+      output="$(timeout 15s docker run --rm --network "${MESH_NETWORK}" "${MESH_RUNTIME_IMAGE}" mcp-client -url "http://${MESH_PREFIX}-node-${idx}:8080/mcp" -tool "get_mesh_info" 2>/dev/null)"
       echo "[$(date +%T)] Node ${idx} get_mesh_info raw output: ${output}"
       local connected
       connected="$(echo "${output}" | jq -r --arg peer "$target_peer" '.connected_peers | index($peer) != null')"
@@ -160,7 +160,7 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
     local i
     for ((i=0; i<timeout_s; i++)); do
       local output
-      output="$(timeout 15s docker run --rm --network "${MESH_NETWORK}" "${MESH_RUNTIME_IMAGE}" mcp-client -url "http://sam-node-${idx}:8080/mcp" -tool "get_mesh_info" 2>/dev/null)"
+      output="$(timeout 15s docker run --rm --network "${MESH_NETWORK}" "${MESH_RUNTIME_IMAGE}" mcp-client -url "http://${MESH_PREFIX}-node-${idx}:8080/mcp" -tool "get_mesh_info" 2>/dev/null)"
       echo "[$(date +%T)] Node ${idx} get_mesh_info raw output: ${output}"
       local connected
       connected="$(echo "${output}" | jq -r --arg peer "$target_peer" '.connected_peers | index($peer) != null')"
@@ -308,7 +308,7 @@ KIND
     docker run -d \
       --name "${name}" \
       --network "${MESH_NETWORK}" \
-      --network-alias "sam-node-${idx}" \
+      --network-alias "${name}" \
       ${add_hosts} \
       "${mount_args[@]}" \
       "${MESH_RUNTIME_IMAGE}" \

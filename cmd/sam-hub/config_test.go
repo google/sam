@@ -31,6 +31,70 @@ func TestLoadPolicyConfig(t *testing.T) {
 		verify      func(t *testing.T, config *api.PolicyConfig)
 	}{
 		{
+			name: "Valid comprehensive config from docs",
+			yamlContent: `
+version: "v1alpha1"
+
+# Bindings map OIDC identities (sub/user, email, groups) to SAM Roles.
+# Note: Kubernetes projected service account tokens do not carry 'groups' claims,
+# so they must be bound explicitly using their 'user' claim format.
+bindings:
+  # 1. Global Admins (Infrastructure SAs, Lead Architects)
+  - members: ["user:system:serviceaccount:sam-mesh:admin-sa"]
+    role: "admin"
+  - members: ["group:infrastructure-leads"]
+    role: "admin"
+
+  # 2. Software Developers
+  - members: ["group:software-engineering-team"]
+    role: "developer"
+
+  # 3. Data Scientists & AI Engineers
+  - members: ["group:data-science-team"]
+    role: "data-scientist"
+
+  # 4. Contractors / Read-Only Audits
+  - members: ["email:audit-contractor@external.com"]
+    role: "auditor"
+
+# Roles define the allowed destinations (allowed_targets) and tools (allowed_services)
+roles:
+  # Admins have full, unrestricted access to the entire mesh
+  admin:
+    allowed_targets:
+      - "*"
+    allowed_services:
+      - "*"
+
+  # Developers can call development tools on dev nodes
+  developer:
+    allowed_targets:
+      - "group:dev-nodes"           # Can only call nodes in the 'dev-nodes' target group
+    allowed_services:
+      - "mcp://code-reviewer"       # Can call the code reviewer tool
+      - "mcp://git-helper"          # Can call git helper tools
+      - "mcp://build-runner.*"      # Wildcard: matches any build runner sub-service (e.g. build-runner.go)
+
+  # Data Scientists can call database tools and all AI inference endpoints
+  data-scientist:
+    allowed_targets:
+      - "group:data-nodes"          # Can call nodes in the 'data-nodes' target group
+      - "node:12D3KooWSpecialNode"  # Can call a specific high-compute node directly
+    allowed_services:
+      - "mcp://db-reader"           # Can query databases
+      - "inference://*"             # Wildcard: can access any LLM inference service
+
+  # Auditors can only query metadata catalogs and cannot call operational tools
+  auditor:
+    allowed_targets:
+      - "*"
+    allowed_services:
+      - "system://sam.catalog"      # Strictly limited to tool discovery/metadata
+
+`,
+			wantErr: false,
+		},
+		{
 			name: "Valid config with exact services",
 			yamlContent: `
 version: "v1alpha1"
@@ -100,7 +164,7 @@ roles:
 			yamlContent: `
 version: "v1alpha1"
 bindings:
-  - group: "system:serviceaccounts:sam-canary-bananas"
+  - members: ["group:system:serviceaccounts:sam-canary-bananas"]
     role: "mesh-member"
 roles:
   mesh-member:
@@ -111,7 +175,7 @@ roles:
 				if len(config.Bindings) != 1 {
 					t.Errorf("expected 1 binding, got %d", len(config.Bindings))
 				}
-				if config.Bindings[0].Group != "system:serviceaccounts:sam-canary-bananas" || config.Bindings[0].Role != "mesh-member" {
+				if len(config.Bindings[0].Members) == 0 || config.Bindings[0].Members[0] != "group:system:serviceaccounts:sam-canary-bananas" || config.Bindings[0].Role != "mesh-member" {
 					t.Errorf("unexpected binding values: %+v", config.Bindings[0])
 				}
 			},
@@ -121,7 +185,7 @@ roles:
 			yamlContent: `
 version: "v1alpha1"
 bindings:
-  - group: "system:serviceaccounts:sam-canary-bananas"
+  - members: ["group:system:serviceaccounts:sam-canary-bananas"]
     role: "non-existent-role"
 roles:
   mesh-member:
@@ -134,7 +198,7 @@ roles:
 			yamlContent: `
 version: "v1alpha1"
 bindings:
-  - user: "system:serviceaccount:sam-canary:sam-node-sa"
+  - members: ["user:system:serviceaccount:sam-canary:sam-node-sa"]
     role: "mesh-member"
 roles:
   mesh-member:
@@ -145,13 +209,13 @@ roles:
 				if len(config.Bindings) != 1 {
 					t.Errorf("expected 1 binding, got %d", len(config.Bindings))
 				}
-				if config.Bindings[0].User != "system:serviceaccount:sam-canary:sam-node-sa" || config.Bindings[0].Role != "mesh-member" {
+				if len(config.Bindings[0].Members) == 0 || config.Bindings[0].Members[0] != "user:system:serviceaccount:sam-canary:sam-node-sa" || config.Bindings[0].Role != "mesh-member" {
 					t.Errorf("unexpected binding values: %+v", config.Bindings[0])
 				}
 			},
 		},
 		{
-			name: "Invalid binding with both group and user missing",
+			name: "Invalid binding with no members",
 			yamlContent: `
 version: "v1alpha1"
 bindings:
@@ -163,12 +227,45 @@ roles:
 			wantErr: true,
 		},
 		{
-			name: "Invalid binding with both group and user populated",
+			name: "Invalid binding with invalid prefix",
 			yamlContent: `
 version: "v1alpha1"
 bindings:
-  - group: "some-group"
-    user: "some-user"
+  - members: ["invalid-prefix:some-user"]
+    role: "mesh-member"
+roles:
+  mesh-member:
+    allowed_services: ["mcp://1.0.0"]
+`,
+			wantErr: true,
+		},
+		{
+			name: "Valid binding with all valid member prefixes",
+			yamlContent: `
+version: "v1alpha1"
+bindings:
+  - members: ["user:bob", "group:eng", "email:bob@example.com", "node:12D3KooW", "system:authenticated"]
+    role: "mesh-member"
+roles:
+  mesh-member:
+    allowed_services: ["mcp://1.0.0"]
+`,
+			wantErr: false,
+			verify: func(t *testing.T, config *api.PolicyConfig) {
+				if len(config.Bindings) != 1 {
+					t.Errorf("expected 1 binding, got %d", len(config.Bindings))
+				}
+				if len(config.Bindings[0].Members) != 5 {
+					t.Errorf("expected 5 members, got %d", len(config.Bindings[0].Members))
+				}
+			},
+		},
+		{
+			name: "Invalid binding missing colon in member string",
+			yamlContent: `
+version: "v1alpha1"
+bindings:
+  - members: ["userbob"]
     role: "mesh-member"
 roles:
   mesh-member:

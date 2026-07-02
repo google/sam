@@ -100,17 +100,17 @@ roles:
 
 bindings:
   - role: role-user
-    user: "bob-subject"
+    members: ["user:bob-subject"]
   - role: role-email
-    email: "bob@example.com"
+    members: ["email:bob@example.com"]
   - role: role-group
-    group: "eng-team"
+    members: ["group:eng-team"]
   - role: role-node
-    user: "node-user"
+    members: ["user:node-user"]
   - role: admin
-    user: "admin-user"
+    members: ["user:admin-user"]
   - role: admin
-    user: "nodeB"
+    members: ["user:nodeB"]
 `
 	if err := os.WriteFile(hubPolicyFile, []byte(hubPolicyYAML), 0644); err != nil {
 		t.Fatal(err)
