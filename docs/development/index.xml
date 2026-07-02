@@ -27,51 +27,12 @@ This guide focuses on local development sandboxing. For production-grade Kuberne
 &lt;h2 id="2-autoupdate-mechanism">2. Autoupdate Mechanism&lt;/h2>
 &lt;p>Updates to both release tracks are fully automated via a robust &lt;strong>Continuous Deployment&lt;/strong> pipeline:&lt;/p></description></item><item><title>SAM Policy &amp; Authorization Reference</title><link>https://sam-mesh.dev/docs/development/policy/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://sam-mesh.dev/docs/development/policy/</guid><description>&lt;p>SAM uses a decentralized authorization model powered by &lt;a href="https://www.biscuitsec.org/">Biscuit&lt;/a>.
 The &lt;code>sam-hub&lt;/code> authenticates users via OIDC and injects &lt;strong>Facts&lt;/strong> into their token based on &lt;code>policies.yaml&lt;/code>. The &lt;code>sam-node&lt;/code> operates offline, evaluating the token against baseline rules and optional local attenuation policies.&lt;/p>
-&lt;h2 id="1-oidc-to-biscuit-translation">1. OIDC to Biscuit Translation&lt;/h2>
-&lt;p>The Hub automatically translates OIDC claims into undeniable cryptographic facts:&lt;/p>
-&lt;table>
- &lt;thead>
- &lt;tr>
- &lt;th style="text-align: left">OIDC Claim / Data&lt;/th>
- &lt;th style="text-align: left">Biscuit Fact&lt;/th>
- &lt;th style="text-align: left">Description&lt;/th>
- &lt;/tr>
- &lt;/thead>
- &lt;tbody>
- &lt;tr>
- &lt;td style="text-align: left">&lt;code>sub&lt;/code>&lt;/td>
- &lt;td style="text-align: left">&lt;code>user(&amp;quot;&amp;lt;sub-id&amp;gt;&amp;quot;)&lt;/code>&lt;/td>
- &lt;td style="text-align: left">The unique subject ID from the identity provider.&lt;/td>
- &lt;/tr>
- &lt;tr>
- &lt;td style="text-align: left">&lt;code>email&lt;/code>&lt;/td>
- &lt;td style="text-align: left">&lt;code>email(&amp;quot;&amp;lt;email&amp;gt;&amp;quot;)&lt;/code>&lt;/td>
- &lt;td style="text-align: left">The user&amp;rsquo;s email address (if present).&lt;/td>
- &lt;/tr>
- &lt;tr>
- &lt;td style="text-align: left">&lt;code>groups&lt;/code>&lt;/td>
- &lt;td style="text-align: left">&lt;code>group(&amp;quot;&amp;lt;group-name&amp;gt;&amp;quot;)&lt;/code>&lt;/td>
- &lt;td style="text-align: left">One fact is injected for &lt;em>each&lt;/em> group the user possesses.&lt;/td>
- &lt;/tr>
- &lt;tr>
- &lt;td style="text-align: left">&lt;code>roles&lt;/code> / Resolved Roles&lt;/td>
- &lt;td style="text-align: left">&lt;code>role(&amp;quot;&amp;lt;role-name&amp;gt;&amp;quot;)&lt;/code>&lt;/td>
- &lt;td style="text-align: left">One fact is injected for &lt;em>each&lt;/em> role mapped or direct role.&lt;/td>
- &lt;/tr>
- &lt;tr>
- &lt;td style="text-align: left">Peer ID&lt;/td>
- &lt;td style="text-align: left">&lt;code>node(&amp;quot;&amp;lt;peer-id&amp;gt;&amp;quot;)&lt;/code>, &lt;code>client_peer_id(&amp;quot;&amp;lt;peer-id&amp;gt;&amp;quot;)&lt;/code>&lt;/td>
- &lt;td style="text-align: left">Binds the token to the specific agent&amp;rsquo;s libp2p cryptographic identity.&lt;/td>
- &lt;/tr>
- &lt;tr>
- &lt;td style="text-align: left">Expiration&lt;/td>
- &lt;td style="text-align: left">&lt;code>expiration(&amp;lt;date&amp;gt;)&lt;/code>&lt;/td>
- &lt;td style="text-align: left">The token expiration date based on the OIDC session.&lt;/td>
- &lt;/tr>
- &lt;/tbody>
-&lt;/table>
-&lt;h3 id="11-translating-identity-to-capability-oidc-to-biscuit">1.1 Translating Identity to Capability: OIDC to Biscuit&lt;/h3>
-&lt;p>The core innovation of the SAM Network&amp;rsquo;s security model is translating standard web identity (OIDC JSON Web Tokens defined in &lt;a href="https://openid.net/specs/openid-connect-core-1_0.html#Claims">OpenID Connect Core 1.0&lt;/a>) into decentralized capability tokens (Biscuits). This translation happens securely at the &lt;code>sam-hub&lt;/code> during the authentication phase.&lt;/p></description></item><item><title>Testing</title><link>https://sam-mesh.dev/docs/development/testing/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://sam-mesh.dev/docs/development/testing/</guid><description>&lt;p>Current testing is intentionally minimal and aligned with the current binaries.&lt;/p>
+&lt;blockquote>
+&lt;p>[!IMPORTANT]
+&lt;strong>Default-Deny Security Posture&lt;/strong>
+SAM enforces a strict &lt;strong>default-deny&lt;/strong> model. By default, when a node joins the mesh, &lt;strong>all of its services (MCP tools, LLM inference endpoints) are completely locked down and inaccessible to other peers&lt;/strong>.
+Access is only permitted if the caller presents a Biscuit token containing capability facts (e.g., &lt;code>granted_service_exact(...)&lt;/code>) explicitly issued by the Hub based on matched user roles.
+There are no built-in exceptions; even the catalog service (system://sam.catalog) must be explicitly permitted (e.g., via a role mapping) to facilitate peer-to-peer discovery.&lt;/p></description></item><item><title>Testing</title><link>https://sam-mesh.dev/docs/development/testing/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://sam-mesh.dev/docs/development/testing/</guid><description>&lt;p>Current testing is intentionally minimal and aligned with the current binaries.&lt;/p>
 &lt;h2 id="test-layers">Test Layers&lt;/h2>
 &lt;ol>
 &lt;li>Go tests: &lt;code>make test&lt;/code>&lt;/li>
