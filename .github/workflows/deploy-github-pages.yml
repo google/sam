@@ -25,13 +25,8 @@ env:
   REPO_OWNER: ${{ github.repository_owner }}
 
 jobs:
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+  build:
     runs-on: ubuntu-latest
-    concurrency:
-      group: ${{ github.workflow }}-${{ github.ref }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -60,16 +55,23 @@ jobs:
         working-directory: ./site
 
       - name: Create CNAME
-        if: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' }}
         run: echo "sam-mesh.dev" > ./site/public/CNAME
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
-        if: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' }}
         with:
           path: ./site/public
 
+  deploy:
+    needs: build
+    if: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' }}
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}
+    steps:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
-        if: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' }}
