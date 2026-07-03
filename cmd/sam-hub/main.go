@@ -15,49 +15,23 @@
 package main
 
 import (
-	"io"
-
-	"github.com/libp2p/go-libp2p/core/network"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
-
-	"sync"
-
-	"github.com/libp2p/go-msgio"
-
 	"context"
-	"crypto/ed25519"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/hex"
 	"fmt"
 	"net"
 	"net/http"
 	"os"
 	"strings"
-	"sync/atomic"
 	"time"
 
-	"github.com/biscuit-auth/biscuit-go/v2"
-	"github.com/coreos/go-oidc/v3/oidc"
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/sam/api"
+	"github.com/google/sam/internal/hub"
 	golog "github.com/ipfs/go-log/v2"
-	"github.com/libp2p/go-libp2p"
-	dht "github.com/libp2p/go-libp2p-kad-dht"
-	pubsub "github.com/libp2p/go-libp2p-pubsub"
-	"github.com/libp2p/go-libp2p/core/host"
-	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/libp2p/go-libp2p/p2p/net/connmgr"
-	"github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/relay"
-	libp2ptls "github.com/libp2p/go-libp2p/p2p/security/tls"
-	"github.com/multiformats/go-multiaddr"
 	madns "github.com/multiformats/go-multiaddr-dns"
-
-	"golang.org/x/time/rate"
-
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/cobra"
-	"google.golang.org/protobuf/proto"
 )
 
 func init() {
@@ -73,31 +47,6 @@ func init() {
 		madns.DefaultResolver, _ = madns.NewResolver(madns.WithDefaultResolver(customResolver))
 	}
 }
-
-const (
-	GracePeriod = 60 * time.Second
-
-	// Rate limiting defaults
-	EnrollRateLimit = 10
-	EnrollBurst     = 20
-
-	// ConnManager limits
-	LowWaterMark    = 100
-	HighWaterMark   = 400
-	ConnGracePeriod = 1 * time.Minute
-
-	// Timeouts
-	JWTVerificationTimeout = 10 * time.Second
-
-	// Defaults
-	DefaultOIDCIssuer  = "https://accounts.google.com"
-	DefaultMeshName    = "public-mesh"
-	DefaultPolicyFile  = "policies.yaml"
-	DefaultKeysDBPath  = "keys.db"
-	DefaultBindAddress = ":9090"
-)
-
-var isHubReady atomic.Bool
 
 var (
 	oidcIssuer            string
@@ -121,341 +70,7 @@ var (
 	allowLoopbackFlag     bool
 )
 
-var logger = golog.Logger("sam-hub")
-
-type relayACL struct {
-	hub *Hub
-}
-
-func (a *relayACL) AllowReserve(p peer.ID, addr multiaddr.Multiaddr) bool {
-	_, ok := a.hub.authenticatedPeers.Load(p)
-	if !ok {
-		logger.Errorf("[Relay] Rejecting reservation for %s: not authenticated", p)
-	} else {
-		logger.Infof("[Relay] Allowing reservation for %s", p)
-	}
-	return ok
-}
-
-func (a *relayACL) AllowConnect(src peer.ID, srcAddr multiaddr.Multiaddr, dest peer.ID) bool {
-	_, ok := a.hub.authenticatedPeers.Load(dest)
-	if !ok {
-		logger.Errorf("[Relay] Rejecting connect from %s to %s: dest not authenticated", src, dest)
-	} else {
-		logger.Infof("[Relay] Allowing connect from %s to %s", src, dest)
-	}
-	return ok
-}
-
-// Hub handles identity bridging and network discovery
-type Hub struct {
-	Host               host.Host
-	DHT                *dht.IpfsDHT
-	Providers          map[string]*oidc.Provider
-	KeyRing            *KeyRing
-	MeshID             string
-	PubSub             *pubsub.PubSub
-	EventTopic         *pubsub.Topic
-	Policy             *api.PolicyConfig
-	limiter            *rate.Limiter
-	ExternalAddrs      []string
-	AllowedAudiences   []string
-	AllowLoopback      bool
-	BiscuitTimeout     time.Duration
-	authenticatedPeers sync.Map
-}
-
-// NewHub starts a host supporting both QUIC and TCP (with TLS 1.3)
-func NewHub(ctx context.Context, policy *api.PolicyConfig, allowLoopback bool) (*Hub, error) {
-	// Connection Manager for DoS protection
-	cm, err := connmgr.NewConnManager(LowWaterMark, HighWaterMark, connmgr.WithGracePeriod(ConnGracePeriod))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create connection manager: %w", err)
-	}
-
-	opts := []libp2p.Option{
-		libp2p.DefaultTransports,
-		libp2p.ListenAddrStrings(listenAddrs...),
-		// FIPS compliant Security
-		libp2p.Security(libp2ptls.ID, libp2ptls.New),
-		libp2p.ConnectionManager(cm),
-		libp2p.EnableAutoNATv2(),
-		libp2p.EnableNATService(),
-		libp2p.AddrsFactory(func(addrs []multiaddr.Multiaddr) []multiaddr.Multiaddr {
-			if allowLoopback {
-				return addrs
-			}
-			var filtered []multiaddr.Multiaddr
-			for _, addr := range addrs {
-				if !isLoopbackOrLinkLocal(addr) {
-					filtered = append(filtered, addr)
-				}
-			}
-			return filtered
-		}),
-	}
-
-	h, err := libp2p.New(opts...)
-	if err != nil {
-		return nil, err
-	}
-
-	kadDHT, err := dht.New(ctx, h, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/sam"))
-	if err != nil {
-		return nil, err
-	}
-	if err = kadDHT.Bootstrap(ctx); err != nil {
-		return nil, err
-	}
-
-	issuers := strings.Split(oidcIssuer, ",")
-	providers := make(map[string]*oidc.Provider)
-	for _, iss := range issuers {
-		iss = strings.TrimSpace(iss)
-		if iss == "" {
-			continue
-		}
-		var providerCtx = ctx
-		if insecureSkipTLSVerify {
-			tr := &http.Transport{
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-			}
-			client := &http.Client{
-				Timeout:   30 * time.Second,
-				Transport: tr,
-			}
-			providerCtx = oidc.ClientContext(ctx, client)
-		}
-		provider, err := oidc.NewProvider(providerCtx, iss)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create provider for %s: %w", iss, err)
-		}
-		providers[iss] = provider
-		logger.Infof("[OIDC] Trusted issuer: %s", iss)
-	}
-
-	var initialSeed []byte
-	if biscuitHex != "" {
-		var err error
-		initialSeed, err = hex.DecodeString(strings.TrimSpace(biscuitHex))
-		if err != nil {
-			return nil, fmt.Errorf("failed to decode key flag: %w", err)
-		}
-	}
-	kr, err := NewKeyRing(keysDBPath, keyGracePeriod, initialSeed)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create keyring: %w", err)
-	}
-
-	var auds []string
-	for _, aud := range strings.Split(allowedAudiencesFlag, ",") {
-		aud = strings.TrimSpace(aud)
-		if aud != "" {
-			auds = append(auds, aud)
-		}
-	}
-	if len(auds) == 0 {
-		auds = []string{api.DefaultAudience}
-	}
-
-	var filteredExternal []string
-	for _, addr := range externalMultiaddrs {
-		if !strings.HasPrefix(addr, "http://") && !strings.HasPrefix(addr, "https://") {
-			filteredExternal = append(filteredExternal, addr)
-		}
-	}
-
-	hub := &Hub{
-		Host:             h,
-		DHT:              kadDHT,
-		Providers:        providers,
-		KeyRing:          kr,
-		MeshID:           meshName,
-		Policy:           policy,
-		limiter:          rate.NewLimiter(rate.Limit(EnrollRateLimit), EnrollBurst),
-		ExternalAddrs:    filteredExternal,
-		AllowedAudiences: auds,
-		AllowLoopback:    allowLoopback,
-	}
-	ps, err := pubsub.NewGossipSub(ctx, h)
-	if err != nil {
-		return nil, err
-	}
-	topic, err := ps.Join(api.GossipEvents)
-	if err != nil {
-		return nil, err
-	}
-
-	hub.PubSub = ps
-	hub.EventTopic = topic
-
-	_, err = relay.New(h, relay.WithACL(&relayACL{hub: hub}))
-	if err != nil {
-		return nil, err
-	}
-
-	h.SetStreamHandler(api.AuthProtocolID, hub.HandleAuthHandshake)
-
-	h.Network().Notify(&network.NotifyBundle{
-		DisconnectedF: func(n network.Network, c network.Conn) {
-			p := c.RemotePeer()
-			if len(h.Network().ConnsToPeer(p)) == 0 {
-				hub.authenticatedPeers.Delete(p)
-			}
-		},
-	})
-
-	return hub, nil
-}
-
-func (h *Hub) parseAndVerifyJWT(ctx context.Context, jwtStr string, allowedAudiences []string) (jwt.MapClaims, *oidc.IDToken, error) {
-	jwtParser := jwt.Parser{}
-	jwtToken, _, err := jwtParser.ParseUnverified(jwtStr, jwt.MapClaims{})
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to parse JWT: %w", err)
-	}
-
-	// 1. Defend against downgrade attacks immediately
-	alg, ok := jwtToken.Header["alg"].(string)
-	if !ok || alg == "" || strings.ToLower(alg) == "none" {
-		return nil, nil, fmt.Errorf("invalid or missing alg header")
-	}
-
-	claims, ok := jwtToken.Claims.(jwt.MapClaims)
-	if !ok {
-		return nil, nil, fmt.Errorf("invalid JWT claims")
-	}
-	iss, _ := claims["iss"].(string)
-
-	// 2. Extract the audience
-	var aud string
-	switch a := claims["aud"].(type) {
-	case string:
-		aud = a
-	case []any:
-		if len(a) > 0 {
-			aud, _ = a[0].(string)
-		}
-	}
-
-	if aud == "" {
-		return nil, nil, fmt.Errorf("missing aud claim")
-	}
-
-	// 3. Verify the audience matches one of your expected tenants/platforms
-	validAudience := false
-	for _, allowed := range allowedAudiences {
-		if aud == allowed {
-			validAudience = true
-			break
-		}
-	}
-	if !validAudience {
-		return nil, nil, fmt.Errorf("untrusted audience: %s", aud)
-	}
-
-	// 4. Route to the correct provider
-	provider, ok := h.Providers[iss]
-	if !ok {
-		return nil, nil, fmt.Errorf("unknown issuer: %s", iss)
-	}
-
-	// 5. Verify cryptographic signature, bypassing the strict single-clientID check
-	// because we already validated the audience against our allowed list above.
-	verifier := provider.Verifier(&oidc.Config{
-		SkipClientIDCheck: true,
-	})
-
-	token, err := verifier.Verify(ctx, jwtStr)
-	if err != nil {
-		return nil, nil, fmt.Errorf("JWT validation failed: %w", err)
-	}
-
-	return claims, token, nil
-}
-
-// startWatchdog periodically checks for peers that have connected but not completed OIDC
-// authentication within the grace period, and evicts them from the network.
-
-func (h *Hub) startRotation(ctx context.Context) {
-	if keyRotationInterval <= 0 {
-		return
-	}
-	go func() {
-		ticker := time.NewTicker(keyRotationInterval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				logger.Infow("Rotating keys")
-				newPub, newPriv, oldPriv, err := h.KeyRing.PrepareRotation()
-				if err != nil {
-					logger.Errorw("Failed to prepare key rotation", "error", err)
-					continue
-				}
-				samHubKeyRotationsTotal.Inc()
-
-				// Broadcast event
-				event := &api.MeshEvent{
-					Type:         api.MeshEvent_KEY_ROTATION,
-					Timestamp:    time.Now().UnixMilli(),
-					NewPublicKey: newPub,
-				}
-
-				// Sign with the OLD key so nodes can verify it!
-				event.Signature = nil
-				data, err := proto.Marshal(event)
-				if err != nil {
-					logger.Errorw("Failed to marshal key rotation event", "error", err)
-					continue
-				}
-				event.Signature = ed25519.Sign(oldPriv, data)
-
-				eventData, err := proto.Marshal(event)
-				if err != nil {
-					logger.Errorw("Failed to marshal key rotation event", "error", err)
-					continue
-				}
-				if err := h.EventTopic.Publish(ctx, eventData); err != nil {
-					logger.Errorw("Failed to publish key rotation event", "error", err)
-				} else {
-					logger.Infow("Broadcasted new public key", "public_key", hex.EncodeToString(newPub))
-					samHubMeshEventsTotal.WithLabelValues("KEY_ROTATION").Inc()
-
-					// Promote the new key after successful broadcast
-					if err := h.KeyRing.CommitRotation(newPub, newPriv, keyGracePeriod); err != nil {
-						logger.Errorw("Failed to commit key rotation", "error", err)
-					} else {
-						logger.Infow("Committed new key to keyring")
-					}
-				}
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
-}
-
-func (h *Hub) signEvent(event *api.MeshEvent) error {
-	event.Signature = nil
-	data, err := proto.Marshal(event)
-	if err != nil {
-		return err
-	}
-	event.Signature = ed25519.Sign(h.KeyRing.GetCurrentKey(), data)
-	return nil
-}
-
-func (h *Hub) PublishEvent(ctx context.Context, event *api.MeshEvent) error {
-	if err := h.signEvent(event); err != nil {
-		return err
-	}
-	data, err := proto.Marshal(event)
-	if err != nil {
-		return err
-	}
-	return h.EventTopic.Publish(ctx, data)
-}
+var logger = golog.Logger("sam-hub-cli")
 
 func main() {
 	rootCmd := &cobra.Command{
@@ -478,7 +93,7 @@ func main() {
 			_ = golog.SetLogLevel("dht", "fatal")
 			_ = golog.SetLogLevel("dht/RtRefreshManager", "fatal")
 
-			policyConfig, err := LoadPolicyConfig(policyFile)
+			policyConfig, err := hub.LoadPolicyConfig(policyFile)
 			if err != nil {
 				logger.Fatal(err)
 			}
@@ -494,22 +109,60 @@ func main() {
 				}
 			}
 
-			h, err := NewHub(ctx, policyConfig, allowLoopbackFlag)
+			var auds []string
+			for _, aud := range strings.Split(allowedAudiencesFlag, ",") {
+				aud = strings.TrimSpace(aud)
+				if aud != "" {
+					auds = append(auds, aud)
+				}
+			}
+			if len(auds) == 0 {
+				auds = []string{api.DefaultAudience}
+			}
+
+			hOpts := hub.Options{
+				OIDCIssuer:            oidcIssuer,
+				ClientID:              clientID,
+				BiscuitHex:            biscuitHex,
+				ListenAddrs:           listenAddrs,
+				MeshName:              meshName,
+				InsecureSkipTLSVerify: insecureSkipTLSVerify,
+				PolicyFile:            policyFile,
+				KeyRotationInterval:   keyRotationInterval,
+				KeyGracePeriod:        keyGracePeriod,
+				KeysDBPath:            keysDBPath,
+				BindAddress:           bindAddress,
+				AdminToken:            adminToken,
+				TLSCertFile:           tlsCertFile,
+				TLSKeyFile:            tlsKeyFile,
+				TLSCAFile:             tlsCAFile,
+				ExternalMultiaddrs:    externalMultiaddrs,
+				AllowedAudiences:      auds,
+				AllowLoopback:         allowLoopbackFlag,
+				Policy:                policyConfig,
+			}
+
+			h, err := hub.NewHub(ctx, hOpts)
 			if err != nil {
 				logger.Fatal(err)
 			}
+			defer func() {
+				if err := h.Close(); err != nil {
+					logger.Errorf("Failed to close hub: %v", err)
+				}
+			}()
 
 			// Start key rotation if enabled
-			h.startRotation(ctx)
+			h.StartRotation(ctx)
 
 			if len(externalMultiaddrs) > 0 {
-				go startBootstrapFederation(ctx, h, externalMultiaddrs)
+				go h.StartBootstrapFederation(ctx, externalMultiaddrs)
 			}
 
 			mux := http.NewServeMux()
 			mux.Handle("/metrics", promhttp.HandlerFor(prometheus.DefaultGatherer, promhttp.HandlerOpts{}))
 			mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
-				if isHubReady.Load() {
+				if h.Ready() {
 					w.WriteHeader(http.StatusOK)
 					_, _ = w.Write([]byte("ok"))
 				} else {
@@ -518,8 +171,8 @@ func main() {
 				}
 			})
 
-			mux.HandleFunc("/register", h.handleRegisterHTTP)
-			mux.HandleFunc("/info", h.handleInfoHTTP)
+			mux.HandleFunc("/register", h.HandleRegisterHTTP)
+			mux.HandleFunc("/info", h.HandleInfoHTTP)
 			mux.HandleFunc("/admin/ban", func(w http.ResponseWriter, r *http.Request) {
 				if adminToken != "" {
 					authHeader := r.Header.Get("Authorization")
@@ -528,7 +181,7 @@ func main() {
 						return
 					}
 				}
-				handleBan(h)(w, r)
+				hub.HandleBan(h)(w, r)
 			})
 
 			server := &http.Server{
@@ -554,7 +207,7 @@ func main() {
 			}()
 
 			logger.Infof("SAM Hub Online (HTTP on %s, P2P on %v)", bindAddress, listenAddrs)
-			isHubReady.Store(true)
+			h.SetReady(true)
 			logger.Infof("MeshID: %s", h.MeshID)
 			logger.Infof("PeerID: %s", h.Host.ID())
 			<-ctx.Done()
@@ -567,22 +220,22 @@ func main() {
 
 	defIssuer := os.Getenv("SAM_OIDC_ISSUER")
 	if defIssuer == "" {
-		defIssuer = DefaultOIDCIssuer
+		defIssuer = hub.DefaultOIDCIssuer
 	}
 	rootCmd.Flags().StringVar(&oidcIssuer, "issuer", defIssuer, "OIDC Issuer URL")
 	rootCmd.Flags().StringVar(&clientID, "client-id", os.Getenv("SAM_OIDC_ID"), "OIDC Client ID")
 	rootCmd.Flags().StringVar(&biscuitHex, "key", os.Getenv("SAM_HUB_KEY"), "Hub Private Key (32-byte Hex)")
 	rootCmd.Flags().StringSliceVar(&listenAddrs, "listen", []string{}, "libp2p Listen Addrs")
 	rootCmd.Flags().StringSliceVar(&externalMultiaddrs, "external-multiaddr", []string{}, "External multiaddrs to announce")
-	rootCmd.Flags().StringVar(&meshName, "mesh", DefaultMeshName, "Mesh federation name")
+	rootCmd.Flags().StringVar(&meshName, "mesh", hub.DefaultMeshName, "Mesh federation name")
 	rootCmd.Flags().StringVar(&allowedAudiencesFlag, "allowed-audiences", api.DefaultAudience, "Comma-separated list of allowed OIDC audiences")
 	rootCmd.Flags().BoolVar(&insecureSkipTLSVerify, "insecure-skip-tls-verify", false, "Skip TLS verification for OIDC issuers")
 	rootCmd.Flags().StringVar(&logLevel, "log-level", "info", "Log level (debug, info, warn, error)")
-	rootCmd.Flags().StringVar(&policyFile, "policy-file", DefaultPolicyFile, "Path to policies.yaml")
+	rootCmd.Flags().StringVar(&policyFile, "policy-file", hub.DefaultPolicyFile, "Path to policies.yaml")
 	rootCmd.Flags().DurationVar(&keyRotationInterval, "key-rotation-interval", 0, "Key rotation interval (e.g. 12h). 0 disables rotation.")
 	rootCmd.Flags().DurationVar(&keyGracePeriod, "key-grace-period", 24*time.Hour, "Key grace period for old keys (e.g. 24h).")
-	rootCmd.Flags().StringVar(&keysDBPath, "keys-db", DefaultKeysDBPath, "Path to BoltDB file for keys")
-	rootCmd.PersistentFlags().StringVar(&bindAddress, "bind-address", DefaultBindAddress, "Address to listen on for HTTP/HTTPS service")
+	rootCmd.Flags().StringVar(&keysDBPath, "keys-db", hub.DefaultKeysDBPath, "Path to BoltDB file for keys")
+	rootCmd.PersistentFlags().StringVar(&bindAddress, "bind-address", hub.DefaultBindAddress, "Address to listen on for HTTP/HTTPS service")
 	rootCmd.PersistentFlags().StringVar(&adminToken, "admin-token", "", "Secret token for authorizing admin requests")
 	rootCmd.PersistentFlags().StringVar(&tlsCertFile, "tls-cert-file", "", "Path to TLS certificate for the server")
 	rootCmd.PersistentFlags().StringVar(&tlsKeyFile, "tls-key-file", "", "Path to TLS private key for the server")
@@ -670,169 +323,5 @@ func main() {
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
-	}
-}
-
-func isLoopbackOrLinkLocal(addr multiaddr.Multiaddr) bool {
-	for _, proto := range addr.Protocols() {
-		if proto.Code == multiaddr.P_IP4 || proto.Code == multiaddr.P_IP6 {
-			value, err := addr.ValueForProtocol(proto.Code)
-			if err == nil {
-				ip := net.ParseIP(value)
-				if ip != nil {
-					if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
-						return true
-					}
-				}
-			}
-		}
-	}
-	return false
-}
-
-func (h *Hub) HandleAuthHandshake(s network.Stream) {
-	defer func() {
-		if err := s.Close(); err != nil {
-			logger.Debugf("[AuthN] Failed to close auth stream: %v", err)
-		}
-	}()
-	remotePeer := s.Conn().RemotePeer()
-
-	reader := msgio.NewVarintReaderSize(s, 1024*64)
-	msg, err := reader.ReadMsg()
-	if err != nil {
-		logger.Errorf("[AuthN] Failed to read handshake from %s: %v", remotePeer, err)
-		return
-	}
-	defer reader.ReleaseMsg(msg)
-
-	var exchange api.AuthFrame
-	if err := proto.Unmarshal(msg, &exchange); err != nil {
-		logger.Warnf("[AuthN] Invalid protobuf from %s", remotePeer)
-		return
-	}
-
-	b, err := h.verifyBiscuit(exchange.Biscuit, remotePeer)
-	if err != nil {
-		logger.Warnf("[AuthN] Authorization failed for %s: %v", remotePeer, err)
-		return
-	}
-
-	// Enforce hardware binding
-	boundFact := biscuit.Fact{Predicate: biscuit.Predicate{
-		Name: "node",
-		IDs:  []biscuit.Term{biscuit.String(remotePeer.String())},
-	}}
-	if _, err := b.GetBlockID(boundFact); err != nil {
-		logger.Warnf("[AuthN] Token is not bound to peer %s", remotePeer)
-		return
-	}
-
-	h.authenticatedPeers.Store(remotePeer, true)
-	logger.Infof("[AuthN] Successfully authenticated peer %s", remotePeer)
-
-	writer := msgio.NewVarintWriter(s)
-	resp := &api.AuthResponse{Success: true}
-	respBytes, _ := proto.Marshal(resp)
-	if err := writer.WriteMsg(respBytes); err != nil {
-		logger.Errorf("[AuthN] Failed to write ACK to %s: %v", remotePeer, err)
-	}
-}
-
-func startBootstrapFederation(ctx context.Context, h *Hub, peers []string) {
-	if len(peers) == 0 {
-		return
-	}
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
-
-	connectBootstrap(ctx, h, peers)
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			connectBootstrap(ctx, h, peers)
-		}
-	}
-}
-
-func connectBootstrap(ctx context.Context, h *Hub, peers []string) {
-	for _, peerStr := range peers {
-		if strings.HasPrefix(peerStr, "http://") || strings.HasPrefix(peerStr, "https://") {
-			client := &http.Client{Timeout: 10 * time.Second}
-			resp, err := client.Get(peerStr + "/info")
-			if err != nil {
-				logger.Errorf("[Federation] HTTP Get error for %s: %v", peerStr, err)
-				continue
-			}
-			if resp.StatusCode != http.StatusOK {
-				logger.Errorf("[Federation] HTTP Get for %s returned status %d", peerStr, resp.StatusCode)
-				_ = resp.Body.Close()
-				continue
-			}
-			bodyBytes, err := io.ReadAll(resp.Body)
-			_ = resp.Body.Close()
-			if err != nil {
-				logger.Errorf("[Federation] ReadAll error: %v", err)
-				continue
-			}
-
-			var info api.HubInfoResponse
-			if err := proto.Unmarshal(bodyBytes, &info); err != nil {
-				logger.Errorf("[Federation] Proto unmarshal error: %v", err)
-				continue
-			}
-
-			for _, addrStr := range info.HubAddresses {
-				ma, err := multiaddr.NewMultiaddr(addrStr)
-				if err != nil {
-					logger.Errorf("[Federation] Multiaddr error: %v", err)
-					continue
-				}
-
-				pi, err := peer.AddrInfoFromP2pAddr(ma)
-				if err != nil {
-					logger.Errorf("[Federation] AddrInfo error: %v", err)
-					continue
-				}
-
-				if pi.ID == h.Host.ID() {
-					continue
-				}
-
-				if len(h.Host.Network().ConnsToPeer(pi.ID)) > 0 {
-					continue
-				}
-
-				if err := h.Host.Connect(ctx, *pi); err == nil {
-					logger.Infof("[Federation] Connected to bootstrap peer: %s via HTTP %s", pi.ID, peerStr)
-				} else {
-					logger.Errorf("[Federation] Failed to connect to %s: %v", pi.ID, err)
-				}
-			}
-			continue
-		}
-
-		ma, err := multiaddr.NewMultiaddr(peerStr)
-		if err != nil {
-			continue
-		}
-		resolvedAddrs, err := madns.DefaultResolver.Resolve(ctx, ma)
-		if err != nil {
-			resolvedAddrs = []multiaddr.Multiaddr{ma}
-		}
-		for _, resolved := range resolvedAddrs {
-			pi, err := peer.AddrInfoFromP2pAddr(resolved)
-			if err != nil || pi.ID == h.Host.ID() {
-				continue
-			}
-			if len(h.Host.Network().ConnsToPeer(pi.ID)) == 0 {
-				if err := h.Host.Connect(ctx, *pi); err == nil {
-					logger.Infof("[Federation] Connected to bootstrap peer: %s via %s", pi.ID, peerStr)
-				}
-			}
-		}
 	}
 }
