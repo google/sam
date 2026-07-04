@@ -35,8 +35,7 @@ mobile-ffi-android:
 		echo "Error: Android NDK not found under $(ANDROID_HOME_RESOLVED)/ndk/. Please install NDK (Side-by-side) via Android Studio or sdkmanager." >&2; \
 		exit 1; \
 	fi
-	mkdir -p "$(OUT_DIR)/android"
-	GOOS=android GOARCH=arm64 CGO_ENABLED=1 CC=$(ANDROID_CC_ARM64) go build -v -buildmode=c-shared -o "$(OUT_DIR)/android/libsam.so" ./mobile/sam-node-ffi
+	GOOS=android GOARCH=arm64 CGO_ENABLED=1 CC=$(ANDROID_CC_ARM64) go build -v -ldflags="-checklinkname=0" -buildmode=c-shared -o "$(OUT_DIR)/android/libsam.so" ./mobile/sam-node-ffi
 
 mobile-ffi-android-x86_64:
 	@if [ -z "$(ANDROID_NDK_LATEST)" ]; then \
@@ -44,7 +43,7 @@ mobile-ffi-android-x86_64:
 		exit 1; \
 	fi
 	mkdir -p "$(OUT_DIR)/android-x86_64"
-	GOOS=android GOARCH=amd64 CGO_ENABLED=1 CC=$(ANDROID_CC_X86_64) go build -v -buildmode=c-shared -o "$(OUT_DIR)/android-x86_64/libsam.so" ./mobile/sam-node-ffi
+	GOOS=android GOARCH=amd64 CGO_ENABLED=1 CC=$(ANDROID_CC_X86_64) go build -v -ldflags="-checklinkname=0" -buildmode=c-shared -o "$(OUT_DIR)/android-x86_64/libsam.so" ./mobile/sam-node-ffi
 
 mobile-ffi-ios:
 	mkdir -p "$(OUT_DIR)/ios"
