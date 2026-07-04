@@ -10,6 +10,19 @@ build:
 	go build -v -o "$(OUT_DIR)/sam-hub" ./cmd/sam-hub
 	go build -v -o "$(OUT_DIR)/mcp-client" ./cmd/mcp-client
 
+.PHONY: mobile-ffi-host mobile-ffi-android mobile-ffi-ios
+mobile-ffi-host:
+	mkdir -p "$(OUT_DIR)"
+	CGO_ENABLED=1 go build -v -buildmode=c-shared -o "$(OUT_DIR)/libsam.so" ./mobile/sam-node-ffi
+
+mobile-ffi-android:
+	mkdir -p "$(OUT_DIR)/android"
+	GOOS=android GOARCH=arm64 CGO_ENABLED=1 go build -v -buildmode=c-shared -o "$(OUT_DIR)/android/libsam.so" ./mobile/sam-node-ffi
+
+mobile-ffi-ios:
+	mkdir -p "$(OUT_DIR)/ios"
+	GOOS=ios GOARCH=arm64 CGO_ENABLED=1 go build -v -buildmode=c-archive -o "$(OUT_DIR)/ios/libsam.a" ./mobile/sam-node-ffi
+
 .PHONY: proto
 proto:
 	./hack/gen-proto.sh

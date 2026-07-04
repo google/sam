@@ -239,9 +239,9 @@ func NewSamNode(cfg Options) (*SamNode, error) {
 		authenticatedHubs: make(map[peer.ID]bool),
 		LocalPolicy:       cfg.NodeConfig,
 		AllowLoopback:     cfg.AllowLoopback,
-		authSuccess:      make(chan struct{}),
-		reprovideTrigger: make(chan struct{}, 1),
-		logger:           golog.Logger("sam-node"),
+		authSuccess:       make(chan struct{}),
+		reprovideTrigger:  make(chan struct{}, 1),
+		logger:            golog.Logger("sam-node"),
 	}
 	node.BiscuitTimeout = cfg.BiscuitTimeout
 
