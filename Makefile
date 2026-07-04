@@ -10,7 +10,7 @@ build:
 	go build -v -o "$(OUT_DIR)/sam-hub" ./cmd/sam-hub
 	go build -v -o "$(OUT_DIR)/mcp-client" ./cmd/mcp-client
 
-.PHONY: mobile-ffi-host mobile-ffi-android mobile-ffi-ios
+.PHONY: mobile-ffi-host mobile-ffi-android mobile-ffi-ios mobile-ffi mobile-app-apk mobile-app-apk-emulator
 mobile-ffi-host:
 	mkdir -p "$(OUT_DIR)"
 	CGO_ENABLED=1 go build -v -buildmode=c-shared -o "$(OUT_DIR)/libsam.so" ./mobile/sam-node-ffi
@@ -22,6 +22,20 @@ mobile-ffi-android:
 mobile-ffi-ios:
 	mkdir -p "$(OUT_DIR)/ios"
 	GOOS=ios GOARCH=arm64 CGO_ENABLED=1 go build -v -buildmode=c-archive -o "$(OUT_DIR)/ios/libsam.a" ./mobile/sam-node-ffi
+
+mobile-ffi: mobile-ffi-host mobile-ffi-android mobile-ffi-ios
+
+mobile-app-apk: mobile-ffi-android
+	mkdir -p mobile/sam-node-app/android/app/src/main/jniLibs/arm64-v8a
+	cp "$(OUT_DIR)/android/libsam.so" mobile/sam-node-app/android/app/src/main/jniLibs/arm64-v8a/libsam.so
+	cd mobile/sam-node-app && flutter build apk --release
+
+mobile-app-apk-emulator:
+	mkdir -p "$(OUT_DIR)/android-x86_64"
+	GOOS=android GOARCH=amd64 CGO_ENABLED=1 go build -v -buildmode=c-shared -o "$(OUT_DIR)/android-x86_64/libsam.so" ./mobile/sam-node-ffi
+	mkdir -p mobile/sam-node-app/android/app/src/main/jniLibs/x86_64
+	cp "$(OUT_DIR)/android-x86_64/libsam.so" mobile/sam-node-app/android/app/src/main/jniLibs/x86_64/libsam.so
+	cd mobile/sam-node-app && flutter build apk --release
 
 .PHONY: proto
 proto:

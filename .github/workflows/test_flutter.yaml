@@ -2,7 +2,7 @@
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+# You may obtain a copy of the License at
 #
 #    https://www.apache.org/licenses/LICENSE-2.0
 #
@@ -17,10 +17,11 @@ on:
   push:
     branches:
       - 'main'
+      - 'mmobile'
     tags:
       - 'v*'
   pull_request:
-    branches: [ main ]
+    branches: [ main, mmobile ]
 
 env:
   GO_VERSION: "1.26"
@@ -48,3 +49,26 @@ jobs:
     - name: Analyze code
       run: flutter analyze
       working-directory: mobile/sam-node-app
+
+  e2e-android:
+    runs-on: macos-latest
+    steps:
+    - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v6
+    - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      with:
+        go-version: ${{ env.GO_VERSION }}
+    - uses: subosito/flutter-action@f0e3869966141470404a3952d9a30b9538350811 # v2
+      with:
+        channel: 'stable'
+    - name: Set up JDK
+      uses: actions/setup-java@99b8673ff64fbf99d8d325f52d9a5bdedb8483e9 # v4.2.1
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+    - name: Run E2E Integration Test in Android Emulator
+      uses: ReactiveCircus/android-emulator-runner@b86636dcd5723ef0161e7f288e9bd0ad01258791 # v2.30.0
+      with:
+        api-level: 30
+        target: google_apis
+        arch: x86_64
+        script: ./mobile/mobile_e2e.sh
