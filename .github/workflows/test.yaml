@@ -27,7 +27,7 @@ env:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-16core
     steps:
     - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
       with:
@@ -36,7 +36,7 @@ jobs:
     - run: sudo make test
 
   lint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-16core
     steps:
     - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
       with:
@@ -45,7 +45,7 @@ jobs:
     - run: make lint
 
   verify:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-16core
     steps:
     - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
       with:

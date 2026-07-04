@@ -184,7 +184,7 @@ TEST_PID=$!
 # 8. Monitor host node's MCP tool list to verify discovery of emulator-tool
 echo "[E2E] Verifying host node can discover emulator-tool..."
 DISCOVERED=0
-for i in {1..120}; do
+for i in {1..300}; do
   if [ -f "$REPO_ROOT/bin/mcp-client" ]; then
     TOOLS=$("$REPO_ROOT/bin/mcp-client" -token host-token -url http://127.0.0.1:8081/mcp -tool find_remote_tools 2>/dev/null || true)
     if echo "$TOOLS" | grep -q "emulator-tool"; then

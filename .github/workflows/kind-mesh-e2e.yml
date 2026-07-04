@@ -29,7 +29,7 @@ env:
 
 jobs:
   kind_mesh_e2e:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-22.04-16core
     name: Kind mesh e2e
     steps:
       - name: Checkout

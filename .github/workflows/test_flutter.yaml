@@ -28,7 +28,7 @@ env:
 
 jobs:
   build-ffi:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-16core
     steps:
     - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
       with:
@@ -37,7 +37,7 @@ jobs:
     - run: make mobile-ffi-host
 
   analyze-flutter:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-16core
     steps:
     - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v6
     - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
@@ -51,7 +51,7 @@ jobs:
       working-directory: mobile/sam-node-app
 
   e2e-android:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-22.04-16core
     steps:
     - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v6
     - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
