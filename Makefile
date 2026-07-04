@@ -6,11 +6,19 @@ CGO_ENABLED=0
 export GOROOT GO111MODULE CGO_ENABLED
 
 # Autodetect Android SDK and NDK
-ANDROID_HOME_RESOLVED:=$(if $(ANDROID_HOME),$(ANDROID_HOME),$(HOME)/Android/Sdk)
+ANDROID_HOME_RESOLVED:=$(if $(ANDROID_HOME),$(ANDROID_HOME),$(firstword $(wildcard $(HOME)/Android/Sdk $(HOME)/Library/Android/sdk)))
 ANDROID_NDK_LATEST:=$(shell ls -d $(ANDROID_HOME_RESOLVED)/ndk/* 2>/dev/null | sort -V | tail -n 1)
-ANDROID_NDK_TOOLCHAIN=$(ANDROID_NDK_LATEST)/toolchains/llvm/prebuilt/linux-x86_64/bin
+
+UNAME_S := $(shell uname -s)
+HOST_OS_NAME := linux-x86_64
+ifeq ($(UNAME_S),Darwin)
+  HOST_OS_NAME := darwin-x86_64
+endif
+
+ANDROID_NDK_TOOLCHAIN=$(ANDROID_NDK_LATEST)/toolchains/llvm/prebuilt/$(HOST_OS_NAME)/bin
 ANDROID_CC_ARM64=$(ANDROID_NDK_TOOLCHAIN)/aarch64-linux-android30-clang
 ANDROID_CC_X86_64=$(ANDROID_NDK_TOOLCHAIN)/x86_64-linux-android30-clang
+
 
 build:
 	go build -v -o "$(OUT_DIR)/sam-node" ./cmd/sam-node
