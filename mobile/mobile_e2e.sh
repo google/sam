@@ -55,15 +55,16 @@ OIDC_PID=$!
 timeout 15s bash -c 'until curl -s http://127.0.0.1:18080/ >/dev/null; do sleep 0.5; done'
 
 # 5. Start the Hub
-bin/sam-hub run \
-  --bind-addr 127.0.0.1:37001 \
-  --oidc-issuer http://mock-oidc:18080 \
-  --mesh-id public-mesh \
-  --insecure-skip-tls-verify &
+bin/sam-hub \
+  --bind-address 127.0.0.1:37001 \
+  --issuer http://mock-oidc:18080 \
+  --mesh public-mesh \
+  --insecure-skip-tls-verify \
+  --allow-loopback &
 HUB_PID=$!
 
-# Wait for Hub to print PeerID
-timeout 15s bash -c 'until bin/sam-hub --context local info 2>/dev/null; do sleep 0.5; done'
+# Wait for Hub to be ready
+timeout 15s bash -c 'until curl -s http://127.0.0.1:37001/info >/dev/null; do sleep 0.5; done'
 
 # 6. Enroll and Start the External Node on Host
 rm -rf /tmp/host-node-data
