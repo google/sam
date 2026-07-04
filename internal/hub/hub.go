@@ -100,6 +100,7 @@ func (a *relayACL) AllowConnect(src peer.ID, srcAddr multiaddr.Multiaddr, dest p
 
 // Hub handles identity bridging and network discovery
 type Hub struct {
+	config                Options
 	Host                  host.Host
 	DHT                   *dht.IpfsDHT
 	Providers             map[string]*oidc.Provider
@@ -122,29 +123,62 @@ type Hub struct {
 	isReady               atomic.Bool
 }
 
-// NewHub starts a host supporting both QUIC and TCP (with TLS 1.3)
-func NewHub(ctx context.Context, config Options) (*Hub, error) {
+// NewHub initializes configuration and KeyRing without starting background tasks or network interfaces.
+func NewHub(config Options) (*Hub, error) {
 	config.Default()
 	if err := config.Validate(); err != nil {
 		return nil, err
 	}
 
+	var initialSeed []byte
+	if config.BiscuitHex != "" {
+		var err error
+		initialSeed, err = hex.DecodeString(strings.TrimSpace(config.BiscuitHex))
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode key flag: %w", err)
+		}
+	}
+	kr, err := NewKeyRing(config.KeysDBPath, config.KeyGracePeriod, initialSeed)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create keyring: %w", err)
+	}
+
+	hub := &Hub{
+		config:                config,
+		KeyRing:               kr,
+		MeshID:                config.MeshName,
+		Policy:                config.Policy,
+		limiter:               rate.NewLimiter(rate.Limit(EnrollRateLimit), EnrollBurst),
+		AllowedAudiences:      config.AllowedAudiences,
+		AllowLoopback:         config.AllowLoopback,
+		logger:                golog.Logger("sam-hub"),
+		oidcIssuer:            config.OIDCIssuer,
+		keyRotationInterval:   config.KeyRotationInterval,
+		keyGracePeriod:        config.KeyGracePeriod,
+		insecureSkipTLSVerify: config.InsecureSkipTLSVerify,
+	}
+
+	return hub, nil
+}
+
+// Start initializes the libp2p host, DHT, PubSub, OIDC providers, and starts runtime components.
+func (h *Hub) Start(ctx context.Context) error {
 	// Connection Manager for DoS protection
 	cm, err := connmgr.NewConnManager(LowWaterMark, HighWaterMark, connmgr.WithGracePeriod(ConnGracePeriod))
 	if err != nil {
-		return nil, fmt.Errorf("failed to create connection manager: %w", err)
+		return fmt.Errorf("failed to create connection manager: %w", err)
 	}
 
 	p2pOpts := []libp2p.Option{
 		libp2p.DefaultTransports,
-		libp2p.ListenAddrStrings(config.ListenAddrs...),
+		libp2p.ListenAddrStrings(h.config.ListenAddrs...),
 		// FIPS compliant Security
 		libp2p.Security(libp2ptls.ID, libp2ptls.New),
 		libp2p.ConnectionManager(cm),
 		libp2p.EnableAutoNATv2(),
 		libp2p.EnableNATService(),
 		libp2p.AddrsFactory(func(addrs []multiaddr.Multiaddr) []multiaddr.Multiaddr {
-			if config.AllowLoopback {
+			if h.config.AllowLoopback {
 				return addrs
 			}
 			var filtered []multiaddr.Multiaddr
@@ -157,22 +191,23 @@ func NewHub(ctx context.Context, config Options) (*Hub, error) {
 		}),
 	}
 
-	h, err := libp2p.New(p2pOpts...)
+	hostNode, err := libp2p.New(p2pOpts...)
 	if err != nil {
-		return nil, err
+		return err
 	}
+	h.Host = hostNode
 
-	kadDHT, err := dht.New(ctx, h, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/sam"))
+	kadDHT, err := dht.New(ctx, hostNode, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/sam"))
 	if err != nil {
-		_ = h.Close()
-		return nil, err
+		return err
 	}
+	h.DHT = kadDHT
+
 	if err = kadDHT.Bootstrap(ctx); err != nil {
-		_ = h.Close()
-		return nil, err
+		return err
 	}
 
-	issuers := strings.Split(config.OIDCIssuer, ",")
+	issuers := strings.Split(h.config.OIDCIssuer, ",")
 	providers := make(map[string]*oidc.Provider)
 	for _, iss := range issuers {
 		iss = strings.TrimSpace(iss)
@@ -180,7 +215,7 @@ func NewHub(ctx context.Context, config Options) (*Hub, error) {
 			continue
 		}
 		var providerCtx = ctx
-		if config.InsecureSkipTLSVerify {
+		if h.config.InsecureSkipTLSVerify {
 			tr := &http.Transport{
 				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 			}
@@ -192,86 +227,59 @@ func NewHub(ctx context.Context, config Options) (*Hub, error) {
 		}
 		provider, err := oidc.NewProvider(providerCtx, iss)
 		if err != nil {
-			_ = h.Close()
-			return nil, fmt.Errorf("failed to create provider for %s: %w", iss, err)
+			return fmt.Errorf("failed to create provider for %s: %w", iss, err)
 		}
 		providers[iss] = provider
 	}
-
-	var initialSeed []byte
-	if config.BiscuitHex != "" {
-		var err error
-		initialSeed, err = hex.DecodeString(strings.TrimSpace(config.BiscuitHex))
-		if err != nil {
-			_ = h.Close()
-			return nil, fmt.Errorf("failed to decode key flag: %w", err)
-		}
-	}
-	kr, err := NewKeyRing(config.KeysDBPath, config.KeyGracePeriod, initialSeed)
-	if err != nil {
-		_ = h.Close()
-		return nil, fmt.Errorf("failed to create keyring: %w", err)
-	}
+	h.Providers = providers
 
 	var filteredExternal []string
-	for _, addr := range config.ExternalMultiaddrs {
+	for _, addr := range h.config.ExternalMultiaddrs {
 		if !strings.HasPrefix(addr, "http://") && !strings.HasPrefix(addr, "https://") {
 			filteredExternal = append(filteredExternal, addr)
 		}
 	}
+	h.ExternalAddrs = filteredExternal
 
-	hub := &Hub{
-		Host:                  h,
-		DHT:                   kadDHT,
-		Providers:             providers,
-		KeyRing:               kr,
-		MeshID:                config.MeshName,
-		Policy:                config.Policy,
-		limiter:               rate.NewLimiter(rate.Limit(EnrollRateLimit), EnrollBurst),
-		ExternalAddrs:         filteredExternal,
-		AllowedAudiences:      config.AllowedAudiences,
-		AllowLoopback:         config.AllowLoopback,
-		logger:                golog.Logger("sam-hub"),
-		oidcIssuer:            config.OIDCIssuer,
-		keyRotationInterval:   config.KeyRotationInterval,
-		keyGracePeriod:        config.KeyGracePeriod,
-		insecureSkipTLSVerify: config.InsecureSkipTLSVerify,
-	}
-
-	ps, err := pubsub.NewGossipSub(ctx, h)
+	ps, err := pubsub.NewGossipSub(ctx, hostNode)
 	if err != nil {
-		_ = hub.Close()
-		return nil, err
+		return err
 	}
+	h.PubSub = ps
+
 	topic, err := ps.Join(api.GossipEvents)
 	if err != nil {
-		_ = hub.Close()
-		return nil, err
+		return err
 	}
+	h.EventTopic = topic
 
-	hub.PubSub = ps
-	hub.EventTopic = topic
-
-	_, err = relay.New(h, relay.WithACL(&relayACL{hub: hub}))
+	_, err = relay.New(hostNode, relay.WithACL(&relayACL{hub: h}))
 	if err != nil {
-		_ = hub.Close()
-		return nil, err
+		return err
 	}
 
-	h.SetStreamHandler(api.AuthProtocolID, hub.HandleAuthHandshake)
+	hostNode.SetStreamHandler(api.AuthProtocolID, h.HandleAuthHandshake)
 
-	h.Network().Notify(&network.NotifyBundle{
+	hostNode.Network().Notify(&network.NotifyBundle{
 		DisconnectedF: func(n network.Network, c network.Conn) {
 			p := c.RemotePeer()
-			if len(h.Network().ConnsToPeer(p)) == 0 {
-				hub.authenticatedPeers.Delete(p)
+			if len(hostNode.Network().ConnsToPeer(p)) == 0 {
+				h.authenticatedPeers.Delete(p)
 			}
 		},
 	})
 
-	hub.logger.Infof("[OIDC] Trusted issuers: %s", config.OIDCIssuer)
+	h.logger.Infof("[OIDC] Trusted issuers: %s", h.config.OIDCIssuer)
 
-	return hub, nil
+	// Start key rotation if enabled
+	h.StartRotation(ctx)
+
+	// Start bootstrap federation if enabled
+	if len(h.config.ExternalMultiaddrs) > 0 {
+		go h.StartBootstrapFederation(ctx, h.config.ExternalMultiaddrs)
+	}
+
+	return nil
 }
 
 // Ready returns the ready status of the Hub.
@@ -287,6 +295,11 @@ func (h *Hub) SetReady(ready bool) {
 // Close closes the underlying p2p host and keyring db.
 func (h *Hub) Close() error {
 	var errs []error
+	if h.DHT != nil {
+		if err := h.DHT.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
 	if h.Host != nil {
 		if err := h.Host.Close(); err != nil {
 			errs = append(errs, err)

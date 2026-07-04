@@ -142,7 +142,7 @@ func main() {
 				Policy:                policyConfig,
 			}
 
-			h, err := hub.NewHub(ctx, hOpts)
+			h, err := hub.NewHub(hOpts)
 			if err != nil {
 				logger.Fatal(err)
 			}
@@ -152,11 +152,8 @@ func main() {
 				}
 			}()
 
-			// Start key rotation if enabled
-			h.StartRotation(ctx)
-
-			if len(externalMultiaddrs) > 0 {
-				go h.StartBootstrapFederation(ctx, externalMultiaddrs)
+			if err := h.Start(ctx); err != nil {
+				logger.Fatalf("Failed to start hub: %v", err)
 			}
 
 			mux := http.NewServeMux()

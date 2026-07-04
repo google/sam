@@ -36,7 +36,7 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
-func StartSidecarServer(node *SamNode, addr, token, certFile, keyFile, caFile string) error {
+func StartSidecarServer(node *SamNode, addr, token, certFile, keyFile, caFile string) (*http.Server, error) {
 	mux := http.NewServeMux()
 
 	// Public endpoints
@@ -67,14 +67,15 @@ func StartSidecarServer(node *SamNode, addr, token, certFile, keyFile, caFile st
 
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
-		return fmt.Errorf("failed to listen on %s: %w", addr, err)
+		return nil, fmt.Errorf("failed to listen on %s: %w", addr, err)
 	}
 
 	actualAddr := listener.Addr().String()
 	node.BoundHTTPAddr = actualAddr
 
 	if (certFile != "") != (keyFile != "") {
-		return fmt.Errorf("both --tls-cert and --tls-key must be provided to enable TLS")
+		_ = listener.Close()
+		return nil, fmt.Errorf("both --tls-cert and --tls-key must be provided to enable TLS")
 	}
 
 	if certFile != "" && keyFile != "" {
@@ -83,7 +84,8 @@ func StartSidecarServer(node *SamNode, addr, token, certFile, keyFile, caFile st
 		if caFile != "" {
 			caCert, err := os.ReadFile(caFile)
 			if err != nil {
-				return fmt.Errorf("failed to read CA cert: %w", err)
+				_ = listener.Close()
+				return nil, fmt.Errorf("failed to read CA cert: %w", err)
 			}
 			caCertPool := x509.NewCertPool()
 			caCertPool.AppendCertsFromPEM(caCert)
@@ -93,7 +95,8 @@ func StartSidecarServer(node *SamNode, addr, token, certFile, keyFile, caFile st
 		}
 
 		if !isMTLS && token == "" {
-			return fmt.Errorf("token is mandatory when not using mTLS")
+			_ = listener.Close()
+			return nil, fmt.Errorf("token is mandatory when not using mTLS")
 		}
 
 		server.TLSConfig = tlsConfig
@@ -105,7 +108,8 @@ func StartSidecarServer(node *SamNode, addr, token, certFile, keyFile, caFile st
 		}()
 	} else {
 		if token == "" {
-			return fmt.Errorf("token is mandatory when not using mTLS")
+			_ = listener.Close()
+			return nil, fmt.Errorf("token is mandatory when not using mTLS")
 		}
 		logger.Infof("Starting MCP server on TCP address %s", actualAddr)
 		go func() {
@@ -114,10 +118,10 @@ func StartSidecarServer(node *SamNode, addr, token, certFile, keyFile, caFile st
 			}
 		}()
 	}
-	return nil
+	return server, nil
 }
 
-func StartUnauthSidecarServer(hubURL, addr, certFile, keyFile string) error {
+func StartUnauthSidecarServer(hubURL, addr, certFile, keyFile string) (*http.Server, error) {
 	mux := http.NewServeMux()
 
 	// Public endpoints
@@ -134,13 +138,14 @@ func StartUnauthSidecarServer(hubURL, addr, certFile, keyFile string) error {
 
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
-		return fmt.Errorf("failed to listen on %s: %w", addr, err)
+		return nil, fmt.Errorf("failed to listen on %s: %w", addr, err)
 	}
 
 	actualAddr := listener.Addr().String()
 
 	if (certFile != "") != (keyFile != "") {
-		return fmt.Errorf("both --tls-cert and --tls-key must be provided to enable TLS")
+		_ = listener.Close()
+		return nil, fmt.Errorf("both --tls-cert and --tls-key must be provided to enable TLS")
 	}
 
 	if certFile != "" && keyFile != "" {
@@ -158,7 +163,7 @@ func StartUnauthSidecarServer(hubURL, addr, certFile, keyFile string) error {
 			}
 		}()
 	}
-	return nil
+	return server, nil
 }
 
 func handleHealthz(w http.ResponseWriter, r *http.Request) {

@@ -112,7 +112,7 @@ func startBareNode(t *testing.T, ctx context.Context) (*SamNode, func()) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	node, err := NewSamNode(ctx, Options{
+	node, err := NewSamNode(Options{
 		PrivKey:           priv,
 		HubAddrs:          nil,
 		Store:             store,
@@ -128,6 +128,9 @@ func startBareNode(t *testing.T, ctx context.Context) (*SamNode, func()) {
 		BiscuitTimeout:    500 * time.Millisecond,
 	})
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := node.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
 

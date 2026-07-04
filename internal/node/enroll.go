@@ -113,6 +113,10 @@ func (n *SamNode) Enroll(ctx context.Context, hubURL string, jwt string) error {
 		return fmt.Errorf("received empty biscuit token")
 	}
 
+	if len(enrollResp.HubPublicKey) != ed25519.PublicKeySize {
+		return fmt.Errorf("received invalid hub public key size: %d bytes (expected %d)", len(enrollResp.HubPublicKey), ed25519.PublicKeySize)
+	}
+
 	if err := n.Store.SaveIdentity(enrollResp.BiscuitToken); err != nil {
 		return fmt.Errorf("failed to save identity: %v", err)
 	}

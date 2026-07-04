@@ -115,6 +115,7 @@ func (a *nodeRelayACL) AllowConnect(src peer.ID, srcAddr multiaddr.Multiaddr, de
 }
 
 type SamNode struct {
+	config            Options
 	Host              host.Host
 	DHT               *dht.IpfsDHT
 	PubSub            *pubsub.PubSub
@@ -216,7 +217,8 @@ func resolveAddrIfNeeded(ctx context.Context, addr multiaddr.Multiaddr) ([]multi
 }
 
 // NewSamNode creates a new Agent instance secured with the 4-layer pipeline.
-func NewSamNode(ctx context.Context, cfg Options) (*SamNode, error) {
+// NewSamNode initializes options and structures without starting background tasks or network interfaces.
+func NewSamNode(cfg Options) (*SamNode, error) {
 	cfg.Default()
 	if err := cfg.Validate(); err != nil {
 		return nil, err
@@ -228,6 +230,7 @@ func NewSamNode(ctx context.Context, cfg Options) (*SamNode, error) {
 	}
 
 	node := &SamNode{
+		config:            cfg,
 		Store:             cfg.Store,
 		trustedKeys:       trustedKeys,
 		peerLastEventTime: make(map[string]int64),
@@ -236,12 +239,10 @@ func NewSamNode(ctx context.Context, cfg Options) (*SamNode, error) {
 		authenticatedHubs: make(map[peer.ID]bool),
 		LocalPolicy:       cfg.NodeConfig,
 		AllowLoopback:     cfg.AllowLoopback,
-
 		authSuccess:      make(chan struct{}),
 		reprovideTrigger: make(chan struct{}, 1),
 		logger:           golog.Logger("sam-node"),
 	}
-
 	node.BiscuitTimeout = cfg.BiscuitTimeout
 
 	var err error
@@ -254,12 +255,17 @@ func NewSamNode(ctx context.Context, cfg Options) (*SamNode, error) {
 		return nil, fmt.Errorf("failed to create revocation cache: %w", err)
 	}
 
+	return node, nil
+}
+
+// Start initializes the libp2p host, DHT, connects to the hub, and starts runtime components.
+func (n *SamNode) Start(ctx context.Context) error {
 	// Layer 2: Attach the Bouncer (Gater)
-	gater := &nodeConnGate{node: node}
+	gater := &nodeConnGate{node: n}
 
 	// Convert Hub multiaddrs to peer.AddrInfo to use as static relays
 	var staticRelays []peer.AddrInfo
-	for _, addr := range cfg.HubAddrs {
+	for _, addr := range n.config.HubAddrs {
 		resolvedAddrs, err := resolveAddrIfNeeded(ctx, addr)
 		if err != nil {
 			resolvedAddrs = []multiaddr.Multiaddr{addr}
@@ -267,8 +273,8 @@ func NewSamNode(ctx context.Context, cfg Options) (*SamNode, error) {
 		for _, resolved := range resolvedAddrs {
 			if addrInfo, err := peer.AddrInfoFromP2pAddr(resolved); err == nil && addrInfo.ID != "" {
 				staticRelays = append(staticRelays, *addrInfo)
-				if node.HubPeerID == "" {
-					node.HubPeerID = addrInfo.ID
+				if n.HubPeerID == "" {
+					n.HubPeerID = addrInfo.ID
 				}
 			} else {
 				logger.Warnf("Failed to parse static relay addr %s: %v", resolved, err)
@@ -279,16 +285,16 @@ func NewSamNode(ctx context.Context, cfg Options) (*SamNode, error) {
 
 	cm, err := connmgr.NewConnManager(100, 400, connmgr.WithGracePeriod(time.Minute))
 	if err != nil {
-		return nil, fmt.Errorf("failed to create connection manager: %w", err)
+		return fmt.Errorf("failed to create connection manager: %w", err)
 	}
 
 	// Layer 1: Establish FIPS-compliant Transports & NAT Services
 	opts := []libp2p.Option{
-		libp2p.Identity(cfg.PrivKey),
+		libp2p.Identity(n.config.PrivKey),
 		libp2p.DefaultTransports,
 		libp2p.Security(libp2ptls.ID, libp2ptls.New),
 		libp2p.ConnectionGater(gater),
-		libp2p.ListenAddrStrings(cfg.ListenAddrs...),
+		libp2p.ListenAddrStrings(n.config.ListenAddrs...),
 		libp2p.EnableNATService(),
 		libp2p.EnableAutoNATv2(),
 		libp2p.ForceReachabilityPrivate(),
@@ -297,7 +303,7 @@ func NewSamNode(ctx context.Context, cfg Options) (*SamNode, error) {
 		libp2p.ConnectionManager(cm),
 		libp2p.SwarmOpts(swarm.WithDialTimeout(15 * time.Second)),
 		libp2p.AddrsFactory(func(addrs []multiaddr.Multiaddr) []multiaddr.Multiaddr {
-			if cfg.AllowLoopback {
+			if n.config.AllowLoopback {
 				return addrs
 			}
 			var filtered []multiaddr.Multiaddr
@@ -312,13 +318,13 @@ func NewSamNode(ctx context.Context, cfg Options) (*SamNode, error) {
 
 	// If we have a Hub, configure it as our static fallback relay for NAT hole-punching
 	if len(staticRelays) > 0 {
-		node.currentRelays = staticRelays
+		n.currentRelays = staticRelays
 		opts = append(opts, libp2p.EnableAutoRelayWithPeerSource(
 			func(ctx context.Context, numPeers int) <-chan peer.AddrInfo {
 				logger.Infof("[Relay] AutoRelay called PeerSource for %d peers", numPeers)
-				node.mu.Lock()
-				currentRelays := node.currentRelays
-				node.mu.Unlock()
+				n.mu.Lock()
+				currentRelays := n.currentRelays
+				n.mu.Unlock()
 
 				c := make(chan peer.AddrInfo, len(currentRelays))
 				go func() {
@@ -326,7 +332,7 @@ func NewSamNode(ctx context.Context, cfg Options) (*SamNode, error) {
 					select {
 					case <-ctx.Done():
 						logger.Infof("[Relay] PeerSource context done")
-					case <-node.authSuccess:
+					case <-n.authSuccess:
 						logger.Infof("[Relay] Yielding static relays to AutoRelay")
 						// Shuffle the relays to distribute load evenly across Hubs
 						shuffled := make([]peer.AddrInfo, len(currentRelays))
@@ -341,22 +347,22 @@ func NewSamNode(ctx context.Context, cfg Options) (*SamNode, error) {
 				}()
 				return c
 			},
-			autorelay.WithBootDelay(cfg.AutoRelayBootDelay),
-			autorelay.WithBackoff(cfg.AutoRelayBackoff),
-			autorelay.WithMinInterval(cfg.AutoRelayMinInterval),
+			autorelay.WithBootDelay(n.config.AutoRelayBootDelay),
+			autorelay.WithBackoff(n.config.AutoRelayBackoff),
+			autorelay.WithMinInterval(n.config.AutoRelayMinInterval),
 		))
 	}
 
 	// If the user explicitly opts in, allow this node to serve as a relay for others
-	if cfg.EnableRelay {
+	if n.config.EnableRelay {
 		logger.Infof("[Relay] Enabling Relay Service")
 	}
 
 	h, err := libp2p.New(opts...)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	node.Host = h
+	n.Host = h
 
 	h.Network().Notify(&network.NotifyBundle{
 		ConnectedF: func(n network.Network, c network.Conn) {
@@ -376,28 +382,28 @@ func NewSamNode(ctx context.Context, cfg Options) (*SamNode, error) {
 		h.Peerstore().AddAddrs(pi.ID, pi.Addrs, peerstore.PermanentAddrTTL)
 	}
 
-	if cfg.EnableRelay {
+	if n.config.EnableRelay {
 		logger.Infof("[Relay] Enabling Relay Service with ACL")
-		_, err = relay.New(h, relay.WithACL(&nodeRelayACL{node: node}))
+		_, err = relay.New(h, relay.WithACL(&nodeRelayACL{node: n}))
 		if err != nil {
-			return nil, err
+			return err
 		}
 	}
 
 	// Initialize Rendezvous (DHT Client)
 	kdht, err := dht.New(ctx, h, dht.Mode(dht.ModeAuto), dht.ProtocolPrefix("/sam"))
 	if err != nil {
-		return nil, err
+		return err
 	}
-	node.DHT = kdht
+	n.DHT = kdht
 
-	node.services = NewServiceRegistry(node.DHT)
+	n.services = NewServiceRegistry(n.DHT)
 
 	var authenticated bool
 	var fatalAuthErr error
 
-	for _, addr := range cfg.HubAddrs {
-		if err := node.ConnectAndAuthWithHub(ctx, addr); err != nil {
+	for _, addr := range n.config.HubAddrs {
+		if err := n.ConnectAndAuthWithHub(ctx, addr); err != nil {
 			logger.Warnf("[AuthN] Failed to bootstrap and auth with hub %s: %v", addr, err)
 			if errors.Is(err, ErrFatalAuth) {
 				fatalAuthErr = err
@@ -407,16 +413,16 @@ func NewSamNode(ctx context.Context, cfg Options) (*SamNode, error) {
 		}
 	}
 
-	if len(cfg.HubAddrs) > 0 && !authenticated {
+	if len(n.config.HubAddrs) > 0 && !authenticated {
 		if fatalAuthErr != nil {
-			return nil, fmt.Errorf("fatal auth failure: %w", fatalAuthErr)
+			return fmt.Errorf("fatal auth failure: %w", fatalAuthErr)
 		}
-		return nil, fmt.Errorf("failed to authenticate with any hub: all connection attempts failed")
+		return fmt.Errorf("failed to authenticate with any hub: all connection attempts failed")
 	}
 
 	if authenticated {
 		logger.Infof("[DHT] Bootstrapping DHT with connected hub...")
-		if err := node.DHT.Bootstrap(ctx); err != nil {
+		if err := n.DHT.Bootstrap(ctx); err != nil {
 			logger.Warnf("[DHT] Failed to trigger DHT bootstrap: %v", err)
 		}
 	}
@@ -424,9 +430,9 @@ func NewSamNode(ctx context.Context, cfg Options) (*SamNode, error) {
 	// Initialize Gossipsub for Hub Events
 	ps, err := pubsub.NewGossipSub(ctx, h)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	node.PubSub = ps
+	n.PubSub = ps
 
 	// Subscribe to local address updates to reprovide services and log
 	sub, err := h.EventBus().Subscribe(new(event.EvtLocalAddressesUpdated))
@@ -457,7 +463,7 @@ func NewSamNode(ctx context.Context, cfg Options) (*SamNode, error) {
 					go func() {
 						time.Sleep(2 * time.Second) // Small debounce
 						select {
-						case node.reprovideTrigger <- struct{}{}:
+						case n.reprovideTrigger <- struct{}{}:
 						default:
 						}
 					}()
@@ -467,38 +473,38 @@ func NewSamNode(ctx context.Context, cfg Options) (*SamNode, error) {
 	}
 
 	// Listen for Network Evictions/Revocations from the Hub
-	go node.listenForHubEvents(ctx)
+	go n.listenForHubEvents(ctx)
 
-	interval, err := time.ParseDuration(cfg.DiscoveryInterval)
+	interval, err := time.ParseDuration(n.config.DiscoveryInterval)
 	if err != nil {
-		logger.Warnf("[Discovery] Invalid discovery interval '%s', using default %s: %v", cfg.DiscoveryInterval, DefaultDiscoveryInterval, err)
+		logger.Warnf("[Discovery] Invalid discovery interval '%s', using default %s: %v", n.config.DiscoveryInterval, DefaultDiscoveryInterval, err)
 		interval, _ = time.ParseDuration(DefaultDiscoveryInterval)
 	}
 
 	// Start DHT Discovery
-	go node.startDiscovery(ctx, cfg.MeshID, interval)
+	go n.startDiscovery(ctx, n.config.MeshID, interval)
 
 	// Layer 3: Open the Lobby Door (Auth Protocol is bypassed by Layer 4)
-	node.Host.SetStreamHandler(api.AuthProtocolID, node.HandleAuthHandshake)
+	n.Host.SetStreamHandler(api.AuthProtocolID, n.HandleAuthHandshake)
 
 	// Layer 3: Wire up MCP handler wrapped in middleware
-	node.Host.SetStreamHandler(api.MCPProtocolID, node.WithBiscuitAuth(node.HandleMCPStream))
+	n.Host.SetStreamHandler(api.MCPProtocolID, n.WithBiscuitAuth(n.HandleMCPStream))
 
 	// Start key pruning
-	node.startKeyPruning(ctx, cfg.KeyGracePeriod)
+	n.startKeyPruning(ctx, n.config.KeyGracePeriod)
 
 	// Start Ingress HTTP Server
-	if err := node.StartIngressServer(ctx); err != nil {
-		return nil, fmt.Errorf("failed to start ingress server: %w", err)
+	if err := n.StartIngressServer(ctx); err != nil {
+		return fmt.Errorf("failed to start ingress server: %w", err)
 	}
 
 	// Start connection monitor
-	node.startConnectionMonitor(ctx, cfg.MonitorBootstrap, cfg.MonitorInterval, 3)
+	n.startConnectionMonitor(ctx, n.config.MonitorBootstrap, n.config.MonitorInterval, 3)
 
 	// Periodically and on-demand reprovide registered services to the DHT
-	node.startReprovideLoop(ctx, ReprovideInterval)
+	n.startReprovideLoop(ctx, ReprovideInterval)
 
-	return node, nil
+	return nil
 }
 
 func (n *SamNode) startReprovideLoop(ctx context.Context, interval time.Duration) {
@@ -1232,10 +1238,18 @@ func (n *SamNode) Teardown() error {
 	if n.services != nil {
 		n.services.TeardownAll()
 	}
-	if n.Host != nil {
-		return n.Host.Close()
+	var errs []error
+	if n.DHT != nil {
+		if err := n.DHT.Close(); err != nil {
+			errs = append(errs, err)
+		}
 	}
-	return nil
+	if n.Host != nil {
+		if err := n.Host.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func (n *SamNode) IsServiceRegistered(serviceName string) bool {

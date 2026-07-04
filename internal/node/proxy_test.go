@@ -55,7 +55,7 @@ func TestDatapathIntegration(t *testing.T) {
 	// Pre-populate stores with dummy keys to avoid enrollment failure if required
 	// For this test, we assume we can run without full enrollment if we bypass AuthHandler
 
-	nodeA, err := NewSamNode(ctx, Options{
+	nodeA, err := NewSamNode(Options{
 		PrivKey:           privA,
 		HubAddrs:          nil,
 		Store:             storeA,
@@ -73,13 +73,16 @@ func TestDatapathIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := nodeA.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
 	defer func() {
 		if err := nodeA.Host.Close(); err != nil {
 			t.Logf("failed to close nodeA host: %v", err)
 		}
 	}()
 
-	nodeB, err := NewSamNode(ctx, Options{
+	nodeB, err := NewSamNode(Options{
 		PrivKey:           privB,
 		HubAddrs:          nil,
 		Store:             storeB,
@@ -95,6 +98,9 @@ func TestDatapathIntegration(t *testing.T) {
 		BiscuitTimeout:    500 * time.Millisecond,
 	})
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := nodeB.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
 	defer func() {
@@ -253,7 +259,7 @@ func TestDatapathIntegration_Unauthenticated(t *testing.T) {
 	}
 	defer func() { _ = storeB.Close() }()
 
-	nodeA, err := NewSamNode(ctx, Options{
+	nodeA, err := NewSamNode(Options{
 		PrivKey:           privA,
 		HubAddrs:          nil,
 		Store:             storeA,
@@ -271,13 +277,16 @@ func TestDatapathIntegration_Unauthenticated(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := nodeA.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
 	defer func() {
 		if err := nodeA.Host.Close(); err != nil {
 			t.Logf("failed to close nodeA host: %v", err)
 		}
 	}()
 
-	nodeB, err := NewSamNode(ctx, Options{
+	nodeB, err := NewSamNode(Options{
 		PrivKey:           privB,
 		HubAddrs:          nil,
 		Store:             storeB,
@@ -293,6 +302,9 @@ func TestDatapathIntegration_Unauthenticated(t *testing.T) {
 		BiscuitTimeout:    500 * time.Millisecond,
 	})
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := nodeB.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
 	defer func() {
@@ -396,7 +408,7 @@ func TestStdioDatapathIntegration(t *testing.T) {
 	}
 	defer func() { _ = storeB.Close() }()
 
-	nodeA, err := NewSamNode(ctx, Options{
+	nodeA, err := NewSamNode(Options{
 		PrivKey:           privA,
 		HubAddrs:          nil,
 		Store:             storeA,
@@ -414,9 +426,12 @@ func TestStdioDatapathIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := nodeA.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
 	defer func() { _ = nodeA.Host.Close() }()
 
-	nodeB, err := NewSamNode(ctx, Options{
+	nodeB, err := NewSamNode(Options{
 		PrivKey:           privB,
 		HubAddrs:          nil,
 		Store:             storeB,
@@ -432,6 +447,9 @@ func TestStdioDatapathIntegration(t *testing.T) {
 		BiscuitTimeout:    500 * time.Millisecond,
 	})
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := nodeB.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = nodeB.Host.Close() }()
@@ -580,7 +598,7 @@ func TestDatapathHeadersAndRoutingTable(t *testing.T) {
 	}
 	defer func() { _ = storeB.Close() }()
 
-	nodeA, err := NewSamNode(ctx, Options{
+	nodeA, err := NewSamNode(Options{
 		PrivKey:           privA,
 		HubAddrs:          nil,
 		Store:             storeA,
@@ -598,13 +616,16 @@ func TestDatapathHeadersAndRoutingTable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := nodeA.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
 	defer func() {
 		if err := nodeA.Host.Close(); err != nil {
 			t.Logf("failed to close nodeA host: %v", err)
 		}
 	}()
 
-	nodeB, err := NewSamNode(ctx, Options{
+	nodeB, err := NewSamNode(Options{
 		PrivKey:           privB,
 		HubAddrs:          nil,
 		Store:             storeB,
@@ -620,6 +641,9 @@ func TestDatapathHeadersAndRoutingTable(t *testing.T) {
 		BiscuitTimeout:    500 * time.Millisecond,
 	})
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := nodeB.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
 	defer func() {

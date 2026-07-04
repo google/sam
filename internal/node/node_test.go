@@ -100,7 +100,7 @@ func TestConnectionMonitor_CrashesAfterFailures(t *testing.T) {
 	if os.Getenv("BE_CRASHER_MONITOR") == "1" {
 		priv, _, _ := crypto.GenerateKeyPair(crypto.Ed25519, -1)
 		store, _ := NewStore(t.TempDir())
-		node, err := NewSamNode(context.Background(), Options{
+		node, err := NewSamNode(Options{
 			PrivKey:           priv,
 			HubAddrs:          nil,
 			Store:             store,
@@ -117,6 +117,9 @@ func TestConnectionMonitor_CrashesAfterFailures(t *testing.T) {
 		if err != nil {
 			os.Exit(0) // Ignore NewSamNode errors for this crasher
 		}
+		if err := node.Start(context.Background()); err != nil {
+			os.Exit(0)
+		}
 
 		// Use very short durations
 		node.startConnectionMonitor(context.Background(), 10*time.Millisecond, 10*time.Millisecond, 3)
@@ -132,4 +135,30 @@ func TestConnectionMonitor_CrashesAfterFailures(t *testing.T) {
 		return // Successful fatal exit
 	}
 	t.Fatalf("process ran with err %v, want exit status 1 (fatal crash)", err)
+}
+
+func TestNewSamNode_Validation(t *testing.T) {
+	priv, _, _ := crypto.GenerateKeyPair(crypto.Ed25519, -1)
+	store, _ := NewStore(t.TempDir())
+	defer func() { _ = store.Close() }()
+
+	t.Run("nil PrivKey", func(t *testing.T) {
+		_, err := NewSamNode(Options{
+			PrivKey: nil,
+			Store:   store,
+		})
+		if err == nil || err.Error() != "private key is required" {
+			t.Errorf("expected 'private key is required' error, got: %v", err)
+		}
+	})
+
+	t.Run("nil Store", func(t *testing.T) {
+		_, err := NewSamNode(Options{
+			PrivKey: priv,
+			Store:   nil,
+		})
+		if err == nil || err.Error() != "store is required" {
+			t.Errorf("expected 'store is required' error, got: %v", err)
+		}
+	})
 }

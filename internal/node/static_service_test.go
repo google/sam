@@ -64,7 +64,7 @@ func startMockLibp2pHub(t *testing.T) (peer.ID, string) {
 
 		resp := &api.EnrollResponse{
 			BiscuitToken: []byte("mock-biscuit-token"),
-			HubPublicKey: []byte("mock-hub-pub-key"),
+			HubPublicKey: make([]byte, 32),
 			HubAddresses: []string{h.Addrs()[0].String() + "/p2p/" + h.ID().String()},
 		}
 		data, err := proto.Marshal(resp)
@@ -106,7 +106,7 @@ func TestStaticServiceRegistrationRequiresConnection(t *testing.T) {
 	}
 
 	// 4. Create Node with empty hub addrs initially
-	node, err := NewSamNode(context.Background(), Options{
+	node, err := NewSamNode(Options{
 		PrivKey:           priv,
 		HubAddrs:          []multiaddr.Multiaddr{},
 		Store:             store,
@@ -122,6 +122,10 @@ func TestStaticServiceRegistrationRequiresConnection(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("failed to create node: %v", err)
+	}
+	ctx := context.Background()
+	if err := node.Start(ctx); err != nil {
+		t.Fatalf("failed to start node: %v", err)
 	}
 	defer func() {
 		if err := node.Host.Close(); err != nil {
@@ -143,7 +147,6 @@ func TestStaticServiceRegistrationRequiresConnection(t *testing.T) {
 		},
 	}
 
-	ctx := context.Background()
 	err = node.RegisterStaticServices(ctx, services)
 	if err == nil {
 		t.Fatal("Expected RegisterStaticServices to fail before connecting to hub, but it succeeded")
@@ -188,7 +191,7 @@ func TestStaticServiceRegistrationCommandFailure(t *testing.T) {
 	}
 
 	// 4. Create Node with empty hub addrs initially
-	node, err := NewSamNode(context.Background(), Options{
+	node, err := NewSamNode(Options{
 		PrivKey:           priv,
 		HubAddrs:          []multiaddr.Multiaddr{},
 		Store:             store,
@@ -205,6 +208,10 @@ func TestStaticServiceRegistrationCommandFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create node: %v", err)
 	}
+	ctx := context.Background()
+	if err := node.Start(ctx); err != nil {
+		t.Fatalf("failed to start node: %v", err)
+	}
 	defer func() {
 		if err := node.Host.Close(); err != nil {
 			t.Errorf("failed to close node host: %v", err)
@@ -212,7 +219,6 @@ func TestStaticServiceRegistrationCommandFailure(t *testing.T) {
 	}()
 
 	// 5. Enroll and connect to hub (which sets up DHT and hub connection)
-	ctx := context.Background()
 	err = node.Enroll(ctx, hubURL, "dummy-jwt")
 	if err != nil {
 		t.Fatalf("failed to enroll: %v", err)

@@ -105,10 +105,11 @@ func TestSidecarServerAuthEnforcement(t *testing.T) {
 	token := "test-token"
 
 	// Start sidecar on an ephemeral port
-	err := StartSidecarServer(node, "127.0.0.1:0", token, "", "", "")
+	sidecarSrv, err := StartSidecarServer(node, "127.0.0.1:0", token, "", "", "")
 	if err != nil {
 		t.Fatalf("Failed to start sidecar server: %v", err)
 	}
+	defer func() { _ = sidecarSrv.Close() }()
 
 	baseURL := "http://" + node.BoundHTTPAddr
 	client := &http.Client{Timeout: 2 * time.Second}
@@ -524,7 +525,7 @@ func TestStartSidecarServer_TokenMandatory(t *testing.T) {
 	node := &SamNode{BiscuitTimeout: 500 * time.Millisecond}
 
 	// Test case: No token, no TLS
-	err := StartSidecarServer(node, "127.0.0.1:0", "", "", "", "")
+	_, err := StartSidecarServer(node, "127.0.0.1:0", "", "", "", "")
 	if err == nil {
 		t.Fatal("Expected StartSidecarServer to fail without token and TLS, but it succeeded")
 	}
@@ -533,8 +534,10 @@ func TestStartSidecarServer_TokenMandatory(t *testing.T) {
 	}
 
 	// Test case: Token provided, should not fail immediately
-	err = StartSidecarServer(node, "127.0.0.1:0", "some-token", "", "", "")
-	if err != nil {
+	sidecarSrv, err := StartSidecarServer(node, "127.0.0.1:0", "some-token", "", "", "")
+	if err == nil {
+		defer func() { _ = sidecarSrv.Close() }()
+	} else {
 		if strings.Contains(err.Error(), "token is mandatory when not using mTLS") {
 			t.Fatalf("Did not expect 'token is mandatory' error when token is provided, got: %v", err)
 		}

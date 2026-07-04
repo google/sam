@@ -187,9 +187,13 @@ func main() {
 						}
 					}
 					logger.Infof("No identity found. Starting unauthenticated sidecar for enrollment over MCP...")
-					if err := node.StartUnauthSidecarServer(displayHub, bindAddrFlag, tlsCertFlag, tlsKeyFlag); err != nil {
+					unauthSrv, err := node.StartUnauthSidecarServer(displayHub, bindAddrFlag, tlsCertFlag, tlsKeyFlag)
+					if err != nil {
 						logger.Fatalf("Failed to start unauthenticated sidecar: %v", err)
 					}
+					defer func() {
+						_ = unauthSrv.Close()
+					}()
 					<-ctx.Done()
 					return
 				}
@@ -199,7 +203,7 @@ func main() {
 					logger.Fatal("Hub public key not found in store and not provided. Cannot verify peers.")
 				}
 				priv := node.GetOrGenerateKey(store)
-				meshNode, err = node.NewSamNode(context.Background(), node.Options{
+				meshNode, err = node.NewSamNode(node.Options{
 					PrivKey:              priv,
 					HubPubKey:            hubPubKey,
 					HubAddrs:             hubAddrs,
@@ -218,6 +222,9 @@ func main() {
 					AutoRelayBackoff:     autoRelayBackoffFlag,
 				})
 				if err != nil {
+					logger.Fatalf("Failed to initialize mesh node: %v", err)
+				}
+				if err := meshNode.Start(ctx); err != nil {
 					logger.Fatalf("Failed to start mesh node: %v", err)
 				}
 			} else {
@@ -255,7 +262,7 @@ func main() {
 
 				priv := node.GetOrGenerateKey(store)
 				enrollCtx, enrollCancel := context.WithCancel(context.Background())
-				meshNode, err = node.NewSamNode(enrollCtx, node.Options{
+				meshNode, err = node.NewSamNode(node.Options{
 					PrivKey:              priv,
 					HubAddrs:             initHubAddrs,
 					Store:                store,
@@ -275,6 +282,10 @@ func main() {
 				if err != nil {
 					enrollCancel()
 					logger.Fatalf("Failed to initialize node for enrollment: %v", err)
+				}
+				if err := meshNode.Start(enrollCtx); err != nil {
+					enrollCancel()
+					logger.Fatalf("Failed to start node for enrollment: %v", err)
 				}
 
 				err = meshNode.Enroll(enrollCtx, hubAddr, jwtStr)
@@ -301,7 +312,7 @@ func main() {
 				hubPubKey = storedPubKey
 
 				logger.Debugf("listenAddrs: %v, allowLoopback: %v", listenAddrs, allowLoopbackFlag)
-				meshNode, err = node.NewSamNode(context.Background(), node.Options{
+				meshNode, err = node.NewSamNode(node.Options{
 					PrivKey:              priv,
 					HubPubKey:            hubPubKey,
 					HubAddrs:             newHubAddrs,
@@ -320,7 +331,10 @@ func main() {
 					AutoRelayBackoff:     autoRelayBackoffFlag,
 				})
 				if err != nil {
-					logger.Fatalf("Failed to start mesh node after enrollment: %v", err)
+					logger.Fatalf("Failed to initialize node after enrollment: %v", err)
+				}
+				if err := meshNode.Start(ctx); err != nil {
+					logger.Fatalf("Failed to start node after enrollment: %v", err)
 				}
 			}
 
@@ -337,9 +351,13 @@ func main() {
 			meshNode.Host.SetStreamHandler(api.AuthProtocolID, meshNode.HandleAuthHandshake)
 
 			// Start Sidecar API Server (multiplexed with MCP)
-			if err := node.StartSidecarServer(meshNode, bindAddrFlag, apiTokenFlag, tlsCertFlag, tlsKeyFlag, tlsCAFlag); err != nil {
+			sidecarSrv, err := node.StartSidecarServer(meshNode, bindAddrFlag, apiTokenFlag, tlsCertFlag, tlsKeyFlag, tlsCAFlag)
+			if err != nil {
 				logger.Fatalf("Failed to start sidecar server: %v", err)
 			}
+			defer func() {
+				_ = sidecarSrv.Close()
+			}()
 
 			fmt.Printf("SAM Node Online.\nPeerID: %s\nListening on: %v\n", meshNode.Host.ID(), meshNode.Host.Addrs())
 
@@ -449,7 +467,7 @@ func main() {
 			}
 
 			priv := node.GetOrGenerateKey(store)
-			meshNode, err := node.NewSamNode(context.Background(), node.Options{
+			meshNode, err := node.NewSamNode(node.Options{
 				PrivKey:              priv,
 				HubAddrs:             initHubAddrs,
 				Store:                store,
@@ -468,6 +486,9 @@ func main() {
 			})
 			if err != nil {
 				logger.Fatalf("Failed to initialize node for enrollment: %v", err)
+			}
+			if err := meshNode.Start(ctx); err != nil {
+				logger.Fatalf("Failed to start node for enrollment: %v", err)
 			}
 
 			err = meshNode.Enroll(context.Background(), targetHub, jwtStr)
