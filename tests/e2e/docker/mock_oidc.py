@@ -49,15 +49,18 @@ JWKS = {
   ]
 }
 
+import os
+ISSUER = os.getenv('OIDC_ISSUER', 'http://mock-oidc:18080')
+
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == '/.well-known/openid-configuration':
             body = {
-                'issuer': 'http://mock-oidc:18080',
-                'authorization_endpoint': 'http://mock-oidc:18080/auth',
-                'token_endpoint': 'http://mock-oidc:18080/token',
-                'device_authorization_endpoint': 'http://mock-oidc:18080/device/code',
-                'jwks_uri': 'http://mock-oidc:18080/keys'
+                'issuer': ISSUER,
+                'authorization_endpoint': f'{ISSUER}/auth',
+                'token_endpoint': f'{ISSUER}/token',
+                'device_authorization_endpoint': f'{ISSUER}/device/code',
+                'jwks_uri': f'{ISSUER}/keys'
             }
             data = json.dumps(body).encode('utf-8')
             self.send_response(200)
@@ -109,7 +112,7 @@ class Handler(BaseHTTPRequestHandler):
                 groups = ['admin']
 
             payload = {
-                'iss': 'http://mock-oidc:18080',
+                'iss': ISSUER,
                 'aud': 'sam-mesh-audience',
                 'sub': 'test-user',
                 'exp': int(time.time()) + 3600,

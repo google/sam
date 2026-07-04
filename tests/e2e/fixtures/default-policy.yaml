@@ -1,6 +1,6 @@
 version: v1alpha1
 bindings:
-  - members: ["group:*"]
+  - members: ["system:authenticated"]
     role: admin
 roles:
   admin:

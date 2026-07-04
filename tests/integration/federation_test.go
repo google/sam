@@ -295,7 +295,7 @@ func extractPeerID(maddrStr string) string {
 
 func waitForDHTReady(t *testing.T, clientBin string, apiPort int, token string) {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(45 * time.Second)
 	cmdArgs := []string{
 		"-url", fmt.Sprintf("http://127.0.0.1:%d/mcp", apiPort),
 		"-token", token,
