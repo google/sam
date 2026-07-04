@@ -1,3 +1,4 @@
+// ignore_for_file: avoid_print
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
@@ -24,8 +25,8 @@ void main() {
 
     // 2. Fetch OIDC JWT from the mock OIDC server running on host
     // Host IP from emulator is 10.0.2.2
-    final oidcIssuer = 'http://10.0.2.2:18080';
-    final tokenURL = '$oidcIssuer/token';
+    const oidcIssuer = 'http://10.0.2.2:18080';
+    const tokenURL = '$oidcIssuer/token';
 
     final response = await http.post(
       Uri.parse(tokenURL),
@@ -42,7 +43,7 @@ void main() {
     expect(jwt, isNotEmpty);
 
     // 3. Enroll Node against host Hub
-    final hubURL = 'http://10.0.2.2:37001';
+    const hubURL = 'http://10.0.2.2:37001';
     final enrollErr = samLib.enroll(dataDir, hubURL, jwt, true);
     expect(enrollErr, isNull);
 
@@ -119,7 +120,7 @@ void main() {
     });
 
     // Register a dummy MCP service inside the Android emulator
-    final registerUrl = 'http://127.0.0.1:8080/sam/service/register';
+    const registerUrl = 'http://127.0.0.1:8080/sam/service/register';
     final regResponse = await http.post(
       Uri.parse(registerUrl),
       headers: {
