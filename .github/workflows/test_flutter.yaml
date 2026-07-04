@@ -1,8 +1,8 @@
-# Copyright The Kubernetes Authors
+# Copyright 2026 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
+// You may obtain a copy of the License at
 #
 #    https://www.apache.org/licenses/LICENSE-2.0
 #
@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-name: Test
+name: Test Flutter App
 
 on:
   push:
@@ -26,31 +26,25 @@ env:
   GO_VERSION: "1.26"
 
 jobs:
-  test:
+  build-ffi:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
       with:
         go-version: ${{ env.GO_VERSION }}
     - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v6
-    - run: sudo make test
+    - run: make mobile-ffi-host
 
-  lint:
+  analyze-flutter:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
-      with:
-        go-version: ${{ env.GO_VERSION }}
     - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v6
-    - run: make lint
-
-  verify:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+    - uses: subosito/flutter-action@f0e3869966141470404a3952d9a30b9538350811 # v2
       with:
-        go-version: ${{ env.GO_VERSION }}
-    - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v6
-    - name: Install protoc
-      run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
-    - run: make verify
+        channel: 'stable'
+    - name: Install dependencies
+      run: flutter pub get
+      working-directory: mobile/sam-node-app
+    - name: Analyze code
+      run: flutter analyze
+      working-directory: mobile/sam-node-app
