@@ -214,17 +214,13 @@ func (h *Hub) Start(ctx context.Context) error {
 		if iss == "" {
 			continue
 		}
-		var providerCtx = ctx
-		if h.config.InsecureSkipTLSVerify {
-			tr := &http.Transport{
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-			}
-			client := &http.Client{
-				Timeout:   30 * time.Second,
-				Transport: tr,
-			}
-			providerCtx = oidc.ClientContext(ctx, client)
+		tr := http.DefaultTransport.(*http.Transport).Clone()
+		tr.TLSClientConfig = &tls.Config{InsecureSkipVerify: h.config.InsecureSkipTLSVerify}
+		client := &http.Client{
+			Timeout:   30 * time.Second,
+			Transport: tr,
 		}
+		providerCtx := oidc.ClientContext(ctx, client)
 		provider, err := oidc.NewProvider(providerCtx, iss)
 		if err != nil {
 			return fmt.Errorf("failed to create provider for %s: %w", iss, err)
