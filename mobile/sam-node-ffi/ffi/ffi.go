@@ -21,11 +21,14 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/google/sam/internal/node"
+	golog "github.com/ipfs/go-log/v2"
 	"github.com/multiformats/go-multiaddr"
 )
 
@@ -64,6 +67,29 @@ func StartNode(configJSON string) error {
 	var config MobileConfig
 	if err := json.Unmarshal([]byte(configJSON), &config); err != nil {
 		return fmt.Errorf("failed to parse config JSON: %w", err)
+	}
+
+	lvl := golog.LevelInfo
+	if config.LogLevel != "" {
+		if l, err := golog.LevelFromString(config.LogLevel); err == nil {
+			lvl = l
+		}
+	}
+
+	if config.DataDir != "" {
+		_ = os.MkdirAll(config.DataDir, 0700)
+		logFilePath := filepath.Join(config.DataDir, "node.log")
+		golog.SetupLogging(golog.Config{
+			File:   logFilePath,
+			Level:  lvl,
+			Stderr: false,
+			Stdout: false,
+		})
+	} else {
+		golog.SetupLogging(golog.Config{
+			Level:  lvl,
+			Stderr: true,
+		})
 	}
 
 	store, err := node.NewStore(config.DataDir)
@@ -231,6 +257,15 @@ func GetNodeID() string {
 
 // EnrollNode enrolls a node.
 func EnrollNode(dataDir string, hubURL string, jwt string, allowLoopback bool) error {
+	_ = os.MkdirAll(dataDir, 0700)
+	logFilePath := filepath.Join(dataDir, "node.log")
+	golog.SetupLogging(golog.Config{
+		File:   logFilePath,
+		Level:  golog.LevelDebug,
+		Stderr: false,
+		Stdout: false,
+	})
+
 	store, err := node.NewStore(dataDir)
 	if err != nil {
 		return fmt.Errorf("failed to open store: %w", err)

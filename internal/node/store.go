@@ -55,6 +55,9 @@ func GetDefaultDataDir() (string, error) {
 }
 
 func NewStore(dir string) (*Store, error) {
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return nil, fmt.Errorf("failed to create data directory: %w", err)
+	}
 	dbPath := filepath.Join(dir, "agent.db")
 	db, err := bbolt.Open(dbPath, 0600, &bbolt.Options{Timeout: 5 * time.Second})
 	if err != nil {

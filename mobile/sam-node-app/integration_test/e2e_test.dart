@@ -54,7 +54,8 @@ void main() {
       'bindAddr': '0.0.0.0:8080', // sidecar HTTP server inside phone
       'apiToken': 'test-token',
       'allowLoopback': true,
-      'enableRelay': false,
+      'enableRelay': true,
+      'logLevel': 'debug',
     });
     expect(startErr, isNull);
 
@@ -68,23 +69,53 @@ void main() {
 
     // Start local Mock MCP Server inside the Android emulator
     final mockMcpServer = await HttpServer.bind(InternetAddress.loopbackIPv4, 9090);
-    mockMcpServer.listen((HttpRequest request) {
-      request.response
-        ..headers.contentType = ContentType.json
-        ..statusCode = HttpStatus.ok
-        ..write(jsonEncode({
-          'jsonrpc': '2.0',
-          'id': 1,
-          'result': {
-            'content': [
+    mockMcpServer.listen((HttpRequest request) async {
+      try {
+        final content = await utf8.decoder.bind(request).join();
+        final body = jsonDecode(content);
+        final method = body['method'] as String?;
+        final id = body['id'];
+
+        dynamic result;
+        if (method == 'initialize') {
+          result = {
+            'protocolVersion': '2024-11-05',
+            'capabilities': {},
+            'serverInfo': {'name': 'mock-emulator-mcp', 'version': '1.0.0'}
+          };
+        } else if (method == 'tools/list') {
+          result = {
+            'tools': [
               {
-                'type': 'text',
-                'text': 'Hello from Android!'
+                'name': 'emulator-tool',
+                'description': 'test tool on emulator',
+                'inputSchema': {'type': 'object', 'properties': {}}
               }
             ]
-          }
-        }));
-      request.response.close();
+          };
+        } else if (method == 'tools/call') {
+          result = {
+            'content': [
+              {'type': 'text', 'text': 'Hello from Android!'}
+            ]
+          };
+        }
+
+        request.response
+          ..headers.contentType = ContentType.json
+          ..statusCode = HttpStatus.ok
+          ..write(jsonEncode({
+            'jsonrpc': '2.0',
+            'id': id,
+            'result': result,
+          }));
+      } catch (e) {
+        request.response
+          ..statusCode = HttpStatus.internalServerError
+          ..write(e.toString());
+      } finally {
+        await request.response.close();
+      }
     });
 
     // Register a dummy MCP service inside the Android emulator
@@ -106,76 +137,76 @@ void main() {
     );
     expect(regResponse.statusCode, equals(200));
 
-    // Discover host-tool from inside the emulator via its local MCP API
-    final listToolsUrl = 'http://127.0.0.1:8080/mcp';
+    // Discover host-tool from inside the emulator via its local MCP API using McpClient
+    final client = McpClient('http://127.0.0.1:8080/mcp', 'test-token');
+    var initialized = false;
+    for (var i = 0; i < 10; i++) {
+      try {
+        await client.initialize();
+        initialized = true;
+        break;
+      } catch (e) {
+        print('E2E McpClient initialization attempt failed: $e');
+      }
+      await Future.delayed(const Duration(seconds: 1));
+    }
+    expect(initialized, isTrue, reason: 'Emulator failed to initialize McpClient session');
+
     var discovered = false;
+    String hostToolName = 'host-tool';
+    String hostPeerId = '';
     for (var i = 0; i < 30; i++) {
       try {
-        final listResponse = await http.post(
-          Uri.parse(listToolsUrl),
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer test-token',
-          },
-          body: jsonEncode({
-            'jsonrpc': '2.0',
-            'method': 'tools/list',
-            'params': {},
-            'id': 1
-          }),
-        );
-        if (listResponse.statusCode == 200) {
-          final listData = jsonDecode(listResponse.body);
-          final result = listData['result'];
-          if (result != null && result['tools'] != null) {
-            final tools = result['tools'] as List;
-            if (tools.any((t) => t['name'] == 'host-tool')) {
+        final callResult = await client.post('tools/call', {
+          'name': 'find_remote_tools',
+          'arguments': {}
+        });
+        print('E2E Discovered Tools Result: $callResult');
+        if (callResult != null && callResult['content'] != null) {
+          final contentList = callResult['content'] as List;
+          if (contentList.isNotEmpty) {
+            final text = contentList[0]['text'] as String;
+            final tools = jsonDecode(text) as List;
+            final matched = tools.firstWhere(
+              (t) => (t['tool_name'] as String).contains('host-tool'),
+              orElse: () => null,
+            );
+            if (matched != null) {
+              hostToolName = matched['tool_name'] as String;
+              hostPeerId = matched['peer_id'] as String;
               discovered = true;
               break;
             }
           }
         }
       } catch (e) {
-        // ignore network setup transient errors
+        print('E2E Discovery attempt failed: $e');
       }
       await Future.delayed(const Duration(seconds: 1));
     }
     expect(discovered, isTrue, reason: 'Emulator failed to discover host-tool');
 
-    // Call host-tool from inside the emulator via its local MCP API
-    final callToolUrl = 'http://127.0.0.1:8080/mcp';
+    // Call host-tool from inside the emulator via its local MCP API using McpClient
     var called = false;
     for (var i = 0; i < 10; i++) {
       try {
-        final callResponse = await http.post(
-          Uri.parse(callToolUrl),
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer test-token',
-          },
-          body: jsonEncode({
-            'jsonrpc': '2.0',
-            'method': 'tools/call',
-            'params': {
-              'name': 'host-tool',
-              'arguments': {}
-            },
-            'id': 1
-          }),
-        );
-        if (callResponse.statusCode == 200) {
-          final callData = jsonDecode(callResponse.body);
-          final result = callData['result'];
-          if (result != null && result['content'] != null) {
-            final content = result['content'] as List;
-            if (content.any((c) => c['text'].contains('Hello from Host!'))) {
-              called = true;
-              break;
-            }
+        final callResult = await client.post('tools/call', {
+          'name': 'call_remote_tool',
+          'arguments': {
+            'peer_id': hostPeerId,
+            'tool_name': hostToolName,
+          }
+        });
+        print('E2E Call Result: $callResult');
+        if (callResult != null && callResult['content'] != null) {
+          final content = callResult['content'] as List;
+          if (content.any((c) => c['text'].contains('Hello from Host!'))) {
+            called = true;
+            break;
           }
         }
       } catch (e) {
-        // ignore network setup transient errors
+        print('E2E Call attempt failed: $e');
       }
       await Future.delayed(const Duration(seconds: 1));
     }
@@ -189,4 +220,100 @@ void main() {
     final stopErr = samLib.stop();
     expect(stopErr, isNull);
   });
+
+  tearDownAll(() async {
+    try {
+      final appDir = await getApplicationDocumentsDirectory();
+      final file = File('${appDir.path}/sam_e2e_data/node.log');
+      if (file.existsSync()) {
+        print('=== MOBILE GO NODE LOGS ===');
+        print(file.readAsStringSync());
+        print('===========================');
+      } else {
+        print('No node.log file found at ${file.path}');
+      }
+    } catch (e) {
+      print('Failed to print node.log: $e');
+    }
+  });
+}
+
+class McpClient {
+  final String url;
+  final String token;
+  String? sessionId;
+
+  McpClient(this.url, this.token);
+
+  Future<dynamic> post(String method, Map<String, dynamic> params) async {
+    final Map<String, String> headers = {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json, text/event-stream',
+      'Authorization': 'Bearer $token',
+    };
+    if (sessionId != null) {
+      headers['Mcp-Session-Id'] = sessionId!;
+    }
+
+    final Map<String, dynamic> bodyMap = {
+      'jsonrpc': '2.0',
+      'method': method,
+      'params': params,
+    };
+    if (!method.startsWith('notifications/')) {
+      bodyMap['id'] = 1;
+    }
+
+    final response = await http.post(
+      Uri.parse(url),
+      headers: headers,
+      body: jsonEncode(bodyMap),
+    );
+
+    // Save session ID if returned in headers
+    final returnedSessionId = response.headers['mcp-session-id'] ?? response.headers['Mcp-Session-Id'];
+    if (returnedSessionId != null) {
+      sessionId = returnedSessionId;
+    }
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception('HTTP error ${response.statusCode}: ${response.body}');
+    }
+
+    // Parse the SSE body
+    final body = response.body;
+    String jsonData = '';
+    for (var line in body.split('\n')) {
+      if (line.startsWith('data: ')) {
+        jsonData = line.substring(6);
+        break;
+      }
+    }
+
+    if (jsonData.isEmpty) {
+      if (method.startsWith('notifications/')) {
+        return null;
+      }
+      throw Exception('No data block found in SSE response: $body');
+    }
+
+    final dataObj = jsonDecode(jsonData);
+    if (dataObj['error'] != null) {
+      throw Exception('JSON-RPC error: ${dataObj['error']}');
+    }
+    return dataObj['result'];
+  }
+
+  Future<void> initialize() async {
+    await post('initialize', {
+      'protocolVersion': '2024-11-05',
+      'capabilities': {},
+      'clientInfo': {
+        'name': 'e2e-dart-client',
+        'version': '1.0.0'
+      }
+    });
+
+    await post('notifications/initialized', {});
+  }
 }

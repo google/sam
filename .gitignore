@@ -38,3 +38,6 @@ tests/integration/scratch/
 __pycache__/
 .venv/
 *.egg-info/
+keys.db
+mobile/logcat.txt
+
