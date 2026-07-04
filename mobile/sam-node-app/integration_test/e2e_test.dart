@@ -71,6 +71,13 @@ void main() {
     // Start local Mock MCP Server inside the Android emulator
     final mockMcpServer = await HttpServer.bind(InternetAddress.loopbackIPv4, 9090);
     mockMcpServer.listen((HttpRequest request) async {
+      if (request.method == 'GET') {
+        request.response
+          ..statusCode = HttpStatus.notImplemented
+          ..write('501 Unsupported method GET');
+        await request.response.close();
+        return;
+      }
       try {
         final content = await utf8.decoder.bind(request).join();
         final body = jsonDecode(content);
