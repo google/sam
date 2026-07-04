@@ -66,6 +66,27 @@ void main() {
     expect(nodeID, isNotEmpty);
     expect(nodeID, isNot('unauthenticated'));
 
+    // Start local Mock MCP Server inside the Android emulator
+    final mockMcpServer = await HttpServer.bind(InternetAddress.loopbackIPv4, 9090);
+    mockMcpServer.listen((HttpRequest request) {
+      request.response
+        ..headers.contentType = ContentType.json
+        ..statusCode = HttpStatus.ok
+        ..write(jsonEncode({
+          'jsonrpc': '2.0',
+          'id': 1,
+          'result': {
+            'content': [
+              {
+                'type': 'text',
+                'text': 'Hello from Android!'
+              }
+            ]
+          }
+        }));
+      request.response.close();
+    });
+
     // Register a dummy MCP service inside the Android emulator
     final registerUrl = 'http://127.0.0.1:8080/sam/service/register';
     final regResponse = await http.post(
@@ -80,7 +101,7 @@ void main() {
           'name': 'emulator-tool',
           'description': 'test tool inside emulator'
         },
-        'targetUrl': 'http://127.0.0.1:8080' // dummy loopback inside emulator
+        'targetUrl': 'http://127.0.0.1:9090' // point to local Dart mock server
       }),
     );
     expect(regResponse.statusCode, equals(200));
@@ -121,10 +142,50 @@ void main() {
     }
     expect(discovered, isTrue, reason: 'Emulator failed to discover host-tool');
 
+    // Call host-tool from inside the emulator via its local MCP API
+    final callToolUrl = 'http://127.0.0.1:8080/mcp';
+    var called = false;
+    for (var i = 0; i < 10; i++) {
+      try {
+        final callResponse = await http.post(
+          Uri.parse(callToolUrl),
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer test-token',
+          },
+          body: jsonEncode({
+            'jsonrpc': '2.0',
+            'method': 'tools/call',
+            'params': {
+              'name': 'host-tool',
+              'arguments': {}
+            },
+            'id': 1
+          }),
+        );
+        if (callResponse.statusCode == 200) {
+          final callData = jsonDecode(callResponse.body);
+          final result = callData['result'];
+          if (result != null && result['content'] != null) {
+            final content = result['content'] as List;
+            if (content.any((c) => c['text'].contains('Hello from Host!'))) {
+              called = true;
+              break;
+            }
+          }
+        }
+      } catch (e) {
+        // ignore network setup transient errors
+      }
+      await Future.delayed(const Duration(seconds: 1));
+    }
+    expect(called, isTrue, reason: 'Emulator failed to execute host-tool');
+
     // Wait some time to let the host verify connection and discover emulator-tool
-    await Future.delayed(const Duration(seconds: 5));
+    await Future.delayed(const Duration(seconds: 10));
 
     // Cleanup & Stop
+    await mockMcpServer.close();
     final stopErr = samLib.stop();
     expect(stopErr, isNull);
   });
