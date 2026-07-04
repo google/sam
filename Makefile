@@ -25,7 +25,7 @@ build:
 	go build -v -o "$(OUT_DIR)/sam-hub" ./cmd/sam-hub
 	go build -v -o "$(OUT_DIR)/mcp-client" ./cmd/mcp-client
 
-.PHONY: mobile-ffi-host mobile-ffi-android mobile-ffi-ios mobile-ffi mobile-app-apk mobile-app-apk-emulator
+.PHONY: mobile-ffi-host mobile-ffi-android mobile-ffi-android-x86_64 mobile-ffi-ios mobile-ffi mobile-app-apk mobile-app-apk-emulator
 mobile-ffi-host:
 	mkdir -p "$(OUT_DIR)"
 	CGO_ENABLED=1 go build -v -buildmode=c-shared -o "$(OUT_DIR)/libsam.so" ./mobile/sam-node-ffi
@@ -38,24 +38,26 @@ mobile-ffi-android:
 	mkdir -p "$(OUT_DIR)/android"
 	GOOS=android GOARCH=arm64 CGO_ENABLED=1 CC=$(ANDROID_CC_ARM64) go build -v -buildmode=c-shared -o "$(OUT_DIR)/android/libsam.so" ./mobile/sam-node-ffi
 
-mobile-ffi-ios:
-	mkdir -p "$(OUT_DIR)/ios"
-	GOOS=ios GOARCH=arm64 CGO_ENABLED=1 go build -v -buildmode=c-archive -o "$(OUT_DIR)/ios/libsam.a" ./mobile/sam-node-ffi
-
-mobile-ffi: mobile-ffi-host mobile-ffi-android mobile-ffi-ios
-
-mobile-app-apk: mobile-ffi-android
-	mkdir -p mobile/sam-node-app/android/app/src/main/jniLibs/arm64-v8a
-	cp "$(OUT_DIR)/android/libsam.so" mobile/sam-node-app/android/app/src/main/jniLibs/arm64-v8a/libsam.so
-	cd mobile/sam-node-app && flutter build apk --release
-
-mobile-app-apk-emulator:
+mobile-ffi-android-x86_64:
 	@if [ -z "$(ANDROID_NDK_LATEST)" ]; then \
 		echo "Error: Android NDK not found under $(ANDROID_HOME_RESOLVED)/ndk/. Please install NDK (Side-by-side) via Android Studio or sdkmanager." >&2; \
 		exit 1; \
 	fi
 	mkdir -p "$(OUT_DIR)/android-x86_64"
 	GOOS=android GOARCH=amd64 CGO_ENABLED=1 CC=$(ANDROID_CC_X86_64) go build -v -buildmode=c-shared -o "$(OUT_DIR)/android-x86_64/libsam.so" ./mobile/sam-node-ffi
+
+mobile-ffi-ios:
+	mkdir -p "$(OUT_DIR)/ios"
+	GOOS=ios GOARCH=arm64 CGO_ENABLED=1 go build -v -buildmode=c-archive -o "$(OUT_DIR)/ios/libsam.a" ./mobile/sam-node-ffi
+
+mobile-ffi: mobile-ffi-host mobile-ffi-android mobile-ffi-android-x86_64 mobile-ffi-ios
+
+mobile-app-apk: mobile-ffi-android
+	mkdir -p mobile/sam-node-app/android/app/src/main/jniLibs/arm64-v8a
+	cp "$(OUT_DIR)/android/libsam.so" mobile/sam-node-app/android/app/src/main/jniLibs/arm64-v8a/libsam.so
+	cd mobile/sam-node-app && flutter build apk --release
+
+mobile-app-apk-emulator: mobile-ffi-android-x86_64
 	mkdir -p mobile/sam-node-app/android/app/src/main/jniLibs/x86_64
 	cp "$(OUT_DIR)/android-x86_64/libsam.so" mobile/sam-node-app/android/app/src/main/jniLibs/x86_64/libsam.so
 	cd mobile/sam-node-app && flutter build apk --release

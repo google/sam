@@ -40,10 +40,10 @@ fi
 # 2. Build host binaries
 make build
 
-# 3. Build Android FFI library using the Makefile and copy to Flutter jniLibs
-make mobile-ffi-android
-mkdir -p mobile/sam-node-app/android/app/src/main/jniLibs/arm64-v8a
-cp bin/android/libsam.so mobile/sam-node-app/android/app/src/main/jniLibs/arm64-v8a/libsam.so
+# 3. Build Android x86_64 FFI library using the Makefile and copy to Flutter jniLibs
+make mobile-ffi-android-x86_64
+mkdir -p mobile/sam-node-app/android/app/src/main/jniLibs/x86_64
+cp bin/android-x86_64/libsam.so mobile/sam-node-app/android/app/src/main/jniLibs/x86_64/libsam.so
 
 # 4. Start the mock OIDC server
 python3 tests/e2e/docker/mock_oidc.py &

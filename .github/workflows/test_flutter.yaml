@@ -51,7 +51,7 @@ jobs:
       working-directory: mobile/sam-node-app
 
   e2e-android:
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v6
     - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
@@ -65,13 +65,18 @@ jobs:
       with:
         java-version: '17'
         distribution: 'temurin'
+    - name: Enable KVM group perms
+      run: |
+        echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+        sudo udevadm control --reload-rules
+        sudo udevadm trigger --name-match=kvm
     - name: Run E2E Integration Test in Android Emulator
       uses: ReactiveCircus/android-emulator-runner@b86636dcd5723ef0161e7f288e9bd0ad01258791 # v2.30.0
       with:
         api-level: 30
         target: google_apis
-        arch: arm64-v8a
+        arch: x86_64
         disable-animations: true
-        emulator-options: -no-window -no-snapshot -noaudio -no-boot-anim -camera-back none
-        emulator-boot-timeout: 400
+        emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+        emulator-boot-timeout: 300
         script: ./mobile/mobile_e2e.sh
