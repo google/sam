@@ -30,6 +30,7 @@ import (
 	"github.com/google/sam/internal/node"
 	golog "github.com/ipfs/go-log/v2"
 	"github.com/multiformats/go-multiaddr"
+	"google.golang.org/protobuf/encoding/protojson"
 )
 
 var (
@@ -317,4 +318,60 @@ func EnrollNode(dataDir string, hubURL string, jwt string, allowLoopback bool) e
 	}
 
 	return nil
+}
+
+// FetchHubInfoJSON fetches hub info and returns it as a JSON string.
+// If an error occurs, it returns a JSON object with an "error" field.
+func FetchHubInfoJSON(hubURL string) string {
+	info, err := node.FetchHubInfo(context.Background(), hubURL)
+	if err != nil {
+		return fmt.Sprintf(`{"error": %q}`, err.Error())
+	}
+	jsonBytes, err := protojson.Marshal(info)
+	if err != nil {
+		return fmt.Sprintf(`{"error": %q}`, err.Error())
+	}
+	return string(jsonBytes)
+}
+
+// IsEnrolled checks if the node is enrolled (has a valid identity).
+func IsEnrolled(dataDir string) byte {
+	if activeNode != nil {
+		return 1 // Running node implies enrolled
+	}
+	store, err := node.NewStore(dataDir)
+	if err != nil {
+		return 0
+	}
+	defer store.Close()
+	token, _ := store.LoadIdentity()
+	if len(token) > 0 {
+		return 1
+	}
+	return 0
+}
+
+// GetMeshInfo returns mesh information as a JSON string.
+func GetMeshInfo() string {
+	if activeNode == nil {
+		return `{"error": "node not running"}`
+	}
+	
+	peers := activeNode.Host.Network().Peers()
+	dhtSize := 0
+	if activeNode.DHT != nil && activeNode.DHT.RoutingTable() != nil {
+		dhtSize = activeNode.DHT.RoutingTable().Size()
+	}
+
+	resData := map[string]any{
+		"connected_peers": len(peers),
+		"dht_size":        dhtSize,
+		"node_id":         activeNode.Host.ID().String(),
+	}
+
+	jsonBytes, err := json.Marshal(resData)
+	if err != nil {
+		return fmt.Sprintf(`{"error": %q}`, err.Error())
+	}
+	return string(jsonBytes)
 }

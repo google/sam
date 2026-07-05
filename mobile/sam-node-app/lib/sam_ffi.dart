@@ -24,6 +24,15 @@ typedef EnrollNodeDart = ffi.Pointer<Utf8> Function(
     ffi.Pointer<Utf8> jwt,
     int allowLoopback);
 
+typedef FetchHubInfoJSONC = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> hubURL);
+typedef FetchHubInfoJSONDart = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> hubURL);
+
+typedef IsEnrolledC = ffi.Int8 Function(ffi.Pointer<Utf8> dataDir);
+typedef IsEnrolledDart = int Function(ffi.Pointer<Utf8> dataDir);
+
+typedef GetMeshInfoC = ffi.Pointer<Utf8> Function();
+typedef GetMeshInfoDart = ffi.Pointer<Utf8> Function();
+
 typedef FreeStringC = ffi.Void Function(ffi.Pointer<Utf8> str);
 typedef FreeStringDart = void Function(ffi.Pointer<Utf8> str);
 
@@ -33,6 +42,9 @@ class SamNodeLib {
   late StopNodeDart _stopNode;
   late GetNodeIDDart _getNodeID;
   late EnrollNodeDart _enrollNode;
+  late FetchHubInfoJSONDart _fetchHubInfoJSON;
+  late IsEnrolledDart _isEnrolled;
+  late GetMeshInfoDart _getMeshInfo;
   late FreeStringDart _freeString;
 
   SamNodeLib() {
@@ -48,6 +60,9 @@ class SamNodeLib {
     _stopNode = _dylib.lookupFunction<StopNodeC, StopNodeDart>('StopNode');
     _getNodeID = _dylib.lookupFunction<GetNodeIDC, GetNodeIDDart>('GetNodeID');
     _enrollNode = _dylib.lookupFunction<EnrollNodeC, EnrollNodeDart>('EnrollNode');
+    _fetchHubInfoJSON = _dylib.lookupFunction<FetchHubInfoJSONC, FetchHubInfoJSONDart>('FetchHubInfoJSON');
+    _isEnrolled = _dylib.lookupFunction<IsEnrolledC, IsEnrolledDart>('IsEnrolled');
+    _getMeshInfo = _dylib.lookupFunction<GetMeshInfoC, GetMeshInfoDart>('GetMeshInfo');
     _freeString = _dylib.lookupFunction<FreeStringC, FreeStringDart>('FreeString');
   }
 
@@ -95,5 +110,31 @@ class SamNodeLib {
     final goErr = cErr.toDartString();
     _freeString(cErr);
     return goErr;
+  }
+
+  String? fetchHubInfoJSON(String hubURL) {
+    final cHubURL = hubURL.toNativeUtf8();
+    final cResult = _fetchHubInfoJSON(cHubURL);
+    calloc.free(cHubURL);
+
+    if (cResult.address == 0) return null;
+    final goResult = cResult.toDartString();
+    _freeString(cResult);
+    return goResult;
+  }
+
+  bool isEnrolled(String dataDir) {
+    final cDataDir = dataDir.toNativeUtf8();
+    final result = _isEnrolled(cDataDir);
+    calloc.free(cDataDir);
+    return result != 0;
+  }
+
+  String? getMeshInfo() {
+    final cResult = _getMeshInfo();
+    if (cResult.address == 0) return null;
+    final goResult = cResult.toDartString();
+    _freeString(cResult);
+    return goResult;
   }
 }
