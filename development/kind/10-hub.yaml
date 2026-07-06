@@ -94,6 +94,10 @@ data:
         role: "sam-admin"
       - members: ["user:system:serviceaccount:${NAMESPACE}:node-c-sa"]
         role: "sam-admin"
+      - members: ["user:system:serviceaccount:${NAMESPACE}:node-d-sa"]
+        role: "sam-admin"
+      - members: ["user:system:serviceaccount:${NAMESPACE}:node-e-sa"]
+        role: "sam-admin"
       - members: ["user:system:serviceaccount:${NAMESPACE}:local-node-sa"]
         role: "sam-admin"
     roles:

@@ -23,3 +23,9 @@ nodes:
   - role: worker
     labels:
       sam-role: node-c
+  - role: worker
+    labels:
+      sam-role: node-d
+  - role: worker
+    labels:
+      sam-role: node-e

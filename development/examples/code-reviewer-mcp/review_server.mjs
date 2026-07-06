@@ -10,6 +10,11 @@ const REVIEW_PROMPT =
   "Return concise, actionable comments grouped by severity (bug / risk / style). " +
   "Do not rewrite the code.";
 
+// Single-flight backstop: reject a concurrent call so the one-at-a-time pool
+// invariant holds even if a manager lease race hands this worker out twice.
+const POOL_BUSY = "POOL_BUSY";
+let busy = false;
+
 // Run `gemini -p <prompt>` with the snippet piped on stdin; resolve its stdout.
 function runGemini(code) {
   return new Promise((resolve, reject) => {
@@ -41,11 +46,15 @@ server.registerTool(
     inputSchema: { code: z.string().describe("The code snippet to review (any language).") },
   },
   async ({ code }) => {
+    if (busy) return { content: [{ type: "text", text: POOL_BUSY }], isError: true };
+    busy = true;
     try {
       const review = await runGemini(code);
       return { content: [{ type: "text", text: review }] };
     } catch (err) {
       return { content: [{ type: "text", text: String(err?.message ?? err) }], isError: true };
+    } finally {
+      busy = false;
     }
   },
 );
