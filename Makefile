@@ -52,11 +52,27 @@ mobile-ffi-ios:
 mobile-ffi: mobile-ffi-host mobile-ffi-android mobile-ffi-android-x86_64 mobile-ffi-ios
 
 mobile-app-apk: mobile-ffi-android
+	@if [ -n "$$GOOGLE_SERVICES_JSON" ]; then \
+		echo "Decoding google-services.json from GOOGLE_SERVICES_JSON environment variable..."; \
+		echo "$$GOOGLE_SERVICES_JSON" | base64 --decode > mobile/sam-node-app/android/app/google-services.json; \
+	elif [ ! -f mobile/sam-node-app/android/app/google-services.json ]; then \
+		echo "Error: google-services.json is missing."; \
+		echo "Please set GOOGLE_SERVICES_JSON environment variable with the base64-encoded configuration, or place the file directly at mobile/sam-node-app/android/app/google-services.json"; \
+		exit 1; \
+	fi
 	mkdir -p mobile/sam-node-app/android/app/src/main/jniLibs/arm64-v8a
 	cp "$(OUT_DIR)/android/libsam.so" mobile/sam-node-app/android/app/src/main/jniLibs/arm64-v8a/libsam.so
 	cd mobile/sam-node-app && flutter build apk --release
 
 mobile-app-apk-emulator: mobile-ffi-android-x86_64
+	@if [ -n "$$GOOGLE_SERVICES_JSON" ]; then \
+		echo "Decoding google-services.json from GOOGLE_SERVICES_JSON environment variable..."; \
+		echo "$$GOOGLE_SERVICES_JSON" | base64 --decode > mobile/sam-node-app/android/app/google-services.json; \
+	elif [ ! -f mobile/sam-node-app/android/app/google-services.json ]; then \
+		echo "Error: google-services.json is missing."; \
+		echo "Please set GOOGLE_SERVICES_JSON environment variable with the base64-encoded configuration, or place the file directly at mobile/sam-node-app/android/app/google-services.json"; \
+		exit 1; \
+	fi
 	mkdir -p mobile/sam-node-app/android/app/src/main/jniLibs/x86_64
 	cp "$(OUT_DIR)/android-x86_64/libsam.so" mobile/sam-node-app/android/app/src/main/jniLibs/x86_64/libsam.so
 	cd mobile/sam-node-app && flutter build apk --release
