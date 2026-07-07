@@ -344,7 +344,7 @@ func IsEnrolled(dataDir string) byte {
 	if err != nil {
 		return 0
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	token, _ := store.LoadIdentity()
 	if len(token) > 0 {
 		return 1
@@ -357,7 +357,7 @@ func GetMeshInfo() string {
 	if activeNode == nil {
 		return `{"error": "node not running"}`
 	}
-	
+
 	peers := activeNode.Host.Network().Peers()
 	dhtSize := 0
 	if activeNode.DHT != nil && activeNode.DHT.RoutingTable() != nil {

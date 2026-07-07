@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:convert';
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 class SamDartMcpServer {
@@ -21,7 +22,7 @@ class SamDartMcpServer {
   Future<void> start({int port = 9090, required String goSidecarPort, required String apiToken}) async {
     try {
       _server = await HttpServer.bind(InternetAddress.loopbackIPv4, port);
-      print('SAM Dart MCP Server listening on port $port');
+      debugPrint('SAM Dart MCP Server listening on port $port');
 
       _server!.listen((HttpRequest request) async {
         // Handle CORS if needed, but since it's loopback and called by Go, maybe not strict
@@ -45,7 +46,7 @@ class SamDartMcpServer {
       );
 
     } catch (e) {
-      print('Failed to start Dart MCP Server: $e');
+      debugPrint('Failed to start Dart MCP Server: $e');
     }
   }
 
@@ -53,7 +54,7 @@ class SamDartMcpServer {
   Future<void> stop() async {
     await _server?.close(force: true);
     _sseClients.clear();
-    print('SAM Dart MCP Server stopped');
+    debugPrint('SAM Dart MCP Server stopped');
   }
 
   /// Handles SSE (Server-Sent Events) for MCP stream
@@ -93,7 +94,7 @@ class SamDartMcpServer {
       _sendJsonResponse(request, response);
 
     } catch (e) {
-      print('Error processing MCP request: $e');
+      debugPrint('Error processing MCP request: $e');
       _sendJsonError(request, null, -32700, 'Parse error');
     }
   }
@@ -255,14 +256,14 @@ class SamDartMcpServer {
       );
 
       if (response.statusCode == 200) {
-        print('Service "$serviceName" registered successfully with SAM Go Node!');
+        debugPrint('Service "$serviceName" registered successfully with SAM Go Node!');
         return true;
       } else {
-        print('Failed to register service "$serviceName": ${response.statusCode} - ${response.body}');
+        debugPrint('Failed to register service "$serviceName": ${response.statusCode} - ${response.body}');
         return false;
       }
     } catch (e) {
-      print('Error registering service "$serviceName": $e');
+      debugPrint('Error registering service "$serviceName": $e');
       return false;
     }
   }

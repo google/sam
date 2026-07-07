@@ -128,7 +128,7 @@ class _NodeControlPageState extends State<NodeControlPage> {
   }
 
   Future<void> _loginAndEnroll() async {
-    print('DEBUG: _loginAndEnroll started');
+    debugPrint('DEBUG: _loginAndEnroll started');
     setState(() {
       _loggingIn = true;
       _status = 'Fetching hub info...';
@@ -138,9 +138,9 @@ class _NodeControlPageState extends State<NodeControlPage> {
 
     try {
       final hubUrl = _hubController.text.trim();
-      print('DEBUG: Fetching hub info from $hubUrl');
+      debugPrint('DEBUG: Fetching hub info from $hubUrl');
       final infoJson = _samLib.fetchHubInfoJSON(hubUrl);
-      print('DEBUG: Hub info JSON: $infoJson');
+      debugPrint('DEBUG: Hub info JSON: $infoJson');
       if (infoJson == null) {
         throw Exception('Failed to fetch hub info');
       }
@@ -154,7 +154,7 @@ class _NodeControlPageState extends State<NodeControlPage> {
       final clientId = info['clientId'];
       final audience = info['audience'];
 
-      print('DEBUG: Issuer: $issuer, ClientId: $clientId, Audience: $audience');
+      debugPrint('DEBUG: Issuer: $issuer, ClientId: $clientId, Audience: $audience');
 
       if (issuer == null || clientId == null) {
         throw Exception('Incomplete hub info received');
@@ -166,9 +166,9 @@ class _NodeControlPageState extends State<NodeControlPage> {
 
       // Simple OIDC discovery
       final discoveryUrl = '$issuer/.well-known/openid-configuration';
-      print('DEBUG: Fetching OIDC config from $discoveryUrl');
+      debugPrint('DEBUG: Fetching OIDC config from $discoveryUrl');
       final discResponse = await http.get(Uri.parse(discoveryUrl));
-      print('DEBUG: OIDC config response status: ${discResponse.statusCode}');
+      debugPrint('DEBUG: OIDC config response status: ${discResponse.statusCode}');
       if (discResponse.statusCode != 200) {
         throw Exception('Failed to discover OIDC endpoints');
       }
@@ -176,7 +176,7 @@ class _NodeControlPageState extends State<NodeControlPage> {
       final authUrl = discData['authorization_endpoint'];
       final tokenUrl = discData['token_endpoint'];
 
-      print('DEBUG: AuthURL: $authUrl, TokenURL: $tokenUrl');
+      debugPrint('DEBUG: AuthURL: $authUrl, TokenURL: $tokenUrl');
 
       if (authUrl == null || tokenUrl == null) {
         throw Exception('Missing endpoints in OIDC discovery');
@@ -188,10 +188,10 @@ class _NodeControlPageState extends State<NodeControlPage> {
         try {
           server = await HttpServer.bind(InternetAddress.anyIPv4, port);
           selectedPort = port;
-          print('DEBUG: Bound local server to port $port (any IPv4)');
+          debugPrint('DEBUG: Bound local server to port $port (any IPv4)');
           break;
         } catch (e) {
-          print('DEBUG: Failed to bind to port $port: $e');
+          debugPrint('DEBUG: Failed to bind to port $port: $e');
         }
       }
 
@@ -222,8 +222,8 @@ class _NodeControlPageState extends State<NodeControlPage> {
 
       final uri = Uri.parse(authUrl).replace(queryParameters: queryParams);
 
-      print('OIDC Login URL: $uri');
-      print('Expecting callback on: $redirectUri');
+      debugPrint('OIDC Login URL: $uri');
+      debugPrint('Expecting callback on: $redirectUri');
 
       setState(() {
         _status = 'Opening browser for login...';
@@ -233,23 +233,23 @@ class _NodeControlPageState extends State<NodeControlPage> {
         throw Exception('Could not launch login URL');
       }
 
-      print('Waiting for callback on local server...');
+      debugPrint('Waiting for callback on local server...');
 
       String? code;
       String? receivedState;
 
       await for (final request in server) {
-        print('DEBUG: Received request: ${request.requestedUri}');
+        debugPrint('DEBUG: Received request: ${request.requestedUri}');
 
         if (request.requestedUri.path == '/callback') {
           final query = request.requestedUri.queryParameters;
           receivedState = query['state'];
           code = query['code'];
 
-          print('DEBUG: Callback state: $receivedState, code: $code');
+          debugPrint('DEBUG: Callback state: $receivedState, code: $code');
 
           if (receivedState != state) {
-            print('DEBUG: State mismatch. Expected $state, got $receivedState');
+            debugPrint('DEBUG: State mismatch. Expected $state, got $receivedState');
             request.response.statusCode = 400;
             request.response.write('Invalid state parameter');
             await request.response.close();
@@ -257,7 +257,7 @@ class _NodeControlPageState extends State<NodeControlPage> {
           }
 
           if (code == null) {
-            print('DEBUG: No code in callback');
+            debugPrint('DEBUG: No code in callback');
             request.response.statusCode = 400;
             request.response.write('No code received');
             await request.response.close();
@@ -268,10 +268,10 @@ class _NodeControlPageState extends State<NodeControlPage> {
           request.response.write(
               '<html><body><h1>Authorization successful!</h1><p>You can close this window and return to the app.</p></body></html>');
           await request.response.close();
-          print('DEBUG: Callback handled successfully');
+          debugPrint('DEBUG: Callback handled successfully');
           break; // Success
         } else {
-          print(
+          debugPrint(
               'DEBUG: Ignoring non-callback request: ${request.requestedUri.path}');
           request.response.statusCode = 404;
           await request.response.close();
@@ -341,13 +341,14 @@ class _NodeControlPageState extends State<NodeControlPage> {
 
     try {
       final hubUrl = _hubController.text.trim();
-      print('DEBUG: Device Login: Fetching hub info from $hubUrl');
+      debugPrint('DEBUG: Device Login: Fetching hub info from $hubUrl');
       final infoJson = _samLib.fetchHubInfoJSON(hubUrl);
       if (infoJson == null) throw Exception('Failed to fetch hub info');
 
       final info = jsonDecode(infoJson);
-      if (info['error'] != null)
+      if (info['error'] != null) {
         throw Exception('Hub info error: ${info['error']}');
+      }
 
       final issuer = info['oidcIssuer'];
       final clientId = info['clientId'];
@@ -360,8 +361,9 @@ class _NodeControlPageState extends State<NodeControlPage> {
       // OIDC discovery
       final discoveryUrl = '$issuer/.well-known/openid-configuration';
       final discResponse = await http.get(Uri.parse(discoveryUrl));
-      if (discResponse.statusCode != 200)
+      if (discResponse.statusCode != 200) {
         throw Exception('Failed to discover OIDC endpoints');
+      }
 
       final discData = jsonDecode(discResponse.body);
       final deviceAuthUrl = discData['device_authorization_endpoint'];
@@ -371,7 +373,7 @@ class _NodeControlPageState extends State<NodeControlPage> {
         throw Exception('Device Authorization not supported by Issuer');
       }
 
-      print('DEBUG: Device Auth Endpoint: $deviceAuthUrl');
+      debugPrint('DEBUG: Device Auth Endpoint: $deviceAuthUrl');
 
       // 1. Request Device Code
       final deviceCodeResp = await http.post(
@@ -395,8 +397,8 @@ class _NodeControlPageState extends State<NodeControlPage> {
           deviceData['verification_uri'];
       int interval = deviceData['interval'] ?? 5; // seconds
 
-      print('DEBUG: User Code: $userCode');
-      print('DEBUG: Verification URI: $verificationUri');
+      debugPrint('DEBUG: User Code: $userCode');
+      debugPrint('DEBUG: Verification URI: $verificationUri');
 
       // 2. Show UI
       _devicePollingActive = true;
@@ -414,7 +416,7 @@ class _NodeControlPageState extends State<NodeControlPage> {
 
   Future<void> _pollForDeviceToken(
       String tokenUrl, String clientId, String deviceCode, int interval) async {
-    print('DEBUG: Starting device token polling...');
+    debugPrint('DEBUG: Starting device token polling...');
     bool polling = true;
     while (polling && _devicePollingActive) {
       await Future.delayed(Duration(seconds: interval));
@@ -452,16 +454,16 @@ class _NodeControlPageState extends State<NodeControlPage> {
           final error = errorData['error'];
 
           if (error == 'authorization_pending') {
-            print('DEBUG: Authorization pending...');
+            debugPrint('DEBUG: Authorization pending...');
           } else if (error == 'slow_down') {
-            print('DEBUG: Slow down requested');
+            debugPrint('DEBUG: Slow down requested');
             interval += 5; // Slow down
           } else {
             throw Exception('Device login error: $error');
           }
         }
       } catch (e) {
-        print('DEBUG: Polling error: $e');
+        debugPrint('DEBUG: Polling error: $e');
         setState(() {
           _status = 'Polling failed: $e';
         });
@@ -593,7 +595,7 @@ class _NodeControlPageState extends State<NodeControlPage> {
           });
         }
       } catch (e) {
-        print('DEBUG: Error parsing mesh info: $e');
+        debugPrint('DEBUG: Error parsing mesh info: $e');
       }
     }
   }
@@ -623,7 +625,7 @@ class _NodeControlPageState extends State<NodeControlPage> {
     try {
       await _exposeChannel.invokeMethod('startBackgroundService');
     } catch (e) {
-      print('DEBUG: Failed to start background service: $e');
+      debugPrint('DEBUG: Failed to start background service: $e');
       // Non-fatal, but node might be killed in background
     }
 
@@ -651,7 +653,7 @@ class _NodeControlPageState extends State<NodeControlPage> {
     try {
       _exposeChannel.invokeMethod('stopBackgroundService');
     } catch (e) {
-      print('DEBUG: Failed to stop background service: $e');
+      debugPrint('DEBUG: Failed to stop background service: $e');
     }
 
     setState(() {
@@ -778,6 +780,7 @@ class _NodeControlPageState extends State<NodeControlPage> {
                         try {
                           await _exposeChannel.invokeMethod('setExposeBattery', {'enabled': value});
                         } catch (e) {
+                          if (!mounted) return;
                           ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(content: Text('Failed to toggle battery exposure: $e')),
                           );
@@ -796,6 +799,7 @@ class _NodeControlPageState extends State<NodeControlPage> {
                         try {
                           await _exposeChannel.invokeMethod('setExposeLocation', {'enabled': value});
                         } catch (e) {
+                          if (!mounted) return;
                           ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(content: Text('Failed to toggle location exposure: $e')),
                           );
@@ -855,6 +859,7 @@ class _NodeControlPageState extends State<NodeControlPage> {
                                 targetUrl: _externalMcpUrlController.text,
                                 description: _externalMcpDescController.text,
                               );
+                              if (!mounted) return;
                               if (success) {
                                 setState(() {
                                   _externalMcpRegistered = true;
@@ -951,7 +956,7 @@ class _NodeControlPageState extends State<NodeControlPage> {
                           final model = FirebaseAI.googleAI().generativeModel(
                             model: 'gemini-2.5-flash',
                           );
-                          print('DEBUG: Model initialized: ${model.hashCode}');
+                          debugPrint('DEBUG: Model initialized: ${model.hashCode}');
                           setState(() {
                             _status = 'Debug: Model initialized';
                           });
@@ -1000,7 +1005,7 @@ class _NodeControlPageState extends State<NodeControlPage> {
                           boxShadow: [
                             if (isRunning)
                               BoxShadow(
-                                color: Colors.green.withOpacity(0.5),
+                                color: Colors.green.withValues(alpha: 0.5),
                                 spreadRadius: 4,
                                 blurRadius: 4,
                               )
