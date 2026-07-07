@@ -17,11 +17,10 @@ on:
   push:
     branches:
       - 'main'
-      - 'mmobile'
     tags:
       - 'v*'
   pull_request:
-    branches: [ main, mmobile ]
+    branches: [ main ]
 
 env:
   GO_VERSION: "1.26"
@@ -70,6 +69,17 @@ jobs:
         echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
         sudo udevadm control --reload-rules
         sudo udevadm trigger --name-match=kvm
+    - name: Inject Google Services Configuration
+      env:
+        GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
+      run: |
+        if [ -n "$GOOGLE_SERVICES_JSON_BASE64" ]; then
+          echo "[CI] Decoding google-services.json from secret..."
+          echo "$GOOGLE_SERVICES_JSON_BASE64" | base64 --decode > mobile/sam-node-app/android/app/google-services.json
+        else
+          echo "[CI] GOOGLE_SERVICES_JSON_BASE64 secret not set, copying dummy configuration template..."
+          cp mobile/sam-node-app/android/app/google-services.json.tmpl mobile/sam-node-app/android/app/google-services.json
+        fi
     - name: Run E2E Integration Test in Android Emulator
       uses: ReactiveCircus/android-emulator-runner@eaf4c246b5ce90db0e68560f6443978a636797aa # v2.30.0
       with:
@@ -80,3 +90,4 @@ jobs:
         emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
         emulator-boot-timeout: 300
         script: ./mobile/mobile_e2e.sh
+

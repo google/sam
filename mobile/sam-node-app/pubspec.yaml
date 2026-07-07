@@ -13,6 +13,11 @@ dependencies:
   ffi: ^2.1.0
   path_provider: ^2.1.1
   http: ^1.2.0
+  url_launcher: ^6.2.5
+  crypto: ^3.0.3
+  qr_flutter: ^4.1.0
+  firebase_core: ^4.0.0
+  firebase_ai: ^3.0.0
 
 dev_dependencies:
   flutter_test:

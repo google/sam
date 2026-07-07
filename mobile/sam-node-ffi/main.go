@@ -68,6 +68,35 @@ func EnrollNode(dataDir *C.char, hubURL *C.char, jwt *C.char, allowLoopback C.ch
 	return nil
 }
 
+//export FetchHubInfoJSON
+func FetchHubInfoJSON(hubURL *C.char) *C.char {
+	goHubURL := C.GoString(hubURL)
+	jsonStr := ffi.FetchHubInfoJSON(goHubURL)
+	return C.CString(jsonStr)
+}
+
+//export IsEnrolled
+func IsEnrolled(dataDir *C.char) C.char {
+	goDataDir := C.GoString(dataDir)
+	return C.char(ffi.IsEnrolled(goDataDir))
+}
+
+//export GetMeshInfo
+func GetMeshInfo() *C.char {
+	jsonStr := ffi.GetMeshInfo()
+	return C.CString(jsonStr)
+}
+
+//export CallRemoteTool
+func CallRemoteTool(peerID *C.char, toolName *C.char, argsJSON *C.char) *C.char {
+	goPeerID := C.GoString(peerID)
+	goToolName := C.GoString(toolName)
+	goArgsJSON := C.GoString(argsJSON)
+
+	jsonStr := ffi.CallRemoteTool(goPeerID, goToolName, goArgsJSON)
+	return C.CString(jsonStr)
+}
+
 //export FreeString
 func FreeString(str *C.char) {
 	C.free(unsafe.Pointer(str))

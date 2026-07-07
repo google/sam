@@ -32,6 +32,7 @@ cleanup() {
   docker kill host-node sam-hub mock-oidc host-mock-mcp >/dev/null 2>&1 || true
   docker network rm sam-net >/dev/null 2>&1 || true
   rm -rf /tmp/host-node-data
+  adb reverse --remove-all || true
 }
 trap cleanup EXIT
 
@@ -57,6 +58,9 @@ docker run --name mock-oidc \
 # Wait for OIDC server to be ready
 timeout 15s bash -c 'until curl -s http://127.0.0.1:18080/ >/dev/null; do sleep 0.5; done'
 
+# Set up adb reverse for OIDC
+adb reverse tcp:18080 tcp:18080
+
 # 4. Start the Hub container
 docker run --name sam-hub \
   --network sam-net \
@@ -67,13 +71,17 @@ docker run --name sam-hub \
   sam-hub:local \
   --bind-address 0.0.0.0:37001 \
   --listen /ip4/0.0.0.0/tcp/37002 \
-  --external-multiaddr /ip4/10.0.2.2/tcp/37002,/dns4/sam-hub/tcp/37002 \
+  --external-multiaddr /ip4/10.0.2.2/tcp/37002,/ip4/127.0.0.1/tcp/37002,/dns4/sam-hub/tcp/37002 \
   --issuer http://mock-oidc:18080 \
   --mesh public-mesh \
   --policy-file /policy.yaml \
   --insecure-skip-tls-verify \
   --allow-loopback \
   --log-level debug
+
+# Set up adb reverse for Hub
+adb reverse tcp:37001 tcp:37001
+adb reverse tcp:37002 tcp:37002
 
 # Wait for Hub to be ready
 timeout 15s bash -c 'until curl -s http://127.0.0.1:37001/info >/dev/null; do sleep 0.5; done'

@@ -64,13 +64,19 @@ Compiles `bin/android/libsam.so` targeting Android ARM64 devices:
 make mobile-ffi-android
 ```
 
-### 3. Build iOS FFI Library
+### 3. Build Android Emulator FFI Library
+Compiles `bin/android/libsam.so` targeting Android x86_64 emulator environments:
+```bash
+make mobile-ffi-android-x86_64
+```
+
+### 4. Build iOS FFI Library
 Compiles `bin/ios/libsam.a` targeting iOS ARM64 devices:
 ```bash
 make mobile-ffi-ios
 ```
 
-### 4. Build Complete Android Release APK
+### 5. Build Complete Android Release APK
 Compiles the FFI library, bundles it inside the Flutter project, and builds the final release APK:
 ```bash
 make mobile-app-apk

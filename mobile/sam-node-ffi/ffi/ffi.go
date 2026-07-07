@@ -29,7 +29,9 @@ import (
 
 	"github.com/google/sam/internal/node"
 	golog "github.com/ipfs/go-log/v2"
+	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
+	"google.golang.org/protobuf/encoding/protojson"
 )
 
 var (
@@ -285,11 +287,19 @@ func EnrollNode(dataDir string, hubURL string, jwt string, allowLoopback bool) e
 	enrollCtx, enrollCancel := context.WithCancel(context.Background())
 	defer enrollCancel()
 
+	var listenAddrs []string
+	if allowLoopback {
+		listenAddrs = []string{"/ip4/127.0.0.1/udp/0/quic-v1", "/ip4/127.0.0.1/tcp/0"}
+	} else {
+		listenAddrs = []string{"/ip4/0.0.0.0/udp/0/quic-v1", "/ip4/0.0.0.0/tcp/0"}
+	}
+
 	meshNode, err := node.NewSamNode(node.Options{
 		PrivKey:       priv,
 		HubAddrs:      initHubAddrs,
 		Store:         store,
 		AllowLoopback: allowLoopback,
+		ListenAddrs:   listenAddrs,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create node for enrollment: %w", err)
@@ -317,4 +327,107 @@ func EnrollNode(dataDir string, hubURL string, jwt string, allowLoopback bool) e
 	}
 
 	return nil
+}
+
+// FetchHubInfoJSON fetches hub info and returns it as a JSON string.
+// If an error occurs, it returns a JSON object with an "error" field.
+func FetchHubInfoJSON(hubURL string) string {
+	info, err := node.FetchHubInfo(context.Background(), hubURL)
+	if err != nil {
+		return fmt.Sprintf(`{"error": %q}`, err.Error())
+	}
+	jsonBytes, err := protojson.Marshal(info)
+	if err != nil {
+		return fmt.Sprintf(`{"error": %q}`, err.Error())
+	}
+	return string(jsonBytes)
+}
+
+// IsEnrolled checks if the node is enrolled (has a valid identity).
+func IsEnrolled(dataDir string) byte {
+	mu.Lock()
+	running := activeNode != nil
+	mu.Unlock()
+	if running {
+		return 1 // Running node implies enrolled
+	}
+	store, err := node.NewStore(dataDir)
+	if err != nil {
+		return 0
+	}
+	defer func() { _ = store.Close() }()
+	token, _ := store.LoadIdentity()
+	if len(token) > 0 {
+		return 1
+	}
+	return 0
+}
+
+// GetMeshInfo returns mesh information as a JSON string.
+func GetMeshInfo() string {
+	mu.Lock()
+	defer mu.Unlock()
+
+	if activeNode == nil {
+		return `{"error": "node not running"}`
+	}
+	if activeNode.Host == nil {
+		return `{"error": "host not initialized"}`
+	}
+
+	peers := activeNode.Host.Network().Peers()
+	dhtSize := 0
+	if activeNode.DHT != nil && activeNode.DHT.RoutingTable() != nil {
+		dhtSize = activeNode.DHT.RoutingTable().Size()
+	}
+
+	resData := map[string]any{
+		"connected_peers": len(peers),
+		"dht_size":        dhtSize,
+		"node_id":         activeNode.Host.ID().String(),
+	}
+
+	jsonBytes, err := json.Marshal(resData)
+	if err != nil {
+		return fmt.Sprintf(`{"error": %q}`, err.Error())
+	}
+	return string(jsonBytes)
+}
+
+// CallRemoteTool calls an MCP tool on a remote peer and returns the result as a JSON string.
+func CallRemoteTool(peerIDStr string, toolName string, argsJSON string) string {
+	mu.Lock()
+	n := activeNode
+	mu.Unlock()
+
+	if n == nil {
+		return `{"error": "node not running"}`
+	}
+	if n.Host == nil {
+		return `{"error": "host not initialized"}`
+	}
+
+	targetPeer, err := peer.Decode(peerIDStr)
+	if err != nil {
+		return fmt.Sprintf(`{"error": "invalid peer ID: %s"}`, err.Error())
+	}
+
+	var params any
+	if argsJSON != "" && argsJSON != "{}" {
+		if err := json.Unmarshal([]byte(argsJSON), &params); err != nil {
+			return fmt.Sprintf(`{"error": "invalid arguments JSON: %s"}`, err.Error())
+		}
+	}
+
+	res, err := n.CallMCPTool(context.Background(), targetPeer, toolName, params)
+	if err != nil {
+		return fmt.Sprintf(`{"error": "failed to call tool: %s"}`, err.Error())
+	}
+
+	jsonBytes, err := json.Marshal(res)
+	if err != nil {
+		return fmt.Sprintf(`{"error": "failed to marshal result: %s"}`, err.Error())
+	}
+
+	return string(jsonBytes)
 }
