@@ -2,32 +2,147 @@
 title: "Kubernetes Deployment and Local Testing Guide"
 linkTitle: "Kubernetes Deployment and Local Testing Guide"
 ---
-This guide explains how to deploy the `sam-hub` in a Kubernetes cluster and how to test it locally using `kind` and `cloud-provider-kind`.
+This guide explains how to deploy the `sam-hub` in a Kubernetes cluster and how to test it locally with `kind` — using the bundled `make kind-*` targets for a one-command mesh, or a manual setup with `cloud-provider-kind`.
 
 > [!TIP]
 > This guide focuses on local development sandboxing. For production-grade Kubernetes deployments (GKE, EKS, AKS), see the [Production Kubernetes Deployment](../../user/kubernetes-deployment/) guide.
 
-This guide supports using either **Google OIDC** or a **Mock OIDC Provider** for authentication. The mock provider is recommended for quick local testing as it does not require creating external credentials.
+---
+
+## 1. Local Testing with Kind
+
+The repository ships a one-command local mesh under `development/kind/`, driven by `make` targets. This is the fastest way to get a running hub and a few nodes on your machine.
+
+### Automated Mesh (Recommended)
+
+```bash
+make kind-up
+```
+
+This creates a `sam-kind` cluster (one control-plane plus workers for the hub and `node-a`, `node-b`, `node-c`), builds the `sam-hub:local` and `sam-node:local` images, loads them into the cluster, and deploys:
+
+- The **hub**, configured to trust the cluster's own OIDC issuer.
+- Three **nodes** declared in `development/kind/mesh-config.yaml`: `node-a` (bare), `node-b` (hosts the `calc-mcp` example service), and `node-c` (hosts the `greeter-mcp` example service).
+
+Nodes authenticate to the hub via **Workload Identity Federation** (projected ServiceAccount tokens), so no static secrets or mock OIDC provider are needed. The hub is exposed to the host on `127.0.0.1:9090` (HTTP enroll) and `127.0.0.1:4001` (libp2p) via a NodePort and the cluster's `extraPortMappings` — `cloud-provider-kind` is not required.
+
+Once everything is up, `make kind-up` opens a tmux session with live per-pod logs (hub and each node in its own pane). Manage the mesh with:
+
+```bash
+make kind-up ARGS=-s     # bring the mesh up without attaching the log view
+make kind-logs           # (re)attach the live-logs tmux session
+make kind-down           # delete the sam-kind cluster
+```
+
+### Mesh Layout (`mesh-config.yaml`)
+
+The nodes that make up the dev mesh are declared in `development/kind/mesh-config.yaml`. Each entry maps a node to an optional service:
+
+```yaml
+# node -> service. A blank value means a bare node (no service, e.g. a caller).
+# The service value is a folder name under development/examples/.
+node-a:
+node-b: calc-mcp
+node-c: greeter-mcp
+```
+
+- The key is the node's name. The cluster currently ships with a hub plus these **three** agent nodes; each is pinned to a matching worker via the `sam-role` labels in `kind-config.yaml`.
+- A **blank** value is a bare node — a `sam-node` with no local service, useful as a caller/consumer.
+- A **non-blank** value is a folder name under `development/examples/`. That service is built and deployed as a **sidecar** next to the node, and the node is configured to advertise it to the mesh.
+
+When a node has a service, `make kind-up` builds the service image from its `Dockerfile`, loads it into the cluster, and mounts the service's `sam-node-config.yaml` into the node. Because `make kind-up` only runs against a fresh cluster (it refuses if `sam-kind` already exists), **services are (re)deployed on cluster recreation** — after editing `mesh-config.yaml` or a service, run `make kind-down && make kind-up` to pick up the change.
+
+### Adding and Testing a New Service
+
+A service is any backend a node advertises to the mesh. Its kind is set by the `type` field in `sam-node-config.yaml`. SAM currently supports `mcp` (an MCP server) and `inference` (an LLM inference endpoint). The repository ships example MCP services under `development/examples/` (`calc-mcp`, `greeter-mcp`, `code-reviewer-mcp`, and `everything-mcp`) which are the easiest starting point. Using `calc-mcp` as a template:
+
+1. **Create the service folder** `development/examples/my-mcp/` with:
+   - The service backend (e.g. `my_server.py`) listening on a local port, plus a `Dockerfile` and any `requirements.txt`.
+   - A `sam-node-config.yaml` declaring the service. Set `type` to the service kind and point `target_url` at the backend's local port:
+     ```yaml
+     version: "v1alpha1"
+     attenuation:
+       policies:
+     services:
+       - type: "mcp"
+         name: "my-service"
+         description: "What it does"
+         target_url: "http://127.0.0.1:7779/mcp"
+     ```
+     The sidecar and `sam-node` share the pod's network, so `target_url` is always `127.0.0.1:<port>`, where `<port>` matches the port your service listens on.
+
+2. **Assign it to a node** in `mesh-config.yaml` — replace an existing mapping or use a free node slot (`node-a`, `node-b`, `node-c`):
+   ```yaml
+   node-a: my-mcp
+   node-b: calc-mcp
+   node-c: greeter-mcp
+   ```
+   > [!NOTE]
+   > There are three node slots because `kind-config.yaml` defines three workers labeled `sam-role: node-a|node-b|node-c`. To host more than three services at once, add a matching labeled worker there too.
+
+3. **Recreate the cluster** so the new service is built and deployed:
+   ```bash
+   make kind-down && make kind-up
+   ```
+
+4. **Discover and call it** from another node — enroll a local node and use the MCP client:
+   ```bash
+   make kind-local-node
+   # in another shell:
+   ./bin/mcp-client -url http://127.0.0.1:9099/mcp -token devtoken -tool find_remote_tools -args '{}'
+   ```
+   `find_remote_tools` lists the discovered tools (e.g. `mcp://my-service/...`) and the peer hosting them; pass that `peer_id` and `tool_name` to `call_remote_tool` to invoke it.
+
+### Enrolling a Local Node
+
+To iterate on `sam-node` without rebuilding the image, enroll a locally-built binary into the running mesh:
+
+```bash
+make build            # produce ./bin/sam-node
+make kind-local-node
+```
+
+This mints a ServiceAccount token and runs `./bin/sam-node` against the hub at `127.0.0.1:9090`, exposing its MCP API on `127.0.0.1:9099` with the API token `devtoken`. Extra flags pass through via `ARGS`, e.g. to host an example service:
+
+```bash
+make kind-local-node ARGS="--config development/examples/calc-mcp/sam-node-config.yaml"
+```
+
+You can then drive it with the bundled MCP client:
+
+```bash
+./bin/mcp-client -url http://127.0.0.1:9099/mcp -token devtoken -tool find_remote_tools -args '{}'
+```
+
+### End-to-End Mesh Check
+
+To verify the full discovery-and-call path against a freshly built mesh:
+
+```bash
+make kind-e2e-mesh
+```
+
+This enrolls a local node, waits for it to discover `mcp://calculator/add` (hosted by `node-b`), calls `add(2, 3)`, and asserts the result is `5`.
 
 ---
 
-## 1. Mock OIDC Provider Manifests (Optional)
+## 2. Manual Deployment
+
+If you'd rather deploy the pieces by hand — for example to exercise the Mock OIDC provider or wire up Google OIDC — you can apply the manifests below to a cluster yourself. SAM supports either a **Mock OIDC Provider** (recommended for quick local testing, since it needs no external credentials) or **Google OIDC** for authentication. The local `kind` path below uses `cloud-provider-kind` to allocate LoadBalancer IPs.
+
+### Mock OIDC Provider Manifests (Optional)
 
 The manifests for the mock OIDC provider are available in [mock-oidc.yaml](manifests/mock-oidc.yaml).
 
 [mock-oidc.yaml](manifests/mock-oidc.yaml ':include')
 
----
-
-## 2. SAM Hub Manifests
+### SAM Hub Manifests
 
 The manifests for the SAM Hub are available in [sam-hub.yaml](manifests/sam-hub.yaml).
 
 [sam-hub.yaml](manifests/sam-hub.yaml ':include')
 
----
-
-## 3. Configuring Google OIDC (Optional)
+### Configuring Google OIDC (Optional)
 
 To use Google as the OIDC provider instead of the mock provider:
 
@@ -39,28 +154,26 @@ To use Google as the OIDC provider instead of the mock provider:
     SAM_OIDC_SECRET: "<your-client-secret>"
     ```
 
----
+### Deploying to Kind
 
-## 4. Local Testing with Kind
-
-### Step 1: Create a Kind Cluster
+#### Step 1: Create a Kind Cluster
 ```bash
 kind create cluster --name sam-test
 ```
 
-### Step 2: Run cloud-provider-kind
+#### Step 2: Run cloud-provider-kind
 Run it in a separate terminal:
 ```bash
 cloud-provider-kind
 ```
 
-### Step 3: Load Images into Kind
+#### Step 3: Load Images into Kind
 ```bash
 kind load docker-image sam-hub:local --name sam-test
 kind load docker-image sam-node:local --name sam-test
 ```
 
-### Step 4: Apply Manifests
+#### Step 4: Apply Manifests
 
 If using the **Mock OIDC Provider**:
 ```bash
@@ -73,7 +186,7 @@ If using **Google OIDC**:
 kubectl apply -f sam-hub.yaml
 ```
 
-### Step 5: Get the External IP
+#### Step 5: Get the External IP
 You can use the following command to extract the allocated IP into an environment variable:
 
 ```bash
@@ -82,7 +195,7 @@ HUB_IP=$(kubectl get svc sam-hub -o jsonpath='{.status.loadBalancer.ingress[0].i
 
 ---
 
-## 5. Connecting an Agent
+## 3. Connecting an Agent
 
 To connect a `sam-node` to the hub, you just need the hub's external IP and port.
 
@@ -120,7 +233,7 @@ sam-node run
 
 ---
 
-## 6. Automating Node Deployment
+## 4. Automating Node Deployment
 
 To automate the deployment of `sam-nodes` in Kubernetes and have them fetch the JWT token automatically, you can use a standard Kubernetes `Deployment` or `StatefulSet`.
 
@@ -213,7 +326,7 @@ sam-node run \
 
 ---
 
-## 7. Configuring Workload Identity in Kubernetes
+## 5. Configuring Workload Identity in Kubernetes
 
 Workload Identity allows `sam-node` pods to authenticate with the `sam-hub` using their Kubernetes ServiceAccount token, removing the need for static credentials.
 

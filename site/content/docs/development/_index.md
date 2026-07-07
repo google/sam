@@ -77,16 +77,13 @@ make test-e2e-container
 
 ## Local Kubernetes Test Setup
 
-For end-to-end integration testing in a local Kubernetes environment:
+For end-to-end integration testing in a local Kubernetes environment, the repository provides `make` targets that stand up a complete mesh in `kind` with a single command:
 
-1. **Start Kind Cluster**:
-   Ensure you have a Kind cluster running.
-2. **Build and Load Images**:
-   ```bash
-   make docker-build-node
-   make docker-build-hub
-   kind load docker-image sam-node:local
-   kind load docker-image sam-hub:local
-   ```
-3. **Deploy Config Templates**:
-   Deploy and template configuration files located under `.github/k8s/` or `development/kind/` to spin up local nodes and vLLM inference engines.
+```bash
+make kind-up          # create the sam-kind cluster, build+load images, deploy hub + nodes
+make kind-local-node  # enroll a locally-built ./bin/sam-node into the mesh
+make kind-e2e-mesh    # run the end-to-end discover-and-call check
+make kind-down        # tear the cluster down
+```
+
+`make kind-up` builds the `sam-hub:local` and `sam-node:local` images, creates a `sam-kind` cluster, and deploys the hub plus the nodes declared in `development/kind/mesh-config.yaml`. See the [Kubernetes Deployment and Local Testing Guide](kubernetes-deployment/#1-local-testing-with-kind) for details.
