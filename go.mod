@@ -12,7 +12,7 @@ require (
 	github.com/libp2p/go-libp2p v0.48.1-0.20260603104142-e6309a296286
 	github.com/libp2p/go-libp2p-gostream v0.6.0
 	github.com/libp2p/go-libp2p-http v0.5.0
-	github.com/libp2p/go-libp2p-kad-dht v0.40.0
+	github.com/libp2p/go-libp2p-kad-dht v0.41.0
 	github.com/libp2p/go-libp2p-pubsub v0.16.0
 	github.com/libp2p/go-msgio v0.3.0
 	github.com/modelcontextprotocol/go-sdk v1.6.1
