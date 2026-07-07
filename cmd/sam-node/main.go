@@ -30,6 +30,7 @@ import (
 	"github.com/google/sam/api"
 	"github.com/google/sam/internal/node"
 	golog "github.com/ipfs/go-log/v2"
+	"github.com/mattn/go-isatty"
 	"github.com/multiformats/go-multiaddr"
 	madns "github.com/multiformats/go-multiaddr-dns"
 	"github.com/spf13/cobra"
@@ -51,6 +52,7 @@ func init() {
 
 var (
 	hubAddr                  string
+	joinFlag                 bool
 	jwtFlag                  string
 	jwtPathFlag              string
 	clientIDFlag             string
@@ -85,6 +87,51 @@ var (
 
 var logger = golog.Logger("sam-node-cli")
 
+func interactiveLogin(ctx context.Context, store *node.Store, targetHub string) (string, string, *api.HubInfoResponse, error) {
+	if targetHub == "" {
+		fmt.Print("No hub URL provided. Do you want to join the default community testing network (https://bananas.sam-mesh.dev)? [y/N]: ")
+		reader := bufio.NewReader(os.Stdin)
+		response, err := reader.ReadString('\n')
+		if err != nil {
+			return "", "", nil, fmt.Errorf("failed to read input: %w", err)
+		}
+		response = strings.ToLower(strings.TrimSpace(response))
+		if response != "y" && response != "yes" {
+			return "", "", nil, fmt.Errorf("join aborted by user")
+		}
+		targetHub = "https://bananas.sam-mesh.dev"
+	}
+
+	if !strings.HasPrefix(targetHub, "http://") && !strings.HasPrefix(targetHub, "https://") {
+		targetHub = "https://" + targetHub
+	}
+	targetHub = strings.TrimSuffix(targetHub, "/")
+
+	dummyNode := &node.SamNode{Store: store}
+
+	fmt.Printf("Discovering hub info from %s...\n", targetHub)
+	hubInfo, err := node.FetchHubInfo(ctx, targetHub)
+	if err != nil {
+		return "", "", nil, fmt.Errorf("failed to discover hub info: %w", err)
+	}
+
+	fmt.Printf("OIDC Issuer discovered: %s\n", hubInfo.OidcIssuer)
+	fmt.Printf("Client ID discovered: %s\n", hubInfo.ClientId)
+
+	logger.Info("Discovering OIDC endpoints...")
+	tokenURL, authURL, err := dummyNode.DiscoverEndpoints(ctx, hubInfo.OidcIssuer)
+	if err != nil {
+		return "", "", nil, fmt.Errorf("failed to discover OIDC endpoints: %w", err)
+	}
+
+	jwtStr, err := dummyNode.InteractiveLogin(ctx, authURL, tokenURL, hubInfo.ClientId, hubInfo.Audience, offlineAccessFlag, headlessFlag)
+	if err != nil {
+		return "", "", nil, fmt.Errorf("failed to get token: %w", err)
+	}
+
+	return jwtStr, targetHub, hubInfo, nil
+}
+
 func main() {
 	rootCmd := &cobra.Command{
 		Use:   "sam-node",
@@ -95,6 +142,7 @@ func main() {
 	runCmd := &cobra.Command{
 		Use:   "run",
 		Short: "Start the sovereign mesh node",
+		Args:  cobra.NoArgs,
 		Run: func(cmd *cobra.Command, args []string) {
 			ctx := cmd.Context()
 			// Configure logging to duplicate to ring buffer
@@ -173,6 +221,29 @@ func main() {
 				jwtStr, err = dummyNode.FetchJWT(context.Background(), tokenURL, clientIDFlag, clientSecretFlag)
 				if err != nil {
 					logger.Fatalf("Failed to fetch JWT: %v", err)
+				}
+			}
+
+			var hubInfo *api.HubInfoResponse
+			if jwtStr == "" && joinFlag {
+				hasIdentity := false
+				if token, _ := store.LoadIdentity(); len(token) > 0 {
+					hasIdentity = true
+				}
+				if !hasIdentity {
+					if !isatty.IsTerminal(os.Stdin.Fd()) {
+						logger.Warn("--join set but no interactive TTY; starting unauthenticated sidecar for out-of-band enrollment")
+					} else {
+						targetHub := hubAddr
+						if !cmd.Flags().Changed("hub") {
+							targetHub = ""
+						}
+						var loginErr error
+						jwtStr, hubAddr, hubInfo, loginErr = interactiveLogin(ctx, store, targetHub)
+						if loginErr != nil {
+							logger.Fatalf("Interactive join failed: %v", loginErr)
+						}
+					}
 				}
 			}
 
@@ -302,6 +373,11 @@ func main() {
 				if err := store.SaveHubURL(hubAddr); err != nil {
 					logger.Warnf("Failed to save hub URL: %v", err)
 				}
+				if hubInfo != nil {
+					if err := store.SaveOIDCConfig(hubInfo.OidcIssuer, hubInfo.ClientId, hubInfo.Audience); err != nil {
+						logger.Warnf("Failed to save OIDC config: %v", err)
+					}
+				}
 
 				if teardownErr := meshNode.Teardown(); teardownErr != nil {
 					logger.Errorf("Failed to teardown enrollment node: %v", teardownErr)
@@ -382,27 +458,6 @@ func main() {
 				targetHub = args[0]
 			}
 
-			if targetHub == "" {
-				fmt.Print("No hub URL provided. Do you want to join the default community testing network (https://bananas.sam-mesh.dev)? [y/N]: ")
-				reader := bufio.NewReader(os.Stdin)
-				response, err := reader.ReadString('\n')
-				if err != nil {
-					fmt.Println("\nAborting: failed to read input.")
-					return
-				}
-				response = strings.ToLower(strings.TrimSpace(response))
-				if response != "y" && response != "yes" {
-					fmt.Println("Aborting join operation.")
-					return
-				}
-				targetHub = "https://bananas.sam-mesh.dev"
-			}
-
-			if !strings.HasPrefix(targetHub, "http://") && !strings.HasPrefix(targetHub, "https://") {
-				targetHub = "https://" + targetHub
-			}
-			targetHub = strings.TrimSuffix(targetHub, "/")
-
 			store, err := node.NewStore(resolveDataDir())
 			if err != nil {
 				logger.Fatalf("Failed to open store: %v", err)
@@ -418,30 +473,13 @@ func main() {
 				}
 			}()
 
-			dummyNode := &node.SamNode{Store: store}
-
-			fmt.Printf("Discovering hub info from %s...\n", targetHub)
-			hubInfo, err := node.FetchHubInfo(ctx, targetHub)
+			jwtStr, resolvedHub, hubInfo, err := interactiveLogin(ctx, store, targetHub)
 			if err != nil {
-				logger.Fatalf("Failed to discover hub info: %v", err)
+				logger.Fatalf("Failed to join: %v", err)
 			}
 
-			fmt.Printf("OIDC Issuer discovered: %s\n", hubInfo.OidcIssuer)
-			fmt.Printf("Client ID discovered: %s\n", hubInfo.ClientId)
-
-			logger.Info("Discovering OIDC endpoints...")
-			tokenURL, authURL, err := dummyNode.DiscoverEndpoints(ctx, hubInfo.OidcIssuer)
-			if err != nil {
-				logger.Fatalf("Failed to discover OIDC endpoints: %v", err)
-			}
-
-			jwtStr, err := dummyNode.InteractiveLogin(ctx, authURL, tokenURL, hubInfo.ClientId, hubInfo.Audience, offlineAccessFlag, headlessFlag)
-			if err != nil {
-				logger.Fatalf("Failed to get token: %v", err)
-			}
-
-			// Override global hubAddr with targetHub for enrollment
-			hubAddr = targetHub
+			// Override global hubAddr with resolved hub for enrollment
+			hubAddr = resolvedHub
 
 			// Connect to Hub and Enroll
 			var initHubAddrs []multiaddr.Multiaddr
@@ -496,11 +534,11 @@ func main() {
 				logger.Fatalf("Failed to start node for enrollment: %v", err)
 			}
 
-			err = meshNode.Enroll(context.Background(), targetHub, jwtStr)
+			err = meshNode.Enroll(context.Background(), hubAddr, jwtStr)
 			if err != nil {
 				logger.Fatalf("Enrollment failed: %v", err)
 			}
-			if err := store.SaveHubURL(targetHub); err != nil {
+			if err := store.SaveHubURL(hubAddr); err != nil {
 				logger.Warnf("Failed to save hub URL: %v", err)
 			}
 			if err := store.SaveOIDCConfig(hubInfo.OidcIssuer, hubInfo.ClientId, hubInfo.Audience); err != nil {
@@ -534,6 +572,8 @@ func main() {
 	joinCmd.Flags().BoolVar(&allowLoopbackFlag, "allow-loopback", false, "Allow publishing and connecting to loopback/link-local addresses")
 	joinCmd.Flags().DurationVar(&hubConnectTimeoutFlag, "hub-connect-timeout", node.DefaultHubConnectTimeout, "Timeout for dialing each hub address")
 	joinCmd.Flags().BoolVar(&offlineAccessFlag, "offline-access", false, "Request OIDC offline access/refresh token for automatic renewal")
+	runCmd.Flags().BoolVar(&joinFlag, "join", false, "Enroll on first run if no identity exists. Use --hub to set the hub URL; defaults to the testnet")
+	runCmd.Flags().BoolVar(&offlineAccessFlag, "offline-access", false, "Request OIDC offline access/refresh token for automatic renewal")
 	runCmd.Flags().StringVar(&apiTokenFlag, "api-token", "", "Static Bearer token for API authorization")
 	runCmd.Flags().StringVar(&tlsCertFlag, "tls-cert", "", "Path to TLS certificate for sidecar API")
 	runCmd.Flags().StringVar(&tlsKeyFlag, "tls-key", "", "Path to TLS key for sidecar API")
