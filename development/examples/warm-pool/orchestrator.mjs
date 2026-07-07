@@ -7,7 +7,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
-const NODE_URL = process.env.SAM_NODE_URL ?? "http://127.0.0.1:9091/mcp";
+const NODE_URL = process.env.SAM_NODE_URL ?? "http://127.0.0.1:9099/mcp";
 const API_TOKEN = process.env.SAM_API_TOKEN ?? "devtoken";
 const ACQUIRE_TIMEOUT = Number(process.env.SAM_ACQUIRE_TIMEOUT ?? 60);
 

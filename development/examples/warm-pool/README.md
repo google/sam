@@ -48,28 +48,34 @@ dispatcher (fine for a single-manager pool).
 
 2. Mesh layout ships in `development/kind/mesh-config.yaml`:
    ```yaml
-   node-a:                     # orchestrator entry (bare)
+   node-a:                     # in-cluster bare node
    node-b: code-reviewer-mcp   # worker
    node-c: code-reviewer-mcp   # worker
    node-d: code-reviewer-mcp   # worker
    node-e: pool-manager-mcp    # manager
    ```
 
-3. Bring the mesh up, then port-forward the caller node:
+3. Bring the mesh up and start a **local caller node** — this is the orchestrator
+   entry point:
    ```
-   make kind
-   kubectl --context kind-sam-kind -n sam-kind port-forward deploy/node-a 9091:8080
+   make build          # builds ./bin/sam-node (once)
+   make kind-up        # hub + reviewer pool (node-b/c/d) + manager (node-e)
+   make kind-local-node   # local sam-node enrolled in the mesh — LEAVE RUNNING
    ```
+   `kind-local-node` runs in the foreground (own shell). It exposes the mesh MCP
+   tools at **`http://127.0.0.1:9099/mcp`** (token `devtoken`) — no
+   `kubectl port-forward` needed. This `:9099` endpoint is the base for both
+   options below.
 
 ### Option A — drive it from Claude Code (the cool one)
 
-Register node-a as an MCP server (`.mcp.json` in the project root):
+Register the local node as an MCP server (`.mcp.json` in the project root):
 ```json
 {
   "mcpServers": {
     "sam-mesh": {
       "type": "http",
-      "url": "http://127.0.0.1:9091/mcp",
+      "url": "http://127.0.0.1:9099/mcp",
       "headers": { "Authorization": "Bearer devtoken" }
     }
   }
@@ -89,7 +95,7 @@ chains; you watch the reviews come back concurrently.
 ```
 cd development/examples/warm-pool
 npm install
-node orchestrator.mjs samples
+node orchestrator.mjs samples     # defaults to http://127.0.0.1:9099/mcp
 ```
 Example output:
 ```
@@ -116,7 +122,7 @@ kubectl --context kind-sam-kind -n sam-kind scale deploy/node-d --replicas=1
 
 | var | default | used by |
 |-----|---------|---------|
-| `SAM_NODE_URL` | manager: `http://127.0.0.1:8080/mcp`, orchestrator: `http://127.0.0.1:9091/mcp` | both |
+| `SAM_NODE_URL` | manager: `http://127.0.0.1:8080/mcp`, orchestrator: `http://127.0.0.1:9099/mcp` | both |
 | `SAM_API_TOKEN` | `devtoken` | both |
 | `SAM_POOL_SERVICE` | `code-reviewer` | manager |
 | `SAM_DISCOVERY_MS` | `3000` | manager |
