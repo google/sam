@@ -287,11 +287,19 @@ func EnrollNode(dataDir string, hubURL string, jwt string, allowLoopback bool) e
 	enrollCtx, enrollCancel := context.WithCancel(context.Background())
 	defer enrollCancel()
 
+	var listenAddrs []string
+	if allowLoopback {
+		listenAddrs = []string{"/ip4/127.0.0.1/udp/0/quic-v1", "/ip4/127.0.0.1/tcp/0"}
+	} else {
+		listenAddrs = []string{"/ip4/0.0.0.0/udp/0/quic-v1", "/ip4/0.0.0.0/tcp/0"}
+	}
+
 	meshNode, err := node.NewSamNode(node.Options{
 		PrivKey:       priv,
 		HubAddrs:      initHubAddrs,
 		Store:         store,
 		AllowLoopback: allowLoopback,
+		ListenAddrs:   listenAddrs,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create node for enrollment: %w", err)
@@ -337,7 +345,10 @@ func FetchHubInfoJSON(hubURL string) string {
 
 // IsEnrolled checks if the node is enrolled (has a valid identity).
 func IsEnrolled(dataDir string) byte {
-	if activeNode != nil {
+	mu.Lock()
+	running := activeNode != nil
+	mu.Unlock()
+	if running {
 		return 1 // Running node implies enrolled
 	}
 	store, err := node.NewStore(dataDir)
@@ -354,6 +365,9 @@ func IsEnrolled(dataDir string) byte {
 
 // GetMeshInfo returns mesh information as a JSON string.
 func GetMeshInfo() string {
+	mu.Lock()
+	defer mu.Unlock()
+
 	if activeNode == nil {
 		return `{"error": "node not running"}`
 	}
@@ -382,10 +396,14 @@ func GetMeshInfo() string {
 
 // CallRemoteTool calls an MCP tool on a remote peer and returns the result as a JSON string.
 func CallRemoteTool(peerIDStr string, toolName string, argsJSON string) string {
-	if activeNode == nil {
+	mu.Lock()
+	n := activeNode
+	mu.Unlock()
+
+	if n == nil {
 		return `{"error": "node not running"}`
 	}
-	if activeNode.Host == nil {
+	if n.Host == nil {
 		return `{"error": "host not initialized"}`
 	}
 
@@ -401,7 +419,7 @@ func CallRemoteTool(peerIDStr string, toolName string, argsJSON string) string {
 		}
 	}
 
-	res, err := activeNode.CallMCPTool(context.Background(), targetPeer, toolName, params)
+	res, err := n.CallMCPTool(context.Background(), targetPeer, toolName, params)
 	if err != nil {
 		return fmt.Sprintf(`{"error": "failed to call tool: %s"}`, err.Error())
 	}

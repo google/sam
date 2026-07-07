@@ -152,6 +152,13 @@ class SamDartMcpServer {
     // 3. Call Tool
     if (method == 'tools/call') {
         final params = jsonRpc['params'];
+        if (params is! Map<String, dynamic> || !params.containsKey('name')) {
+          return {
+            'jsonrpc': '2.0',
+            'id': id,
+            'error': {'code': -32602, 'message': 'Invalid params: missing tool name'}
+          };
+        }
         final toolName = params['name'];
         
         if (toolName == 'get_battery_status' && isBatteryEnabled()) {
@@ -252,11 +259,11 @@ class SamDartMcpServer {
           },
           body: jsonEncode({
             'service': {
-              'type': 1, // SERVICE_TYPE_MCP
+              'type': 'SERVICE_TYPE_MCP',
               'name': serviceName,
               'description': description
             },
-            'target_url': targetUrl
+            'targetUrl': targetUrl
           }),
         );
 

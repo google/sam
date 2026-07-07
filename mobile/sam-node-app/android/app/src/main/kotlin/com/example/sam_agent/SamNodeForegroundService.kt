@@ -71,7 +71,9 @@ class SamNodeForegroundService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
-        wakeLock?.release()
+        if (wakeLock?.isHeld == true) {
+            wakeLock?.release()
+        }
         Log.d("SAM_SERVICE", "Foreground Service Destroyed")
     }
 

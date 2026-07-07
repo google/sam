@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
+import 'dart:isolate';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
@@ -143,7 +144,7 @@ class _NodeControlPageState extends State<NodeControlPage> {
     try {
       final hubUrl = _hubController.text.trim();
       debugPrint('DEBUG: Fetching hub info from $hubUrl');
-      final infoJson = _samLib.fetchHubInfoJSON(hubUrl);
+      final infoJson = await Isolate.run(() => SamNodeLib().fetchHubInfoJSON(hubUrl));
       debugPrint('DEBUG: Hub info JSON: $infoJson');
       if (infoJson == null) {
         throw Exception('Failed to fetch hub info');
@@ -346,7 +347,7 @@ class _NodeControlPageState extends State<NodeControlPage> {
     try {
       final hubUrl = _hubController.text.trim();
       debugPrint('DEBUG: Device Login: Fetching hub info from $hubUrl');
-      final infoJson = _samLib.fetchHubInfoJSON(hubUrl);
+      final infoJson = await Isolate.run(() => SamNodeLib().fetchHubInfoJSON(hubUrl));
       if (infoJson == null) throw Exception('Failed to fetch hub info');
 
       final info = jsonDecode(infoJson);
@@ -555,12 +556,16 @@ class _NodeControlPageState extends State<NodeControlPage> {
   Future<void> _enroll() async {
     final appDir = await getApplicationDocumentsDirectory();
     final dataDir = '${appDir.path}/sam_data';
-    final err = _samLib.enroll(
-      dataDir,
-      _hubController.text,
-      _jwtController.text,
-      true, // allowLoopback
-    );
+    final hubText = _hubController.text;
+    final jwtText = _jwtController.text;
+    final err = await Isolate.run(() {
+      return SamNodeLib().enroll(
+        dataDir,
+        hubText,
+        jwtText,
+        true, // allowLoopback
+      );
+    });
 
     setState(() {
       if (err != null) {
