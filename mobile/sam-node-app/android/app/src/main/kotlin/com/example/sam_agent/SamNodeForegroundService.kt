@@ -9,6 +9,10 @@ import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
+import android.content.pm.ServiceInfo
+import android.content.pm.PackageManager
+import android.Manifest
 import android.util.Log
 
 class SamNodeForegroundService : Service() {
@@ -31,7 +35,30 @@ class SamNodeForegroundService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val notification = createNotification()
-        startForeground(NOTIFICATION_ID, notification)
+        
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            var type = 0
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+            }
+            
+            val hasLocationPermission = ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.ACCESS_COARSE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+            
+            if (hasLocationPermission) {
+                type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+            }
+            
+            if (type != 0) {
+                startForeground(NOTIFICATION_ID, notification, type)
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
         
         Log.d("SAM_SERVICE", "Foreground Service Started")
         

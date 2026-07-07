@@ -357,6 +357,9 @@ func GetMeshInfo() string {
 	if activeNode == nil {
 		return `{"error": "node not running"}`
 	}
+	if activeNode.Host == nil {
+		return `{"error": "host not initialized"}`
+	}
 
 	peers := activeNode.Host.Network().Peers()
 	dhtSize := 0
@@ -381,6 +384,9 @@ func GetMeshInfo() string {
 func CallRemoteTool(peerIDStr string, toolName string, argsJSON string) string {
 	if activeNode == nil {
 		return `{"error": "node not running"}`
+	}
+	if activeNode.Host == nil {
+		return `{"error": "host not initialized"}`
 	}
 
 	targetPeer, err := peer.Decode(peerIDStr)

@@ -64,6 +64,9 @@ class SamDartMcpServer {
     request.response.headers.add('Connection', 'keep-alive');
     
     _sseClients.add(request.response);
+    request.response.done.then((_) {
+      _sseClients.remove(request.response);
+    });
     
     // Initial connection event
     request.response.write('event: connected\ndata: {}\n\n');
@@ -238,33 +241,41 @@ class SamDartMcpServer {
   }) async {
     final url = 'http://127.0.0.1:$goSidecarPort/sam/service/register';
     
-    try {
-      final response = await http.post(
-        Uri.parse(url),
-        headers: {
-          'Authorization': 'Bearer $apiToken',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode({
-          'service': {
-            'type': 1, // SERVICE_TYPE_MCP
-            'name': serviceName,
-            'description': description
+    int retries = 5;
+    while (retries > 0) {
+      try {
+        final response = await http.post(
+          Uri.parse(url),
+          headers: {
+            'Authorization': 'Bearer $apiToken',
+            'Content-Type': 'application/json',
           },
-          'target_url': targetUrl
-        }),
-      );
+          body: jsonEncode({
+            'service': {
+              'type': 1, // SERVICE_TYPE_MCP
+              'name': serviceName,
+              'description': description
+            },
+            'target_url': targetUrl
+          }),
+        );
 
-      if (response.statusCode == 200) {
-        debugPrint('Service "$serviceName" registered successfully with SAM Go Node!');
-        return true;
-      } else {
-        debugPrint('Failed to register service "$serviceName": ${response.statusCode} - ${response.body}');
-        return false;
+        if (response.statusCode == 200) {
+          debugPrint('Service "$serviceName" registered successfully with SAM Go Node!');
+          return true;
+        } else {
+          debugPrint('Failed to register service "$serviceName": ${response.statusCode} - ${response.body}');
+          return false;
+        }
+      } catch (e) {
+        retries--;
+        if (retries == 0) {
+          debugPrint('Error registering service "$serviceName": $e');
+          return false;
+        }
+        await Future.delayed(const Duration(milliseconds: 500));
       }
-    } catch (e) {
-      debugPrint('Error registering service "$serviceName": $e');
-      return false;
     }
+    return false;
   }
 }

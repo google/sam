@@ -24,8 +24,8 @@ void main() {
     }
 
     // 2. Fetch OIDC JWT from the mock OIDC server running on host
-    // Host IP from emulator is 10.0.2.2
-    const oidcIssuer = 'http://10.0.2.2:18080';
+    // Use loopback with adb reverse
+    const oidcIssuer = 'http://127.0.0.1:18080';
     const tokenURL = '$oidcIssuer/token';
 
     final response = await http.post(
@@ -43,7 +43,7 @@ void main() {
     expect(jwt, isNotEmpty);
 
     // 3. Enroll Node against host Hub
-    const hubURL = 'http://10.0.2.2:37001';
+    const hubURL = 'http://127.0.0.1:37001';
     final enrollErr = samLib.enroll(dataDir, hubURL, jwt, true);
     expect(enrollErr, isNull);
 

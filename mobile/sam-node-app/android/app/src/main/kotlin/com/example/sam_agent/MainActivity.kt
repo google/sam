@@ -73,9 +73,14 @@ class MainActivity : FlutterActivity() {
                             return@setMethodCallHandler
                         }
                         
+                        val hasFineLocation = androidx.core.content.ContextCompat.checkSelfPermission(this, android.Manifest.permission.ACCESS_FINE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED
                         val locationManager = getSystemService(Context.LOCATION_SERVICE) as android.location.LocationManager
-                        val location: android.location.Location? = locationManager.getLastKnownLocation(android.location.LocationManager.GPS_PROVIDER) 
-                            ?: locationManager.getLastKnownLocation(android.location.LocationManager.NETWORK_PROVIDER)
+                        val location: android.location.Location? = if (hasFineLocation) {
+                            locationManager.getLastKnownLocation(android.location.LocationManager.GPS_PROVIDER) 
+                                ?: locationManager.getLastKnownLocation(android.location.LocationManager.NETWORK_PROVIDER)
+                        } else {
+                            locationManager.getLastKnownLocation(android.location.LocationManager.NETWORK_PROVIDER)
+                        }
                             
                         if (location != null) {
                             result.success("{\"latitude\": ${location.latitude}, \"longitude\": ${location.longitude}}")

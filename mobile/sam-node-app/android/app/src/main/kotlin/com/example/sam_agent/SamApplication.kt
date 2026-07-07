@@ -1,9 +1,9 @@
 package com.example.sam_agent
 
-import io.flutter.app.FlutterApplication
+import android.app.Application
 import androidx.appfunctions.service.AppFunctionConfiguration
 
-class SamApplication : FlutterApplication(), AppFunctionConfiguration.Provider {
+class SamApplication : Application(), AppFunctionConfiguration.Provider {
     
     // Instantiate SamFunctions lazily or eagerly
     private val samFunctions by lazy { SamFunctions() }

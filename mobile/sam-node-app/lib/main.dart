@@ -18,7 +18,11 @@ import 'mcp_server.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp();
+  try {
+    await Firebase.initializeApp();
+  } catch (e) {
+    debugPrint('Failed to initialize Firebase: $e');
+  }
   runApp(const MyApp());
 }
 
@@ -186,9 +190,9 @@ class _NodeControlPageState extends State<NodeControlPage> {
       int? selectedPort;
       for (final port in [13000, 13001, 13002]) {
         try {
-          server = await HttpServer.bind(InternetAddress.anyIPv4, port);
+          server = await HttpServer.bind(InternetAddress.loopbackIPv4, port);
           selectedPort = port;
-          debugPrint('DEBUG: Bound local server to port $port (any IPv4)');
+          debugPrint('DEBUG: Bound local server to port $port (loopback)');
           break;
         } catch (e) {
           debugPrint('DEBUG: Failed to bind to port $port: $e');
@@ -586,6 +590,7 @@ class _NodeControlPageState extends State<NodeControlPage> {
       try {
         final info = jsonDecode(infoJson);
         if (info['error'] == null) {
+          if (!mounted) return;
           setState(() {
             _connectedPeers = info['connected_peers'] ?? 0;
             _dhtSize = info['dht_size'] ?? 0;
