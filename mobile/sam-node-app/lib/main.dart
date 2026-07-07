@@ -2,15 +2,23 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
-import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:url_launcher/url_launcher.dart';
-import 'package:http/http.dart' as http;
-import 'package:crypto/crypto.dart';
-import 'package:qr_flutter/qr_flutter.dart';
-import 'sam_ffi.dart';
 
-void main() {
+import 'package:crypto/crypto.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_ai/firebase_ai.dart';
+import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
+import 'package:qr_flutter/qr_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
+
+import 'sam_ffi.dart';
+import 'mcp_server.dart';
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp();
   runApp(const MyApp());
 }
 
@@ -38,12 +46,16 @@ class NodeControlPage extends StatefulWidget {
 }
 
 class _NodeControlPageState extends State<NodeControlPage> {
-  final _hubController = TextEditingController(text: 'https://bananas.sam-mesh.dev');
+  final _hubController =
+      TextEditingController(text: 'https://bananas.sam-mesh.dev');
   final _jwtController = TextEditingController();
   final _tokenController = TextEditingController(text: 'secret-token');
+  
+  static const _exposeChannel = MethodChannel('com.example.sam_agent/mesh_expose');
 
   late SamNodeLib _samLib;
-  bool? _isEnrolled; // null = checking, false = show enrollment, true = show dashboard
+  bool?
+      _isEnrolled; // null = checking, false = show enrollment, true = show dashboard
   bool _running = false;
   String _status = 'Disconnected';
   String _nodeID = '';
@@ -53,11 +65,28 @@ class _NodeControlPageState extends State<NodeControlPage> {
   bool _devicePollingActive = false;
   Timer? _pollingTimer;
 
+  // Local Services Exposure State
+  bool _exposeBattery = false;
+  bool _exposeLocation = false;
+
+  // External MCP Bridging State
+  final _externalMcpUrlController = TextEditingController(text: 'http://127.0.0.1:8080');
+  final _externalMcpNameController = TextEditingController(text: 'android-remote');
+  final _externalMcpDescController = TextEditingController(text: 'External Android Remote Control MCP');
+  bool _externalMcpRegistered = false;
+
+  late SamDartMcpServer _embeddedMcpServer;
+  int _selectedTab = 0; // 0 = Dashboard, 1 = Services
+
   @override
   void initState() {
     super.initState();
     _samLib = SamNodeLib();
     _checkEnrollment();
+    _embeddedMcpServer = SamDartMcpServer(
+      isBatteryEnabled: () => _exposeBattery,
+      isLocationEnabled: () => _exposeLocation,
+    );
   }
 
   @override
@@ -66,6 +95,9 @@ class _NodeControlPageState extends State<NodeControlPage> {
     _hubController.dispose();
     _jwtController.dispose();
     _tokenController.dispose();
+    _externalMcpUrlController.dispose();
+    _externalMcpNameController.dispose();
+    _externalMcpDescController.dispose();
     super.dispose();
   }
 
@@ -164,12 +196,15 @@ class _NodeControlPageState extends State<NodeControlPage> {
       }
 
       if (server == null || selectedPort == null) {
-        throw Exception('Could not bind local callback listener (ports 13000-13002 busy)');
+        throw Exception(
+            'Could not bind local callback listener (ports 13000-13002 busy)');
       }
 
       final verifier = _generateCodeVerifier();
       final challenge = _generateCodeChallenge(verifier);
-      final state = base64UrlEncode(List<int>.generate(16, (_) => Random.secure().nextInt(256))).replaceAll('=', '');
+      final state = base64UrlEncode(
+              List<int>.generate(16, (_) => Random.secure().nextInt(256)))
+          .replaceAll('=', '');
       final redirectUri = 'http://127.0.0.1:$selectedPort/callback';
 
       final queryParams = {
@@ -199,20 +234,20 @@ class _NodeControlPageState extends State<NodeControlPage> {
       }
 
       print('Waiting for callback on local server...');
-      
+
       String? code;
       String? receivedState;
-      
+
       await for (final request in server) {
         print('DEBUG: Received request: ${request.requestedUri}');
-        
+
         if (request.requestedUri.path == '/callback') {
           final query = request.requestedUri.queryParameters;
           receivedState = query['state'];
           code = query['code'];
-          
+
           print('DEBUG: Callback state: $receivedState, code: $code');
-          
+
           if (receivedState != state) {
             print('DEBUG: State mismatch. Expected $state, got $receivedState');
             request.response.statusCode = 400;
@@ -220,7 +255,7 @@ class _NodeControlPageState extends State<NodeControlPage> {
             await request.response.close();
             break;
           }
-          
+
           if (code == null) {
             print('DEBUG: No code in callback');
             request.response.statusCode = 400;
@@ -228,19 +263,21 @@ class _NodeControlPageState extends State<NodeControlPage> {
             await request.response.close();
             break;
           }
-          
+
           request.response.headers.contentType = ContentType.html;
-          request.response.write('<html><body><h1>Authorization successful!</h1><p>You can close this window and return to the app.</p></body></html>');
+          request.response.write(
+              '<html><body><h1>Authorization successful!</h1><p>You can close this window and return to the app.</p></body></html>');
           await request.response.close();
           print('DEBUG: Callback handled successfully');
           break; // Success
         } else {
-          print('DEBUG: Ignoring non-callback request: ${request.requestedUri.path}');
+          print(
+              'DEBUG: Ignoring non-callback request: ${request.requestedUri.path}');
           request.response.statusCode = 404;
           await request.response.close();
         }
       }
-      
+
       await server.close();
 
       if (receivedState != state) {
@@ -250,7 +287,6 @@ class _NodeControlPageState extends State<NodeControlPage> {
       if (code == null) {
         throw Exception('No code received');
       }
-
 
       setState(() {
         _status = 'Exchanging code for token...';
@@ -285,7 +321,6 @@ class _NodeControlPageState extends State<NodeControlPage> {
       });
 
       await _enroll();
-
     } catch (e) {
       setState(() {
         _status = 'Login/Enrollment failed: $e';
@@ -311,7 +346,8 @@ class _NodeControlPageState extends State<NodeControlPage> {
       if (infoJson == null) throw Exception('Failed to fetch hub info');
 
       final info = jsonDecode(infoJson);
-      if (info['error'] != null) throw Exception('Hub info error: ${info['error']}');
+      if (info['error'] != null)
+        throw Exception('Hub info error: ${info['error']}');
 
       final issuer = info['oidcIssuer'];
       final clientId = info['clientId'];
@@ -324,8 +360,9 @@ class _NodeControlPageState extends State<NodeControlPage> {
       // OIDC discovery
       final discoveryUrl = '$issuer/.well-known/openid-configuration';
       final discResponse = await http.get(Uri.parse(discoveryUrl));
-      if (discResponse.statusCode != 200) throw Exception('Failed to discover OIDC endpoints');
-      
+      if (discResponse.statusCode != 200)
+        throw Exception('Failed to discover OIDC endpoints');
+
       final discData = jsonDecode(discResponse.body);
       final deviceAuthUrl = discData['device_authorization_endpoint'];
       final tokenUrl = discData['token_endpoint'];
@@ -354,7 +391,8 @@ class _NodeControlPageState extends State<NodeControlPage> {
       final deviceData = jsonDecode(deviceCodeResp.body);
       final deviceCode = deviceData['device_code'];
       final userCode = deviceData['user_code'];
-      final verificationUri = deviceData['verification_uri_complete'] ?? deviceData['verification_uri'];
+      final verificationUri = deviceData['verification_uri_complete'] ??
+          deviceData['verification_uri'];
       int interval = deviceData['interval'] ?? 5; // seconds
 
       print('DEBUG: User Code: $userCode');
@@ -366,7 +404,6 @@ class _NodeControlPageState extends State<NodeControlPage> {
 
       // 3. Start Polling
       _pollForDeviceToken(tokenUrl, clientId, deviceCode, interval);
-
     } catch (e) {
       setState(() {
         _status = 'Device Login failed: $e';
@@ -375,12 +412,13 @@ class _NodeControlPageState extends State<NodeControlPage> {
     }
   }
 
-  Future<void> _pollForDeviceToken(String tokenUrl, String clientId, String deviceCode, int interval) async {
+  Future<void> _pollForDeviceToken(
+      String tokenUrl, String clientId, String deviceCode, int interval) async {
     print('DEBUG: Starting device token polling...');
     bool polling = true;
     while (polling && _devicePollingActive) {
       await Future.delayed(Duration(seconds: interval));
-      
+
       if (!_devicePollingActive) break;
 
       try {
@@ -412,7 +450,7 @@ class _NodeControlPageState extends State<NodeControlPage> {
         } else {
           final errorData = jsonDecode(response.body);
           final error = errorData['error'];
-          
+
           if (error == 'authorization_pending') {
             print('DEBUG: Authorization pending...');
           } else if (error == 'slow_down') {
@@ -434,7 +472,7 @@ class _NodeControlPageState extends State<NodeControlPage> {
         }
       }
     }
-    
+
     setState(() {
       _loggingIn = false;
     });
@@ -465,14 +503,18 @@ class _NodeControlPageState extends State<NodeControlPage> {
                 const SizedBox(height: 20),
                 SelectableText(
                   verificationUri,
-                  style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blue),
+                  style: const TextStyle(
+                      fontWeight: FontWeight.bold, color: Colors.blue),
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 20),
                 const Text('And enter this code:'),
                 SelectableText(
                   userCode,
-                  style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, letterSpacing: 2),
+                  style: const TextStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 2),
                 ),
               ],
             ),
@@ -577,17 +619,41 @@ class _NodeControlPageState extends State<NodeControlPage> {
       return;
     }
 
+    // Start Android Foreground Service to keep process alive
+    try {
+      await _exposeChannel.invokeMethod('startBackgroundService');
+    } catch (e) {
+      print('DEBUG: Failed to start background service: $e');
+      // Non-fatal, but node might be killed in background
+    }
+
     setState(() {
       _running = true;
       _status = 'Running';
       _nodeID = _samLib.getNodeID() ?? 'unknown';
     });
+    
+    // Start embedded MCP server
+    await _embeddedMcpServer.start(
+      goSidecarPort: '5005',
+      apiToken: _tokenController.text,
+    );
+
     _startPolling();
   }
 
   void _stop() {
     _pollingTimer?.cancel();
+    _embeddedMcpServer.stop();
     final err = _samLib.stop();
+    
+    // Stop Android Foreground Service
+    try {
+      _exposeChannel.invokeMethod('stopBackgroundService');
+    } catch (e) {
+      print('DEBUG: Failed to stop background service: $e');
+    }
+
     setState(() {
       if (err != null) {
         _status = 'Stop failed: $err';
@@ -605,9 +671,12 @@ class _NodeControlPageState extends State<NodeControlPage> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Unenroll Node'),
-        content: const Text('Are you sure you want to unenroll? This will delete your local identity and disconnect you from the mesh.'),
+        content: const Text(
+            'Are you sure you want to unenroll? This will delete your local identity and disconnect you from the mesh.'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel')),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
             child: const Text('Unenroll', style: TextStyle(color: Colors.red)),
@@ -644,7 +713,29 @@ class _NodeControlPageState extends State<NodeControlPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('SAM Node Mobile')),
-      body: _buildBody(),
+      body: _isEnrolled == true
+          ? (_selectedTab == 0 ? _buildDashboardView() : _buildServicesView())
+          : _buildBody(),
+      bottomNavigationBar: _isEnrolled == true
+          ? BottomNavigationBar(
+              currentIndex: _selectedTab,
+              onTap: (index) {
+                setState(() {
+                  _selectedTab = index;
+                });
+              },
+              items: const [
+                BottomNavigationBarItem(
+                  icon: Icon(Icons.dashboard),
+                  label: 'Dashboard',
+                ),
+                BottomNavigationBarItem(
+                  icon: Icon(Icons.electrical_services),
+                  label: 'Services',
+                ),
+              ],
+            )
+          : null,
     );
   }
 
@@ -655,7 +746,148 @@ class _NodeControlPageState extends State<NodeControlPage> {
     if (_isEnrolled == false) {
       return _buildEnrollmentView();
     }
+
     return _buildDashboardView();
+  }
+
+  Widget _buildServicesView() {
+      final bool isRunning = _running;
+      return SingleChildScrollView(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Expose Services Section
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Expose Local Services to Mesh',
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                    const SizedBox(height: 10),
+                    SwitchListTile(
+                      title: const Text('Battery Status'),
+                      subtitle: const Text('Share battery level and charging state with mesh peers'),
+                      value: _exposeBattery,
+                      onChanged: (bool value) async {
+                        setState(() {
+                          _exposeBattery = value;
+                        });
+                        try {
+                          await _exposeChannel.invokeMethod('setExposeBattery', {'enabled': value});
+                        } catch (e) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('Failed to toggle battery exposure: $e')),
+                          );
+                        }
+                      },
+                      secondary: const Icon(Icons.battery_std),
+                    ),
+                    SwitchListTile(
+                      title: const Text('Location'),
+                      subtitle: const Text('Share coarse location with mesh peers'),
+                      value: _exposeLocation,
+                      onChanged: (bool value) async {
+                        setState(() {
+                          _exposeLocation = value;
+                        });
+                        try {
+                          await _exposeChannel.invokeMethod('setExposeLocation', {'enabled': value});
+                        } catch (e) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('Failed to toggle location exposure: $e')),
+                          );
+                        }
+                      },
+                      secondary: const Icon(Icons.location_on),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+
+            // External MCP Bridging Section
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Bridge External Local MCP to Mesh',
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                    const SizedBox(height: 10),
+                    TextFormField(
+                      controller: _externalMcpUrlController,
+                      decoration: const InputDecoration(
+                        labelText: 'External MCP Server URL',
+                        hintText: 'http://127.0.0.1:8080',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextFormField(
+                            controller: _externalMcpNameController,
+                            decoration: const InputDecoration(
+                              labelText: 'Service Name',
+                              hintText: 'android-remote',
+                              border: OutlineInputBorder(),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        ElevatedButton(
+                          onPressed: !isRunning ? null : () async {
+                            if (_externalMcpRegistered) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('Unregister not fully supported yet in UI')),
+                              );
+                            } else {
+                              final success = await SamDartMcpServer.registerService(
+                                goSidecarPort: '5005',
+                                apiToken: _tokenController.text,
+                                serviceName: _externalMcpNameController.text,
+                                targetUrl: _externalMcpUrlController.text,
+                                description: _externalMcpDescController.text,
+                              );
+                              if (success) {
+                                setState(() {
+                                  _externalMcpRegistered = true;
+                                });
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('External MCP Registered!')),
+                                );
+                              } else {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('Failed to register external MCP')),
+                                );
+                              }
+                            }
+                          },
+                          child: Text(_externalMcpRegistered ? 'Registered' : 'Register'),
+                        ),
+                      ],
+                    ),
+                     const SizedBox(height: 10),
+                     TextFormField(
+                      controller: _externalMcpDescController,
+                      decoration: const InputDecoration(
+                        labelText: 'Description',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
   }
 
   Widget _buildEnrollmentView() {
@@ -664,9 +896,12 @@ class _NodeControlPageState extends State<NodeControlPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Text('Welcome to SAM', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
+          const Text('Welcome to SAM',
+              style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+              textAlign: TextAlign.center),
           const SizedBox(height: 20),
-          const Text('Please enroll your node to join the mesh.', textAlign: TextAlign.center),
+          const Text('Please enroll your node to join the mesh.',
+              textAlign: TextAlign.center),
           const SizedBox(height: 30),
           TextField(
             controller: _hubController,
@@ -679,26 +914,57 @@ class _NodeControlPageState extends State<NodeControlPage> {
           const SizedBox(height: 20),
           ElevatedButton.icon(
             onPressed: _loggingIn ? null : _loginAndEnroll,
-            icon: _loggingIn 
-              ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2))
-              : const Icon(Icons.login),
+            icon: _loggingIn
+                ? const SizedBox(
+                    height: 20,
+                    width: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.login),
             label: const Text('Login & Enroll (Browser)'),
-            style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16)),
+            style: ElevatedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 16)),
           ),
           const SizedBox(height: 10),
           ElevatedButton.icon(
             onPressed: _loggingIn ? null : _startDeviceLogin,
             icon: const Icon(Icons.tv),
             label: const Text('Device Login (TV / Other Device)'),
-            style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16)),
+            style: ElevatedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 16)),
           ),
           const SizedBox(height: 30),
-          if (_status.isNotEmpty && _status != 'Enrolled' && _status != 'Unenrolled')
+          if (_status.isNotEmpty &&
+              _status != 'Enrolled' &&
+              _status != 'Unenrolled')
             Card(
               color: Colors.grey.shade100,
               child: Padding(
                 padding: const EdgeInsets.all(16.0),
-                child: Text('Status: $_status', style: const TextStyle(fontStyle: FontStyle.italic)),
+                child: Column(
+                  children: [
+                    Text('Status: $_status',
+                        style: const TextStyle(fontStyle: FontStyle.italic)),
+                    const SizedBox(height: 10),
+                    ElevatedButton(
+                      onPressed: () async {
+                        try {
+                          final model = FirebaseAI.googleAI().generativeModel(
+                            model: 'gemini-2.5-flash',
+                          );
+                          print('DEBUG: Model initialized: ${model.hashCode}');
+                          setState(() {
+                            _status = 'Debug: Model initialized';
+                          });
+                        } catch (e) {
+                          setState(() {
+                            _status = 'API Error: $e';
+                          });
+                        }
+                      },
+                      child: const Text('Debug API Connection'),
+                    ),
+                  ],
+                ),
               ),
             ),
         ],
@@ -747,13 +1013,16 @@ class _NodeControlPageState extends State<NodeControlPage> {
                         style: TextStyle(
                           fontSize: 20,
                           fontWeight: FontWeight.bold,
-                          color: isRunning ? Colors.green.shade700 : Colors.grey.shade700,
+                          color: isRunning
+                              ? Colors.green.shade700
+                              : Colors.grey.shade700,
                         ),
                       ),
                     ],
                   ),
                   const SizedBox(height: 10),
-                  Text('Mesh: public-mesh', style: TextStyle(color: Colors.grey.shade600)),
+                  Text('Mesh: public-mesh',
+                      style: TextStyle(color: Colors.grey.shade600)),
                 ],
               ),
             ),
@@ -782,7 +1051,7 @@ class _NodeControlPageState extends State<NodeControlPage> {
               ),
             ],
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 30),
 
           // Node Info
           Card(
@@ -791,11 +1060,15 @@ class _NodeControlPageState extends State<NodeControlPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Node ID', style: TextStyle(fontWeight: FontWeight.bold)),
+                  const Text('Node ID',
+                      style: TextStyle(fontWeight: FontWeight.bold)),
                   const SizedBox(height: 4),
                   SelectableText(
-                    _nodeID.isEmpty ? 'Unknown (Start node to see ID)' : _nodeID,
-                    style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+                    _nodeID.isEmpty
+                        ? 'Unknown (Start node to see ID)'
+                        : _nodeID,
+                    style:
+                        const TextStyle(fontFamily: 'monospace', fontSize: 12),
                   ),
                 ],
               ),
@@ -834,19 +1107,24 @@ class _NodeControlPageState extends State<NodeControlPage> {
             ],
           ),
           const SizedBox(height: 20),
-          
+
           // Unenroll fallback
           TextButton.icon(
             onPressed: _unenroll,
             icon: const Icon(Icons.logout, color: Colors.red),
-            label: const Text('Unenroll / Clear Identity', style: TextStyle(color: Colors.red)),
+            label: const Text('Unenroll / Clear Identity',
+                style: TextStyle(color: Colors.red)),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildStatCard({required IconData icon, required String title, required String value, required Color color}) {
+  Widget _buildStatCard(
+      {required IconData icon,
+      required String title,
+      required String value,
+      required Color color}) {
     return Card(
       elevation: 2,
       child: Padding(
@@ -855,9 +1133,13 @@ class _NodeControlPageState extends State<NodeControlPage> {
           children: [
             Icon(icon, color: color, size: 30),
             const SizedBox(height: 10),
-            Text(value, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+            Text(value,
+                style:
+                    const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
             const SizedBox(height: 5),
-            Text(title, style: TextStyle(color: Colors.grey.shade600, fontSize: 12), textAlign: TextAlign.center),
+            Text(title,
+                style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+                textAlign: TextAlign.center),
           ],
         ),
       ),
