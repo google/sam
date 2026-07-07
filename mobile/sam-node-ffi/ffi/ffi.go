@@ -29,6 +29,7 @@ import (
 
 	"github.com/google/sam/internal/node"
 	golog "github.com/ipfs/go-log/v2"
+	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
 	"google.golang.org/protobuf/encoding/protojson"
 )
@@ -373,5 +374,36 @@ func GetMeshInfo() string {
 	if err != nil {
 		return fmt.Sprintf(`{"error": %q}`, err.Error())
 	}
+	return string(jsonBytes)
+}
+
+// CallRemoteTool calls an MCP tool on a remote peer and returns the result as a JSON string.
+func CallRemoteTool(peerIDStr string, toolName string, argsJSON string) string {
+	if activeNode == nil {
+		return `{"error": "node not running"}`
+	}
+
+	targetPeer, err := peer.Decode(peerIDStr)
+	if err != nil {
+		return fmt.Sprintf(`{"error": "invalid peer ID: %s"}`, err.Error())
+	}
+
+	var params any
+	if argsJSON != "" && argsJSON != "{}" {
+		if err := json.Unmarshal([]byte(argsJSON), &params); err != nil {
+			return fmt.Sprintf(`{"error": "invalid arguments JSON: %s"}`, err.Error())
+		}
+	}
+
+	res, err := activeNode.CallMCPTool(context.Background(), targetPeer, toolName, params)
+	if err != nil {
+		return fmt.Sprintf(`{"error": "failed to call tool: %s"}`, err.Error())
+	}
+
+	jsonBytes, err := json.Marshal(res)
+	if err != nil {
+		return fmt.Sprintf(`{"error": "failed to marshal result: %s"}`, err.Error())
+	}
+
 	return string(jsonBytes)
 }

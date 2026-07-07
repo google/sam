@@ -87,6 +87,16 @@ func GetMeshInfo() *C.char {
 	return C.CString(jsonStr)
 }
 
+//export CallRemoteTool
+func CallRemoteTool(peerID *C.char, toolName *C.char, argsJSON *C.char) *C.char {
+	goPeerID := C.GoString(peerID)
+	goToolName := C.GoString(toolName)
+	goArgsJSON := C.GoString(argsJSON)
+
+	jsonStr := ffi.CallRemoteTool(goPeerID, goToolName, goArgsJSON)
+	return C.CString(jsonStr)
+}
+
 //export FreeString
 func FreeString(str *C.char) {
 	C.free(unsafe.Pointer(str))
