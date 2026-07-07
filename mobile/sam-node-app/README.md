@@ -69,31 +69,72 @@ Once launched, the app displays a control interface:
 
 ---
 
-## Developer Integration & API Usage
+---
 
-Once the node is **Running**, other applications on the mobile device (or inside the emulator) can connect to its local HTTP API:
+## Features & New Capabilities
 
-### 1. Model Context Protocol (MCP) Client
-Connect a local agent client to the streamable SSE endpoint:
-*   **SSE URL**: `http://127.0.0.1:5005/mcp`
-*   **Headers**:
-    *   `Authorization: Bearer <Local-API-Token>`
-    *   `Accept: text/event-stream`
+### 📱 1. Embedded MCP Server & Real Telemetry
+The app now includes an embedded Dart MCP server that exposes real-time telemetry from the device:
+*   **Battery Status**: Level and charging state.
+*   **Location**: Coarse/Fine coordinates (requires permissions).
+*   **Foreground Service**: Keeps the node alive and connected even when the phone is idle or backgrounded (Android 14+ compatible).
 
-### 2. Registering Local Tools
-An app on the device can expose its own tools to the mesh by registering them with the sidecar registry:
-*   **POST URL**: `http://127.0.0.1:5005/sam/service/register`
-*   **Headers**:
-    *   `Authorization: Bearer <Local-API-Token>`
-    *   `Content-Type: application/json`
-*   **Body Example**:
-    ```json
-    {
-      "service": {
-        "type": "SERVICE_TYPE_MCP",
-        "name": "my-mobile-tool",
-        "description": "Exposes mobile device sensors/actions"
-      },
-      "targetUrl": "http://127.0.0.1:9090"
-    }
+### 🤖 2. Android 16 AppFunctions (On-Device MCP)
+Exposes capabilities directly to the OS registry, allowing native assistants (like Gemini) to orchestrate tasks without manual app navigation.
+*   `getMeshStatus`: Returns node stats and connected peers.
+*   `callRemoteMeshTool`: Proxy to invoke tools on remote mesh peers.
+
+---
+
+## How to Use the Application
+
+### 📸 Screenshots
+
+| Node Status / Dashboard | Services & Telemetry |
+|:---:|:---:|
+| ![Node Logged](../../site/static/images/mobile_node_logged.png) | ![Services Enabled](../../site/static/images/mobile_services_enabled.png) |
+
+1.  **Dashboard Tab**: Displays current status, Node ID, connected peers, and DHT size.
+2.  **Services Tab**: Allows enabling/disabling embedded sensors (Battery/Location) and bridging external local MCP servers.
+
+---
+
+## Developer Integration & Usage Examples
+
+### Option 1: CLI Usage (Technical Verification)
+
+You can query the phone's telemetry from a remote machine (or another node) using the repository's `mcp-client` utility.
+
+1.  **Discover tools on the remote phone service**:
+    ```bash
+    # Query the local SAM node proxy for tools hosted by the phone-sensors peer
+    go run cmd/mcp-client/main.go \
+      -url "http://localhost:8080/sam/<PHONE_PEER_ID>/mcp/phone-sensors" \
+      -token "secret-token" \
+      -list
     ```
+    *Output:*
+    *   `get_battery_status`: Returns the current battery level and charging status of the device.
+    *   `get_location`: Returns the current coarse location of the device.
+
+2.  **Query the location**:
+    ```bash
+    go run cmd/mcp-client/main.go \
+      -url "http://localhost:8080/sam/<PHONE_PEER_ID>/mcp/phone-sensors" \
+      -token "secret-token" \
+      -tool "get_location"
+    ```
+    *Output:* `{"latitude": 42.2805588, "longitude": -8.6124088}`
+
+---
+
+### Option 2: AI Agent Interaction Flow
+
+Clean, successful flow of an AI agent discovering and querying the mesh.
+
+| Step | Action | Details / Tool | Result |
+|---|---|---|---|
+| 1 | Discover Peers & Tools | `find_remote_tools` | Found peer `<PHONE_PEER_ID>` hosting service `phone-sensors` with tool `mcp://phone-sensors/get_location`. |
+| 2 | Verify Schema | `describe_remote_tool` | Confirmed `get_location` requires no input parameters: `{"input_schema": {"type": "object", "properties": {}}}`. |
+| 3 | Query Location | `call_remote_tool` | Received: `{"latitude": 42.2805588, "longitude": -8.6124088}` |
+| 4 | Resolve Address | Web Search | Geolocated to Vigo / Redondela area, Galicia, Spain. |
