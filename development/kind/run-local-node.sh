@@ -36,4 +36,5 @@ exec ./bin/sam-node run \
   --bind-addr 127.0.0.1:9099 \
   --api-token devtoken \
   --discovery-interval 200ms \
+  --hub-connect-timeout 10s \
   "$@"
