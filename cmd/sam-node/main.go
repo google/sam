@@ -76,6 +76,7 @@ var (
 	autoRelayMinIntervalFlag time.Duration
 	autoRelayBootDelayFlag   time.Duration
 	autoRelayBackoffFlag     time.Duration
+	hubConnectTimeoutFlag    time.Duration
 	apiTokenFlag             string
 	tlsCertFlag              string
 	tlsKeyFlag               string
@@ -220,6 +221,7 @@ func main() {
 					AutoRelayMinInterval: autoRelayMinIntervalFlag,
 					AutoRelayBootDelay:   autoRelayBootDelayFlag,
 					AutoRelayBackoff:     autoRelayBackoffFlag,
+					HubConnectTimeout:    hubConnectTimeoutFlag,
 				})
 				if err != nil {
 					logger.Fatalf("Failed to initialize mesh node: %v", err)
@@ -278,6 +280,7 @@ func main() {
 					AutoRelayMinInterval: autoRelayMinIntervalFlag,
 					AutoRelayBootDelay:   autoRelayBootDelayFlag,
 					AutoRelayBackoff:     autoRelayBackoffFlag,
+					HubConnectTimeout:    hubConnectTimeoutFlag,
 				})
 				if err != nil {
 					enrollCancel()
@@ -329,6 +332,7 @@ func main() {
 					AutoRelayMinInterval: autoRelayMinIntervalFlag,
 					AutoRelayBootDelay:   autoRelayBootDelayFlag,
 					AutoRelayBackoff:     autoRelayBackoffFlag,
+					HubConnectTimeout:    hubConnectTimeoutFlag,
 				})
 				if err != nil {
 					logger.Fatalf("Failed to initialize node after enrollment: %v", err)
@@ -483,6 +487,7 @@ func main() {
 				AutoRelayMinInterval: 30 * time.Second,
 				AutoRelayBootDelay:   0 * time.Second,
 				AutoRelayBackoff:     3 * time.Second,
+				HubConnectTimeout:    hubConnectTimeoutFlag,
 			})
 			if err != nil {
 				logger.Fatalf("Failed to initialize node for enrollment: %v", err)
@@ -521,11 +526,13 @@ func main() {
 	runCmd.Flags().DurationVar(&autoRelayMinIntervalFlag, "autorelay-min-interval", 30*time.Second, "AutoRelay Min Interval")
 	runCmd.Flags().DurationVar(&autoRelayBootDelayFlag, "autorelay-boot-delay", 0*time.Second, "AutoRelay Boot Delay")
 	runCmd.Flags().DurationVar(&autoRelayBackoffFlag, "autorelay-backoff", 3*time.Second, "AutoRelay Backoff")
+	runCmd.Flags().DurationVar(&hubConnectTimeoutFlag, "hub-connect-timeout", node.DefaultHubConnectTimeout, "Timeout for dialing each hub address")
 	runCmd.Flags().BoolVar(&enableRelayFlag, "enable-relay", false, "Allow this node to serve as a relay for others")
 	runCmd.Flags().StringVar(&logLevelFlag, "log-level", "info", "Log level (debug, info, warn, error)")
 	runCmd.Flags().DurationVar(&keyGracePeriodFlag, "key-grace-period", 24*time.Hour, "Key grace period for old keys (e.g. 24h)")
 	runCmd.Flags().BoolVar(&allowLoopbackFlag, "allow-loopback", false, "Allow publishing and connecting to loopback/link-local addresses")
 	joinCmd.Flags().BoolVar(&allowLoopbackFlag, "allow-loopback", false, "Allow publishing and connecting to loopback/link-local addresses")
+	joinCmd.Flags().DurationVar(&hubConnectTimeoutFlag, "hub-connect-timeout", node.DefaultHubConnectTimeout, "Timeout for dialing each hub address")
 	joinCmd.Flags().BoolVar(&offlineAccessFlag, "offline-access", false, "Request OIDC offline access/refresh token for automatic renewal")
 	runCmd.Flags().StringVar(&apiTokenFlag, "api-token", "", "Static Bearer token for API authorization")
 	runCmd.Flags().StringVar(&tlsCertFlag, "tls-cert", "", "Path to TLS certificate for sidecar API")

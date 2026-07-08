@@ -28,6 +28,7 @@ const (
 	DefaultDiscoveryInterval = "30s"
 	DefaultHubURL            = "http://localhost:8080"
 	DefaultConfigFile        = "sam-node.yaml"
+	DefaultHubConnectTimeout = 5 * time.Second
 )
 
 // Options holds all configuration options for a SamNode.
@@ -48,6 +49,8 @@ type Options struct {
 	AutoRelayMinInterval time.Duration
 	AutoRelayBootDelay   time.Duration
 	AutoRelayBackoff     time.Duration
+	// HubConnectTimeout bounds each hub address's dial (connect + stream open).
+	HubConnectTimeout time.Duration
 
 	BiscuitTimeout time.Duration
 }
@@ -74,6 +77,9 @@ func (o *Options) Default() {
 	}
 	if o.KeyGracePeriod == 0 {
 		o.KeyGracePeriod = 24 * time.Hour
+	}
+	if o.HubConnectTimeout == 0 {
+		o.HubConnectTimeout = DefaultHubConnectTimeout
 	}
 	if len(o.ListenAddrs) == 0 {
 		o.ListenAddrs = []string{"/ip4/0.0.0.0/udp/5001/quic-v1", "/ip4/0.0.0.0/tcp/5002"}

@@ -678,7 +678,7 @@ func (n *SamNode) ConnectAndAuthWithHub(ctx context.Context, addr multiaddr.Mult
 		}
 
 		// Create a per-replica timeout context to prevent blocking on offline replicas
-		replicaCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		replicaCtx, cancel := context.WithTimeout(ctx, n.config.HubConnectTimeout)
 
 		if err := n.Host.Connect(replicaCtx, *addrInfo); err != nil {
 			cancel()
