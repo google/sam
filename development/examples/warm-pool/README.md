@@ -42,17 +42,17 @@ dispatcher (fine for a single-manager pool).
 
 1. **Set a Gemini key** for the reviewer image (free AI Studio key is fine):
    ```
-   git update-index --skip-worktree development/examples/code-reviewer-mcp/Dockerfile
+   git update-index --skip-worktree development/examples/code-reviewer-pool/reviewer/Dockerfile
    # edit ENV GEMINI_API_KEY=<API_KEY> in that Dockerfile
    ```
 
 2. Mesh layout ships in `development/kind/mesh-config.yaml`:
    ```yaml
    node-a:                     # in-cluster bare node
-   node-b: code-reviewer-mcp   # worker
-   node-c: code-reviewer-mcp   # worker
-   node-d: code-reviewer-mcp   # worker
-   node-e: pool-manager-mcp    # manager
+   node-b: code-reviewer-pool/reviewer   # worker
+   node-c: code-reviewer-pool/reviewer   # worker
+   node-d: code-reviewer-pool/reviewer   # worker
+   node-e: code-reviewer-pool/manager    # manager
    ```
 
 3. Bring the mesh up and start a **local caller node** — this is the orchestrator

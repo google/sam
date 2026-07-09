@@ -54,7 +54,7 @@ When a node has a service, `make kind-up` builds the service image from its `Doc
 
 ### Adding and Testing a New Service
 
-A service is any backend a node advertises to the mesh. Its kind is set by the `type` field in `sam-node-config.yaml`. SAM currently supports `mcp` (an MCP server) and `inference` (an LLM inference endpoint). The repository ships example MCP services under `development/examples/` (`calc-mcp`, `greeter-mcp`, `code-reviewer-mcp`, and `everything-mcp`) which are the easiest starting point. Using `calc-mcp` as a template:
+A service is any backend a node advertises to the mesh. Its kind is set by the `type` field in `sam-node-config.yaml`. SAM currently supports `mcp` (an MCP server) and `inference` (an LLM inference endpoint). The repository ships example MCP services under `development/examples/` (`calc-mcp`, `greeter-mcp`, `code-reviewer-pool/reviewer`, and `everything-mcp`) which are the easiest starting point. Using `calc-mcp` as a template:
 
 1. **Create the service folder** `development/examples/my-mcp/` with:
    - The service backend (e.g. `my_server.py`) listening on a local port, plus a `Dockerfile` and any `requirements.txt`.

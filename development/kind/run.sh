@@ -31,16 +31,17 @@ render_and_apply() {
   local CONFIG_ARG="" CONFIG_MOUNT="" SIDECAR="" CONFIG_VOLUME=""
   if [[ -n "$svc" ]]; then
     local dir="${PROJECT_ROOT}/development/examples/${svc}"
+    local name="$(basename "$svc")"
     [[ -d "$dir" ]] || { echo "service '${svc}' (node ${node}) not found in development/examples/" >&2; exit 1; }
-    echo "Building service image ${svc}:${IMAGE_TAG}…"
-    docker build -t "${svc}:${IMAGE_TAG}" "$dir"
-    kind load docker-image --name "${CLUSTER}" "${svc}:${IMAGE_TAG}"
+    echo "Building service image ${name}:${IMAGE_TAG}…"
+    docker build -t "${name}:${IMAGE_TAG}" "$dir"
+    kind load docker-image --name "${CLUSTER}" "${name}:${IMAGE_TAG}"
     kubectl --context "${KCTX}" -n "${NAMESPACE}" create configmap "${node}-config" \
       --from-file=sam-node.yaml="${dir}/sam-node-config.yaml" \
       --dry-run=client -o yaml | kubectl --context "${KCTX}" apply -f -
     CONFIG_ARG='        - "--config=/etc/sam/sam-node.yaml"'
     CONFIG_MOUNT=$'        - name: config\n          mountPath: /etc/sam'
-    SIDECAR=$'      - name: '"${svc}"$'\n        image: '"${svc}:${IMAGE_TAG}"$'\n        imagePullPolicy: IfNotPresent'
+    SIDECAR=$'      - name: '"${name}"$'\n        image: '"${name}:${IMAGE_TAG}"$'\n        imagePullPolicy: IfNotPresent'
     CONFIG_VOLUME=$'      - name: config\n        configMap:\n          name: '"${node}-config"
   fi
   NODE="$node" CONFIG_ARG="$CONFIG_ARG" CONFIG_MOUNT="$CONFIG_MOUNT" SIDECAR="$SIDECAR" CONFIG_VOLUME="$CONFIG_VOLUME" \

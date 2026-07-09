@@ -1,0 +1,9 @@
+version: "v1alpha1"
+attenuation:
+  policies: []
+services:
+  - type: "mcp"
+    name: "code-reviewer"
+    description: "Reviews code snippets via a Gemini-backed agent"
+    # Reach the reviewer by its compose service name, not 127.0.0.1.
+    target_url: "http://code-reviewer:7779/mcp"

@@ -1,9 +1,9 @@
 # node -> service. A blank value means a bare node (no service, e.g. a caller).
-# The service value is a folder name under development/examples/.
+# The service value is a folder path under development/examples/.
 # node-a is the orchestrator entry; node-b/c/d form a warm reviewer pool;
 # node-e runs the pool-manager that leases those workers out.
 node-a:
-node-b: code-reviewer-mcp
-node-c: code-reviewer-mcp
-node-d: code-reviewer-mcp
-node-e: pool-manager-mcp
+node-b: code-reviewer-pool/reviewer
+node-c: code-reviewer-pool/reviewer
+node-d: code-reviewer-pool/reviewer
+node-e: code-reviewer-pool/manager
