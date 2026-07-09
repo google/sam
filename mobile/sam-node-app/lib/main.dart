@@ -17,6 +17,22 @@ import 'package:url_launcher/url_launcher.dart';
 import 'sam_ffi.dart';
 import 'mcp_server.dart';
 
+String? _isolatedFetchHubInfo(String url) {
+  try {
+    return SamNodeLib().fetchHubInfoJSON(url);
+  } catch (e) {
+    return jsonEncode({'error': 'FFI_ERROR: ${e.toString()}'});
+  }
+}
+
+String? _isolatedEnroll(String dataDir, String hubText, String jwtText, bool allowLoopback) {
+  try {
+    return SamNodeLib().enroll(dataDir, hubText, jwtText, allowLoopback);
+  } catch (e) {
+    return e.toString();
+  }
+}
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   try {
@@ -144,7 +160,7 @@ class _NodeControlPageState extends State<NodeControlPage> {
     try {
       final hubUrl = _hubController.text.trim();
       debugPrint('DEBUG: Fetching hub info from $hubUrl');
-      final infoJson = await Isolate.run(() => SamNodeLib().fetchHubInfoJSON(hubUrl));
+      final infoJson = await Isolate.run(() => _isolatedFetchHubInfo(hubUrl));
       debugPrint('DEBUG: Hub info JSON: $infoJson');
       if (infoJson == null) {
         throw Exception('Failed to fetch hub info');
@@ -347,7 +363,7 @@ class _NodeControlPageState extends State<NodeControlPage> {
     try {
       final hubUrl = _hubController.text.trim();
       debugPrint('DEBUG: Device Login: Fetching hub info from $hubUrl');
-      final infoJson = await Isolate.run(() => SamNodeLib().fetchHubInfoJSON(hubUrl));
+      final infoJson = await Isolate.run(() => _isolatedFetchHubInfo(hubUrl));
       if (infoJson == null) throw Exception('Failed to fetch hub info');
 
       final info = jsonDecode(infoJson);
@@ -559,12 +575,7 @@ class _NodeControlPageState extends State<NodeControlPage> {
     final hubText = _hubController.text;
     final jwtText = _jwtController.text;
     final err = await Isolate.run(() {
-      return SamNodeLib().enroll(
-        dataDir,
-        hubText,
-        jwtText,
-        true, // allowLoopback
-      );
+      return _isolatedEnroll(dataDir, hubText, jwtText, true);
     });
 
     setState(() {
