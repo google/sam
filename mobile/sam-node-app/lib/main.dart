@@ -21,13 +21,13 @@ String? _isolatedFetchHubInfo(String url) {
   try {
     return SamNodeLib().fetchHubInfoJSON(url);
   } catch (e) {
-    return '{"error": "FFI_ERROR: ${e.toString()}"}';
+    return jsonEncode({'error': 'FFI_ERROR: ${e.toString()}'});
   }
 }
 
-String? _isolatedEnroll(Map<String, dynamic> args) {
+String? _isolatedEnroll(String dataDir, String hubText, String jwtText, bool allowLoopback) {
   try {
-    return SamNodeLib().enroll(args['dataDir'], args['hubText'], args['jwtText'], args['allowLoopback']);
+    return SamNodeLib().enroll(dataDir, hubText, jwtText, allowLoopback);
   } catch (e) {
     return e.toString();
   }
@@ -575,12 +575,7 @@ class _NodeControlPageState extends State<NodeControlPage> {
     final hubText = _hubController.text;
     final jwtText = _jwtController.text;
     final err = await Isolate.run(() {
-      return _isolatedEnroll({
-        'dataDir': dataDir,
-        'hubText': hubText,
-        'jwtText': jwtText,
-        'allowLoopback': true,
-      });
+      return _isolatedEnroll(dataDir, hubText, jwtText, true);
     });
 
     setState(() {
