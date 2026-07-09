@@ -4,8 +4,6 @@ linkTitle: "Quick Start"
 weight: 1
 ---
 
-# Quick Start
-
 This guide gets you up and running with a SAM node connected to the public `bananas.sam-mesh.dev` mesh. You can run SAM either directly via a binary or using Docker.
 
 ## 1. Install SAM
@@ -35,16 +33,44 @@ Expand-Archive -Path "sam.zip" -DestinationPath "$env:ProgramFiles\sam"
 
 ---
 
-## 2. Join the Mesh
+## 2. Connect Your Node to the Mesh
 
-To register your node with the mesh and obtain a cryptographic identity token (Biscuit), run the OIDC authorization flow. 
+Getting a node onto the mesh takes two actions: **joining** — registering your node with the mesh and obtaining its cryptographic identity (Biscuit) through an OIDC login — and **running** it, which starts the node and connects it to the hub. The `--join` flag on `run` does both at once: it enrolls the node the first time (when it has no identity yet), then starts running it.
 
-### Using the Binary
+### One Command
+
+#### Using the Binary
+```bash
+sam-node run --join --bind-addr 127.0.0.1:8080 --api-token my-secret-token
+```
+
+#### Using Docker
+```bash
+mkdir -p $(pwd)/sam-data
+docker run -it \
+  -v $(pwd)/sam-data:/data \
+  -p 5001:5001/udp \
+  -p 5002:5002 \
+  -p 8080:8080 \
+  ghcr.io/google/sam-node:latest \
+  run --join --data-dir /data --bind-addr 0.0.0.0:8080 --api-token my-secret-token
+```
+The first run uses `-it` so you can complete the interactive login; once enrolled, you can restart it detached with `-d`.
+
+By default this joins the public testnet (`bananas.sam-mesh.dev`); pass `--hub <url>` to enroll with a different mesh. On later restarts `--join` is ignored, since the identity is already stored, so it is safe to leave in your start command. If there is no interactive terminal to complete the login (for example a container started without `-it`), the node comes up unauthenticated so you can enroll separately.
+
+You can also perform the two actions separately — the steps below cover each in more detail.
+
+### Step 1: Join the Mesh
+
+To register your node with the mesh and obtain a cryptographic identity token (Biscuit), run the OIDC authorization flow.
+
+#### Using the Binary
 ```bash
 sam-node join https://bananas.sam-mesh.dev
 ```
 
-### Using Docker
+#### Using Docker
 Create a local directory to persist your node identity:
 ```bash
 mkdir -p $(pwd)/sam-data
@@ -56,13 +82,11 @@ docker run -it \
 
 The CLI will output a Device Authorization URL (if headless/Docker) or open your browser (if using the binary natively). Once authenticated, the node registers and saves the identity to `~/.config/sam-mesh/agent.db` (or `/data/agent.db` in Docker).
 
----
-
-## 3. Run the Node
+### Step 2: Run the Node
 
 Start your node in the background. We set a security `--api-token` to protect access to the local control plane API.
 
-### Using the Binary
+#### Using the Binary
 ```bash
 sam-node run --bind-addr 127.0.0.1:8080 --api-token my-secret-token
 ```
@@ -73,7 +97,7 @@ SAM Node Online.
 PeerID: 12D3KooW...
 ```
 
-### Using Docker
+#### Using Docker
 Map the required ports (`5001/udp`, `5002/tcp` for libp2p, and `8080/tcp` for the local API):
 ```bash
 docker run -d \
@@ -87,7 +111,9 @@ docker run -d \
 ```
 Verify the node is running with `docker logs sam-node`.
 
-## 4. Query the Local MCP API
+---
+
+## 3. Query the Local MCP API
 
 Your SAM node exposes a standard Model Context Protocol (MCP) server. The easiest way to interact with it is using the `mcp-client` CLI tool (which is installed alongside `sam-node`):
 
