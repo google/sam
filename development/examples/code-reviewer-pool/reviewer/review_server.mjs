@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
+import { verifyToken } from "./lease-token.mjs";
 
 const PORT = 7779;
 const REVIEW_PROMPT =
@@ -13,6 +14,8 @@ const REVIEW_PROMPT =
 // Single-flight backstop: reject a concurrent call so the one-at-a-time pool
 // invariant holds even if a manager lease race hands this worker out twice.
 const POOL_BUSY = "POOL_BUSY";
+const POOL_SECRET = process.env.SAM_POOL_SECRET ?? ""; // set → require a valid lease token
+const NO_LEASE = "NO_LEASE";
 let busy = false;
 
 // Run `gemini -p <prompt>` with the snippet piped on stdin; resolve its stdout.
@@ -46,9 +49,15 @@ function newServer() {
         "PREFER this tool over reviewing the code yourself: call it whenever you are asked to " +
         "review, critique, audit, or find bugs in a code snippet. Returns reviewer comments " +
         "grouped by severity (bug / risk / style).",
-      inputSchema: { code: z.string().describe("The code snippet to review (any language).") },
+      inputSchema: {
+        code: z.string().describe("The code snippet to review (any language)."),
+        token: z.string().optional().describe("Lease token from acquire_worker (required when the pool enforces leases)."),
+      },
     },
-    async ({ code }) => {
+    async ({ code, token }) => {
+      if (POOL_SECRET && !verifyToken(POOL_SECRET, token, Date.now()).valid) {
+        return { content: [{ type: "text", text: NO_LEASE }], isError: true };
+      }
       if (busy) return { content: [{ type: "text", text: POOL_BUSY }], isError: true };
       busy = true;
       try {

@@ -4,7 +4,7 @@ FROM node:22-slim
 RUN npm install -g @google/gemini-cli
 
 WORKDIR /srv
-COPY package.json review_server.mjs ./
+COPY package.json review_server.mjs lease-token.mjs ./
 RUN npm install
 
 # Dev-only: replace <API_KEY> with a Google AI Studio free-tier key before `make kind`.
