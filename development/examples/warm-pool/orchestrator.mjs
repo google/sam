@@ -64,7 +64,7 @@ async function main() {
       console.log(`[+${elapsed()}s] -> ${short(acq.peer_id)}  ${task.name}`);
       let review;
       try {
-        review = await call(acq.peer_id, acq.tool, { code: task.code });
+        review = await call(acq.peer_id, acq.tool, { code: task.code, token: acq.token });
       } finally {
         await call(manager, "mcp://pool-manager/release_worker", { peer_id: acq.peer_id, lease_id: acq.lease_id });
       }

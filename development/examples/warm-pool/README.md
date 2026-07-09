@@ -128,3 +128,12 @@ kubectl --context kind-sam-kind -n sam-kind scale deploy/node-d --replicas=1
 | `SAM_DISCOVERY_MS` | `3000` | manager |
 | `SAM_LEASE_MS` | `60000` | manager |
 | `SAM_ACQUIRE_TIMEOUT` | `60` | orchestrator |
+| `SAM_POOL_SECRET` | unset (enforcement off) | manager + reviewer |
+
+## Lease enforcement (optional)
+
+By default any peer can call a worker's `review_code` directly. Set the same
+`SAM_POOL_SECRET` on the manager and every reviewer to require a lease: the
+manager signs a token on `acquire_worker`, the reviewer verifies it offline and
+returns `NO_LEASE` for any call without a valid, unexpired one. Unset = open, as
+before.
