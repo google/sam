@@ -75,6 +75,21 @@ server.registerTool(
   },
 );
 
+server.registerTool(
+  "reset",
+  {
+    description: "Forget a conversation and start fresh with your buddy.",
+    inputSchema: {
+      session_id: z.string().optional().describe("Conversation id to clear; defaults to 'default'."),
+    },
+  },
+  async ({ session_id }) => {
+    const id = session_id ?? "default";
+    sessions.delete(id);
+    return { content: [{ type: "text", text: `Okay, wiped the '${id}' chat. Clean slate! 🧽` }] };
+  },
+);
+
 // Stateless Streamable HTTP: a fresh transport per request.
 const app = express();
 app.use(express.json());
