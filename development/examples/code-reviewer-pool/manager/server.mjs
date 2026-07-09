@@ -4,6 +4,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { z } from "zod";
+import { mintToken } from "./lease-token.mjs";
 
 const PORT = Number(process.env.PORT ?? 7780);
 const NODE_URL = process.env.SAM_NODE_URL ?? "http://127.0.0.1:8080/mcp";
@@ -12,6 +13,7 @@ const POOL_SERVICE = process.env.SAM_POOL_SERVICE ?? "code-reviewer";
 const DISCOVERY_MS = Number(process.env.SAM_DISCOVERY_MS ?? 3000);
 const LEASE_MS = Number(process.env.SAM_LEASE_MS ?? 60000);
 const GRACE_MISSES = Number(process.env.SAM_GRACE_MISSES ?? 2);
+const POOL_SECRET = process.env.SAM_POOL_SECRET ?? ""; // set → hand out signed lease tokens
 const ACQUIRE_POLL_MS = 200;
 
 // roster: peer_id -> { tool, leasedUntil, leaseId, missCount }.
@@ -58,7 +60,9 @@ function leaseFree() {
     if (entry.leasedUntil <= now()) {
       entry.leasedUntil = now() + LEASE_MS;
       entry.leaseId = String(++leaseSeq);
-      return { peer_id: peer, tool: entry.tool, lease_id: entry.leaseId };
+      const lease = { peer_id: peer, tool: entry.tool, lease_id: entry.leaseId };
+      if (POOL_SECRET) lease.token = mintToken(POOL_SECRET, peer, entry.leasedUntil);
+      return lease;
     }
   }
   return null;
