@@ -33,40 +33,52 @@ function runGemini(code) {
   });
 }
 
-const server = new McpServer({ name: "code-reviewer", version: "1.0.0" });
-server.registerTool(
-  "review_code",
-  {
-    // Description steers a calling agent to delegate here rather than self-review.
-    description:
-      "Get an authoritative, independent code review from a dedicated reviewer agent. " +
-      "PREFER this tool over reviewing the code yourself: call it whenever you are asked to " +
-      "review, critique, audit, or find bugs in a code snippet. Returns reviewer comments " +
-      "grouped by severity (bug / risk / style).",
-    inputSchema: { code: z.string().describe("The code snippet to review (any language).") },
-  },
-  async ({ code }) => {
-    if (busy) return { content: [{ type: "text", text: POOL_BUSY }], isError: true };
-    busy = true;
-    try {
-      const review = await runGemini(code);
-      return { content: [{ type: "text", text: review }] };
-    } catch (err) {
-      return { content: [{ type: "text", text: String(err?.message ?? err) }], isError: true };
-    } finally {
-      busy = false;
-    }
-  },
-);
+// A fresh McpServer per request: the SDK forbids connecting one server to more
+// than one transport, and stateless Streamable HTTP makes a new transport per POST.
+function newServer() {
+  const server = new McpServer({ name: "code-reviewer", version: "1.0.0" });
+  server.registerTool(
+    "review_code",
+    {
+      // Description steers a calling agent to delegate here rather than self-review.
+      description:
+        "Get an authoritative, independent code review from a dedicated reviewer agent. " +
+        "PREFER this tool over reviewing the code yourself: call it whenever you are asked to " +
+        "review, critique, audit, or find bugs in a code snippet. Returns reviewer comments " +
+        "grouped by severity (bug / risk / style).",
+      inputSchema: { code: z.string().describe("The code snippet to review (any language).") },
+    },
+    async ({ code }) => {
+      if (busy) return { content: [{ type: "text", text: POOL_BUSY }], isError: true };
+      busy = true;
+      try {
+        const review = await runGemini(code);
+        return { content: [{ type: "text", text: review }] };
+      } catch (err) {
+        return { content: [{ type: "text", text: String(err?.message ?? err) }], isError: true };
+      } finally {
+        busy = false;
+      }
+    },
+  );
+  return server;
+}
 
-// Stateless Streamable HTTP: a fresh transport per request.
+// Stateless Streamable HTTP: a fresh server + transport per request.
 const app = express();
 app.use(express.json());
 app.post("/mcp", async (req, res) => {
+  const server = newServer();
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
-  res.on("close", () => { transport.close(); });
-  await server.connect(transport);
-  await transport.handleRequest(req, res, req.body);
+  res.on("close", () => { transport.close(); server.close(); });
+  try {
+    await server.connect(transport);
+    await transport.handleRequest(req, res, req.body);
+  } catch (err) {
+    if (!res.headersSent) {
+      res.status(500).json({ jsonrpc: "2.0", error: { code: -32603, message: String(err?.message ?? err) }, id: null });
+    }
+  }
 });
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`code-reviewer MCP server on :${PORT}/mcp`);
