@@ -110,12 +110,14 @@ kubectl --context kind-sam-kind -n sam-kind scale deploy/node-d --replicas=1
 | `SAM_DISCOVERY_MS` | `3000` | manager |
 | `SAM_LEASE_MS` | `60000` | manager |
 | `SAM_GRACE_MISSES` | `2` | manager |
-| `SAM_POOL_SECRET` | unset (enforcement off) | manager + reviewer |
+| `SAM_POOL_SECRET` | `sam-dev-pool-secret` (enforcement always on) | manager + reviewer |
 
-## Lease enforcement (optional)
+## Lease enforcement
 
-By default any peer can call a worker's `review_code` directly. Set the same
-`SAM_POOL_SECRET` on the manager and every reviewer to require a lease: the
-manager signs a token on `acquire_worker`, the reviewer verifies it offline and
-returns `NO_LEASE` for any call without a valid, unexpired one. Unset = open, as
-before. A secret set on only one side (or a mismatch between them) fails closed: every `review_code` call returns `NO_LEASE`.
+Every reviewer requires a valid lease: the manager signs a token on
+`acquire_worker`, and the reviewer verifies it offline and returns `NO_LEASE`
+for any `review_code` call without a valid, unexpired one. Both sides share a
+hardcoded dev secret (`sam-dev-pool-secret`) so it works out of the box; override
+it by setting the same `SAM_POOL_SECRET` on the manager and every reviewer. A
+mismatch (or setting it on only one side) fails closed: every call returns
+`NO_LEASE`.
