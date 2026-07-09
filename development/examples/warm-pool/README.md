@@ -136,4 +136,4 @@ By default any peer can call a worker's `review_code` directly. Set the same
 `SAM_POOL_SECRET` on the manager and every reviewer to require a lease: the
 manager signs a token on `acquire_worker`, the reviewer verifies it offline and
 returns `NO_LEASE` for any call without a valid, unexpired one. Unset = open, as
-before.
+before. A secret set on only one side (or a mismatch between them) fails closed: every `review_code` call returns `NO_LEASE`.

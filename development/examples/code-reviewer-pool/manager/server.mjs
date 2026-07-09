@@ -74,8 +74,8 @@ server.registerTool(
   "acquire_worker",
   {
     description:
-      `Acquire (lease) a free worker from the '${POOL_SERVICE}' pool. Returns {peer_id, tool, lease_id}: ` +
-      "call the tool via call_remote_tool, then release_worker with the same peer_id and lease_id. " +
+      `Acquire (lease) a free worker from the '${POOL_SERVICE}' pool. Returns {peer_id, tool, lease_id, token?}: ` +
+      "call the tool via call_remote_tool — forward token in the tool arguments when present (the pool may require it) — then release_worker with the same peer_id and lease_id. " +
       "Blocks up to timeout_secs if all workers are busy; returns {available:false} if none free by then.",
     inputSchema: { timeout_secs: z.number().optional().describe("Max seconds to wait for a free worker (default 10).") },
   },
