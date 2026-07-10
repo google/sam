@@ -307,3 +307,39 @@ func TestPolicyOps(t *testing.T) {
 		t.Fatalf("policy contents mismatch: %+v", retPolicy)
 	}
 }
+
+func TestTimezoneComparison(t *testing.T) {
+	store := newTestStore(t)
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+	peerID := "12D3KooWTimezoneRouter"
+
+	// Create a lease with ExpiresAt using a different timezone (e.g., Eastern Standard Time)
+	estZone := time.FixedZone("EST", -5*3600)
+	expiresAt := time.Now().In(estZone).Add(10 * time.Second)
+
+	lease := &RouterLease{
+		PeerID:      peerID,
+		Addresses:   []string{"/ip4/127.0.0.1/tcp/5001/p2p/" + peerID},
+		LastRenewal: time.Now().In(estZone),
+		ExpiresAt:   expiresAt,
+	}
+
+	if err := store.UpsertRouterLease(ctx, lease); err != nil {
+		t.Fatalf("failed to upsert router lease: %v", err)
+	}
+
+	// Query using UTC timezone time
+	routers, err := store.GetActiveRouters(ctx)
+	if err != nil {
+		t.Fatalf("failed to get active routers: %v", err)
+	}
+
+	if len(routers) != 1 {
+		t.Fatalf("expected 1 router, got %d (timezone comparison failed)", len(routers))
+	}
+	if routers[0].PeerID != peerID {
+		t.Fatalf("expected router %s, got %s", peerID, routers[0].PeerID)
+	}
+}
