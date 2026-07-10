@@ -82,29 +82,29 @@ func (s *SQLStore) initSchema() error {
 				id SERIAL PRIMARY KEY,
 				private_key BYTEA NOT NULL,
 				public_key BYTEA NOT NULL UNIQUE,
-				expiration TIMESTAMP WITH TIME ZONE,
-				created_at TIMESTAMP WITH TIME ZONE NOT NULL
+				expiration BIGINT,
+				created_at BIGINT NOT NULL
 			)`
 		nodesSchema = `
 			CREATE TABLE IF NOT EXISTS nodes (
 				peer_id VARCHAR(255) PRIMARY KEY,
 				biscuit_token BYTEA NOT NULL,
-				enrolled_at TIMESTAMP WITH TIME ZONE NOT NULL,
-				expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+				enrolled_at BIGINT NOT NULL,
+				expires_at BIGINT NOT NULL,
 				banned BOOLEAN DEFAULT FALSE NOT NULL
 			)`
 		routersSchema = `
 			CREATE TABLE IF NOT EXISTS routers (
 				peer_id VARCHAR(255) PRIMARY KEY,
 				multiaddresses TEXT NOT NULL,
-				last_lease_renewal TIMESTAMP WITH TIME ZONE NOT NULL,
-				expires_at TIMESTAMP WITH TIME ZONE NOT NULL
+				last_lease_renewal BIGINT NOT NULL,
+				expires_at BIGINT NOT NULL
 			)`
 		policiesSchema = `
 			CREATE TABLE IF NOT EXISTS policies (
 				id VARCHAR(255) PRIMARY KEY,
 				content TEXT NOT NULL,
-				updated_at TIMESTAMP WITH TIME ZONE NOT NULL
+				updated_at BIGINT NOT NULL
 			)`
 	} else {
 		keyringSchema = `
@@ -112,29 +112,29 @@ func (s *SQLStore) initSchema() error {
 				id INTEGER PRIMARY KEY AUTOINCREMENT,
 				private_key BLOB NOT NULL,
 				public_key BLOB NOT NULL UNIQUE,
-				expiration DATETIME,
-				created_at DATETIME NOT NULL
+				expiration BIGINT,
+				created_at BIGINT NOT NULL
 			)`
 		nodesSchema = `
 			CREATE TABLE IF NOT EXISTS nodes (
 				peer_id TEXT PRIMARY KEY,
 				biscuit_token BLOB NOT NULL,
-				enrolled_at DATETIME NOT NULL,
-				expires_at DATETIME NOT NULL,
+				enrolled_at BIGINT NOT NULL,
+				expires_at BIGINT NOT NULL,
 				banned BOOLEAN DEFAULT FALSE NOT NULL
 			)`
 		routersSchema = `
 			CREATE TABLE IF NOT EXISTS routers (
 				peer_id TEXT PRIMARY KEY,
 				multiaddresses TEXT NOT NULL,
-				last_lease_renewal DATETIME NOT NULL,
-				expires_at DATETIME NOT NULL
+				last_lease_renewal BIGINT NOT NULL,
+				expires_at BIGINT NOT NULL
 			)`
 		policiesSchema = `
 			CREATE TABLE IF NOT EXISTS policies (
 				id TEXT PRIMARY KEY,
 				content TEXT NOT NULL,
-				updated_at DATETIME NOT NULL
+				updated_at BIGINT NOT NULL
 			)`
 	}
 
@@ -181,7 +181,7 @@ func (s *SQLStore) GetCurrentKey(ctx context.Context) (ed25519.PrivateKey, ed255
 // GetAllValidKeys implements Store.
 func (s *SQLStore) GetAllValidKeys(ctx context.Context) ([]KeyPair, error) {
 	query := s.rebind(`SELECT private_key, public_key, expiration FROM keyring WHERE expiration IS NULL OR expiration > ?`)
-	rows, err := s.db.QueryContext(ctx, query, time.Now())
+	rows, err := s.db.QueryContext(ctx, query, time.Now().Unix())
 	if err != nil {
 		return nil, err
 	}
@@ -190,13 +190,13 @@ func (s *SQLStore) GetAllValidKeys(ctx context.Context) ([]KeyPair, error) {
 	var keys []KeyPair
 	for rows.Next() {
 		var priv, pub []byte
-		var exp NullTime
+		var exp sql.NullInt64
 		if err := rows.Scan(&priv, &pub, &exp); err != nil {
 			return nil, err
 		}
 		var expiration time.Time
 		if exp.Valid {
-			expiration = exp.Time
+			expiration = time.Unix(exp.Int64, 0)
 		}
 		keys = append(keys, KeyPair{
 			Private:    ed25519.PrivateKey(priv),
@@ -220,19 +220,19 @@ func (s *SQLStore) RotateKeys(ctx context.Context, newPriv ed25519.PrivateKey, n
 
 	// Set expiration on the current active key
 	updateQuery := s.rebind(`UPDATE keyring SET expiration = ? WHERE expiration IS NULL`)
-	if _, err := tx.ExecContext(ctx, updateQuery, expireTime); err != nil {
+	if _, err := tx.ExecContext(ctx, updateQuery, expireTime.Unix()); err != nil {
 		return err
 	}
 
 	// Insert the new key
 	insertQuery := s.rebind(`INSERT INTO keyring (private_key, public_key, created_at) VALUES (?, ?, ?)`)
-	if _, err := tx.ExecContext(ctx, insertQuery, []byte(newPriv), []byte(newPub), now); err != nil {
+	if _, err := tx.ExecContext(ctx, insertQuery, []byte(newPriv), []byte(newPub), now.Unix()); err != nil {
 		return err
 	}
 
 	// Clean up expired keys
 	deleteQuery := s.rebind(`DELETE FROM keyring WHERE expiration <= ?`)
-	if _, err := tx.ExecContext(ctx, deleteQuery, now); err != nil {
+	if _, err := tx.ExecContext(ctx, deleteQuery, now.Unix()); err != nil {
 		return err
 	}
 
@@ -242,7 +242,7 @@ func (s *SQLStore) RotateKeys(ctx context.Context, newPriv ed25519.PrivateKey, n
 // SaveInitialKey implements Store.
 func (s *SQLStore) SaveInitialKey(ctx context.Context, priv ed25519.PrivateKey, pub ed25519.PublicKey) error {
 	query := s.rebind(`INSERT INTO keyring (private_key, public_key, created_at) VALUES (?, ?, ?)`)
-	_, err := s.db.ExecContext(ctx, query, []byte(priv), []byte(pub), time.Now())
+	_, err := s.db.ExecContext(ctx, query, []byte(priv), []byte(pub), time.Now().Unix())
 	return err
 }
 
@@ -263,7 +263,7 @@ func (s *SQLStore) EnrollNode(ctx context.Context, peerID string, biscuit []byte
 			DO UPDATE SET biscuit_token = excluded.biscuit_token, enrolled_at = excluded.enrolled_at, expires_at = excluded.expires_at`)
 	}
 
-	_, err := s.db.ExecContext(ctx, query, peerID, biscuit, time.Now(), expiresAt)
+	_, err := s.db.ExecContext(ctx, query, peerID, biscuit, time.Now().Unix(), expiresAt.Unix())
 	return err
 }
 
@@ -271,13 +271,16 @@ func (s *SQLStore) EnrollNode(ctx context.Context, peerID string, biscuit []byte
 func (s *SQLStore) GetNode(ctx context.Context, peerID string) (*EnrolledNode, error) {
 	query := s.rebind(`SELECT peer_id, biscuit_token, enrolled_at, expires_at, banned FROM nodes WHERE peer_id = ?`)
 	var node EnrolledNode
-	err := s.db.QueryRowContext(ctx, query, peerID).Scan(&node.PeerID, &node.Biscuit, &node.EnrolledAt, &node.ExpiresAt, &node.Banned)
+	var enrolledAtUnix, expiresAtUnix int64
+	err := s.db.QueryRowContext(ctx, query, peerID).Scan(&node.PeerID, &node.Biscuit, &enrolledAtUnix, &expiresAtUnix, &node.Banned)
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
+	node.EnrolledAt = time.Unix(enrolledAtUnix, 0)
+	node.ExpiresAt = time.Unix(expiresAtUnix, 0)
 	return &node, nil
 }
 
@@ -324,14 +327,14 @@ func (s *SQLStore) UpsertRouterLease(ctx context.Context, lease *RouterLease) er
 			DO UPDATE SET multiaddresses = excluded.multiaddresses, last_lease_renewal = excluded.last_lease_renewal, expires_at = excluded.expires_at`)
 	}
 
-	_, err = s.db.ExecContext(ctx, query, lease.PeerID, string(addrsBytes), lease.LastRenewal, lease.ExpiresAt)
+	_, err = s.db.ExecContext(ctx, query, lease.PeerID, string(addrsBytes), lease.LastRenewal.Unix(), lease.ExpiresAt.Unix())
 	return err
 }
 
 // GetActiveRouters implements Store.
 func (s *SQLStore) GetActiveRouters(ctx context.Context) ([]RouterLease, error) {
 	query := s.rebind(`SELECT peer_id, multiaddresses, last_lease_renewal, expires_at FROM routers WHERE expires_at > ?`)
-	rows, err := s.db.QueryContext(ctx, query, time.Now())
+	rows, err := s.db.QueryContext(ctx, query, time.Now().Unix())
 	if err != nil {
 		return nil, err
 	}
@@ -341,12 +344,15 @@ func (s *SQLStore) GetActiveRouters(ctx context.Context) ([]RouterLease, error) 
 	for rows.Next() {
 		var l RouterLease
 		var addrsStr string
-		if err := rows.Scan(&l.PeerID, &addrsStr, &l.LastRenewal, &l.ExpiresAt); err != nil {
+		var lastRenewalUnix, expiresAtUnix int64
+		if err := rows.Scan(&l.PeerID, &addrsStr, &lastRenewalUnix, &expiresAtUnix); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal([]byte(addrsStr), &l.Addresses); err != nil {
 			return nil, err
 		}
+		l.LastRenewal = time.Unix(lastRenewalUnix, 0)
+		l.ExpiresAt = time.Unix(expiresAtUnix, 0)
 		leases = append(leases, l)
 	}
 	return leases, rows.Err()
@@ -374,7 +380,7 @@ func (s *SQLStore) SavePolicy(ctx context.Context, policy *api.PolicyConfig) err
 			DO UPDATE SET content = excluded.content, updated_at = excluded.updated_at`)
 	}
 
-	_, err = s.db.ExecContext(ctx, query, string(data), time.Now())
+	_, err = s.db.ExecContext(ctx, query, string(data), time.Now().Unix())
 	return err
 }
 
@@ -400,45 +406,4 @@ func (s *SQLStore) GetPolicy(ctx context.Context) (*api.PolicyConfig, error) {
 // Close implements Store.
 func (s *SQLStore) Close() error {
 	return s.db.Close()
-}
-
-// NullTime represents a time.Time that may be null.
-type NullTime struct {
-	Time  time.Time
-	Valid bool // Valid is true if Time is not NULL
-}
-
-// Scan implements the Scanner interface.
-func (nt *NullTime) Scan(value any) error {
-	if value == nil {
-		nt.Time, nt.Valid = time.Time{}, false
-		return nil
-	}
-	nt.Valid = true
-	switch v := value.(type) {
-	case time.Time:
-		nt.Time = v
-	case []byte:
-		// SQLite might return string representation of date
-		t, err := time.Parse("2006-01-02 15:04:05", string(v))
-		if err != nil {
-			t, err = time.Parse(time.RFC3339, string(v))
-		}
-		if err != nil {
-			return err
-		}
-		nt.Time = t
-	case string:
-		t, err := time.Parse("2006-01-02 15:04:05", v)
-		if err != nil {
-			t, err = time.Parse(time.RFC3339, v)
-		}
-		if err != nil {
-			return err
-		}
-		nt.Time = t
-	default:
-		return fmt.Errorf("cannot scan %T into NullTime", value)
-	}
-	return nil
 }
