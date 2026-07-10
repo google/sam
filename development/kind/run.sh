@@ -78,10 +78,11 @@ show_cluster_logs() {
   tmuxs attach-session -t "${SESSION}"
 }
 
-# Read the node -> service assignment from mesh-config.yaml into NODE_LINES
-# (each line: "<node> <service-or-empty>") and the NODES array.
+# Read the node -> service assignment into NODE_LINES (each line:
+# "<node> <service-or-empty>") and the NODES array. Defaults to mesh-config.yaml;
+# override with MESH_CONFIG (e.g. the e2e lane pins calc-mcp via mesh-config.e2e.yaml).
 read_mesh_nodes() {
-  mapfile -t NODE_LINES < <(awk -F: '/^[A-Za-z0-9_-]+:/{n=$1; s=$2; gsub(/[[:space:]]/,"",n); gsub(/[[:space:]]/,"",s); print n, s}' "${SCRIPT_DIR}/mesh-config.yaml")
+  mapfile -t NODE_LINES < <(awk -F: '/^[A-Za-z0-9_-]+:/{n=$1; s=$2; gsub(/[[:space:]]/,"",n); gsub(/[[:space:]]/,"",s); print n, s}' "${MESH_CONFIG:-${SCRIPT_DIR}/mesh-config.yaml}")
   NODES=()
   for line in "${NODE_LINES[@]}"; do NODES+=("${line%% *}"); done
 }
