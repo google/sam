@@ -53,7 +53,7 @@ jobs:
         run: make build
 
       - name: Bring up the kind mesh
-        run: make kind-up ARGS="-s"
+        run: MESH_CONFIG=development/kind/mesh-config.e2e.yaml make kind-up ARGS="-s"
 
       - name: Run e2e mesh tests
         run: make kind-e2e-mesh

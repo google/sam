@@ -1,5 +1,11 @@
 # node -> service. A blank value means a bare node (no service, e.g. a caller).
-# The service value is a folder name under development/examples/.
+# Set a value to host a service on that node; the value is a folder path under
+# development/examples/, e.g:
+#   node-b: calc-mcp
+#   node-c: code-reviewer-pool/reviewer
+# All nodes ship bare by default — assign services to suit what you're testing.
 node-a:
-node-b: calc-mcp
-node-c: greeter-mcp
+node-b:
+node-c:
+node-d:
+node-e:
