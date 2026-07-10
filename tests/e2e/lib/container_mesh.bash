@@ -462,6 +462,7 @@ EOF
       --keys-path "/data/router.key" \
       --allow-loopback \
       --lease-renew-interval 5s \
+      --keys-sync-interval 2s \
       --log-level debug >/dev/null
 
     MESH_CONTAINERS+=("${hub_name}")
