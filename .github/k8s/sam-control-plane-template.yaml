@@ -12,13 +12,67 @@ spec:
   selector:
     app: sam-control-plane-${ENV_NAME}
 ---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sam-db-${ENV_NAME}
+  namespace: ${NAMESPACE}
+spec:
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+  selector:
+    app: sam-db-${ENV_NAME}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: sam-db-${ENV_NAME}
+  namespace: ${NAMESPACE}
+spec:
+  serviceName: sam-db-${ENV_NAME}
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sam-db-${ENV_NAME}
+  template:
+    metadata:
+      labels:
+        app: sam-db-${ENV_NAME}
+    spec:
+      containers:
+      - name: postgres
+        image: postgres:16-alpine
+        env:
+        - name: POSTGRES_DB
+          value: sam_mesh
+        - name: POSTGRES_USER
+          value: sam
+        - name: POSTGRES_PASSWORD
+          value: sam-secret-password
+        ports:
+        - containerPort: 5432
+          protocol: TCP
+        volumeMounts:
+        - name: db-data
+          mountPath: /var/lib/postgresql/data
+  volumeClaimTemplates:
+  - metadata:
+      name: db-data
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: 5Gi
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: sam-control-plane-${ENV_NAME}
   namespace: ${NAMESPACE}
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
       app: sam-control-plane-${ENV_NAME}
@@ -50,8 +104,8 @@ spec:
           periodSeconds: 20
         args:
         - "--bind-address=0.0.0.0:8080"
-        - "--db-driver=sqlite"
-        - "--db-dsn=/data/control-plane.db"
+        - "--db-driver=postgres"
+        - "--db-dsn=postgres://sam:sam-secret-password@sam-db-${ENV_NAME}:5432/sam_mesh?sslmode=disable"
         - "--issuer=https://auth.sam-mesh.dev,https://container.googleapis.com/v1/projects/${GCP_PROJECT_ID}/locations/${CLUSTER_REGION}/clusters/${CLUSTER_NAME}"
         - "--allowed-audiences=sam-mesh-audience,sam-hub-audience"
         - "--policy-file=/etc/sam/policies/policies.yaml"
@@ -66,14 +120,10 @@ spec:
         - name: policies-volume
           mountPath: /etc/sam/policies
           readOnly: true
-        - name: db-data
-          mountPath: /data
       volumes:
       - name: policies-volume
         configMap:
           name: sam-control-plane-policies-${ENV_NAME}
-      - name: db-data
-        emptyDir: {}
 ---
 apiVersion: v1
 kind: ConfigMap

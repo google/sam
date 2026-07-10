@@ -123,6 +123,8 @@ for f in "${SCRIPT_DIR}"/00-*.yaml "${SCRIPT_DIR}"/10-*.yaml "${SCRIPT_DIR}"/11-
   envsubst '${NAMESPACE} ${ISSUER} ${IMAGE_TAG}' < "$f" | kubectl --context "${KCTX}" apply -f -
 done
 
+echo "== Waiting for database to be ready =="
+kubectl --context "${KCTX}" -n "${NAMESPACE}" wait --for=condition=ready --timeout=180s pod -l app=sam-db
 echo "== Waiting for control plane to be ready =="
 kubectl --context "${KCTX}" -n "${NAMESPACE}" wait --for=condition=available --timeout=180s deployment/sam-control-plane
 echo "== Waiting for router to be ready =="

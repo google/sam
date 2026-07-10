@@ -26,7 +26,6 @@ import (
 const (
 	DefaultMeshName          = "public-mesh"
 	DefaultDiscoveryInterval = "30s"
-	DefaultHubURL            = "https://bananas.sam-mesh.dev"
 	DefaultConfigFile        = "sam-node.yaml"
 	DefaultHubConnectTimeout = 5 * time.Second
 )

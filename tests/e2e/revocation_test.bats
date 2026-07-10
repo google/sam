@@ -21,7 +21,7 @@ teardown() {
 
   mesh_start_standalone_hub "${hub_name}"
 
-  mesh_wait_for_log "${hub_name}" "PeerID:" 20
+  mesh_wait_for_log "${hub_name}" "Lease renewed successfully" 20
 
   local hub_peer_id
   hub_peer_id=$(docker logs "${hub_name}" 2>&1 | grep -oE '12D3Koo[a-zA-Z0-9]+' | head -n 1)

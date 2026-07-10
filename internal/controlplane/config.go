@@ -44,7 +44,7 @@ func (o *Options) Default() {
 		o.DataSourceName = "control-plane.db"
 	}
 	if o.LeaseDuration <= 0 {
-		o.LeaseDuration = 60 * time.Second
+		o.LeaseDuration = 15 * time.Minute
 	}
 	if o.KeyRotationInterval <= 0 {
 		o.KeyRotationInterval = 24 * time.Hour

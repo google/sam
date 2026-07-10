@@ -244,7 +244,6 @@ func NewSamNode(cfg Options) (*SamNode, error) {
 		reprovideTrigger:  make(chan struct{}, 1),
 		logger:            golog.Logger("sam-node"),
 	}
-	node.BiscuitTimeout = 2 * time.Second
 
 	var err error
 	node.rateLimiter, err = NewPeerRateLimiter(RateLimiterSize)
