@@ -37,6 +37,7 @@ function runGemini(text) {
     child.stdout.on("data", (d) => { stdout += d; });
     child.stderr.on("data", (d) => { stderr += d; });
     child.on("error", reject);
+    child.stdin.on("error", reject); // fail the request instead of crashing on EPIPE
     child.on("close", (exitCode) => {
       if (exitCode === 0) resolve(stdout.trim());
       else reject(new Error(stderr.trim() || `gemini exited with code ${exitCode}`));
