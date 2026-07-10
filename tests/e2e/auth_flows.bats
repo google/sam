@@ -51,7 +51,7 @@ teardown() {
     $(mesh_get_add_hosts) \
     -v "${data_vol}:/root/.config/sam-mesh" \
     "sam-node:local" \
-    join "http://sam-hub:9090" > "/tmp/${node_name}-join.out" 2>&1 &
+    join "http://sam-control-plane:8080" > "/tmp/${node_name}-join.out" 2>&1 &
   local join_pid=$!
   MESH_CONTAINERS+=("${node_name}-join")
 
@@ -137,7 +137,7 @@ teardown() {
     -v "${token_vol}:/var/run/secrets/tokens" \
     "sam-node:local" \
     run \
-    --hub "http://sam-hub:9090" \
+    --hub "http://sam-control-plane:8080" \
     --jwt-path "/var/run/secrets/tokens/sa-token" \
     --api-token "secret-token"
   MESH_CONTAINERS+=("${node_name}")

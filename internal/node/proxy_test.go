@@ -68,11 +68,11 @@ func TestDatapathIntegration(t *testing.T) {
 		AllowLoopback:     true,
 		MonitorBootstrap:  2 * time.Minute,
 		MonitorInterval:   1 * time.Minute,
-		BiscuitTimeout:    500 * time.Millisecond,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	nodeA.BiscuitTimeout = 500 * time.Millisecond
 	if err := nodeA.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -95,11 +95,11 @@ func TestDatapathIntegration(t *testing.T) {
 		AllowLoopback:     true,
 		MonitorBootstrap:  2 * time.Minute,
 		MonitorInterval:   1 * time.Minute,
-		BiscuitTimeout:    500 * time.Millisecond,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	nodeB.BiscuitTimeout = 500 * time.Millisecond
 	if err := nodeB.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -272,11 +272,11 @@ func TestDatapathIntegration_Unauthenticated(t *testing.T) {
 		AllowLoopback:     true,
 		MonitorBootstrap:  2 * time.Minute,
 		MonitorInterval:   1 * time.Minute,
-		BiscuitTimeout:    500 * time.Millisecond,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	nodeA.BiscuitTimeout = 500 * time.Millisecond
 	if err := nodeA.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -299,11 +299,11 @@ func TestDatapathIntegration_Unauthenticated(t *testing.T) {
 		AllowLoopback:     true,
 		MonitorBootstrap:  2 * time.Minute,
 		MonitorInterval:   1 * time.Minute,
-		BiscuitTimeout:    500 * time.Millisecond,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	nodeB.BiscuitTimeout = 500 * time.Millisecond
 	if err := nodeB.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -421,11 +421,11 @@ func TestStdioDatapathIntegration(t *testing.T) {
 		AllowLoopback:     true,
 		MonitorBootstrap:  2 * time.Minute,
 		MonitorInterval:   1 * time.Minute,
-		BiscuitTimeout:    500 * time.Millisecond,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	nodeA.BiscuitTimeout = 500 * time.Millisecond
 	if err := nodeA.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -444,11 +444,11 @@ func TestStdioDatapathIntegration(t *testing.T) {
 		AllowLoopback:     true,
 		MonitorBootstrap:  2 * time.Minute,
 		MonitorInterval:   1 * time.Minute,
-		BiscuitTimeout:    500 * time.Millisecond,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	nodeB.BiscuitTimeout = 500 * time.Millisecond
 	if err := nodeB.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -611,11 +611,11 @@ func TestDatapathHeadersAndRoutingTable(t *testing.T) {
 		AllowLoopback:     true,
 		MonitorBootstrap:  2 * time.Minute,
 		MonitorInterval:   1 * time.Minute,
-		BiscuitTimeout:    500 * time.Millisecond,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	nodeA.BiscuitTimeout = 500 * time.Millisecond
 	if err := nodeA.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -638,11 +638,11 @@ func TestDatapathHeadersAndRoutingTable(t *testing.T) {
 		AllowLoopback:     true,
 		MonitorBootstrap:  2 * time.Minute,
 		MonitorInterval:   1 * time.Minute,
-		BiscuitTimeout:    500 * time.Millisecond,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	nodeB.BiscuitTimeout = 500 * time.Millisecond
 	if err := nodeB.Start(ctx); err != nil {
 		t.Fatal(err)
 	}

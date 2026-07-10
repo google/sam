@@ -110,6 +110,8 @@ class Handler(BaseHTTPRequestHandler):
             groups = ['data-scientist']
             if client_id == 'admin-client':
                 groups = ['admin']
+            elif client_id == 'router-client':
+                groups = ['routers']
 
             payload = {
                 'iss': ISSUER,

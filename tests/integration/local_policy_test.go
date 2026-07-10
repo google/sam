@@ -10,7 +10,6 @@ import (
 )
 
 func TestLocalPolicyCanGrantPermissions(t *testing.T) {
-	hubBin := buildBinary(t, "./cmd/sam-hub")
 	nodeBin := buildBinary(t, "./cmd/sam-node")
 	tmpDir := t.TempDir()
 
@@ -33,25 +32,8 @@ bindings:
 		t.Fatal(err)
 	}
 
-	httpPortHub := getFreePort(t)
-	p2pPortHub := getFreePort(t)
-
-	cmdHub := exec.Command(hubBin,
-		"--bind-address", fmt.Sprintf("127.0.0.1:%d", httpPortHub),
-		"--listen", fmt.Sprintf("/ip4/127.0.0.1/tcp/%d", p2pPortHub),
-		"--policy-file", hubPolicyFile,
-		"--keys-db", filepath.Join(tmpDir, "keys.db"),
-		"--allow-loopback",
-		"--issuer", oidcURL,
-		"--insecure-skip-tls-verify",
-	)
-	cmdHub.Stdout = os.Stdout
-	cmdHub.Stderr = os.Stderr
-	if err := cmdHub.Start(); err != nil {
-		t.Fatalf("Failed to start Hub: %v", err)
-	}
-	defer func() { _ = cmdHub.Process.Kill(); _ = cmdHub.Wait() }()
-	fetchPeerID(t, httpPortHub)
+	httpPortHub, cleanupHub := startControlPlaneAndRouter(t, tmpDir, oidcURL, mintToken, hubPolicyFile)
+	defer cleanupHub()
 
 	// Node B Config with a permissive local policy
 	nodeBPolicyFile := filepath.Join(tmpDir, "nodeB_config.yaml")
@@ -170,7 +152,6 @@ attenuation:
 }
 
 func TestLocalPolicyCannotBypassHubTargetConstraint(t *testing.T) {
-	hubBin := buildBinary(t, "./cmd/sam-hub")
 	nodeBin := buildBinary(t, "./cmd/sam-node")
 	tmpDir := t.TempDir()
 
@@ -193,25 +174,8 @@ bindings:
 		t.Fatal(err)
 	}
 
-	httpPortHub := getFreePort(t)
-	p2pPortHub := getFreePort(t)
-
-	cmdHub := exec.Command(hubBin,
-		"--bind-address", fmt.Sprintf("127.0.0.1:%d", httpPortHub),
-		"--listen", fmt.Sprintf("/ip4/127.0.0.1/tcp/%d", p2pPortHub),
-		"--policy-file", hubPolicyFile,
-		"--keys-db", filepath.Join(tmpDir, "keys.db"),
-		"--allow-loopback",
-		"--issuer", oidcURL,
-		"--insecure-skip-tls-verify",
-	)
-	cmdHub.Stdout = os.Stdout
-	cmdHub.Stderr = os.Stderr
-	if err := cmdHub.Start(); err != nil {
-		t.Fatalf("Failed to start Hub: %v", err)
-	}
-	defer func() { _ = cmdHub.Process.Kill(); _ = cmdHub.Wait() }()
-	fetchPeerID(t, httpPortHub)
+	httpPortHub, cleanupHub := startControlPlaneAndRouter(t, tmpDir, oidcURL, mintToken, hubPolicyFile)
+	defer cleanupHub()
 
 	// Node B Config with a permissive local policy ("allow if true;")
 	// Node B will NOT claim "group:admin-only", so it will fail the Hub's target check.

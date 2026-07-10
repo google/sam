@@ -20,21 +20,8 @@ teardown() {
   local key
   key="$(mesh_gen_hex32)"
 
-  docker run -d \
-    --name "${hub_name}" \
-    --network "${MESH_NETWORK}" \
-    --network-alias sam-hub \
-    $(mesh_get_add_hosts) \
-    "sam-hub:local" \
-    --issuer "http://mock-oidc:18080" \
-    --client-id "sam-e2e" \
-    --key "${key}" \
-    --listen "/ip4/0.0.0.0/tcp/4002" \
-    --external-multiaddr "/dns4/sam-hub/tcp/4002" \
-    --mesh "${MESH_PREFIX}" \
-    --key-rotation-interval 5s >/dev/null
+  mesh_start_standalone_hub "${hub_name}" "5s" "2s"
 
-  MESH_CONTAINERS+=("${hub_name}")
   mesh_wait_for_log "${hub_name}" "PeerID:" 20
 
   local hub_peer_id

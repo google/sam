@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package hub
+package identity
 
 import (
+	"crypto/ed25519"
 	"errors"
 	"fmt"
 	"sort"
@@ -30,7 +31,8 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 )
 
-func (h *Hub) mintBiscuitToken(claims jwt.MapClaims, token *oidc.IDToken, remotePeer peer.ID) ([]byte, error) {
+// MintBiscuitToken generates a signed Biscuit token for a peer with policy rules based on JWT claims.
+func MintBiscuitToken(signingKey ed25519.PrivateKey, claims jwt.MapClaims, token *oidc.IDToken, remotePeer peer.ID, policy *api.PolicyConfig) ([]byte, error) {
 	if token == nil {
 		return nil, fmt.Errorf("token cannot be nil")
 	}
@@ -43,11 +45,9 @@ func (h *Hub) mintBiscuitToken(claims jwt.MapClaims, token *oidc.IDToken, remote
 	oidcSub, _ := claims["sub"].(string)
 	oidcEmail, _ := claims["email"].(string)
 
-	// Resolve roles based on configured bindings and explicit OIDC roles
 	resolvedRoles := make(map[string]bool)
-	if h.Policy != nil {
-		// 1. Evaluate explicit Policy Bindings
-		for _, b := range h.Policy.Bindings {
+	if policy != nil {
+		for _, b := range policy.Bindings {
 			for _, member := range b.Members {
 				if member == api.SystemAuthenticated {
 					resolvedRoles[b.Role] = true
@@ -56,7 +56,7 @@ func (h *Hub) mintBiscuitToken(claims jwt.MapClaims, token *oidc.IDToken, remote
 
 				parts := strings.SplitN(member, ":", 2)
 				if len(parts) != 2 {
-					continue // validated at startup, but ignore if broken
+					continue
 				}
 				prefix := parts[0]
 				value := parts[1]
@@ -84,16 +84,14 @@ func (h *Hub) mintBiscuitToken(claims jwt.MapClaims, token *oidc.IDToken, remote
 			}
 		}
 
-		// 2. Validate and accept pre-resolved OIDC roles directly if defined in policy (Zero-Trust check)
 		for _, r := range oidcRoles {
-			if _, exists := h.Policy.Roles[r]; exists {
+			if _, exists := policy.Roles[r]; exists {
 				resolvedRoles[r] = true
 			}
 		}
 	}
 
-	builder := biscuit.NewBuilder(h.KeyRing.GetCurrentKey())
-
+	builder := biscuit.NewBuilder(signingKey)
 	addedFacts := make(map[string]bool)
 	addFact := func(fact biscuit.Fact) error {
 		factStr := fact.String()
@@ -128,12 +126,10 @@ func (h *Hub) mintBiscuitToken(claims jwt.MapClaims, token *oidc.IDToken, remote
 		return nil, fmt.Errorf("failed to add client_peer_id fact: %w", err)
 	}
 
-	// Dynamic claims to facts mapping using api.OIDCClaimToFact
 	if err := translateClaimsToFacts(addFact, claims); err != nil {
 		return nil, err
 	}
 
-	// Assert resolved authorized roles in the token
 	roles := make([]string, 0, len(resolvedRoles))
 	for role := range resolvedRoles {
 		roles = append(roles, role)
@@ -150,8 +146,8 @@ func (h *Hub) mintBiscuitToken(claims jwt.MapClaims, token *oidc.IDToken, remote
 			continue
 		}
 
-		if h.Policy != nil {
-			if rolePolicy, ok := h.Policy.Roles[role]; ok {
+		if policy != nil {
+			if rolePolicy, ok := policy.Roles[role]; ok {
 				for _, svc := range rolePolicy.AllowedServices {
 					svcType, svcName := api.ParseServiceTarget(svc)
 
@@ -267,8 +263,8 @@ func (h *Hub) mintBiscuitToken(claims jwt.MapClaims, token *oidc.IDToken, remote
 
 	hasTargets := false
 	for _, role := range roles {
-		if h.Policy != nil {
-			if rolePolicy, ok := h.Policy.Roles[role]; ok {
+		if policy != nil {
+			if rolePolicy, ok := policy.Roles[role]; ok {
 				if len(rolePolicy.AllowedTargets) > 0 {
 					hasTargets = true
 					break
@@ -303,20 +299,25 @@ func (h *Hub) mintBiscuitToken(claims jwt.MapClaims, token *oidc.IDToken, remote
 	return biscuitData, nil
 }
 
-func (h *Hub) verifyBiscuit(biscuitData []byte, remotePeer peer.ID) (*biscuit.Biscuit, error) {
+// VerifyBiscuit verifies the validity of a Biscuit token.
+// It ensures that:
+// 1. The token is cryptographically signed by one of the trustedPublicKeys.
+// 2. The token is not expired.
+// 3. The token is securely bound to the expected remotePeer.
+func VerifyBiscuit(biscuitData []byte, expectedPeer peer.ID, trustedPublicKeys []ed25519.PublicKey, timeout time.Duration) (*biscuit.Biscuit, error) {
 	b, err := biscuit.Unmarshal(biscuitData)
 	if err != nil {
 		return nil, fmt.Errorf("malformed biscuit: %w", err)
 	}
 
 	var authOpts []biscuit.AuthorizerOption
-	if h.BiscuitTimeout > 0 {
-		authOpts = append(authOpts, biscuit.WithWorldOptions(datalog.WithMaxDuration(h.BiscuitTimeout)))
+	if timeout > 0 {
+		authOpts = append(authOpts, biscuit.WithWorldOptions(datalog.WithMaxDuration(timeout)))
 	}
 
-	keys := h.KeyRing.GetAllValidPublicKeys()
 	var lastErr error
-	for _, pubKey := range keys {
+	var authorized bool
+	for _, pubKey := range trustedPublicKeys {
 		authorizer, err := b.Authorizer(pubKey, authOpts...)
 		if err != nil {
 			lastErr = err
@@ -334,13 +335,27 @@ func (h *Hub) verifyBiscuit(biscuitData []byte, remotePeer peer.ID) (*biscuit.Bi
 		authorizer.AddPolicy(api.AllowIfTruePolicy)
 
 		if err := authorizer.Authorize(); err == nil {
-			return b, nil
+			authorized = true
+			break
 		} else {
 			lastErr = err
 		}
 	}
 
-	return nil, fmt.Errorf("no valid key found for verification: %v", lastErr)
+	if !authorized {
+		return nil, fmt.Errorf("no valid key found for verification: %v", lastErr)
+	}
+
+	// Enforce hardware binding
+	boundFact := biscuit.Fact{Predicate: biscuit.Predicate{
+		Name: "node",
+		IDs:  []biscuit.Term{biscuit.String(expectedPeer.String())},
+	}}
+	if _, err := b.GetBlockID(boundFact); err != nil {
+		return nil, fmt.Errorf("token is not bound to peer %s: %w", expectedPeer, err)
+	}
+
+	return b, nil
 }
 
 func translateClaimsToFacts(addFact func(biscuit.Fact) error, claims map[string]any) error {

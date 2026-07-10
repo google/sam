@@ -5,7 +5,6 @@ metadata:
 data:
   SAM_OIDC_ISSUER: "${ISSUERS}"
   SAM_OIDC_ID: "sam-mesh-audience"
-  SAM_HUB_KEY: "0000000000000000000000000000000000000000000000000000000000000000"
   policy.yaml: |
     version: v1alpha1
     bindings:
@@ -17,6 +16,8 @@ data:
         role: admin
       - members: ["user:admin-user"]
         role: admin
+      - members: ["group:routers"]
+        role: router
     roles:
       admin:
         allowed_services:
@@ -32,17 +33,126 @@ data:
           - "system://sam.catalog"
         allowed_targets:
           - "*"
+      router:
+        allowed_services:
+          - "*"
+        allowed_targets:
+          - "*"
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: sam-hub
+  name: sam-db
+spec:
+  ports:
+  - name: postgres
+    port: 5432
+    targetPort: 5432
+  selector:
+    app: sam-db
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sam-db
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sam-db
+  template:
+    metadata:
+      labels:
+        app: sam-db
+    spec:
+      containers:
+      - name: postgres
+        image: postgres:16-alpine
+        env:
+        - name: POSTGRES_DB
+          value: sam_mesh
+        - name: POSTGRES_USER
+          value: sam
+        - name: POSTGRES_PASSWORD
+          value: sam-secret-password
+        ports:
+        - containerPort: 5432
+          protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sam-control-plane
+spec:
+  ports:
+  - name: http
+    port: 8080
+    targetPort: 8080
+  selector:
+    app: sam-control-plane
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sam-control-plane
+spec:
+  replicas: 2
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: sam-control-plane
+  template:
+    metadata:
+      labels:
+        app: sam-control-plane
+    spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: app
+                operator: In
+                values:
+                - sam-control-plane
+            topologyKey: "kubernetes.io/hostname"
+      initContainers:
+      - name: wait-for-db
+        image: busybox:latest
+        command: ['sh', '-c', 'until nc -z -w3 sam-db 5432; do echo waiting for db; sleep 1; done']
+      containers:
+      - name: sam-control-plane
+        image: sam-control-plane:local
+        ports:
+        - containerPort: 8080
+          hostPort: 8080
+          protocol: TCP
+        args:
+        - "--bind-address=0.0.0.0:8080"
+        - "--db-driver=postgres"
+        - "--db-dsn=postgres://sam:sam-secret-password@sam-db:5432/sam_mesh?sslmode=disable"
+        - "--issuer=${ISSUERS}"
+        - "--allowed-audiences=sam-mesh-audience,sam-hub-audience"
+        - "--policy-file=/etc/sam/policy.yaml"
+        - "--insecure-skip-tls-verify"
+        - "--log-level=debug"
+        volumeMounts:
+        - name: config-volume
+          mountPath: /etc/sam/policy.yaml
+          subPath: policy.yaml
+      volumes:
+      - name: config-volume
+        configMap:
+          name: sam-hub-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sam-router
 spec:
   clusterIP: None
   ports:
-  - name: http
-    port: 9090
-    targetPort: 9090
   - port: 4501
     targetPort: 4501
     protocol: TCP
@@ -52,63 +162,62 @@ spec:
     protocol: UDP
     name: p2p-udp
   selector:
-    app: sam-hub
+    app: sam-router
 ---
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: sam-hub
+  name: sam-router
 spec:
-  serviceName: "sam-hub"
-  replicas: 2
+  serviceName: "sam-router"
+  replicas: 1
   selector:
     matchLabels:
-      app: sam-hub
+      app: sam-router
   template:
     metadata:
       labels:
-        app: sam-hub
+        app: sam-router
     spec:
       containers:
-      - name: sam-hub
-        image: sam-hub:local
-        envFrom:
-        - configMapRef:
-            name: sam-hub-config
-        env:
-        - name: MY_NODE_NAME
-          valueFrom:
-            fieldRef:
-              fieldPath: spec.nodeName
+      - name: sam-router
+        image: sam-router:local
         ports:
-        - containerPort: 9090
-          hostPort: 9090
-          protocol: TCP
         - containerPort: 4501
           hostPort: 4501
           protocol: TCP
         - containerPort: 4501
           hostPort: 4501
           protocol: UDP
+        env:
+        - name: ROUTER_NODE_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.hostIP
         args:
-        - "--issuer"
-        - "${ISSUERS}"
-        - "--key"
-        - "0000000000000000000000000000000000000000000000000000000000000000"
-        - "--insecure-skip-tls-verify"
-        - "--policy-file=/etc/sam/policy.yaml"
+        - "--control-plane=http://sam-control-plane:8080"
         - "--listen=/ip4/0.0.0.0/tcp/4501"
         - "--listen=/ip4/0.0.0.0/udp/4501/quic-v1"
-        - "--external-multiaddr=/dns4/$(MY_NODE_NAME)/tcp/4501"
-        - "--external-multiaddr=/dns4/$(MY_NODE_NAME)/udp/4501/quic-v1"
-        - "--external-multiaddr=http://sam-hub:9090"
-        - "--log-level"
-        - "debug"
+        - "--external-addr=/dns4/sam-router/tcp/4501"
+        - "--external-addr=/dns4/sam-router/udp/4501/quic-v1"
+        - "--external-addr=/ip4/$(ROUTER_NODE_IP)/tcp/4501"
+        - "--external-addr=/ip4/$(ROUTER_NODE_IP)/udp/4501/quic-v1"
+        - "--jwt-path=/var/run/secrets/tokens/sa-token"
+        - "--keys-path=/data/router.key"
+        - "--allow-loopback"
+        - "--log-level=debug"
         volumeMounts:
-        - name: config-volume
-          mountPath: /etc/sam/policy.yaml
-          subPath: policy.yaml
+        - name: router-data
+          mountPath: /data
+        - name: router-token-vol
+          mountPath: /var/run/secrets/tokens
+          readOnly: true
       volumes:
-      - name: config-volume
-        configMap:
-          name: sam-hub-config
+      - name: router-data
+        emptyDir: {}
+      - name: router-token-vol
+        secret:
+          secretName: sam-router-token
+          items:
+          - key: token
+            path: sa-token

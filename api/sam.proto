@@ -26,6 +26,7 @@ message AuthFrame {
 message AuthResponse {
   bool success = 1;
   string error = 2; // populated only if success is false
+  bytes biscuit = 3; // The server's own Biscuit token (for mutual auth)
 }
 
 
@@ -93,4 +94,37 @@ message HubInfoResponse {
   string audience = 3;
   repeated string hub_addresses = 4;
 }
+
+message RouterLeaseRequest {
+  string peer_id = 1;
+  repeated string addresses = 2;
+  bytes biscuit = 3;
+}
+
+message RouterLeaseResponse {
+  bool success = 1;
+  string error = 2;
+  int64 expires_at = 3;
+}
+
+message PolicyConfigGetRequest {}
+
+message PolicyConfigGetResponse {
+  string yaml_content = 1;
+}
+
+message PolicyConfigUpdateRequest {
+  string yaml_content = 1;
+}
+
+message PolicyConfigUpdateResponse {
+  bool success = 1;
+  string error = 2;
+}
+
+message KeysResponse {
+  repeated bytes public_keys = 1;
+}
+
+
 

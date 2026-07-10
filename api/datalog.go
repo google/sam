@@ -80,6 +80,10 @@ const (
 	// Example Datalog: allow if role("mesh-member")
 	FactRole = "role"
 
+	// Standard role values
+	RoleRouter    = "router"
+	RoleBootstrap = "bootstrap"
+
 	// FactUser defines the subject (username/userID) claim extracted from the OIDC token.
 	// Contains: biscuit.String(username)
 	// Example Datalog: allow if user("alice")

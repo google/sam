@@ -51,9 +51,9 @@ spec:
             - -c
             - |
               set -e
-              # Extract IPs and PeerIDs of pods running sam-hub
-              echo "Finding sam-hub pods in ${NAMESPACE}..."
-              PODS=$(kubectl get pods -n ${NAMESPACE} -l app=sam-hub-${ENV_NAME} -o jsonpath='{range .items[?(@.status.phase=="Running")]}{.metadata.name}{" "}{.spec.nodeName}{"\n"}{end}')
+              # Extract IPs and PeerIDs of pods running sam-router
+              echo "Finding sam-router pods in ${NAMESPACE}..."
+              PODS=$(kubectl get pods -n ${NAMESPACE} -l app=sam-router-${ENV_NAME} -o jsonpath='{range .items[?(@.status.phase=="Running")]}{.metadata.name}{" "}{.spec.nodeName}{"\n"}{end}')
               
               declare -a IP_ARRAY=()
               declare -a TXT_ARRAY=()
@@ -64,8 +64,8 @@ spec:
                 IP_LIST=$(kubectl get node $node -o jsonpath='{.status.addresses[?(@.type=="ExternalIP")].address}')
                 POD_IP=$(kubectl get pod $pod -n ${NAMESPACE} -o jsonpath='{.status.podIP}')
 
-                # Get the PeerID by extracting the base58 string from the protobuf response
-                PEER_ID=$(curl -s http://${POD_IP}:9090/info | grep -a -o '/p2p/[1-9A-HJ-NP-Za-km-z]*' | head -n 1 | cut -d/ -f3 || true)
+                # Get the PeerID by extracting it from the router pod logs
+                PEER_ID=$(kubectl logs $pod -n ${NAMESPACE} | grep -o 'PeerID: [a-zA-Z0-9]*' | head -n 1 | cut -d' ' -f2 || true)
 
                 if [ -n "$IP_LIST" ]; then
                   echo "Found IP $IP_LIST "

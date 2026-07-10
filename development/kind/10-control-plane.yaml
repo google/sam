@@ -1,0 +1,104 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: sam-control-plane
+  namespace: ${NAMESPACE}
+spec:
+  type: ClusterIP
+  selector:
+    app: sam-control-plane
+  ports:
+  - { name: http, port: 8080, targetPort: 8080, protocol: TCP }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sam-control-plane
+  namespace: ${NAMESPACE}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sam-control-plane
+  template:
+    metadata:
+      labels:
+        app: sam-control-plane
+    spec:
+      nodeSelector:
+        sam-role: hub
+      containers:
+      - name: sam-control-plane
+        image: sam-control-plane:${IMAGE_TAG}
+        imagePullPolicy: IfNotPresent
+        args:
+        - "--bind-address=0.0.0.0:8080"
+        - "--db-driver=sqlite"
+        - "--db-dsn=/data/control-plane.db"
+        - "--issuer=${ISSUER}"
+        - "--allowed-audiences=sam-mesh-audience,sam-hub-audience"
+        - "--policy-file=/etc/sam/policies/policies.yaml"
+        ports:
+        - { containerPort: 8080, name: http, protocol: TCP }
+        readinessProbe:
+          httpGet:
+            path: /info
+            port: http
+          periodSeconds: 2
+        volumeMounts:
+        - name: policies-volume
+          mountPath: /etc/sam/policies
+          readOnly: true
+        - name: db-data
+          mountPath: /data
+      volumes:
+      - name: policies-volume
+        configMap:
+          name: sam-control-plane-policies
+      - name: db-data
+        emptyDir: {}
+---
+# Host-facing access for a locally-built sam-node. Reachable on the host at
+# 127.0.0.1:9090 via the control-plane extraPortMappings.
+apiVersion: v1
+kind: Service
+metadata:
+  name: sam-control-plane-nodeport
+  namespace: ${NAMESPACE}
+spec:
+  type: NodePort
+  selector:
+    app: sam-control-plane
+  ports:
+  - { name: http, port: 8080, targetPort: 8080, nodePort: 30090, protocol: TCP }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sam-control-plane-policies
+  namespace: ${NAMESPACE}
+data:
+  policies.yaml: |
+    version: "v1alpha1"
+    bindings:
+      - members: ["user:system:serviceaccount:${NAMESPACE}:node-a-sa"]
+        role: "sam-admin"
+      - members: ["user:system:serviceaccount:${NAMESPACE}:node-b-sa"]
+        role: "sam-admin"
+      - members: ["user:system:serviceaccount:${NAMESPACE}:node-c-sa"]
+        role: "sam-admin"
+      - members: ["user:system:serviceaccount:${NAMESPACE}:local-node-sa"]
+        role: "sam-admin"
+      - members: ["group:routers", "user:system:serviceaccount:${NAMESPACE}:sam-router-sa"]
+        role: "router"
+    roles:
+      sam-admin:
+        allowed_services:
+          - "*"
+        allowed_targets:
+          - "*"
+      router:
+        allowed_services:
+          - "*"
+        allowed_targets:
+          - "*"

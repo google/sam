@@ -1,3 +1,17 @@
+// Copyright 2026 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package integration_test
 
 import (
@@ -15,12 +29,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/sam/api"
-	"google.golang.org/protobuf/proto"
+	"github.com/libp2p/go-libp2p/core/crypto"
+	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 func TestHubFederationAndRelay(t *testing.T) {
-	hubBin := buildBinary(t, "./cmd/sam-hub")
+	cpBin := buildBinary(t, "./cmd/sam-control-plane")
+	routerBin := buildBinary(t, "./cmd/sam-router")
 	nodeBin := buildBinary(t, "./cmd/sam-node")
 	clientBin := buildBinary(t, "./cmd/mcp-client")
 
@@ -38,14 +53,11 @@ roles:
       - "mcp://*"
       - "system://sam.catalog"
 `
-	if err := os.WriteFile(policyFile, []byte(policyContent), 0644); err != nil {
-		t.Fatal(err)
-	}
+	writePolicyWithRouter(t, policyFile, policyContent)
 
-	portA := getFreePort(t)
-	portB := getFreePort(t)
-	p2pPortA := getFreePort(t)
-	p2pPortB := getFreePort(t)
+	cpPort := getFreePort(t)
+	routerPortA := getFreePort(t)
+	routerPortB := getFreePort(t)
 
 	// Start Fake DNS Server
 	dnsServer, err := NewFakeDNSServer(map[string]string{
@@ -56,103 +68,168 @@ roles:
 	}
 	t.Cleanup(func() { dnsServer.Hijack(t) })
 
-	// Start Hub A
-	// Mock OIDC
-	oidcURL, jwtTokenStr := startMockOIDC(t)
-
-	cmdA := exec.Command(hubBin,
-		"--bind-address", fmt.Sprintf("127.0.0.1:%d", portA),
-		"--listen", fmt.Sprintf("/ip4/127.0.0.1/tcp/%d", p2pPortA),
-		"--policy-file", policyFile,
-		"--keys-db", filepath.Join(tmpDir, "keysA.db"),
-		"--allow-loopback",
-		"--external-multiaddr", "/dnsaddr/test-hub.local",
-		"--issuer", oidcURL,
-		"--insecure-skip-tls-verify",
-		"--key", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-	)
-	cmdA.Env = append(os.Environ(), "SAM_TEST_DNS_SERVER="+dnsServer.conn.LocalAddr().String())
-	var stdoutA, stderrA safeBuffer
-	cmdA.Stdout = &stdoutA
-	cmdA.Stderr = &stderrA
-
-	if err := cmdA.Start(); err != nil {
-		t.Fatalf("failed to start Hub A: %v", err)
+	// 1. Pre-generate keys and Peer IDs for Router A and Router B
+	privA, _, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
+	if err != nil {
+		t.Fatal(err)
 	}
-	defer func() { _ = cmdA.Process.Kill() }()
+	privAData, err := crypto.MarshalPrivateKey(privA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	peerIDA, err := peer.IDFromPrivateKey(privA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	routerKeysPathA := filepath.Join(tmpDir, "router_keysA.db")
+	if err := os.WriteFile(routerKeysPathA, privAData, 0600); err != nil {
+		t.Fatal(err)
+	}
 
-	// Fetch Hub A's Peer ID (which actively loops and waits for readiness)
-	peerIDA := fetchPeerID(t, portA)
+	privB, _, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	privBData, err := crypto.MarshalPrivateKey(privB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	peerIDB, err := peer.IDFromPrivateKey(privB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	routerKeysPathB := filepath.Join(tmpDir, "router_keysB.db")
+	if err := os.WriteFile(routerKeysPathB, privBData, 0600); err != nil {
+		t.Fatal(err)
+	}
 
-	// Update Fake DNS with Hub A's TXT record
-	dnsServer.UpdateTXT("_dnsaddr.test-hub.local", []string{
-		fmt.Sprintf("dnsaddr=/ip4/127.0.0.1/tcp/%d/p2p/%s", p2pPortA, peerIDA),
+	// Mock OIDC
+	oidcURL, mintToken := startCustomMockOIDC(t)
+
+	routerJWT := mintToken(map[string]interface{}{
+		"sub":    "router-integration-1",
+		"groups": []string{"routers"},
 	})
 
-	// Start Hub B, explicitly federating with Hub A via DNS
-	cmdB := exec.Command(hubBin,
-		"--bind-address", fmt.Sprintf("127.0.0.1:%d", portB),
-		"--listen", fmt.Sprintf("/ip4/127.0.0.1/tcp/%d", p2pPortB),
+	// Start Control Plane. We use journal_mode(DELETE) and busy_timeout(5000)
+	// to ensure concurrent node enrollment writes do not trigger SQLITE_BUSY locking failures.
+	cmdCP := exec.Command(cpBin,
+		"--bind-address", fmt.Sprintf("127.0.0.1:%d", cpPort),
 		"--policy-file", policyFile,
-		"--keys-db", filepath.Join(tmpDir, "keysB.db"),
-		"--allow-loopback",
-		"--external-multiaddr", "/dnsaddr/test-hub.local",
+		"--db-dsn", filepath.Join(tmpDir, "cp-keys.db")+"?_pragma=journal_mode(DELETE)&_pragma=busy_timeout(5000)",
 		"--issuer", oidcURL,
 		"--insecure-skip-tls-verify",
-		"--key", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
 	)
-	cmdB.Env = append(os.Environ(), "SAM_TEST_DNS_SERVER="+dnsServer.conn.LocalAddr().String())
-	var stdoutB, stderrB safeBuffer
-	cmdB.Stdout = io.MultiWriter(os.Stdout, &stdoutB)
-	cmdB.Stderr = io.MultiWriter(os.Stderr, &stderrB)
-
-	if err := cmdB.Start(); err != nil {
-		t.Fatalf("failed to start Hub B: %v", err)
+	cmdCP.Stdout = os.Stdout
+	cmdCP.Stderr = os.Stderr
+	if err := cmdCP.Start(); err != nil {
+		t.Fatalf("failed to start CP: %v", err)
 	}
-	defer func() { _ = cmdB.Process.Kill() }()
+	defer func() { _ = cmdCP.Process.Kill(); _ = cmdCP.Wait() }()
 
+	waitForControlPlane(t, cpPort)
+
+	// Start Router A
+	cmdRouterA := exec.Command(routerBin,
+		"--control-plane", fmt.Sprintf("http://127.0.0.1:%d", cpPort),
+		"--listen", fmt.Sprintf("/ip4/127.0.0.1/tcp/%d", routerPortA),
+		"--keys-path", routerKeysPathA,
+		"--allow-loopback",
+		"--external-addr", "/dnsaddr/test-hub.local",
+		"--oidc-token", routerJWT,
+	)
+	var stdoutRouterA, stderrRouterA safeBuffer
+	cmdRouterA.Stdout = &stdoutRouterA
+	cmdRouterA.Stderr = &stderrRouterA
+	cmdRouterA.Env = append(os.Environ(), "SAM_TEST_DNS_SERVER="+dnsServer.conn.LocalAddr().String())
+	if err := cmdRouterA.Start(); err != nil {
+		t.Fatalf("failed to start Router A: %v", err)
+	}
+	defer func() { _ = cmdRouterA.Process.Kill(); _ = cmdRouterA.Wait() }()
+
+	// Start Router B
+	cmdRouterB := exec.Command(routerBin,
+		"--control-plane", fmt.Sprintf("http://127.0.0.1:%d", cpPort),
+		"--listen", fmt.Sprintf("/ip4/127.0.0.1/tcp/%d", routerPortB),
+		"--keys-path", routerKeysPathB,
+		"--allow-loopback",
+		"--external-addr", "/dnsaddr/test-hub.local",
+		"--oidc-token", routerJWT,
+	)
+	var stdoutRouterB, stderrRouterB safeBuffer
+	cmdRouterB.Stdout = &stdoutRouterB
+	cmdRouterB.Stderr = &stderrRouterB
+	cmdRouterB.Env = append(os.Environ(), "SAM_TEST_DNS_SERVER="+dnsServer.conn.LocalAddr().String())
+	if err := cmdRouterB.Start(); err != nil {
+		t.Fatalf("failed to start Router B: %v", err)
+	}
+	defer func() { _ = cmdRouterB.Process.Kill(); _ = cmdRouterB.Wait() }()
+
+	// Wait for routers to lease
+	time.Sleep(3 * time.Second)
+
+	// Verify both routers registered on the control plane
+	peerInfoList := fetchActiveRouters(t, cpPort)
+	if len(peerInfoList) != 2 {
+		t.Fatalf("expected 2 active routers registered on control plane, got %d\nRouter A Stderr:\n%s\nRouter B Stderr:\n%s",
+			len(peerInfoList), stderrRouterA.String(), stderrRouterB.String())
+	}
+
+	// Update Fake DNS with Router A and Router B multiaddresses
+	dnsServer.UpdateTXT("_dnsaddr.test-hub.local", []string{
+		fmt.Sprintf("dnsaddr=/ip4/127.0.0.1/tcp/%d/p2p/%s", routerPortA, peerIDA),
+		fmt.Sprintf("dnsaddr=/ip4/127.0.0.1/tcp/%d/p2p/%s", routerPortB, peerIDB),
+	})
+
+	// Trigger connection sync manually to form the federation link between Router A and Router B
 	time.Sleep(2 * time.Second)
 
-	// Node A connects to Hub A
+	nodeJWT := mintToken(map[string]interface{}{
+		"sub": "mock-user",
+	})
+
+	// Node A connects to Router A (via shared CP)
 	apiPortA := getFreePort(t)
-	nodeACmd := exec.Command(nodeBin, "run", "--hub", fmt.Sprintf("http://127.0.0.1:%d", portA),
+	nodeACmd := exec.Command(nodeBin, "run", "--hub", fmt.Sprintf("http://127.0.0.1:%d", cpPort),
 		"--data-dir", filepath.Join(tmpDir, "nodeA"),
 		"--bind-addr", fmt.Sprintf("127.0.0.1:%d", apiPortA),
 		"--api-token", "tokenA",
-		"--jwt", jwtTokenStr,
+		"--jwt", nodeJWT,
 		"--listen", "/ip4/127.0.0.1/tcp/0",
 		"--listen", "/ip4/127.0.0.1/udp/0/quic-v1",
 		"--discovery-interval", "100ms",
 		"--enable-relay=true",
 		"--allow-loopback=true",
 	)
+	nodeACmd.Env = append(os.Environ(), "SAM_TEST_DNS_SERVER="+dnsServer.conn.LocalAddr().String())
 	var nodeStdoutA, nodeStderrA safeBuffer
 	nodeACmd.Stdout = io.MultiWriter(os.Stdout, &nodeStdoutA)
 	nodeACmd.Stderr = io.MultiWriter(os.Stderr, &nodeStderrA)
 	if err := nodeACmd.Start(); err != nil {
 		t.Fatalf("failed to start Node A: %v", err)
 	}
-	defer func() { _ = nodeACmd.Process.Kill() }()
+	defer func() { _ = nodeACmd.Process.Kill(); _ = nodeACmd.Wait() }()
 
-	// Node B connects to Hub B
+	// Node B connects to Router B (via shared CP)
 	apiPortB := getFreePort(t)
-	nodeBCmd := exec.Command(nodeBin, "run", "--hub", fmt.Sprintf("http://127.0.0.1:%d", portB),
+	nodeBCmd := exec.Command(nodeBin, "run", "--hub", fmt.Sprintf("http://127.0.0.1:%d", cpPort),
 		"--data-dir", filepath.Join(tmpDir, "nodeB"),
 		"--bind-addr", fmt.Sprintf("127.0.0.1:%d", apiPortB),
 		"--api-token", "tokenB",
-		"--jwt", jwtTokenStr,
+		"--jwt", nodeJWT,
 		"--listen", "/ip4/127.0.0.1/tcp/0",
 		"--listen", "/ip4/127.0.0.1/udp/0/quic-v1",
 		"--discovery-interval", "100ms",
 		"--allow-loopback=true",
 	)
+	nodeBCmd.Env = append(os.Environ(), "SAM_TEST_DNS_SERVER="+dnsServer.conn.LocalAddr().String())
 	var nodeStdoutB, nodeStderrB safeBuffer
 	nodeBCmd.Stdout = io.MultiWriter(os.Stdout, &nodeStdoutB)
 	nodeBCmd.Stderr = io.MultiWriter(os.Stderr, &nodeStderrB)
 	if err := nodeBCmd.Start(); err != nil {
 		t.Fatalf("failed to start Node B: %v", err)
 	}
-	defer func() { _ = nodeBCmd.Process.Kill() }()
+	defer func() { _ = nodeBCmd.Process.Kill(); _ = nodeBCmd.Wait() }()
 
 	// Give nodes time to connect and sync
 	waitForDHTReady(t, clientBin, apiPortA, "tokenA")
@@ -180,7 +257,7 @@ roles:
 		"-args", `{"type": "mcp"}`,
 	)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
 	var found bool
@@ -191,11 +268,10 @@ roles:
 			t.Logf("Node A Stderr: %s", nodeStderrA.String())
 			t.Logf("Node B Stdout: %s", nodeStdoutB.String())
 			t.Logf("Node B Stderr: %s", nodeStderrB.String())
-			t.Fatalf("timed out waiting to discover tool from Node B. Hub A logs: %s, Hub B logs: %s", stderrA.String(), stderrB.String())
+			t.Fatalf("timed out waiting to discover tool from Node B.")
 		default:
 			out, err := searchCmd.Output()
 			if err == nil {
-				// For simplicity, just check if the output contains the name
 				if strings.Contains(string(out), "federated-tool") {
 					found = true
 					break
@@ -240,78 +316,4 @@ roles:
 		t.Fatalf("Unexpected datapath response: %s", string(body))
 	}
 	t.Log("Datapath works!")
-}
-
-func fetchPeerID(t *testing.T, port int) string {
-	var bodyBytes []byte
-	var err error
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	for {
-		var resp *http.Response
-		resp, err = http.Get(fmt.Sprintf("http://127.0.0.1:%d/info", port))
-		if err == nil {
-			bodyBytes, err = io.ReadAll(resp.Body)
-			_ = resp.Body.Close()
-			if err == nil {
-				break
-			}
-		}
-
-		select {
-		case <-ctx.Done():
-			t.Fatalf("timed out waiting for /info: %v", err)
-		case <-time.After(100 * time.Millisecond):
-		}
-	}
-
-	var info api.HubInfoResponse
-	if err := proto.Unmarshal(bodyBytes, &info); err != nil {
-		t.Fatalf("failed to decode /info: %v", err)
-	}
-
-	// Hub's PeerID is derived from its first listen multiaddr's /p2p/ segment
-	var peerID string
-	if len(info.HubAddresses) > 0 {
-		peerID = extractPeerID(info.HubAddresses[0])
-	}
-	if peerID == "" {
-		t.Fatalf("empty peer id from /info")
-	}
-	return peerID
-}
-
-func extractPeerID(maddrStr string) string {
-	parts := strings.Split(maddrStr, "/")
-	for i, part := range parts {
-		if part == "p2p" && i+1 < len(parts) {
-			return parts[i+1]
-		}
-	}
-	return ""
-}
-
-func waitForDHTReady(t *testing.T, clientBin string, apiPort int, token string) {
-	t.Helper()
-	deadline := time.Now().Add(45 * time.Second)
-	cmdArgs := []string{
-		"-url", fmt.Sprintf("http://127.0.0.1:%d/mcp", apiPort),
-		"-token", token,
-		"-tool", "get_mesh_info",
-		"-args", `{}`,
-	}
-
-	for time.Now().Before(deadline) {
-		cmd := exec.Command(clientBin, cmdArgs...)
-		out, err := cmd.Output()
-		if err == nil {
-			if strings.Contains(string(out), `"dht_size":`) && !strings.Contains(string(out), `"dht_size":0`) {
-				return
-			}
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-	t.Fatalf("DHT not ready on port %d", apiPort)
 }

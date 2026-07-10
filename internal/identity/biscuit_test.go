@@ -12,10 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package hub
+package identity
 
 import (
-	"path/filepath"
+	"crypto/ed25519"
+	"crypto/rand"
 	"strings"
 	"sync"
 	"testing"
@@ -31,40 +32,32 @@ import (
 )
 
 func TestMintBiscuitToken(t *testing.T) {
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "test.db")
-
-	kr, err := NewKeyRing(dbPath, 24*time.Hour, nil)
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = kr.Close() }()
 
-	hub := &Hub{
-		KeyRing: kr,
-		Policy: &api.PolicyConfig{
-			Bindings: []api.Binding{
-				{Role: "canary-role", Members: []string{"group:system:serviceaccounts:sam-canary"}},
-				{Role: "canary-role", Members: []string{"user:system:serviceaccount:sam-canary:sam-node-sa"}},
+	policy := &api.PolicyConfig{
+		Bindings: []api.Binding{
+			{Role: "canary-role", Members: []string{"group:system:serviceaccounts:sam-canary"}},
+			{Role: "canary-role", Members: []string{"user:system:serviceaccount:sam-canary:sam-node-sa"}},
+		},
+		Roles: map[string]api.RolePolicy{
+			"admin": {
+				AllowedServices: []string{"mcp:read", "mcp:write"},
+				AllowedTargets:  []string{"mcp:target1"},
 			},
-			Roles: map[string]api.RolePolicy{
-				"admin": {
-					AllowedServices: []string{"mcp:read", "mcp:write"},
-					AllowedTargets:  []string{"mcp:target1"},
-				},
-				"canary-role": {
-					AllowedServices: []string{"mcp:1.0.0"},
-				},
+			"canary-role": {
+				AllowedServices: []string{"mcp:1.0.0"},
 			},
 		},
-		BiscuitTimeout: 500 * time.Millisecond,
 	}
 
-	priv, _, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
+	privNode, _, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	dummyPeer, err := peer.IDFromPrivateKey(priv)
+	dummyPeer, err := peer.IDFromPrivateKey(privNode)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,19 +70,16 @@ func TestMintBiscuitToken(t *testing.T) {
 	claims1 := jwt.MapClaims{
 		"roles": []any{"admin"},
 	}
-	biscuitData1, err := hub.mintBiscuitToken(claims1, token, dummyPeer)
+	biscuitData1, err := MintBiscuitToken(priv, claims1, token, dummyPeer, policy)
 	if err != nil {
 		t.Fatal(err)
-	}
-	if len(biscuitData1) == 0 {
-		t.Error("Expected non-empty biscuit data for direct role")
 	}
 
 	b1, err := biscuit.Unmarshal(biscuitData1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	authorizer1, err := b1.Authorizer(kr.GetCurrentPublicKey(), biscuit.WithWorldOptions(datalog.WithMaxDuration(500*time.Millisecond)))
+	authorizer1, err := b1.Authorizer(pub, biscuit.WithWorldOptions(datalog.WithMaxDuration(500*time.Millisecond)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,19 +104,16 @@ func TestMintBiscuitToken(t *testing.T) {
 	claims2 := jwt.MapClaims{
 		"groups": []any{"system:serviceaccounts:sam-canary"},
 	}
-	biscuitData2, err := hub.mintBiscuitToken(claims2, token, dummyPeer)
+	biscuitData2, err := MintBiscuitToken(priv, claims2, token, dummyPeer, policy)
 	if err != nil {
 		t.Fatal(err)
-	}
-	if len(biscuitData2) == 0 {
-		t.Error("Expected non-empty biscuit data for mapped group")
 	}
 
 	b2, err := biscuit.Unmarshal(biscuitData2)
 	if err != nil {
 		t.Fatal(err)
 	}
-	authorizer2, err := b2.Authorizer(kr.GetCurrentPublicKey(), biscuit.WithWorldOptions(datalog.WithMaxDuration(500*time.Millisecond)))
+	authorizer2, err := b2.Authorizer(pub, biscuit.WithWorldOptions(datalog.WithMaxDuration(500*time.Millisecond)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +135,7 @@ func TestMintBiscuitToken(t *testing.T) {
 		"groups": []any{"unknown-group"},
 		"roles":  []any{"undefined-role"},
 	}
-	biscuitData3, err := hub.mintBiscuitToken(claims3, token, dummyPeer)
+	biscuitData3, err := MintBiscuitToken(priv, claims3, token, dummyPeer, policy)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,11 +143,10 @@ func TestMintBiscuitToken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	authorizer3, err := b3.Authorizer(kr.GetCurrentPublicKey(), biscuit.WithWorldOptions(datalog.WithMaxDuration(500*time.Millisecond)))
+	authorizer3, err := b3.Authorizer(pub, biscuit.WithWorldOptions(datalog.WithMaxDuration(500*time.Millisecond)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Verify no role matches
 	rule3 := biscuit.Policy{Queries: []biscuit.Rule{
 		{
 			Head: biscuit.Predicate{Name: "allow", IDs: []biscuit.Term{}},
@@ -178,7 +164,7 @@ func TestMintBiscuitToken(t *testing.T) {
 	claims4 := jwt.MapClaims{
 		"sub": "system:serviceaccount:sam-canary:sam-node-sa",
 	}
-	biscuitData4, err := hub.mintBiscuitToken(claims4, token, dummyPeer)
+	biscuitData4, err := MintBiscuitToken(priv, claims4, token, dummyPeer, policy)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,11 +172,10 @@ func TestMintBiscuitToken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	authorizer4, err := b4.Authorizer(kr.GetCurrentPublicKey(), biscuit.WithWorldOptions(datalog.WithMaxDuration(500*time.Millisecond)))
+	authorizer4, err := b4.Authorizer(pub, biscuit.WithWorldOptions(datalog.WithMaxDuration(500*time.Millisecond)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Verify that it mapped the derived group "system:serviceaccounts:sam-canary" to "canary-role"
 	rule4 := biscuit.Policy{Queries: []biscuit.Rule{
 		{
 			Head: biscuit.Predicate{Name: "allow", IDs: []biscuit.Term{}},
@@ -206,26 +191,16 @@ func TestMintBiscuitToken(t *testing.T) {
 }
 
 func TestVerifyBiscuit_Expiration(t *testing.T) {
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "test.db")
-
-	kr, err := NewKeyRing(dbPath, 24*time.Hour, nil)
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = kr.Close() }()
 
-	hub := &Hub{
-		KeyRing:        kr,
-		Policy:         &api.PolicyConfig{},
-		BiscuitTimeout: 500 * time.Millisecond,
-	}
-
-	priv, _, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
+	privNode, _, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	dummyPeer, err := peer.IDFromPrivateKey(priv)
+	dummyPeer, err := peer.IDFromPrivateKey(privNode)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -256,12 +231,12 @@ func TestVerifyBiscuit_Expiration(t *testing.T) {
 				"roles": []any{"admin"},
 			}
 
-			biscuitData, err := hub.mintBiscuitToken(claims, token, dummyPeer)
+			biscuitData, err := MintBiscuitToken(priv, claims, token, dummyPeer, &api.PolicyConfig{})
 			if err != nil {
-				t.Fatalf("mintBiscuitToken failed: %v", err)
+				t.Fatalf("MintBiscuitToken failed: %v", err)
 			}
 
-			_, err = hub.verifyBiscuit(biscuitData, dummyPeer)
+			_, err = VerifyBiscuit(biscuitData, dummyPeer, []ed25519.PublicKey{pub}, 500*time.Millisecond)
 			if tt.expectError && err == nil {
 				t.Errorf("Expected error due to expiration, got nil")
 			}
@@ -273,35 +248,27 @@ func TestVerifyBiscuit_Expiration(t *testing.T) {
 }
 
 func TestMintBiscuitToken_ClaimsTranslation(t *testing.T) {
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "test.db")
-
-	kr, err := NewKeyRing(dbPath, 24*time.Hour, nil)
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = kr.Close() }()
 
-	hub := &Hub{
-		KeyRing: kr,
-		Policy: &api.PolicyConfig{
-			Bindings: []api.Binding{
-				{Role: "developer-role", Members: []string{"group:engineering"}},
-			},
-			Roles: map[string]api.RolePolicy{
-				"developer-role": {
-					AllowedServices: []string{"mcp:git-helper"},
-				},
+	policy := &api.PolicyConfig{
+		Bindings: []api.Binding{
+			{Role: "developer-role", Members: []string{"group:engineering"}},
+		},
+		Roles: map[string]api.RolePolicy{
+			"developer-role": {
+				AllowedServices: []string{"mcp:git-helper"},
 			},
 		},
-		BiscuitTimeout: 500 * time.Millisecond,
 	}
 
-	priv, _, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
+	privNode, _, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	dummyPeer, err := peer.IDFromPrivateKey(priv)
+	dummyPeer, err := peer.IDFromPrivateKey(privNode)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -316,7 +283,7 @@ func TestMintBiscuitToken_ClaimsTranslation(t *testing.T) {
 		"groups": []any{"beta-testers", "engineering"},
 	}
 
-	biscuitData, err := hub.mintBiscuitToken(claims, token, dummyPeer)
+	biscuitData, err := MintBiscuitToken(priv, claims, token, dummyPeer, policy)
 	if err != nil {
 		t.Fatalf("Failed to mint biscuit: %v", err)
 	}
@@ -326,7 +293,7 @@ func TestMintBiscuitToken_ClaimsTranslation(t *testing.T) {
 		t.Fatalf("Failed to unmarshal biscuit: %v", err)
 	}
 
-	authorizer, err := b.Authorizer(kr.GetCurrentPublicKey(), biscuit.WithWorldOptions(datalog.WithMaxDuration(500*time.Millisecond)))
+	authorizer, err := b.Authorizer(pub, biscuit.WithWorldOptions(datalog.WithMaxDuration(500*time.Millisecond)))
 	if err != nil {
 		t.Fatalf("Failed to get authorizer: %v", err)
 	}
@@ -371,8 +338,6 @@ func TestMintBiscuitToken_ClaimsTranslation(t *testing.T) {
 	}}
 	authorizer.AddCheck(checkGroupEng)
 
-	// To authorize, we also need to allow since checks run in authorizer.
-	// We will add an allow policy that matches anything
 	authorizer.AddPolicy(biscuit.Policy{Queries: []biscuit.Rule{
 		{
 			Head: biscuit.Predicate{Name: "allow", IDs: []biscuit.Term{}},
@@ -385,100 +350,27 @@ func TestMintBiscuitToken_ClaimsTranslation(t *testing.T) {
 	}
 }
 
-func TestMintBiscuitToken_NilToken(t *testing.T) {
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "test.db")
-
-	kr, err := NewKeyRing(dbPath, 24*time.Hour, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = kr.Close() }()
-
-	hub := &Hub{
-		KeyRing:        kr,
-		BiscuitTimeout: 500 * time.Millisecond,
-	}
-
-	priv, _, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	dummyPeer, err := peer.IDFromPrivateKey(priv)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	claims := jwt.MapClaims{"sub": "user-123"}
-	_, err = hub.mintBiscuitToken(claims, nil, dummyPeer)
-	if err == nil {
-		t.Error("Expected mintBiscuitToken to fail with nil token, got nil error")
-	}
-}
-
-func TestMintBiscuitToken_NilClaims(t *testing.T) {
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "test.db")
-
-	kr, err := NewKeyRing(dbPath, 24*time.Hour, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = kr.Close() }()
-
-	hub := &Hub{
-		KeyRing:        kr,
-		BiscuitTimeout: 500 * time.Millisecond,
-	}
-
-	priv, _, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	dummyPeer, err := peer.IDFromPrivateKey(priv)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	token := &oidc.IDToken{
-		Expiry: time.Now().Add(1 * time.Hour),
-	}
-
-	_, err = hub.mintBiscuitToken(nil, token, dummyPeer)
-	if err == nil {
-		t.Error("Expected mintBiscuitToken to fail with nil claims, got nil error")
-	}
-}
-
 func TestMintBiscuitToken_VariousClaimsTypes(t *testing.T) {
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "test.db")
-
-	kr, err := NewKeyRing(dbPath, 24*time.Hour, nil)
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = kr.Close() }()
 
-	hub := &Hub{
-		KeyRing: kr,
-		Policy: &api.PolicyConfig{
-			Bindings: []api.Binding{
-				{Role: "eng-role", Members: []string{"group:eng-group"}},
-			},
-			Roles: map[string]api.RolePolicy{
-				"admin":    {},
-				"eng-role": {},
-			},
+	policy := &api.PolicyConfig{
+		Bindings: []api.Binding{
+			{Role: "eng-role", Members: []string{"group:eng-group"}},
 		},
-		BiscuitTimeout: 500 * time.Millisecond,
+		Roles: map[string]api.RolePolicy{
+			"admin":    {},
+			"eng-role": {},
+		},
 	}
 
-	priv, _, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
+	privNode, _, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	dummyPeer, err := peer.IDFromPrivateKey(priv)
+	dummyPeer, err := peer.IDFromPrivateKey(privNode)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -498,7 +390,7 @@ func TestMintBiscuitToken_VariousClaimsTypes(t *testing.T) {
 			name:           "String slice (standard go code paths)",
 			rolesClaim:     []string{"admin"},
 			groupsClaim:    []string{"eng-group", "beta"},
-			expectedRoles:  []string{"admin", "eng-role"}, // eng-role comes from eng-group mapping
+			expectedRoles:  []string{"admin", "eng-role"},
 			expectedGroups: []string{"eng-group", "beta"},
 		},
 		{
@@ -534,9 +426,9 @@ func TestMintBiscuitToken_VariousClaimsTypes(t *testing.T) {
 				claims["groups"] = tt.groupsClaim
 			}
 
-			biscuitData, err := hub.mintBiscuitToken(claims, token, dummyPeer)
+			biscuitData, err := MintBiscuitToken(priv, claims, token, dummyPeer, policy)
 			if err != nil {
-				t.Fatalf("mintBiscuitToken failed: %v", err)
+				t.Fatalf("MintBiscuitToken failed: %v", err)
 			}
 
 			b, err := biscuit.Unmarshal(biscuitData)
@@ -544,12 +436,11 @@ func TestMintBiscuitToken_VariousClaimsTypes(t *testing.T) {
 				t.Fatalf("Unmarshal biscuit failed: %v", err)
 			}
 
-			authorizer, err := b.Authorizer(kr.GetCurrentPublicKey(), biscuit.WithWorldOptions(datalog.WithMaxDuration(500*time.Millisecond)))
+			authorizer, err := b.Authorizer(pub, biscuit.WithWorldOptions(datalog.WithMaxDuration(500*time.Millisecond)))
 			if err != nil {
 				t.Fatalf("Authorizer failed: %v", err)
 			}
 
-			// Add checks to verify the output facts
 			for _, r := range tt.expectedRoles {
 				authorizer.AddCheck(biscuit.Check{Queries: []biscuit.Rule{
 					{
@@ -585,26 +476,16 @@ func TestMintBiscuitToken_VariousClaimsTypes(t *testing.T) {
 }
 
 func TestVerifyBiscuit_Concurrent(t *testing.T) {
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "test.db")
-
-	kr, err := NewKeyRing(dbPath, 24*time.Hour, nil)
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = kr.Close() }()
 
-	hub := &Hub{
-		KeyRing:        kr,
-		Policy:         &api.PolicyConfig{},
-		BiscuitTimeout: 500 * time.Millisecond,
-	}
-
-	priv, _, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
+	privNode, _, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	dummyPeer, err := peer.IDFromPrivateKey(priv)
+	dummyPeer, err := peer.IDFromPrivateKey(privNode)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -617,12 +498,11 @@ func TestVerifyBiscuit_Concurrent(t *testing.T) {
 		"roles": []any{"admin"},
 	}
 
-	biscuitData, err := hub.mintBiscuitToken(claims, token, dummyPeer)
+	biscuitData, err := MintBiscuitToken(priv, claims, token, dummyPeer, &api.PolicyConfig{})
 	if err != nil {
-		t.Fatalf("mintBiscuitToken failed: %v", err)
+		t.Fatalf("MintBiscuitToken failed: %v", err)
 	}
 
-	// Spin up 50 goroutines performing verification concurrently to detect any data races on static check/policy globals
 	const workers = 50
 	var wg sync.WaitGroup
 	wg.Add(workers)
@@ -631,7 +511,7 @@ func TestVerifyBiscuit_Concurrent(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for j := 0; j < 100; j++ {
-				_, err := hub.verifyBiscuit(biscuitData, dummyPeer)
+				_, err := VerifyBiscuit(biscuitData, dummyPeer, []ed25519.PublicKey{pub}, 500*time.Millisecond)
 				if err != nil {
 					t.Errorf("Concurrent verification failed: %v", err)
 					return
@@ -643,35 +523,27 @@ func TestVerifyBiscuit_Concurrent(t *testing.T) {
 }
 
 func TestMintBiscuitToken_ErrorAggregation(t *testing.T) {
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "test.db")
-
-	kr, err := NewKeyRing(dbPath, 24*time.Hour, nil)
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = kr.Close() }()
 
-	hub := &Hub{
-		KeyRing: kr,
-		Policy: &api.PolicyConfig{
-			Roles: map[string]api.RolePolicy{
-				"admin": {
-					CustomDatalog: []string{
-						"invalid-datalog-fact(123", // syntax error
-						"another-bad-fact);",       // syntax error
-					},
+	policy := &api.PolicyConfig{
+		Roles: map[string]api.RolePolicy{
+			"admin": {
+				CustomDatalog: []string{
+					"invalid-datalog-fact(123", // syntax error
+					"another-bad-fact);",       // syntax error
 				},
 			},
 		},
-		BiscuitTimeout: 500 * time.Millisecond,
 	}
 
-	priv, _, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
+	privNode, _, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	dummyPeer, err := peer.IDFromPrivateKey(priv)
+	dummyPeer, err := peer.IDFromPrivateKey(privNode)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -684,9 +556,9 @@ func TestMintBiscuitToken_ErrorAggregation(t *testing.T) {
 		"roles": []any{"admin"},
 	}
 
-	_, err = hub.mintBiscuitToken(claims, token, dummyPeer)
+	_, err = MintBiscuitToken(priv, claims, token, dummyPeer, policy)
 	if err == nil {
-		t.Fatal("Expected mintBiscuitToken to fail on custom datalog syntax errors, got nil error")
+		t.Fatal("Expected MintBiscuitToken to fail on custom datalog syntax errors, got nil error")
 	}
 
 	errStr := err.Error()
@@ -694,46 +566,37 @@ func TestMintBiscuitToken_ErrorAggregation(t *testing.T) {
 		t.Errorf("Expected error message to contain parse failure info, got: %s", errStr)
 	}
 
-	// Verify that BOTH errors are aggregated in the error message
 	if !strings.Contains(errStr, "invalid-datalog-fact") || !strings.Contains(errStr, "another-bad-fact") {
 		t.Errorf("Expected error to aggregate both failures, got: %s", errStr)
 	}
 }
 
 func TestMintBiscuitToken_FactDeduplication(t *testing.T) {
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "test.db")
-
-	kr, err := NewKeyRing(dbPath, 24*time.Hour, nil)
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = kr.Close() }()
 
-	hub := &Hub{
-		KeyRing: kr,
-		Policy: &api.PolicyConfig{
-			Bindings: []api.Binding{
-				{Role: "role-a", Members: []string{"user:user-1"}},
-				{Role: "role-b", Members: []string{"user:user-1"}},
+	policy := &api.PolicyConfig{
+		Bindings: []api.Binding{
+			{Role: "role-a", Members: []string{"user:user-1"}},
+			{Role: "role-b", Members: []string{"user:user-1"}},
+		},
+		Roles: map[string]api.RolePolicy{
+			"role-a": {
+				AllowedTargets: []string{"*:*"},
 			},
-			Roles: map[string]api.RolePolicy{
-				"role-a": {
-					AllowedTargets: []string{"*:*"},
-				},
-				"role-b": {
-					AllowedTargets: []string{"*:*"},
-				},
+			"role-b": {
+				AllowedTargets: []string{"*:*"},
 			},
 		},
-		BiscuitTimeout: 500 * time.Millisecond,
 	}
 
-	priv, _, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
+	privNode, _, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	dummyPeer, err := peer.IDFromPrivateKey(priv)
+	dummyPeer, err := peer.IDFromPrivateKey(privNode)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -745,10 +608,9 @@ func TestMintBiscuitToken_FactDeduplication(t *testing.T) {
 		"sub": "user-1",
 	}
 
-	// This should not fail with "fact already exists" since the target is duplicated across both roles.
-	biscuitData, err := hub.mintBiscuitToken(claims, token, dummyPeer)
+	biscuitData, err := MintBiscuitToken(priv, claims, token, dummyPeer, policy)
 	if err != nil {
-		t.Fatalf("mintBiscuitToken failed with duplicate facts: %v", err)
+		t.Fatalf("MintBiscuitToken failed with duplicate facts: %v", err)
 	}
 
 	if len(biscuitData) == 0 {

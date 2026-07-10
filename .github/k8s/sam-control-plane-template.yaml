@@ -1,0 +1,179 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: sam-control-plane-${ENV_NAME}
+  namespace: ${NAMESPACE}
+spec:
+  ports:
+    - port: 8080
+      targetPort: 8080
+      protocol: TCP
+      name: http
+  selector:
+    app: sam-control-plane-${ENV_NAME}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sam-control-plane-${ENV_NAME}
+  namespace: ${NAMESPACE}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sam-control-plane-${ENV_NAME}
+  template:
+    metadata:
+      labels:
+        app: sam-control-plane-${ENV_NAME}
+    spec:
+      containers:
+      - name: sam-control-plane
+        image: ghcr.io/google/sam-control-plane:${IMAGE_TAG}
+        ports:
+        - containerPort: 8080
+          protocol: TCP
+          name: http
+        readinessProbe:
+          httpGet:
+            path: /info
+            port: http
+            scheme: HTTP
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /info
+            port: http
+            scheme: HTTP
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        args:
+        - "--bind-address=0.0.0.0:8080"
+        - "--db-driver=sqlite"
+        - "--db-dsn=/data/control-plane.db"
+        - "--issuer=https://auth.sam-mesh.dev,https://container.googleapis.com/v1/projects/${GCP_PROJECT_ID}/locations/${CLUSTER_REGION}/clusters/${CLUSTER_NAME}"
+        - "--allowed-audiences=sam-mesh-audience,sam-hub-audience"
+        - "--policy-file=/etc/sam/policies/policies.yaml"
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        volumeMounts:
+        - name: policies-volume
+          mountPath: /etc/sam/policies
+          readOnly: true
+        - name: db-data
+          mountPath: /data
+      volumes:
+      - name: policies-volume
+        configMap:
+          name: sam-control-plane-policies-${ENV_NAME}
+      - name: db-data
+        emptyDir: {}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sam-control-plane-policies-${ENV_NAME}
+  namespace: ${NAMESPACE}
+data:
+  policies.yaml: |
+    version: "v1alpha1"
+    bindings:
+      - members: ["user:system:serviceaccount:sam-canary-${ENV_NAME}:sam-node-sa"]
+        role: "sam-canary"
+      - members: ["group:routers", "user:system:serviceaccount:${NAMESPACE}:sam-router-sa"]
+        role: "router-role"
+      - members: ["system:authenticated"]
+        role: "public-mesh"
+    roles:
+      sam-canary:
+        allowed_services:
+          - "*"
+        allowed_targets:
+          - "*"
+      router-role:
+        allowed_services:
+          - "*"
+        allowed_targets:
+          - "*"
+      public-mesh:
+        allowed_services:
+          - "*"
+        allowed_targets:
+          - "*"
+---
+apiVersion: networking.gke.io/v1
+kind: HealthCheckPolicy
+metadata:
+  name: sam-control-plane-healthcheck-${ENV_NAME}
+  namespace: ${NAMESPACE}
+spec:
+  default:
+    checkIntervalSec: 15
+    timeoutSec: 5
+    healthyThreshold: 1
+    unhealthyThreshold: 2
+    config:
+      type: HTTP
+      httpHealthCheck:
+        requestPath: /info
+  targetRef:
+    group: ""
+    kind: Service
+    name: sam-control-plane-${ENV_NAME}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: sam-control-plane-gateway-${ENV_NAME}
+  namespace: ${NAMESPACE}
+  annotations:
+    networking.gke.io/certmap: sam-hub-cert-map-${ENV_NAME}
+spec:
+  gatewayClassName: gke-l7-global-external-managed
+  addresses:
+  - type: NamedAddress
+    value: sam-hub-ip-${ENV_NAME}
+  listeners:
+  - name: https
+    protocol: HTTPS
+    port: 443
+    allowedRoutes:
+      namespaces:
+        from: Same
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: sam-control-plane-route-${ENV_NAME}
+  namespace: ${NAMESPACE}
+spec:
+  parentRefs:
+  - name: sam-control-plane-gateway-${ENV_NAME}
+  hostnames:
+  - "${ENV_NAME}.sam-mesh.dev"
+  rules:
+  - matches:
+    - path:
+        type: Exact
+        value: /register
+    - path:
+        type: Exact
+        value: /info
+    - path:
+        type: Exact
+        value: /keys
+    - path:
+        type: Exact
+        value: /routers/lease
+    - path:
+        type: Exact
+        value: /policies
+    backendRefs:
+    - name: sam-control-plane-${ENV_NAME}
+      port: 8080

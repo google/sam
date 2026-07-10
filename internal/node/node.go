@@ -37,6 +37,7 @@ import (
 	"github.com/biscuit-auth/biscuit-go/v2"
 	"github.com/biscuit-auth/biscuit-go/v2/datalog"
 	"github.com/google/sam/api"
+	"github.com/google/sam/internal/identity"
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/ipfs/go-cid"
 	golog "github.com/ipfs/go-log/v2"
@@ -243,7 +244,7 @@ func NewSamNode(cfg Options) (*SamNode, error) {
 		reprovideTrigger:  make(chan struct{}, 1),
 		logger:            golog.Logger("sam-node"),
 	}
-	node.BiscuitTimeout = cfg.BiscuitTimeout
+	node.BiscuitTimeout = 2 * time.Second
 
 	var err error
 	node.rateLimiter, err = NewPeerRateLimiter(RateLimiterSize)
@@ -698,7 +699,7 @@ func (n *SamNode) ConnectAndAuthWithHub(ctx context.Context, addr multiaddr.Mult
 		}
 		_ = s.SetDeadline(time.Now().Add(5 * time.Second))
 
-		success, err := n.performHubAuthHandshake(s, biscuitBytes)
+		success, err := n.performHubAuthHandshake(s, biscuitBytes, addrInfo.ID)
 		if err != nil {
 			_ = s.Reset()
 			cancel()
@@ -734,7 +735,7 @@ func (n *SamNode) ConnectAndAuthWithHub(ctx context.Context, addr multiaddr.Mult
 	return fmt.Errorf("failed to authenticate with any hub addresses: %w", errors.Join(errs...))
 }
 
-func (n *SamNode) performHubAuthHandshake(s network.Stream, biscuitBytes []byte) (bool, error) {
+func (n *SamNode) performHubAuthHandshake(s network.Stream, biscuitBytes []byte, expectedRouter peer.ID) (bool, error) {
 	writer := msgio.NewVarintWriter(s)
 	authFrame := &api.AuthFrame{Biscuit: biscuitBytes}
 	data, err := proto.Marshal(authFrame)
@@ -759,6 +760,52 @@ func (n *SamNode) performHubAuthHandshake(s network.Stream, biscuitBytes []byte)
 
 	if !resp.Success {
 		return false, fmt.Errorf("%w: auth failed: %s", ErrFatalAuth, resp.Error)
+	}
+
+	// Mutual Auth: Verify server/router biscuit
+	if len(resp.Biscuit) == 0 {
+		return false, fmt.Errorf("%w: remote router returned empty biscuit", ErrFatalAuth)
+	}
+
+	n.keysMu.RLock()
+	var trustedKeys []ed25519.PublicKey
+	for _, tk := range n.trustedKeys {
+		trustedKeys = append(trustedKeys, tk.Key)
+	}
+	n.keysMu.RUnlock()
+
+	if len(trustedKeys) == 0 {
+		return false, fmt.Errorf("%w: no trusted control plane keys loaded", ErrFatalAuth)
+	}
+
+	// Verify the router's biscuit using the control plane keys
+	b, err := identity.VerifyBiscuit(resp.Biscuit, expectedRouter, trustedKeys, n.BiscuitTimeout)
+	if err != nil {
+		return false, fmt.Errorf("%w: failed to verify router biscuit: %w", ErrFatalAuth, err)
+	}
+
+	// Enforce role("router"), role("router-role") or role("bootstrap") inside the biscuit
+	authorizer, err := b.Authorizer(trustedKeys[0])
+	if err != nil {
+		return false, fmt.Errorf("authorizer instantiation failed: %w", err)
+	}
+
+	authorizer.AddCheck(biscuit.Check{Queries: []biscuit.Rule{
+		{
+			Body: []biscuit.Predicate{
+				{Name: api.FactRole, IDs: []biscuit.Term{biscuit.String(api.RoleRouter)}},
+			},
+		},
+		{
+			Body: []biscuit.Predicate{
+				{Name: api.FactRole, IDs: []biscuit.Term{biscuit.String(api.RoleBootstrap)}},
+			},
+		},
+	}})
+	authorizer.AddPolicy(api.AllowIfTruePolicy)
+
+	if err := authorizer.Authorize(); err != nil {
+		return false, fmt.Errorf("%w: remote peer lacks router authorization role: %w", ErrFatalAuth, err)
 	}
 
 	return true, nil

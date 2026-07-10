@@ -187,14 +187,19 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
     local custom_hub="${MESH_PREFIX}-hub"
     if docker inspect "${custom_hub}" >/dev/null 2>&1; then
       hub_ip=$(docker inspect -f "{{(index .NetworkSettings.Networks \"${net}\").IPAddress}}" "${custom_hub}")
-      echo "--add-host mock-oidc:${oidc_node_ip} --add-host sam-hub:${hub_ip}"
+      local cp_ip=""
+      local custom_cp="${MESH_PREFIX}-hub-cp"
+      if docker inspect "${custom_cp}" >/dev/null 2>&1; then
+        cp_ip=$(docker inspect -f "{{(index .NetworkSettings.Networks \"${net}\").IPAddress}}" "${custom_cp}")
+      fi
+      echo "--add-host mock-oidc:${oidc_node_ip} --add-host sam-hub:${hub_ip} --add-host sam-control-plane:${cp_ip}"
     else
-      # Resolve sam-hub-0 node IP
-      local hub_node
-      hub_node=$(kubectl --context="${KUBECONTEXT:-kind-sam-wi-test}" get pod sam-hub-0 -o jsonpath='{.spec.nodeName}')
-      local hub_node_ip
-      hub_node_ip=$(docker inspect -f "{{(index .NetworkSettings.Networks \"${net}\").IPAddress}}" "${hub_node}")
-      echo "--add-host mock-oidc:${oidc_node_ip} --add-host sam-hub:${hub_node_ip} --add-host ${hub_node}:${hub_node_ip}"
+      # Resolve sam-router-0 node IP
+      local router_node
+      router_node=$(kubectl --context="${KUBECONTEXT:-kind-sam-wi-test}" get pod sam-router-0 -o jsonpath='{.spec.nodeName}')
+      local router_node_ip
+      router_node_ip=$(docker inspect -f "{{(index .NetworkSettings.Networks \"${net}\").IPAddress}}" "${router_node}")
+      echo "--add-host mock-oidc:${oidc_node_ip} --add-host sam-hub:${router_node_ip} --add-host sam-router:${router_node_ip} --add-host sam-control-plane:${router_node_ip} --add-host ${router_node}:${router_node_ip}"
     fi
   }
 
@@ -222,7 +227,7 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
     make
     make docker-build
 
-    if [[ ! -x "./bin/sam-node" || ! -x "./bin/sam-hub" || ! -x "./bin/mcp-client" ]]; then
+    if [[ ! -x "./bin/sam-node" || ! -x "./bin/sam-control-plane" || ! -x "./bin/sam-router" || ! -x "./bin/mcp-client" ]]; then
       echo "missing binaries; run: make build" >&2
       return 1
     fi
@@ -232,21 +237,15 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
 
     if ! kind get clusters | grep -q "^${KUBERNETES_CLUSTER_NAME}$"; then
       kind delete cluster --name "${KUBERNETES_CLUSTER_NAME}" >/dev/null 2>&1 || true
-      cat <<KIND | kind create cluster --name "${KUBERNETES_CLUSTER_NAME}" --config=-
-kind: Cluster
-apiVersion: kind.x-k8s.io/v1alpha4
-nodes:
-- role: control-plane
-- role: worker
-- role: worker
-KIND
-
-      kind load docker-image sam-hub:local --name "${KUBERNETES_CLUSTER_NAME}"
-      kind load docker-image sam-node:local --name "${KUBERNETES_CLUSTER_NAME}"
-      kind load docker-image sam-mock-oidc:local --name "${KUBERNETES_CLUSTER_NAME}"
+      kind create cluster --name "${KUBERNETES_CLUSTER_NAME}" --config=tests/e2e/fixtures/kind-cluster.yaml
     else
       kind export kubeconfig --name "${KUBERNETES_CLUSTER_NAME}"
     fi
+
+    kind load docker-image sam-control-plane:local --name "${KUBERNETES_CLUSTER_NAME}"
+    kind load docker-image sam-router:local --name "${KUBERNETES_CLUSTER_NAME}"
+    kind load docker-image sam-node:local --name "${KUBERNETES_CLUSTER_NAME}"
+    kind load docker-image sam-mock-oidc:local --name "${KUBERNETES_CLUSTER_NAME}"
 
     kubectl --context="${KUBECONTEXT}" apply -f tests/e2e/fixtures/mock-oidc.yaml
     kubectl --context="${KUBECONTEXT}" rollout status deployment/mock-oidc --timeout=60s
@@ -257,20 +256,43 @@ KIND
 
     kubectl --context="${KUBECONTEXT}" apply -f tests/e2e/fixtures/allow-anonymous-oidc.yaml
 
-    export ISSUERS="${kube_issuer},http://mock-oidc:18080"
+    export ISSUERS="http://mock-oidc:18080,${kube_issuer}"
+
+    local oidc_node
+    oidc_node=$(kubectl --context="${KUBECONTEXT}" get pod -l app=mock-oidc -o jsonpath='{.items[0].spec.nodeName}')
+    local oidc_node_ip
+    oidc_node_ip=$(docker inspect -f "{{(index .NetworkSettings.Networks \"${MESH_NETWORK:-kind}\").IPAddress}}" "${oidc_node}")
+
+    local router_token=""
+    local i
+    for ((i=0; i<15; i++)); do
+      router_token=$(curl -s -d "client_id=router-client" http://${oidc_node_ip}:18080/token | jq -r .access_token || true)
+      if [[ -n "${router_token}" && "${router_token}" != "null" ]]; then
+        break
+      fi
+      sleep 0.5
+    done
+    [[ -n "${router_token}" && "${router_token}" != "null" ]]
+
+    kubectl --context="${KUBECONTEXT}" create secret generic sam-router-token --from-literal=token="${router_token}" --dry-run=client -o yaml | kubectl --context="${KUBECONTEXT}" apply -f -
+
     envsubst '$ISSUERS' < tests/e2e/fixtures/sam-hub.yaml | kubectl --context="${KUBECONTEXT}" apply -f -
-    kubectl --context="${KUBECONTEXT}" rollout restart statefulset/sam-hub
-    kubectl --context="${KUBECONTEXT}" rollout status statefulset/sam-hub --timeout=60s
+    kubectl --context="${KUBECONTEXT}" rollout restart deployment/sam-db || true
+    kubectl --context="${KUBECONTEXT}" rollout status deployment/sam-db --timeout=60s
+    kubectl --context="${KUBECONTEXT}" rollout restart deployment/sam-control-plane
+    kubectl --context="${KUBECONTEXT}" rollout restart statefulset/sam-router
+    kubectl --context="${KUBECONTEXT}" rollout status deployment/sam-control-plane --timeout=60s
+    kubectl --context="${KUBECONTEXT}" rollout status statefulset/sam-router --timeout=60s
 
     local i
     for ((i=0; i<200; i++)); do
-      if kubectl --context="${KUBECONTEXT}" logs "sam-hub-0" 2>&1 | grep -q "PeerID:"; then
+      if kubectl --context="${KUBECONTEXT}" logs "sam-router-0" 2>&1 | grep -q "PeerID:"; then
         break
       fi
       sleep 0.1
     done
     local hub_peer_id
-    hub_peer_id=$(kubectl --context="${KUBECONTEXT}" logs "sam-hub-0" | grep -oE '12D3Koo[a-zA-Z0-9]+' | head -n 1 || true)
+    hub_peer_id=$(kubectl --context="${KUBECONTEXT}" logs "sam-router-0" | grep -oE '12D3Koo[a-zA-Z0-9]+' | head -n 1 || true)
     [[ -n "${hub_peer_id}" ]]
 
     echo "${hub_peer_id}" > "/tmp/sam-wi-test-hub-peer-id"
@@ -280,7 +302,7 @@ KIND
   mesh_teardown_suite() {
     cd "${BATS_TEST_DIRNAME}/../.."
     mesh_cleanup_stale_resources
-    kind delete cluster --name "${KUBERNETES_CLUSTER_NAME:-sam-wi-test}" >/dev/null 2>&1 || true
+    # kind delete cluster --name "${KUBERNETES_CLUSTER_NAME:-sam-wi-test}" >/dev/null 2>&1 || true
     echo "teardown suite"
   }
 
@@ -316,7 +338,7 @@ KIND
       ${flags} \
       --log-level debug \
       --discovery-interval 2s \
-      --hub "http://sam-hub:9090" \
+      --hub "http://sam-control-plane:8080" \
       --client-id "sam-mesh-audience" \
       --client-secret "sam-e2e-secret" \
       --oidc-issuer "http://mock-oidc:18080" \
@@ -346,11 +368,100 @@ KIND
   mesh_assert_container_running() {
     local name="$1"
     if [[ "${name}" == *"-hub" ]]; then
-      kubectl --context="${KUBECONTEXT:-kind-sam-wi-test}" get pod sam-hub-0 -o jsonpath='{.status.phase}' | grep -q "Running"
+      kubectl --context="${KUBECONTEXT:-kind-sam-wi-test}" get pod sam-router-0 -o jsonpath='{.status.phase}' | grep -q "Running"
       return $?
     fi
     local state
     state="$(docker inspect -f '{{.State.Running}}' "${name}" 2>/dev/null || true)"
     [[ "${state}" == "true" ]]
+  }
+
+  mesh_start_standalone_hub() {
+    local hub_name="$1"
+    local rotation_interval="${2:-0}"
+    local grace_period="${3:-0}"
+
+    local policy_file="/tmp/${MESH_PREFIX}-policies.yaml"
+    cat <<EOF > "${policy_file}"
+version: "v1alpha1"
+bindings:
+  - members: ["group:routers", "user:system:serviceaccount:default:sam-router-sa"]
+    role: "router"
+  - members: ["system:authenticated"]
+    role: "admin"
+roles:
+  admin:
+    allowed_services: ["*"]
+    allowed_targets: ["*"]
+  router:
+    allowed_services: ["*"]
+    allowed_targets: ["*"]
+EOF
+
+    # Create data volume for control plane
+    local cp_db_vol="${hub_name}-cp-data"
+    docker volume create "${cp_db_vol}" >/dev/null
+    CLEANUP_VOLUMES+=("${cp_db_vol}")
+
+    # Start Control Plane
+    docker run -d \
+      --name "${hub_name}-cp" \
+      --network "${MESH_NETWORK}" \
+      --network-alias sam-control-plane \
+      $(mesh_get_add_hosts) \
+      -v "${policy_file}:/etc/sam/policies.yaml:ro" \
+      -v "${cp_db_vol}:/data" \
+      "sam-control-plane:local" \
+      --issuer "http://mock-oidc:18080" \
+      --allowed-audiences "sam-e2e,sam-hub-audience,sam-mesh-audience" \
+      --db-driver "sqlite" \
+      --db-dsn "/data/control-plane.db" \
+      --key-rotation-interval "${rotation_interval}" \
+      --key-grace-period "${grace_period}" \
+      --policy-file "/etc/sam/policies.yaml" >/dev/null
+
+    MESH_CONTAINERS+=("${hub_name}-cp")
+
+    # Get a mock token for the router
+    local router_token=""
+    local i
+    for ((i=0; i<15; i++)); do
+      router_token=$(docker run --rm --network "${MESH_NETWORK}" $(mesh_get_add_hosts) python:3.12 python3 -c "import urllib.request; import json; req = urllib.request.Request('http://mock-oidc:18080/token', data=b'client_id=router-client'); resp = urllib.request.urlopen(req); print(json.loads(resp.read().decode())['access_token'])" || true)
+      if [[ -n "${router_token}" && "${router_token}" != "null" ]]; then
+        break
+      fi
+      sleep 0.5
+    done
+    [[ -n "${router_token}" && "${router_token}" != "null" ]]
+
+    # Write token to a temp path and mount it into the router
+    local token_dir
+    token_dir="/tmp/${MESH_PREFIX}-router-token"
+    mkdir -p "${token_dir}"
+    echo -n "${router_token}" > "${token_dir}/sa-token"
+
+    # Create data volume for router
+    local router_data_vol="${hub_name}-router-data"
+    docker volume create "${router_data_vol}" >/dev/null
+    CLEANUP_VOLUMES+=("${router_data_vol}")
+
+    # Start Router
+    docker run -d \
+      --name "${hub_name}" \
+      --network "${MESH_NETWORK}" \
+      --network-alias sam-hub \
+      $(mesh_get_add_hosts) \
+      -v "${token_dir}:/var/run/secrets/tokens:ro" \
+      -v "${router_data_vol}:/data" \
+      "sam-router:local" \
+      --control-plane "http://sam-control-plane:8080" \
+      --listen "/ip4/0.0.0.0/tcp/4002" \
+      --external-addr "/dns4/sam-hub/tcp/4002" \
+      --jwt-path "/var/run/secrets/tokens/sa-token" \
+      --keys-path "/data/router.key" \
+      --allow-loopback \
+      --log-level debug >/dev/null
+
+    MESH_CONTAINERS+=("${hub_name}")
   }
 fi

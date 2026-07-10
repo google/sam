@@ -19,22 +19,8 @@ teardown() {
   local hub_key
   hub_key="$(mesh_gen_hex32)"
 
-  docker run -d \
-    --name "${hub_name}" \
-    --network "${MESH_NETWORK}" \
-    --network-alias sam-hub \
-    $(mesh_get_add_hosts) \
-    "sam-hub:local" \
-    --issuer "http://mock-oidc:18080" \
-    --client-id "sam-e2e" \
-    --key "${hub_key}" \
-    --mesh "${MESH_PREFIX}" \
-    --admin-token "e2e-token" \
-    --listen "/ip4/0.0.0.0/tcp/4002" \
-    --external-multiaddr "/dns4/sam-hub/tcp/4002" \
-    --log-level debug >/dev/null
+  mesh_start_standalone_hub "${hub_name}"
 
-  MESH_CONTAINERS+=("${hub_name}")
   mesh_wait_for_log "${hub_name}" "PeerID:" 20
 
   local hub_peer_id
@@ -82,15 +68,15 @@ teardown() {
 
   # Publish ban event for Node 2
   echo "[$(date +%T)] Publishing ban event"
-  run docker exec "${hub_name}" /sam-hub admin ban --peer "${node2_peer_id}" --admin-token "e2e-token"
+  run docker exec "${hub_name}-cp" /sam-control-plane admin ban --peer "${node2_peer_id}" --db-driver sqlite --db-dsn /data/control-plane.db
   
   echo "admin ban output: $output"
   [[ "$status" -eq 0 ]]
-  if [[ "$output" != *"Published BANNED event"* ]]; then
-    echo "Hub logs:"
-    docker logs "${hub_name}"
+  if [[ "$output" != *"Successfully banned node"* ]]; then
+    echo "Control Plane logs:"
+    docker logs "${hub_name}-cp"
   fi
-  [[ "$output" == *"Published BANNED event"* ]]
+  [[ "$output" == *"Successfully banned node"* ]]
 
   # Verify Node 1 receives the ban event and logs it
   run mesh_wait_for_log "${node1_name}" "Peer banned: ${node2_peer_id}" 20

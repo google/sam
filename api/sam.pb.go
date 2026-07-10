@@ -185,7 +185,8 @@ func (x *AuthFrame) GetTargetService() string {
 type AuthResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
-	Error         string                 `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"` // populated only if success is false
+	Error         string                 `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`     // populated only if success is false
+	Biscuit       []byte                 `protobuf:"bytes,3,opt,name=biscuit,proto3" json:"biscuit,omitempty"` // The server's own Biscuit token (for mutual auth)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -232,6 +233,13 @@ func (x *AuthResponse) GetError() string {
 		return x.Error
 	}
 	return ""
+}
+
+func (x *AuthResponse) GetBiscuit() []byte {
+	if x != nil {
+		return x.Biscuit
+	}
+	return nil
 }
 
 type MeshEvent struct {
@@ -776,6 +784,346 @@ func (x *HubInfoResponse) GetHubAddresses() []string {
 	return nil
 }
 
+type RouterLeaseRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	PeerId        string                 `protobuf:"bytes,1,opt,name=peer_id,json=peerId,proto3" json:"peer_id,omitempty"`
+	Addresses     []string               `protobuf:"bytes,2,rep,name=addresses,proto3" json:"addresses,omitempty"`
+	Biscuit       []byte                 `protobuf:"bytes,3,opt,name=biscuit,proto3" json:"biscuit,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RouterLeaseRequest) Reset() {
+	*x = RouterLeaseRequest{}
+	mi := &file_api_sam_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RouterLeaseRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RouterLeaseRequest) ProtoMessage() {}
+
+func (x *RouterLeaseRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_api_sam_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RouterLeaseRequest.ProtoReflect.Descriptor instead.
+func (*RouterLeaseRequest) Descriptor() ([]byte, []int) {
+	return file_api_sam_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *RouterLeaseRequest) GetPeerId() string {
+	if x != nil {
+		return x.PeerId
+	}
+	return ""
+}
+
+func (x *RouterLeaseRequest) GetAddresses() []string {
+	if x != nil {
+		return x.Addresses
+	}
+	return nil
+}
+
+func (x *RouterLeaseRequest) GetBiscuit() []byte {
+	if x != nil {
+		return x.Biscuit
+	}
+	return nil
+}
+
+type RouterLeaseResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	Error         string                 `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
+	ExpiresAt     int64                  `protobuf:"varint,3,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RouterLeaseResponse) Reset() {
+	*x = RouterLeaseResponse{}
+	mi := &file_api_sam_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RouterLeaseResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RouterLeaseResponse) ProtoMessage() {}
+
+func (x *RouterLeaseResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_api_sam_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RouterLeaseResponse.ProtoReflect.Descriptor instead.
+func (*RouterLeaseResponse) Descriptor() ([]byte, []int) {
+	return file_api_sam_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *RouterLeaseResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *RouterLeaseResponse) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+func (x *RouterLeaseResponse) GetExpiresAt() int64 {
+	if x != nil {
+		return x.ExpiresAt
+	}
+	return 0
+}
+
+type PolicyConfigGetRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PolicyConfigGetRequest) Reset() {
+	*x = PolicyConfigGetRequest{}
+	mi := &file_api_sam_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PolicyConfigGetRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PolicyConfigGetRequest) ProtoMessage() {}
+
+func (x *PolicyConfigGetRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_api_sam_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PolicyConfigGetRequest.ProtoReflect.Descriptor instead.
+func (*PolicyConfigGetRequest) Descriptor() ([]byte, []int) {
+	return file_api_sam_proto_rawDescGZIP(), []int{12}
+}
+
+type PolicyConfigGetResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	YamlContent   string                 `protobuf:"bytes,1,opt,name=yaml_content,json=yamlContent,proto3" json:"yaml_content,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PolicyConfigGetResponse) Reset() {
+	*x = PolicyConfigGetResponse{}
+	mi := &file_api_sam_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PolicyConfigGetResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PolicyConfigGetResponse) ProtoMessage() {}
+
+func (x *PolicyConfigGetResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_api_sam_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PolicyConfigGetResponse.ProtoReflect.Descriptor instead.
+func (*PolicyConfigGetResponse) Descriptor() ([]byte, []int) {
+	return file_api_sam_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *PolicyConfigGetResponse) GetYamlContent() string {
+	if x != nil {
+		return x.YamlContent
+	}
+	return ""
+}
+
+type PolicyConfigUpdateRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	YamlContent   string                 `protobuf:"bytes,1,opt,name=yaml_content,json=yamlContent,proto3" json:"yaml_content,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PolicyConfigUpdateRequest) Reset() {
+	*x = PolicyConfigUpdateRequest{}
+	mi := &file_api_sam_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PolicyConfigUpdateRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PolicyConfigUpdateRequest) ProtoMessage() {}
+
+func (x *PolicyConfigUpdateRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_api_sam_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PolicyConfigUpdateRequest.ProtoReflect.Descriptor instead.
+func (*PolicyConfigUpdateRequest) Descriptor() ([]byte, []int) {
+	return file_api_sam_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *PolicyConfigUpdateRequest) GetYamlContent() string {
+	if x != nil {
+		return x.YamlContent
+	}
+	return ""
+}
+
+type PolicyConfigUpdateResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	Error         string                 `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PolicyConfigUpdateResponse) Reset() {
+	*x = PolicyConfigUpdateResponse{}
+	mi := &file_api_sam_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PolicyConfigUpdateResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PolicyConfigUpdateResponse) ProtoMessage() {}
+
+func (x *PolicyConfigUpdateResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_api_sam_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PolicyConfigUpdateResponse.ProtoReflect.Descriptor instead.
+func (*PolicyConfigUpdateResponse) Descriptor() ([]byte, []int) {
+	return file_api_sam_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *PolicyConfigUpdateResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *PolicyConfigUpdateResponse) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+type KeysResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	PublicKeys    [][]byte               `protobuf:"bytes,1,rep,name=public_keys,json=publicKeys,proto3" json:"public_keys,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *KeysResponse) Reset() {
+	*x = KeysResponse{}
+	mi := &file_api_sam_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *KeysResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*KeysResponse) ProtoMessage() {}
+
+func (x *KeysResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_api_sam_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use KeysResponse.ProtoReflect.Descriptor instead.
+func (*KeysResponse) Descriptor() ([]byte, []int) {
+	return file_api_sam_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *KeysResponse) GetPublicKeys() [][]byte {
+	if x != nil {
+		return x.PublicKeys
+	}
+	return nil
+}
+
 var File_api_sam_proto protoreflect.FileDescriptor
 
 const file_api_sam_proto_rawDesc = "" +
@@ -783,10 +1131,11 @@ const file_api_sam_proto_rawDesc = "" +
 	"\rapi/sam.proto\x12\x06sam.v1\"L\n" +
 	"\tAuthFrame\x12\x18\n" +
 	"\abiscuit\x18\x01 \x01(\fR\abiscuit\x12%\n" +
-	"\x0etarget_service\x18\x02 \x01(\tR\rtargetService\">\n" +
+	"\x0etarget_service\x18\x02 \x01(\tR\rtargetService\"X\n" +
 	"\fAuthResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\"\xd8\x01\n" +
+	"\x05error\x18\x02 \x01(\tR\x05error\x12\x18\n" +
+	"\abiscuit\x18\x03 \x01(\fR\abiscuit\"\xd8\x01\n" +
 	"\tMeshEvent\x12*\n" +
 	"\x04type\x18\x01 \x01(\x0e2\x16.sam.v1.MeshEvent.TypeR\x04type\x12\x17\n" +
 	"\apeer_id\x18\x02 \x01(\tR\x06peerId\x12\x1c\n" +
@@ -834,7 +1183,27 @@ const file_api_sam_proto_rawDesc = "" +
 	"oidcIssuer\x12\x1b\n" +
 	"\tclient_id\x18\x02 \x01(\tR\bclientId\x12\x1a\n" +
 	"\baudience\x18\x03 \x01(\tR\baudience\x12#\n" +
-	"\rhub_addresses\x18\x04 \x03(\tR\fhubAddresses*]\n" +
+	"\rhub_addresses\x18\x04 \x03(\tR\fhubAddresses\"e\n" +
+	"\x12RouterLeaseRequest\x12\x17\n" +
+	"\apeer_id\x18\x01 \x01(\tR\x06peerId\x12\x1c\n" +
+	"\taddresses\x18\x02 \x03(\tR\taddresses\x12\x18\n" +
+	"\abiscuit\x18\x03 \x01(\fR\abiscuit\"d\n" +
+	"\x13RouterLeaseResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x14\n" +
+	"\x05error\x18\x02 \x01(\tR\x05error\x12\x1d\n" +
+	"\n" +
+	"expires_at\x18\x03 \x01(\x03R\texpiresAt\"\x18\n" +
+	"\x16PolicyConfigGetRequest\"<\n" +
+	"\x17PolicyConfigGetResponse\x12!\n" +
+	"\fyaml_content\x18\x01 \x01(\tR\vyamlContent\">\n" +
+	"\x19PolicyConfigUpdateRequest\x12!\n" +
+	"\fyaml_content\x18\x01 \x01(\tR\vyamlContent\"L\n" +
+	"\x1aPolicyConfigUpdateResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x14\n" +
+	"\x05error\x18\x02 \x01(\tR\x05error\"/\n" +
+	"\fKeysResponse\x12\x1f\n" +
+	"\vpublic_keys\x18\x01 \x03(\fR\n" +
+	"publicKeys*]\n" +
 	"\vServiceType\x12\x1c\n" +
 	"\x18SERVICE_TYPE_UNSPECIFIED\x10\x00\x12\x14\n" +
 	"\x10SERVICE_TYPE_MCP\x10\x01\x12\x1a\n" +
@@ -853,26 +1222,33 @@ func file_api_sam_proto_rawDescGZIP() []byte {
 }
 
 var file_api_sam_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_api_sam_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
+var file_api_sam_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
 var file_api_sam_proto_goTypes = []any{
-	(ServiceType)(0),               // 0: sam.v1.ServiceType
-	(MeshEvent_Type)(0),            // 1: sam.v1.MeshEvent.Type
-	(*AuthFrame)(nil),              // 2: sam.v1.AuthFrame
-	(*AuthResponse)(nil),           // 3: sam.v1.AuthResponse
-	(*MeshEvent)(nil),              // 4: sam.v1.MeshEvent
-	(*EnrollRequest)(nil),          // 5: sam.v1.EnrollRequest
-	(*EnrollResponse)(nil),         // 6: sam.v1.EnrollResponse
-	(*ServiceInfo)(nil),            // 7: sam.v1.ServiceInfo
-	(*CommandBackend)(nil),         // 8: sam.v1.CommandBackend
-	(*RegisterServiceRequest)(nil), // 9: sam.v1.RegisterServiceRequest
-	(*DiscoveredProvider)(nil),     // 10: sam.v1.DiscoveredProvider
-	(*HubInfoResponse)(nil),        // 11: sam.v1.HubInfoResponse
-	nil,                            // 12: sam.v1.CommandBackend.EnvEntry
+	(ServiceType)(0),                   // 0: sam.v1.ServiceType
+	(MeshEvent_Type)(0),                // 1: sam.v1.MeshEvent.Type
+	(*AuthFrame)(nil),                  // 2: sam.v1.AuthFrame
+	(*AuthResponse)(nil),               // 3: sam.v1.AuthResponse
+	(*MeshEvent)(nil),                  // 4: sam.v1.MeshEvent
+	(*EnrollRequest)(nil),              // 5: sam.v1.EnrollRequest
+	(*EnrollResponse)(nil),             // 6: sam.v1.EnrollResponse
+	(*ServiceInfo)(nil),                // 7: sam.v1.ServiceInfo
+	(*CommandBackend)(nil),             // 8: sam.v1.CommandBackend
+	(*RegisterServiceRequest)(nil),     // 9: sam.v1.RegisterServiceRequest
+	(*DiscoveredProvider)(nil),         // 10: sam.v1.DiscoveredProvider
+	(*HubInfoResponse)(nil),            // 11: sam.v1.HubInfoResponse
+	(*RouterLeaseRequest)(nil),         // 12: sam.v1.RouterLeaseRequest
+	(*RouterLeaseResponse)(nil),        // 13: sam.v1.RouterLeaseResponse
+	(*PolicyConfigGetRequest)(nil),     // 14: sam.v1.PolicyConfigGetRequest
+	(*PolicyConfigGetResponse)(nil),    // 15: sam.v1.PolicyConfigGetResponse
+	(*PolicyConfigUpdateRequest)(nil),  // 16: sam.v1.PolicyConfigUpdateRequest
+	(*PolicyConfigUpdateResponse)(nil), // 17: sam.v1.PolicyConfigUpdateResponse
+	(*KeysResponse)(nil),               // 18: sam.v1.KeysResponse
+	nil,                                // 19: sam.v1.CommandBackend.EnvEntry
 }
 var file_api_sam_proto_depIdxs = []int32{
 	1,  // 0: sam.v1.MeshEvent.type:type_name -> sam.v1.MeshEvent.Type
 	0,  // 1: sam.v1.ServiceInfo.type:type_name -> sam.v1.ServiceType
-	12, // 2: sam.v1.CommandBackend.env:type_name -> sam.v1.CommandBackend.EnvEntry
+	19, // 2: sam.v1.CommandBackend.env:type_name -> sam.v1.CommandBackend.EnvEntry
 	7,  // 3: sam.v1.RegisterServiceRequest.service:type_name -> sam.v1.ServiceInfo
 	8,  // 4: sam.v1.RegisterServiceRequest.command:type_name -> sam.v1.CommandBackend
 	5,  // [5:5] is the sub-list for method output_type
@@ -897,7 +1273,7 @@ func file_api_sam_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_sam_proto_rawDesc), len(file_api_sam_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   11,
+			NumMessages:   18,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

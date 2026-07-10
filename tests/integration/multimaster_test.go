@@ -15,34 +15,29 @@
 package integration_test
 
 import (
+	"bytes"
 	"context"
 	"fmt"
-	"net"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
+	"github.com/google/sam/api"
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-msgio"
 	"github.com/multiformats/go-multiaddr"
+	"google.golang.org/protobuf/proto"
 )
 
-func getFreePort(t *testing.T) int {
-	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	port := l.Addr().(*net.TCPAddr).Port
-	_ = l.Close()
-	return port
-}
-
 func TestMultiMasterHub(t *testing.T) {
-	hubBin := buildBinary(t, "./cmd/sam-hub")
+	cpBin := buildBinary(t, "./cmd/sam-control-plane")
+	routerBin := buildBinary(t, "./cmd/sam-router")
+
 	tmpDir := t.TempDir()
 
 	// Create a mock policy file
@@ -51,132 +46,266 @@ func TestMultiMasterHub(t *testing.T) {
 bindings: []
 roles: {}
 `
-	if err := os.WriteFile(policyFile, []byte(policyContent), 0644); err != nil {
-		t.Fatal(err)
-	}
+	writePolicyWithRouter(t, policyFile, policyContent)
 
 	portA := getFreePort(t)
 	portB := getFreePort(t)
-	p2pPortA := getFreePort(t)
-	p2pPortB := getFreePort(t)
+	routerPortA := getFreePort(t)
+	routerPortB := getFreePort(t)
 
-	// Start Replica A
-	cmdA := exec.Command(hubBin,
+	// Mock OIDC
+	oidcURL, mintToken := startCustomMockOIDC(t)
+
+	routerJWT := mintToken(map[string]interface{}{
+		"sub":    "router-integration-1",
+		"groups": []string{"routers"},
+	})
+
+	nodeJWT := mintToken(map[string]interface{}{
+		"sub": "mock-user",
+	})
+
+	jwtPath := filepath.Join(tmpDir, "jwt.txt")
+	if err := os.WriteFile(jwtPath, []byte(nodeJWT), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	dbPathA := filepath.Join(tmpDir, "cp_keysA.db")
+	dbPathB := filepath.Join(tmpDir, "cp_keysB.db")
+	// We override journal_mode to DELETE (disabling WAL) because WAL mode caches
+	// transactions in a separate -wal file. Since this test copies dbPathA to dbPathB
+	// while CP A is running, WAL mode would cause the copy to be stale/corrupt.
+	// We also retain busy_timeout(5000) so that concurrent operations wait for locks
+	// rather than returning SQLITE_BUSY immediately.
+	dsnA := dbPathA + "?_pragma=journal_mode(DELETE)&_pragma=busy_timeout(5000)"
+	dsnB := dbPathB + "?_pragma=journal_mode(DELETE)&_pragma=busy_timeout(5000)"
+
+	// 1. Start Control Plane A temporarily to generate keyring
+	cmdCP_A_temp := exec.Command(cpBin,
 		"--bind-address", fmt.Sprintf("127.0.0.1:%d", portA),
-		"--listen", fmt.Sprintf("/ip4/127.0.0.1/tcp/%d", p2pPortA),
 		"--policy-file", policyFile,
-		"--keys-db", filepath.Join(tmpDir, "keysA.db"),
-		"--allow-loopback",
+		"--db-dsn", dsnA,
+		"--issuer", oidcURL,
+		"--insecure-skip-tls-verify",
 	)
-	var stdoutA, stderrA safeBuffer
-	cmdA.Stdout = &stdoutA
-	cmdA.Stderr = &stderrA
-
-	if err := cmdA.Start(); err != nil {
-		t.Fatalf("failed to start Hub Replica A: %v", err)
+	var stdoutCP_A_temp, stderrCP_A_temp safeBuffer
+	cmdCP_A_temp.Stdout = &stdoutCP_A_temp
+	cmdCP_A_temp.Stderr = &stderrCP_A_temp
+	if err := cmdCP_A_temp.Start(); err != nil {
+		t.Fatalf("failed to start temporary CP A: %v", err)
 	}
-	defer func() { _ = cmdA.Process.Kill() }()
+	waitForControlPlane(t, portA)
+	_ = cmdCP_A_temp.Process.Signal(os.Interrupt)
+	_ = cmdCP_A_temp.Wait()
+	t.Logf("Temp CP A Stderr:\n%s\nTemp CP A Stdout:\n%s", stderrCP_A_temp.String(), stdoutCP_A_temp.String())
 
-	// Start Replica B
-	cmdB := exec.Command(hubBin,
+	// 2. Copy CP A keys to CP B to share the key-ring
+	keysData, err := os.ReadFile(dbPathA)
+	if err != nil {
+		t.Fatalf("Failed to read cp_keysA.db: %v", err)
+	}
+	if err := os.WriteFile(dbPathB, keysData, 0600); err != nil {
+		t.Fatalf("Failed to write cp_keysB.db: %v", err)
+	}
+
+	// 3. Start CP A persistently
+	cmdCP_A := exec.Command(cpBin,
+		"--bind-address", fmt.Sprintf("127.0.0.1:%d", portA),
+		"--policy-file", policyFile,
+		"--db-dsn", dsnA,
+		"--issuer", oidcURL,
+		"--insecure-skip-tls-verify",
+	)
+	var stdoutCP_A, stderrCP_A safeBuffer
+	cmdCP_A.Stdout = &stdoutCP_A
+	cmdCP_A.Stderr = &stderrCP_A
+	if err := cmdCP_A.Start(); err != nil {
+		t.Fatalf("failed to start CP A: %v", err)
+	}
+	defer func() { _ = cmdCP_A.Process.Kill(); _ = cmdCP_A.Wait() }()
+
+	waitForControlPlane(t, portA)
+
+	// 4. Start Router A (registered with CP A)
+	cmdRouterA := exec.Command(routerBin,
+		"--control-plane", fmt.Sprintf("http://127.0.0.1:%d", portA),
+		"--listen", fmt.Sprintf("/ip4/127.0.0.1/tcp/%d", routerPortA),
+		"--keys-path", filepath.Join(tmpDir, "router_keysA.db"),
+		"--allow-loopback",
+		"--oidc-token", routerJWT,
+	)
+	var stdoutRouterA, stderrRouterA safeBuffer
+	cmdRouterA.Stdout = &stdoutRouterA
+	cmdRouterA.Stderr = &stderrRouterA
+	if err := cmdRouterA.Start(); err != nil {
+		t.Fatalf("failed to start Router A: %v", err)
+	}
+	defer func() { _ = cmdRouterA.Process.Kill(); _ = cmdRouterA.Wait() }()
+
+	// Wait for Router A to renew lease and register in CP A
+	time.Sleep(3 * time.Second)
+
+	// 5. Start Control Plane B (sharing CP A's keys)
+	cmdCP_B := exec.Command(cpBin,
 		"--bind-address", fmt.Sprintf("127.0.0.1:%d", portB),
-		"--listen", fmt.Sprintf("/ip4/127.0.0.1/tcp/%d", p2pPortB),
 		"--policy-file", policyFile,
-		"--keys-db", filepath.Join(tmpDir, "keysB.db"),
+		"--db-dsn", dsnB,
+		"--issuer", oidcURL,
+		"--insecure-skip-tls-verify",
+	)
+	var stdoutCP_B, stderrCP_B safeBuffer
+	cmdCP_B.Stdout = &stdoutCP_B
+	cmdCP_B.Stderr = &stderrCP_B
+	if err := cmdCP_B.Start(); err != nil {
+		t.Fatalf("failed to start CP B: %v", err)
+	}
+	defer func() { _ = cmdCP_B.Process.Kill(); _ = cmdCP_B.Wait() }()
+
+	waitForControlPlane(t, portB)
+
+	// 5. Start Router B (registered with CP B)
+	cmdRouterB := exec.Command(routerBin,
+		"--control-plane", fmt.Sprintf("http://127.0.0.1:%d", portB),
+		"--listen", fmt.Sprintf("/ip4/127.0.0.1/tcp/%d", routerPortB),
+		"--keys-path", filepath.Join(tmpDir, "router_keysB.db"),
 		"--allow-loopback",
+		"--oidc-token", routerJWT,
 	)
-	var stdoutB, stderrB safeBuffer
-	cmdB.Stdout = &stdoutB
-	cmdB.Stderr = &stderrB
-
-	if err := cmdB.Start(); err != nil {
-		t.Fatalf("failed to start Hub Replica B: %v", err)
+	var stdoutRouterB, stderrRouterB safeBuffer
+	cmdRouterB.Stdout = &stdoutRouterB
+	cmdRouterB.Stderr = &stderrRouterB
+	if err := cmdRouterB.Start(); err != nil {
+		t.Fatalf("failed to start Router B: %v", err)
 	}
-	defer func() { _ = cmdB.Process.Kill() }()
+	defer func() { _ = cmdRouterB.Process.Kill(); _ = cmdRouterB.Wait() }()
 
-	// Wait for both replicas to be online and parse their Peer IDs
-	var peerIDA, peerIDB string
-	for i := 0; i < 50; i++ {
-		outA := stdoutA.String() + stderrA.String()
-		outB := stdoutB.String() + stderrB.String()
+	// Wait for Router B to renew lease and register in CP B
+	time.Sleep(3 * time.Second)
 
-		if peerIDA == "" {
-			for _, line := range strings.Split(outA, "\n") {
-				if strings.Contains(line, "PeerID:") {
-					parts := strings.Split(line, " ")
-					peerIDA = strings.TrimSpace(parts[len(parts)-1])
-				}
-			}
-		}
-
-		if peerIDB == "" {
-			for _, line := range strings.Split(outB, "\n") {
-				if strings.Contains(line, "PeerID:") {
-					parts := strings.Split(line, " ")
-					peerIDB = strings.TrimSpace(parts[len(parts)-1])
-				}
-			}
-		}
-
-		if peerIDA != "" && peerIDB != "" {
-			break
-		}
-		time.Sleep(100 * time.Millisecond)
+	// 6. Fetch router peer IDs
+	peerInfoListA := fetchActiveRouters(t, portA)
+	if len(peerInfoListA) != 1 {
+		t.Fatalf("expected 1 router registered on CP A, got %d", len(peerInfoListA))
 	}
+	peerIDA := peerInfoListA[0]
 
-	if peerIDA == "" || peerIDB == "" {
-		t.Fatalf("replicas failed to report Peer ID in time. A: %q, B: %q\nStdout A:\n%s\nStderr A:\n%s\nStdout B:\n%s\nStderr B:\n%s", peerIDA, peerIDB, stdoutA.String(), stderrA.String(), stdoutB.String(), stderrB.String())
+	peerInfoListB := fetchActiveRouters(t, portB)
+	if len(peerInfoListB) != 1 {
+		t.Fatalf("expected 1 router registered on CP B, got %d", len(peerInfoListB))
 	}
+	peerIDB := peerInfoListB[0]
 
-	// ASSERT: Both replicas must have different Peer IDs!
+	// ASSERT: Router A and Router B have unique Peer IDs
 	if peerIDA == peerIDB {
-		t.Fatalf("expected replicas to have unique Peer IDs, but both got: %s", peerIDA)
+		t.Fatalf("expected routers to have unique Peer IDs, but both got: %s", peerIDA)
 	}
 
-	t.Logf("Replicas successfully started. Replica A: %s, Replica B: %s", peerIDA, peerIDB)
+	t.Logf("Replicas successfully started. Router A: %s, Router B: %s", peerIDA, peerIDB)
 
-	// Create a separate libp2p client host
-	clientHost, err := libp2p.New(
-		libp2p.NoListenAddrs,
-	)
+	// 7. Start a client libp2p host to represent a node
+	clientHost, err := libp2p.New(libp2p.NoListenAddrs)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = clientHost.Close() }()
 
-	// Validate connecting to Replica A
-	addrA, err := multiaddr.NewMultiaddr(fmt.Sprintf("/ip4/127.0.0.1/tcp/%d/p2p/%s", p2pPortA, peerIDA))
+	// 8. Enroll client host on CP B (obtaining a biscuit minted by CP B)
+	clientBiscuit := enrollClientOnControlPlane(t, portB, clientHost.ID(), nodeJWT)
+
+	// 9. Assert that client host can connect and authenticate directly with Router A (registered with CP A!)
+	// This proves Router A accepts biscuits issued by CP B because they share the key-ring.
+	routerAddrA, err := multiaddr.NewMultiaddr(fmt.Sprintf("/ip4/127.0.0.1/tcp/%d/p2p/%s", routerPortA, peerIDA))
 	if err != nil {
 		t.Fatal(err)
 	}
-	infoA, err := peer.AddrInfoFromP2pAddr(addrA)
+	routerInfoA, err := peer.AddrInfoFromP2pAddr(routerAddrA)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	t.Logf("Dialing Hub Replica A at %s...", addrA)
-	ctxA, cancelA := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancelA()
-	if err := clientHost.Connect(ctxA, *infoA); err != nil {
-		t.Fatalf("failed to connect to Hub Replica A: %v", err)
+	t.Logf("Connecting client host %s to Router A at %s...", clientHost.ID(), routerAddrA)
+	ctxConnect, cancelConnect := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelConnect()
+	if err := clientHost.Connect(ctxConnect, *routerInfoA); err != nil {
+		t.Fatalf("failed to connect client to Router A: %v", err)
 	}
-	t.Log("Successfully connected and authenticated with Hub Replica A!")
 
-	// Validate connecting to Replica B
-	addrB, err := multiaddr.NewMultiaddr(fmt.Sprintf("/ip4/127.0.0.1/tcp/%d/p2p/%s", p2pPortB, peerIDB))
+	t.Log("Opening auth stream to Router A...")
+	s, err := clientHost.NewStream(context.Background(), routerInfoA.ID, api.AuthProtocolID)
+	if err != nil {
+		t.Fatalf("failed to open auth stream: %v", err)
+	}
+	defer func() { _ = s.Close() }()
+
+	t.Log("Writing auth frame with CP B biscuit to Router A...")
+	writer := msgio.NewVarintWriter(s)
+	authFrame := &api.AuthFrame{Biscuit: clientBiscuit}
+	authFrameBytes, err := proto.Marshal(authFrame)
 	if err != nil {
 		t.Fatal(err)
 	}
-	infoB, err := peer.AddrInfoFromP2pAddr(addrB)
+	if err := writer.WriteMsg(authFrameBytes); err != nil {
+		t.Fatalf("failed to write auth frame: %v", err)
+	}
+
+	t.Log("Reading auth response from Router A...")
+	reader := msgio.NewVarintReaderSize(s, 1024*64)
+	respMsg, err := reader.ReadMsg()
+	if err != nil {
+		t.Fatalf("failed to read response from Router A: %v\nRouter A Stderr:\n%s\nRouter A Stdout:\n%s\nCP A Stderr:\n%s\nCP B Stderr:\n%s",
+			err, stderrRouterA.String(), stdoutRouterA.String(), stderrCP_A.String(), stderrCP_B.String())
+	}
+	defer reader.ReleaseMsg(respMsg)
+
+	var authResp api.AuthResponse
+	if err := proto.Unmarshal(respMsg, &authResp); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
+	}
+
+	if !authResp.Success {
+		t.Fatalf("mutual auth with Router A was rejected: %s\nRouter A Stderr:\n%s\nRouter A Stdout:\n%s\nCP A Stderr:\n%s\nCP B Stderr:\n%s",
+			authResp.Error, stderrRouterA.String(), stdoutRouterA.String(), stderrCP_A.String(), stderrCP_B.String())
+	}
+
+	t.Log("Successfully verified multi-master control plane signature trust!")
+}
+
+func enrollClientOnControlPlane(t *testing.T, cpPort int, clientID peer.ID, jwtToken string) []byte {
+	t.Helper()
+
+	req := &api.EnrollRequest{
+		Jwt:    jwtToken,
+		PeerId: clientID.String(),
+	}
+	reqBytes, err := proto.Marshal(req)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	t.Logf("Dialing Hub Replica B at %s...", addrB)
-	ctxB, cancelB := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancelB()
-	if err := clientHost.Connect(ctxB, *infoB); err != nil {
-		t.Fatalf("failed to connect to Hub Replica B: %v", err)
+	resp, err := http.Post(
+		fmt.Sprintf("http://127.0.0.1:%d/register", cpPort),
+		"application/octet-stream",
+		bytes.NewReader(reqBytes),
+	)
+	if err != nil {
+		t.Fatalf("failed to send enroll request: %v", err)
 	}
-	t.Log("Successfully connected and authenticated with Hub Replica B!")
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("enroll request failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	respBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var enrollResp api.EnrollResponse
+	if err := proto.Unmarshal(respBytes, &enrollResp); err != nil {
+		t.Fatalf("failed to decode enroll response: %v", err)
+	}
+
+	return enrollResp.BiscuitToken
 }

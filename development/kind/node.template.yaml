@@ -28,7 +28,7 @@ spec:
         imagePullPolicy: IfNotPresent
         args:
         - "run"
-        - "--hub=http://sam-hub:9090"
+        - "--hub=http://sam-control-plane:8080"
         - "--jwt-path=/var/run/secrets/tokens/sam-token"
         - "--api-token=devtoken"
         - "--bind-addr=0.0.0.0:8080"
