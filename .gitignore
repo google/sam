@@ -34,6 +34,7 @@ go.work.sum
 #
 bin/
 tests/e2e/logs/
+tests/integration/logs/
 tests/integration/scratch/
 __pycache__/
 .venv/

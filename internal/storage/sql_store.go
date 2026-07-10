@@ -181,7 +181,7 @@ func (s *SQLStore) GetCurrentKey(ctx context.Context) (ed25519.PrivateKey, ed255
 // GetAllValidKeys implements Store.
 func (s *SQLStore) GetAllValidKeys(ctx context.Context) ([]KeyPair, error) {
 	query := s.rebind(`SELECT private_key, public_key, expiration FROM keyring WHERE expiration IS NULL OR expiration > ?`)
-	rows, err := s.db.QueryContext(ctx, query, time.Now().Unix())
+	rows, err := s.db.QueryContext(ctx, query, time.Now().UnixMilli())
 	if err != nil {
 		return nil, err
 	}
@@ -196,7 +196,7 @@ func (s *SQLStore) GetAllValidKeys(ctx context.Context) ([]KeyPair, error) {
 		}
 		var expiration time.Time
 		if exp.Valid {
-			expiration = time.Unix(exp.Int64, 0)
+			expiration = time.UnixMilli(exp.Int64)
 		}
 		keys = append(keys, KeyPair{
 			Private:    ed25519.PrivateKey(priv),
@@ -220,19 +220,19 @@ func (s *SQLStore) RotateKeys(ctx context.Context, newPriv ed25519.PrivateKey, n
 
 	// Set expiration on the current active key
 	updateQuery := s.rebind(`UPDATE keyring SET expiration = ? WHERE expiration IS NULL`)
-	if _, err := tx.ExecContext(ctx, updateQuery, expireTime.Unix()); err != nil {
+	if _, err := tx.ExecContext(ctx, updateQuery, expireTime.UnixMilli()); err != nil {
 		return err
 	}
 
 	// Insert the new key
 	insertQuery := s.rebind(`INSERT INTO keyring (private_key, public_key, created_at) VALUES (?, ?, ?)`)
-	if _, err := tx.ExecContext(ctx, insertQuery, []byte(newPriv), []byte(newPub), now.Unix()); err != nil {
+	if _, err := tx.ExecContext(ctx, insertQuery, []byte(newPriv), []byte(newPub), now.UnixMilli()); err != nil {
 		return err
 	}
 
 	// Clean up expired keys
 	deleteQuery := s.rebind(`DELETE FROM keyring WHERE expiration <= ?`)
-	if _, err := tx.ExecContext(ctx, deleteQuery, now.Unix()); err != nil {
+	if _, err := tx.ExecContext(ctx, deleteQuery, now.UnixMilli()); err != nil {
 		return err
 	}
 
@@ -242,7 +242,7 @@ func (s *SQLStore) RotateKeys(ctx context.Context, newPriv ed25519.PrivateKey, n
 // SaveInitialKey implements Store.
 func (s *SQLStore) SaveInitialKey(ctx context.Context, priv ed25519.PrivateKey, pub ed25519.PublicKey) error {
 	query := s.rebind(`INSERT INTO keyring (private_key, public_key, created_at) VALUES (?, ?, ?)`)
-	_, err := s.db.ExecContext(ctx, query, []byte(priv), []byte(pub), time.Now().Unix())
+	_, err := s.db.ExecContext(ctx, query, []byte(priv), []byte(pub), time.Now().UnixMilli())
 	return err
 }
 
@@ -263,7 +263,7 @@ func (s *SQLStore) EnrollNode(ctx context.Context, peerID string, biscuit []byte
 			DO UPDATE SET biscuit_token = excluded.biscuit_token, enrolled_at = excluded.enrolled_at, expires_at = excluded.expires_at`)
 	}
 
-	_, err := s.db.ExecContext(ctx, query, peerID, biscuit, time.Now().Unix(), expiresAt.Unix())
+	_, err := s.db.ExecContext(ctx, query, peerID, biscuit, time.Now().UnixMilli(), expiresAt.UnixMilli())
 	return err
 }
 
@@ -279,8 +279,8 @@ func (s *SQLStore) GetNode(ctx context.Context, peerID string) (*EnrolledNode, e
 	if err != nil {
 		return nil, err
 	}
-	node.EnrolledAt = time.Unix(enrolledAtUnix, 0)
-	node.ExpiresAt = time.Unix(expiresAtUnix, 0)
+	node.EnrolledAt = time.UnixMilli(enrolledAtUnix)
+	node.ExpiresAt = time.UnixMilli(expiresAtUnix)
 	return &node, nil
 }
 
@@ -327,14 +327,14 @@ func (s *SQLStore) UpsertRouterLease(ctx context.Context, lease *RouterLease) er
 			DO UPDATE SET multiaddresses = excluded.multiaddresses, last_lease_renewal = excluded.last_lease_renewal, expires_at = excluded.expires_at`)
 	}
 
-	_, err = s.db.ExecContext(ctx, query, lease.PeerID, string(addrsBytes), lease.LastRenewal.Unix(), lease.ExpiresAt.Unix())
+	_, err = s.db.ExecContext(ctx, query, lease.PeerID, string(addrsBytes), lease.LastRenewal.UnixMilli(), lease.ExpiresAt.UnixMilli())
 	return err
 }
 
 // GetActiveRouters implements Store.
 func (s *SQLStore) GetActiveRouters(ctx context.Context) ([]RouterLease, error) {
 	query := s.rebind(`SELECT peer_id, multiaddresses, last_lease_renewal, expires_at FROM routers WHERE expires_at > ?`)
-	rows, err := s.db.QueryContext(ctx, query, time.Now().Unix())
+	rows, err := s.db.QueryContext(ctx, query, time.Now().UnixMilli())
 	if err != nil {
 		return nil, err
 	}
@@ -351,8 +351,8 @@ func (s *SQLStore) GetActiveRouters(ctx context.Context) ([]RouterLease, error) 
 		if err := json.Unmarshal([]byte(addrsStr), &l.Addresses); err != nil {
 			return nil, err
 		}
-		l.LastRenewal = time.Unix(lastRenewalUnix, 0)
-		l.ExpiresAt = time.Unix(expiresAtUnix, 0)
+		l.LastRenewal = time.UnixMilli(lastRenewalUnix)
+		l.ExpiresAt = time.UnixMilli(expiresAtUnix)
 		leases = append(leases, l)
 	}
 	return leases, rows.Err()
@@ -380,7 +380,7 @@ func (s *SQLStore) SavePolicy(ctx context.Context, policy *api.PolicyConfig) err
 			DO UPDATE SET content = excluded.content, updated_at = excluded.updated_at`)
 	}
 
-	_, err = s.db.ExecContext(ctx, query, string(data), time.Now().Unix())
+	_, err = s.db.ExecContext(ctx, query, string(data), time.Now().UnixMilli())
 	return err
 }
 

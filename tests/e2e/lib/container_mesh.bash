@@ -54,6 +54,16 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
       for c in "${MESH_CONTAINERS[@]}"; do
         docker logs "${c}" > "tests/e2e/logs/${c}.log" 2>&1 || true
       done
+      local db_container=""
+      for c in "${MESH_CONTAINERS[@]}"; do
+        if [[ "${c}" == *"-db" ]]; then
+          db_container="${c}"
+          break
+        fi
+      done
+      if [[ -n "${db_container}" ]]; then
+        docker exec "${db_container}" pg_dump -U sam -d sam_mesh > "tests/e2e/logs/${db_container}.sql" 2>&1 || true
+      fi
     fi
 
     local c
@@ -375,96 +385,3 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
     state="$(docker inspect -f '{{.State.Running}}' "${name}" 2>/dev/null || true)"
     [[ "${state}" == "true" ]]
   }
-
-  mesh_start_standalone_hub() {
-    local hub_name="$1"
-    local rotation_interval="${2:-0}"
-    local grace_period="${3:-0}"
-
-    local policy_file="/tmp/${MESH_PREFIX}-policies.yaml"
-    cat <<EOF > "${policy_file}"
-version: "v1alpha1"
-bindings:
-  - members: ["group:routers", "user:system:serviceaccount:default:sam-router-sa"]
-    role: "router"
-  - members: ["system:authenticated"]
-    role: "admin"
-roles:
-  admin:
-    allowed_services: ["*"]
-    allowed_targets: ["*"]
-  router:
-    allowed_services: ["*"]
-    allowed_targets: ["*"]
-EOF
-
-    # Create data volume for control plane
-    local cp_db_vol="${hub_name}-cp-data"
-    docker volume create "${cp_db_vol}" >/dev/null
-    CLEANUP_VOLUMES+=("${cp_db_vol}")
-
-    # Start Control Plane
-    docker run -d \
-      --name "${hub_name}-cp" \
-      --network "${MESH_NETWORK}" \
-      --network-alias sam-control-plane \
-      $(mesh_get_add_hosts) \
-      -v "${policy_file}:/etc/sam/policies.yaml:ro" \
-      -v "${cp_db_vol}:/data" \
-      "sam-control-plane:local" \
-      --issuer "http://mock-oidc:18080" \
-      --allowed-audiences "sam-e2e,sam-hub-audience,sam-mesh-audience" \
-      --db-driver "sqlite" \
-      --db-dsn "/data/control-plane.db" \
-      --key-rotation-interval "${rotation_interval}" \
-      --key-grace-period "${grace_period}" \
-      --lease-duration "15s" \
-      --policy-file "/etc/sam/policies.yaml" >/dev/null
-
-    MESH_CONTAINERS+=("${hub_name}-cp")
-
-    # Get a mock token for the router
-    local router_token=""
-    local i
-    for ((i=0; i<15; i++)); do
-      router_token=$(docker run --rm --network "${MESH_NETWORK}" $(mesh_get_add_hosts) python:3.12 python3 -c "import urllib.request; import json; req = urllib.request.Request('http://mock-oidc:18080/token', data=b'client_id=router-client'); resp = urllib.request.urlopen(req); print(json.loads(resp.read().decode())['access_token'])" || true)
-      if [[ -n "${router_token}" && "${router_token}" != "null" ]]; then
-        break
-      fi
-      sleep 0.5
-    done
-    [[ -n "${router_token}" && "${router_token}" != "null" ]]
-
-    # Write token to a temp path and mount it into the router
-    local token_dir
-    token_dir="/tmp/${MESH_PREFIX}-router-token"
-    mkdir -p "${token_dir}"
-    echo -n "${router_token}" > "${token_dir}/sa-token"
-
-    # Create data volume for router
-    local router_data_vol="${hub_name}-router-data"
-    docker volume create "${router_data_vol}" >/dev/null
-    CLEANUP_VOLUMES+=("${router_data_vol}")
-
-    # Start Router
-    docker run -d \
-      --name "${hub_name}" \
-      --network "${MESH_NETWORK}" \
-      --network-alias sam-hub \
-      $(mesh_get_add_hosts) \
-      -v "${token_dir}:/var/run/secrets/tokens:ro" \
-      -v "${router_data_vol}:/data" \
-      "sam-router:local" \
-      --control-plane "http://sam-control-plane:8080" \
-      --listen "/ip4/0.0.0.0/tcp/4002" \
-      --external-addr "/dns4/sam-hub/tcp/4002" \
-      --jwt-path "/var/run/secrets/tokens/sa-token" \
-      --keys-path "/data/router.key" \
-      --allow-loopback \
-      --lease-renew-interval 5s \
-      --keys-sync-interval 2s \
-      --log-level debug >/dev/null
-
-    MESH_CONTAINERS+=("${hub_name}")
-  }
-fi

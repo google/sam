@@ -637,3 +637,21 @@ func writePolicyWithRouter(t *testing.T, path string, yamlContent string) {
 		t.Fatal(err)
 	}
 }
+
+func waitForNodeOnline(t *testing.T, logPath string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	for {
+		data, err := os.ReadFile(logPath)
+		if err == nil && strings.Contains(string(data), "SAM Node Online") {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("timed out waiting for node to go online")
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+}

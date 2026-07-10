@@ -116,7 +116,7 @@ test-python-e2e: build docker-build
 	bats --verbose-run tests/e2e/python_sdk_test.bats
 
 e2e-test: build docker-build
-	bats --verbose-run $(if $(WHAT),--filter "$(WHAT)") tests/e2e/
+	bats -j 10 --verbose-run $(if $(WHAT),--filter "$(WHAT)") tests/e2e/
 
 test-e2e: build docker-build
 	@command -v bats >/dev/null 2>&1 || { \
