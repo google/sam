@@ -147,7 +147,7 @@ func main() {
 			if err != nil {
 				logger.Fatalf("Failed to initialize database store: %v", err)
 			}
-			defer store.Close()
+			defer store.Close() //nolint:errcheck
 			if err := store.SetNodeBanned(cmd.Context(), peerIDFlag, true); err != nil {
 				logger.Fatalf("Failed to ban node: %v", err)
 			}
@@ -165,7 +165,7 @@ func main() {
 			if err != nil {
 				logger.Fatalf("Failed to initialize database store: %v", err)
 			}
-			defer store.Close()
+			defer store.Close() //nolint:errcheck
 			if err := store.SetNodeBanned(cmd.Context(), peerIDFlag, false); err != nil {
 				logger.Fatalf("Failed to unban node: %v", err)
 			}
