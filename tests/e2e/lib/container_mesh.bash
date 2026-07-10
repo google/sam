@@ -418,6 +418,7 @@ EOF
       --db-dsn "/data/control-plane.db" \
       --key-rotation-interval "${rotation_interval}" \
       --key-grace-period "${grace_period}" \
+      --lease-duration "15s" \
       --policy-file "/etc/sam/policies.yaml" >/dev/null
 
     MESH_CONTAINERS+=("${hub_name}-cp")
@@ -460,6 +461,7 @@ EOF
       --jwt-path "/var/run/secrets/tokens/sa-token" \
       --keys-path "/data/router.key" \
       --allow-loopback \
+      --lease-renew-interval 5s \
       --log-level debug >/dev/null
 
     MESH_CONTAINERS+=("${hub_name}")
