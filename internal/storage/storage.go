@@ -44,11 +44,15 @@ type RouterLease struct {
 
 // EnrolledNode represents a node enrolled in the mesh.
 type EnrolledNode struct {
-	PeerID     string
-	Biscuit    []byte
-	EnrolledAt time.Time
-	ExpiresAt  time.Time
-	Banned     bool
+	PeerID         string
+	PublicKey      []byte
+	Biscuit        []byte
+	Role           string
+	EnrollmentType string
+	ClaimsJSON     string
+	EnrolledAt     time.Time
+	ExpiresAt      time.Time
+	Banned         bool
 }
 
 // BootstrapToken represents a pre-shared token for node enrollment.
@@ -91,7 +95,7 @@ type Store interface {
 	SaveInitialKey(ctx context.Context, priv ed25519.PrivateKey, pub ed25519.PublicKey) error
 
 	// EnrollNode registers or updates a node enrollment.
-	EnrollNode(ctx context.Context, peerID string, biscuit []byte, expiresAt time.Time) error
+	EnrollNode(ctx context.Context, node *EnrolledNode) error
 
 	// GetNode retrieves node enrollment details.
 	GetNode(ctx context.Context, peerID string) (*EnrolledNode, error)

@@ -374,6 +374,7 @@ type EnrollRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Jwt           string                 `protobuf:"bytes,1,opt,name=jwt,proto3" json:"jwt,omitempty"`
 	PeerId        string                 `protobuf:"bytes,2,opt,name=peer_id,json=peerId,proto3" json:"peer_id,omitempty"`
+	PublicKey     []byte                 `protobuf:"bytes,3,opt,name=public_key,json=publicKey,proto3" json:"public_key,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -420,6 +421,13 @@ func (x *EnrollRequest) GetPeerId() string {
 		return x.PeerId
 	}
 	return ""
+}
+
+func (x *EnrollRequest) GetPublicKey() []byte {
+	if x != nil {
+		return x.PublicKey
+	}
+	return nil
 }
 
 type EnrollResponse struct {
@@ -1372,6 +1380,214 @@ func (x *KeysResponse) GetPublicKeys() [][]byte {
 	return nil
 }
 
+type TokenRefreshRequest struct {
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	ChallengeSignature []byte                 `protobuf:"bytes,1,opt,name=challenge_signature,json=challengeSignature,proto3" json:"challenge_signature,omitempty"`
+	Timestamp          int64                  `protobuf:"varint,2,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *TokenRefreshRequest) Reset() {
+	*x = TokenRefreshRequest{}
+	mi := &file_api_sam_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TokenRefreshRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TokenRefreshRequest) ProtoMessage() {}
+
+func (x *TokenRefreshRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_api_sam_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TokenRefreshRequest.ProtoReflect.Descriptor instead.
+func (*TokenRefreshRequest) Descriptor() ([]byte, []int) {
+	return file_api_sam_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *TokenRefreshRequest) GetChallengeSignature() []byte {
+	if x != nil {
+		return x.ChallengeSignature
+	}
+	return nil
+}
+
+func (x *TokenRefreshRequest) GetTimestamp() int64 {
+	if x != nil {
+		return x.Timestamp
+	}
+	return 0
+}
+
+type TokenRefreshResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	BiscuitToken  []byte                 `protobuf:"bytes,1,opt,name=biscuit_token,json=biscuitToken,proto3" json:"biscuit_token,omitempty"`
+	ExpiresAt     int64                  `protobuf:"varint,2,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
+	ErrorMessage  string                 `protobuf:"bytes,3,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TokenRefreshResponse) Reset() {
+	*x = TokenRefreshResponse{}
+	mi := &file_api_sam_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TokenRefreshResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TokenRefreshResponse) ProtoMessage() {}
+
+func (x *TokenRefreshResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_api_sam_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TokenRefreshResponse.ProtoReflect.Descriptor instead.
+func (*TokenRefreshResponse) Descriptor() ([]byte, []int) {
+	return file_api_sam_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *TokenRefreshResponse) GetBiscuitToken() []byte {
+	if x != nil {
+		return x.BiscuitToken
+	}
+	return nil
+}
+
+func (x *TokenRefreshResponse) GetExpiresAt() int64 {
+	if x != nil {
+		return x.ExpiresAt
+	}
+	return 0
+}
+
+func (x *TokenRefreshResponse) GetErrorMessage() string {
+	if x != nil {
+		return x.ErrorMessage
+	}
+	return ""
+}
+
+type TokenRevokeRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	PeerId        string                 `protobuf:"bytes,1,opt,name=peer_id,json=peerId,proto3" json:"peer_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TokenRevokeRequest) Reset() {
+	*x = TokenRevokeRequest{}
+	mi := &file_api_sam_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TokenRevokeRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TokenRevokeRequest) ProtoMessage() {}
+
+func (x *TokenRevokeRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_api_sam_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TokenRevokeRequest.ProtoReflect.Descriptor instead.
+func (*TokenRevokeRequest) Descriptor() ([]byte, []int) {
+	return file_api_sam_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *TokenRevokeRequest) GetPeerId() string {
+	if x != nil {
+		return x.PeerId
+	}
+	return ""
+}
+
+type TokenRevokeResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	Error         string                 `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TokenRevokeResponse) Reset() {
+	*x = TokenRevokeResponse{}
+	mi := &file_api_sam_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TokenRevokeResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TokenRevokeResponse) ProtoMessage() {}
+
+func (x *TokenRevokeResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_api_sam_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TokenRevokeResponse.ProtoReflect.Descriptor instead.
+func (*TokenRevokeResponse) Descriptor() ([]byte, []int) {
+	return file_api_sam_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *TokenRevokeResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *TokenRevokeResponse) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
 var File_api_sam_proto protoreflect.FileDescriptor
 
 const file_api_sam_proto_rawDesc = "" +
@@ -1393,10 +1609,12 @@ const file_api_sam_proto_rawDesc = "" +
 	"\x04Type\x12\n" +
 	"\n" +
 	"\x06BANNED\x10\x00\x12\x10\n" +
-	"\fKEY_ROTATION\x10\x01\":\n" +
+	"\fKEY_ROTATION\x10\x01\"Y\n" +
 	"\rEnrollRequest\x12\x10\n" +
 	"\x03jwt\x18\x01 \x01(\tR\x03jwt\x12\x17\n" +
-	"\apeer_id\x18\x02 \x01(\tR\x06peerId\"\xc5\x01\n" +
+	"\apeer_id\x18\x02 \x01(\tR\x06peerId\x12\x1d\n" +
+	"\n" +
+	"public_key\x18\x03 \x01(\fR\tpublicKey\"\xc5\x01\n" +
 	"\x0eEnrollResponse\x12#\n" +
 	"\rbiscuit_token\x18\x01 \x01(\fR\fbiscuitToken\x12#\n" +
 	"\rerror_message\x18\x02 \x01(\tR\ferrorMessage\x12$\n" +
@@ -1468,7 +1686,20 @@ const file_api_sam_proto_rawDesc = "" +
 	"\x05error\x18\x02 \x01(\tR\x05error\"/\n" +
 	"\fKeysResponse\x12\x1f\n" +
 	"\vpublic_keys\x18\x01 \x03(\fR\n" +
-	"publicKeys*\x94\x01\n" +
+	"publicKeys\"d\n" +
+	"\x13TokenRefreshRequest\x12/\n" +
+	"\x13challenge_signature\x18\x01 \x01(\fR\x12challengeSignature\x12\x1c\n" +
+	"\ttimestamp\x18\x02 \x01(\x03R\ttimestamp\"\x7f\n" +
+	"\x14TokenRefreshResponse\x12#\n" +
+	"\rbiscuit_token\x18\x01 \x01(\fR\fbiscuitToken\x12\x1d\n" +
+	"\n" +
+	"expires_at\x18\x02 \x01(\x03R\texpiresAt\x12#\n" +
+	"\rerror_message\x18\x03 \x01(\tR\ferrorMessage\"-\n" +
+	"\x12TokenRevokeRequest\x12\x17\n" +
+	"\apeer_id\x18\x01 \x01(\tR\x06peerId\"E\n" +
+	"\x13TokenRevokeResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x14\n" +
+	"\x05error\x18\x02 \x01(\tR\x05error*\x94\x01\n" +
 	"\x10EnrollmentStatus\x12!\n" +
 	"\x1dENROLLMENT_STATUS_UNSPECIFIED\x10\x00\x12\x1d\n" +
 	"\x19ENROLLMENT_STATUS_PENDING\x10\x01\x12\x1e\n" +
@@ -1492,7 +1723,7 @@ func file_api_sam_proto_rawDescGZIP() []byte {
 }
 
 var file_api_sam_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_api_sam_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
+var file_api_sam_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
 var file_api_sam_proto_goTypes = []any{
 	(EnrollmentStatus)(0),              // 0: sam.v1.EnrollmentStatus
 	(ServiceType)(0),                   // 1: sam.v1.ServiceType
@@ -1517,13 +1748,17 @@ var file_api_sam_proto_goTypes = []any{
 	(*PolicyConfigUpdateRequest)(nil),  // 20: sam.v1.PolicyConfigUpdateRequest
 	(*PolicyConfigUpdateResponse)(nil), // 21: sam.v1.PolicyConfigUpdateResponse
 	(*KeysResponse)(nil),               // 22: sam.v1.KeysResponse
-	nil,                                // 23: sam.v1.CommandBackend.EnvEntry
+	(*TokenRefreshRequest)(nil),        // 23: sam.v1.TokenRefreshRequest
+	(*TokenRefreshResponse)(nil),       // 24: sam.v1.TokenRefreshResponse
+	(*TokenRevokeRequest)(nil),         // 25: sam.v1.TokenRevokeRequest
+	(*TokenRevokeResponse)(nil),        // 26: sam.v1.TokenRevokeResponse
+	nil,                                // 27: sam.v1.CommandBackend.EnvEntry
 }
 var file_api_sam_proto_depIdxs = []int32{
 	2,  // 0: sam.v1.MeshEvent.type:type_name -> sam.v1.MeshEvent.Type
 	0,  // 1: sam.v1.BootstrapEnrollResponse.status:type_name -> sam.v1.EnrollmentStatus
 	1,  // 2: sam.v1.ServiceInfo.type:type_name -> sam.v1.ServiceType
-	23, // 3: sam.v1.CommandBackend.env:type_name -> sam.v1.CommandBackend.EnvEntry
+	27, // 3: sam.v1.CommandBackend.env:type_name -> sam.v1.CommandBackend.EnvEntry
 	11, // 4: sam.v1.RegisterServiceRequest.service:type_name -> sam.v1.ServiceInfo
 	12, // 5: sam.v1.RegisterServiceRequest.command:type_name -> sam.v1.CommandBackend
 	6,  // [6:6] is the sub-list for method output_type
@@ -1548,7 +1783,7 @@ func file_api_sam_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_sam_proto_rawDesc), len(file_api_sam_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   21,
+			NumMessages:   25,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

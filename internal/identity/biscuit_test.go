@@ -70,7 +70,7 @@ func TestMintBiscuitToken(t *testing.T) {
 	claims1 := jwt.MapClaims{
 		"roles": []any{"admin"},
 	}
-	biscuitData1, err := MintBiscuitToken(priv, claims1, token, dummyPeer, policy)
+	biscuitData1, _, err := MintBiscuitToken(priv, claims1, token, dummyPeer, policy, token.Expiry)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +104,7 @@ func TestMintBiscuitToken(t *testing.T) {
 	claims2 := jwt.MapClaims{
 		"groups": []any{"system:serviceaccounts:sam-canary"},
 	}
-	biscuitData2, err := MintBiscuitToken(priv, claims2, token, dummyPeer, policy)
+	biscuitData2, _, err := MintBiscuitToken(priv, claims2, token, dummyPeer, policy, token.Expiry)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +135,7 @@ func TestMintBiscuitToken(t *testing.T) {
 		"groups": []any{"unknown-group"},
 		"roles":  []any{"undefined-role"},
 	}
-	biscuitData3, err := MintBiscuitToken(priv, claims3, token, dummyPeer, policy)
+	biscuitData3, _, err := MintBiscuitToken(priv, claims3, token, dummyPeer, policy, token.Expiry)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +164,7 @@ func TestMintBiscuitToken(t *testing.T) {
 	claims4 := jwt.MapClaims{
 		"sub": "system:serviceaccount:sam-canary:sam-node-sa",
 	}
-	biscuitData4, err := MintBiscuitToken(priv, claims4, token, dummyPeer, policy)
+	biscuitData4, _, err := MintBiscuitToken(priv, claims4, token, dummyPeer, policy, token.Expiry)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,7 +231,7 @@ func TestVerifyBiscuit_Expiration(t *testing.T) {
 				"roles": []any{"admin"},
 			}
 
-			biscuitData, err := MintBiscuitToken(priv, claims, token, dummyPeer, &api.PolicyConfig{})
+			biscuitData, _, err := MintBiscuitToken(priv, claims, token, dummyPeer, &api.PolicyConfig{}, token.Expiry)
 			if err != nil {
 				t.Fatalf("MintBiscuitToken failed: %v", err)
 			}
@@ -283,7 +283,7 @@ func TestMintBiscuitToken_ClaimsTranslation(t *testing.T) {
 		"groups": []any{"beta-testers", "engineering"},
 	}
 
-	biscuitData, err := MintBiscuitToken(priv, claims, token, dummyPeer, policy)
+	biscuitData, _, err := MintBiscuitToken(priv, claims, token, dummyPeer, policy, token.Expiry)
 	if err != nil {
 		t.Fatalf("Failed to mint biscuit: %v", err)
 	}
@@ -426,7 +426,7 @@ func TestMintBiscuitToken_VariousClaimsTypes(t *testing.T) {
 				claims["groups"] = tt.groupsClaim
 			}
 
-			biscuitData, err := MintBiscuitToken(priv, claims, token, dummyPeer, policy)
+			biscuitData, _, err := MintBiscuitToken(priv, claims, token, dummyPeer, policy, token.Expiry)
 			if err != nil {
 				t.Fatalf("MintBiscuitToken failed: %v", err)
 			}
@@ -498,7 +498,7 @@ func TestVerifyBiscuit_Concurrent(t *testing.T) {
 		"roles": []any{"admin"},
 	}
 
-	biscuitData, err := MintBiscuitToken(priv, claims, token, dummyPeer, &api.PolicyConfig{})
+	biscuitData, _, err := MintBiscuitToken(priv, claims, token, dummyPeer, &api.PolicyConfig{}, token.Expiry)
 	if err != nil {
 		t.Fatalf("MintBiscuitToken failed: %v", err)
 	}
@@ -556,7 +556,7 @@ func TestMintBiscuitToken_ErrorAggregation(t *testing.T) {
 		"roles": []any{"admin"},
 	}
 
-	_, err = MintBiscuitToken(priv, claims, token, dummyPeer, policy)
+	_, _, err = MintBiscuitToken(priv, claims, token, dummyPeer, policy, token.Expiry)
 	if err == nil {
 		t.Fatal("Expected MintBiscuitToken to fail on custom datalog syntax errors, got nil error")
 	}
@@ -608,7 +608,7 @@ func TestMintBiscuitToken_FactDeduplication(t *testing.T) {
 		"sub": "user-1",
 	}
 
-	biscuitData, err := MintBiscuitToken(priv, claims, token, dummyPeer, policy)
+	biscuitData, _, err := MintBiscuitToken(priv, claims, token, dummyPeer, policy, token.Expiry)
 	if err != nil {
 		t.Fatalf("MintBiscuitToken failed with duplicate facts: %v", err)
 	}

@@ -46,6 +46,7 @@ message MeshEvent {
 message EnrollRequest {
   string jwt = 1;
   string peer_id = 2;
+  bytes public_key = 3;
 }
 
 message EnrollResponse {
@@ -151,6 +152,26 @@ message PolicyConfigUpdateResponse {
 
 message KeysResponse {
   repeated bytes public_keys = 1;
+}
+
+message TokenRefreshRequest {
+  bytes challenge_signature = 1;
+  int64 timestamp = 2;
+}
+
+message TokenRefreshResponse {
+  bytes biscuit_token = 1;
+  int64 expires_at = 2;
+  string error_message = 3;
+}
+
+message TokenRevokeRequest {
+  string peer_id = 1;
+}
+
+message TokenRevokeResponse {
+  bool success = 1;
+  string error = 2;
 }
 
 

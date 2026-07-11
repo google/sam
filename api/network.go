@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/libp2p/go-libp2p/core/protocol"
 )
@@ -44,6 +45,26 @@ const (
 
 	// DefaultAudience is the default audience string used in OIDC token validation.
 	DefaultAudience = "sam-mesh-audience"
+)
+
+// ============================================================================
+// Token Lifespans & Session Constants
+// ============================================================================
+
+const (
+	// BiscuitTokenTTL is the strict cryptographically enforced lifespan
+	// of a minted Biscuit token (24 hours).
+	// This is verified locally by each peer on every connection.
+	BiscuitTokenTTL = 24 * time.Hour
+
+	// OIDCSessionTTL is the maximum database-enforced lifespan of a node's OIDC
+	// interactive enrollment session (90 days). After this period, the node
+	// must re-authenticate with the OIDC provider to establish a new session.
+	OIDCSessionTTL = 90 * 24 * time.Hour
+
+	// TokenRefreshCheckInterval is the frequency at which the node daemon and router check
+	// if their current Biscuit token is close to expiration and needs to be proactively refreshed.
+	TokenRefreshCheckInterval = 10 * time.Minute
 )
 
 // ============================================================================

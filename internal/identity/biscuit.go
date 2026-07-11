@@ -32,12 +32,9 @@ import (
 )
 
 // // MintBiscuitToken generates a signed Biscuit token for a peer with policy rules based on JWT claims.
-func MintBiscuitToken(signingKey ed25519.PrivateKey, claims jwt.MapClaims, token *oidc.IDToken, remotePeer peer.ID, policy *api.PolicyConfig) ([]byte, error) {
-	if token == nil {
-		return nil, fmt.Errorf("token cannot be nil")
-	}
+func MintBiscuitToken(signingKey ed25519.PrivateKey, claims jwt.MapClaims, token *oidc.IDToken, remotePeer peer.ID, policy *api.PolicyConfig, biscuitExpiry time.Time) ([]byte, []string, error) {
 	if claims == nil {
-		return nil, fmt.Errorf("claims cannot be nil")
+		return nil, nil, fmt.Errorf("claims cannot be nil")
 	}
 
 	oidcRoles := toStringSlice(claims["roles"])
@@ -109,7 +106,11 @@ func MintBiscuitToken(signingKey ed25519.PrivateKey, claims jwt.MapClaims, token
 		roles = append(roles, api.RoleNode)
 	}
 
-	return mintBiscuit(signingKey, remotePeer, roles, token.Expiry, policy, claims)
+	biscuitBytes, err := mintBiscuit(signingKey, remotePeer, roles, biscuitExpiry, policy, claims)
+	if err != nil {
+		return nil, nil, err
+	}
+	return biscuitBytes, roles, nil
 }
 
 func mintBiscuit(signingKey ed25519.PrivateKey, remotePeer peer.ID, roles []string, expiration time.Time, policy *api.PolicyConfig, claims jwt.MapClaims) ([]byte, error) {
@@ -465,4 +466,68 @@ func toStringSlice(val any) []string {
 // MintBootstrapBiscuitToken generates a signed Biscuit token for a peer using a bootstrap role.
 func MintBootstrapBiscuitToken(signingKey ed25519.PrivateKey, remotePeer peer.ID, role string, expiration time.Time, policy *api.PolicyConfig) ([]byte, error) {
 	return mintBiscuit(signingKey, remotePeer, []string{role}, expiration, policy, nil)
+}
+
+// VerifyAndExtractPeerID checks that the biscuit is signed by one of the trusted keys and returns the peer ID.
+// This function does NOT perform time checks, making it suitable for token refresh flows.
+func VerifyAndExtractPeerID(trustedPublicKeys []ed25519.PublicKey, biscuitData []byte) (peer.ID, error) {
+	b, err := biscuit.Unmarshal(biscuitData)
+	if err != nil {
+		return "", fmt.Errorf("malformed biscuit: %w", err)
+	}
+
+	var authorizer biscuit.Authorizer
+	var verified bool
+	var lastErr error
+
+	for _, pubKey := range trustedPublicKeys {
+		auth, err := b.Authorizer(pubKey)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		authorizer = auth
+		verified = true
+		break
+	}
+
+	if !verified {
+		return "", fmt.Errorf("signature verification failed: %v", lastErr)
+	}
+
+	// Extract the peer ID using Datalog query
+	peerRule, err := parser.FromStringRule(`get_peer($p) <- node($p)`)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse query rule: %w", err)
+	}
+
+	// Trigger datalog engine evaluation to copy token facts to authorizer world
+	_ = authorizer.Authorize()
+
+	facts, err := authorizer.Query(peerRule)
+	if err != nil {
+		return "", fmt.Errorf("query failed: %w", err)
+	}
+
+	if len(facts) == 0 {
+		return "", fmt.Errorf("no node fact found in biscuit. Authorizer state: %s", authorizer.PrintWorld())
+	}
+
+	// Extract value from fact
+	pred := facts[0].Predicate
+	if len(pred.IDs) != 1 {
+		return "", fmt.Errorf("unexpected fact structure")
+	}
+
+	strVal, ok := pred.IDs[0].(biscuit.String)
+	if !ok {
+		return "", fmt.Errorf("node fact value is not a string")
+	}
+
+	pID, err := peer.Decode(string(strVal))
+	if err != nil {
+		return "", fmt.Errorf("invalid peer ID in biscuit: %w", err)
+	}
+
+	return pID, nil
 }

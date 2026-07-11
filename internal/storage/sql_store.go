@@ -89,7 +89,11 @@ func (s *SQLStore) initSchema() error {
 		nodesSchema = `
 			CREATE TABLE IF NOT EXISTS nodes (
 				peer_id VARCHAR(255) PRIMARY KEY,
+				public_key BYTEA NOT NULL,
 				biscuit_token BYTEA NOT NULL,
+				role VARCHAR(64) NOT NULL,
+				enrollment_type VARCHAR(64) NOT NULL,
+				claims_json TEXT,
 				enrolled_at BIGINT NOT NULL,
 				expires_at BIGINT NOT NULL,
 				banned BOOLEAN DEFAULT FALSE NOT NULL
@@ -142,7 +146,11 @@ func (s *SQLStore) initSchema() error {
 		nodesSchema = `
 			CREATE TABLE IF NOT EXISTS nodes (
 				peer_id TEXT PRIMARY KEY,
+				public_key BLOB NOT NULL,
 				biscuit_token BLOB NOT NULL,
+				role TEXT NOT NULL,
+				enrollment_type TEXT NOT NULL,
+				claims_json TEXT,
 				enrolled_at BIGINT NOT NULL,
 				expires_at BIGINT NOT NULL,
 				banned BOOLEAN DEFAULT FALSE NOT NULL
@@ -294,32 +302,51 @@ func (s *SQLStore) SaveInitialKey(ctx context.Context, priv ed25519.PrivateKey, 
 }
 
 // EnrollNode implements Store.
-func (s *SQLStore) EnrollNode(ctx context.Context, peerID string, biscuit []byte, expiresAt time.Time) error {
+func (s *SQLStore) EnrollNode(ctx context.Context, node *EnrolledNode) error {
 	var query string
 	if s.isPostgres() {
 		query = s.rebind(`
-			INSERT INTO nodes (peer_id, biscuit_token, enrolled_at, expires_at, banned) 
-			VALUES (?, ?, ?, ?, FALSE)
+			INSERT INTO nodes (peer_id, public_key, biscuit_token, role, enrollment_type, claims_json, enrolled_at, expires_at, banned) 
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, FALSE)
 			ON CONFLICT (peer_id) 
-			DO UPDATE SET biscuit_token = EXCLUDED.biscuit_token, enrolled_at = EXCLUDED.enrolled_at, expires_at = EXCLUDED.expires_at`)
+			DO UPDATE SET public_key = EXCLUDED.public_key, biscuit_token = EXCLUDED.biscuit_token, role = EXCLUDED.role, enrollment_type = EXCLUDED.enrollment_type, claims_json = EXCLUDED.claims_json, enrolled_at = EXCLUDED.enrolled_at, expires_at = EXCLUDED.expires_at`)
 	} else {
 		query = s.rebind(`
-			INSERT INTO nodes (peer_id, biscuit_token, enrolled_at, expires_at, banned) 
-			VALUES (?, ?, ?, ?, 0)
+			INSERT INTO nodes (peer_id, public_key, biscuit_token, role, enrollment_type, claims_json, enrolled_at, expires_at, banned) 
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
 			ON CONFLICT (peer_id) 
-			DO UPDATE SET biscuit_token = excluded.biscuit_token, enrolled_at = excluded.enrolled_at, expires_at = excluded.expires_at`)
+			DO UPDATE SET public_key = excluded.public_key, biscuit_token = excluded.biscuit_token, role = excluded.role, enrollment_type = excluded.enrollment_type, claims_json = excluded.claims_json, enrolled_at = excluded.enrolled_at, expires_at = excluded.expires_at`)
 	}
 
-	_, err := s.db.ExecContext(ctx, query, peerID, biscuit, time.Now().UnixMilli(), expiresAt.UnixMilli())
+	_, err := s.db.ExecContext(ctx, query,
+		node.PeerID,
+		node.PublicKey,
+		node.Biscuit,
+		node.Role,
+		node.EnrollmentType,
+		node.ClaimsJSON,
+		node.EnrolledAt.UnixMilli(),
+		node.ExpiresAt.UnixMilli(),
+	)
 	return err
 }
 
 // GetNode implements Store.
 func (s *SQLStore) GetNode(ctx context.Context, peerID string) (*EnrolledNode, error) {
-	query := s.rebind(`SELECT peer_id, biscuit_token, enrolled_at, expires_at, banned FROM nodes WHERE peer_id = ?`)
+	query := s.rebind(`SELECT peer_id, public_key, biscuit_token, role, enrollment_type, claims_json, enrolled_at, expires_at, banned FROM nodes WHERE peer_id = ?`)
 	var node EnrolledNode
 	var enrolledAtUnix, expiresAtUnix int64
-	err := s.db.QueryRowContext(ctx, query, peerID).Scan(&node.PeerID, &node.Biscuit, &enrolledAtUnix, &expiresAtUnix, &node.Banned)
+	err := s.db.QueryRowContext(ctx, query, peerID).Scan(
+		&node.PeerID,
+		&node.PublicKey,
+		&node.Biscuit,
+		&node.Role,
+		&node.EnrollmentType,
+		&node.ClaimsJSON,
+		&enrolledAtUnix,
+		&expiresAtUnix,
+		&node.Banned,
+	)
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound
 	}

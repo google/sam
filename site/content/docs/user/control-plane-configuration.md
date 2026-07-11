@@ -119,3 +119,37 @@ Here is a script demonstrating how to boot both services in a secure development
   --keys-path "./router.key" \
   --oidc-token "my-router-jwt-token"
 ```
+
+---
+
+## 5. Token Refresh & Session Revocation
+
+To enforce centralized access control without sacrificing offline verification performance at the edge, SAM implements a decoupled token refresh and session revocation model.
+
+### Lifespan Model
+
+1. **Short-Lived Biscuit Tokens (TTL = 24 Hours)**:
+   All minted Biscuit tokens are cryptographically bound to a strict 24-hour expiration. Peers verify this expiration locally without hitting the Control Plane.
+2. **Long-Lived Sessions (The Right to Refresh)**:
+   * **OIDC Interactive Enrollment**: 90-day database session limit. After 90 days, the user must re-enroll interactively.
+   * **Bootstrap Flow (Headless Nodes/Routers)**: Infinite session limit (sessions never expire).
+
+### Proactive Refresh Lifecycle
+
+Nodes and Routers run a background task that periodically checks the remaining Biscuit expiration:
+* **Check Interval**: Every 10 minutes (`api.TokenRefreshCheckInterval`).
+* **Threshold**: When the remaining token lifespan is less than 20% of its initial TTL (~4.8 hours remaining), the daemon proactively trades the expiring Biscuit for a fresh one.
+* **Challenge Handshake**: The client signs a current timestamp using its private key and sends it to the Control Plane `/refresh` endpoint along with its expiring Biscuit in the `Authorization: Bearer <token>` header. The Control Plane verifies the signature against the registered node's public key in the database before issuing a new Biscuit.
+
+### Administrative Revocation
+
+Administrators can immediately revoke any active session to disable a node's ability to renew its token.
+* **Endpoint**: `POST /admin/revoke`
+* **Authentication**: Requires the `--admin-token` in the headers.
+* **Payload**:
+  ```json
+  {
+    "peer_id": "12D3KooW..."
+  }
+  ```
+* **Enforcement**: Revoked nodes are marked as banned in the database. When the node next attempts a proactive `/refresh` handshake, the request is denied with a `403 Forbidden` status, and the node's local daemon immediately terminates.

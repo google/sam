@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -89,6 +90,7 @@ type Router struct {
 
 	// Keys & Identity
 	biscuitToken      []byte
+	biscuitExpiration time.Time
 	trustedPublicKeys []ed25519.PublicKey
 	keysMu            sync.RWMutex
 	privKey           crypto.PrivKey
@@ -251,10 +253,11 @@ func (r *Router) Start() error {
 	})
 
 	// 5. Start background routines
-	r.wg.Add(3)
+	r.wg.Add(4)
 	go r.runLeaseRenewalLoop()
 	go r.runKeysSyncLoop()
 	go r.runFederationLoop()
+	go r.runBiscuitRenewalLoop()
 
 	r.isReady.Store(true)
 	logger.Infof("Router Online. PeerID: %s, ListenAddrs: %v", r.Host.ID(), r.Host.Addrs())
@@ -262,9 +265,16 @@ func (r *Router) Start() error {
 }
 
 func (r *Router) enroll(peerID peer.ID) error {
+	pubKey := r.privKey.GetPublic()
+	pubBytes, err := crypto.MarshalPublicKey(pubKey)
+	if err != nil {
+		return fmt.Errorf("failed to marshal public key: %w", err)
+	}
+
 	req := &api.EnrollRequest{
-		Jwt:    r.config.OIDCToken,
-		PeerId: peerID.String(),
+		Jwt:       r.config.OIDCToken,
+		PeerId:    peerID.String(),
+		PublicKey: pubBytes,
 	}
 	data, err := proto.Marshal(req)
 	if err != nil {
@@ -294,6 +304,7 @@ func (r *Router) enroll(peerID peer.ID) error {
 	}
 
 	r.biscuitToken = enrollResp.BiscuitToken
+	r.biscuitExpiration = time.Unix(enrollResp.Expiration, 0)
 	r.keysMu.Lock()
 	r.trustedPublicKeys = []ed25519.PublicKey{enrollResp.HubPublicKey}
 	r.keysMu.Unlock()
@@ -410,6 +421,7 @@ func (r *Router) enrollBootstrap(peerID peer.ID) error {
 	}
 
 	r.biscuitToken = enrollResp.BiscuitToken
+	r.biscuitExpiration = time.Unix(enrollResp.Expiration, 0)
 	r.keysMu.Lock()
 	r.trustedPublicKeys = []ed25519.PublicKey{enrollResp.HubPublicKey}
 	r.keysMu.Unlock()
@@ -804,4 +816,106 @@ func isLoopbackOrLinkLocal(addr multiaddr.Multiaddr) bool {
 		}
 	}
 	return false
+}
+
+// RefreshEnrollment trades the expiring biscuit token for a new one using a cryptographic challenge.
+func (r *Router) RefreshEnrollment(ctx context.Context) error {
+	r.keysMu.Lock()
+	defer r.keysMu.Unlock()
+
+	if len(r.biscuitToken) == 0 {
+		return fmt.Errorf("router not enrolled (no biscuit)")
+	}
+
+	// 1. Generate challenge signature over current timestamp
+	timestamp := time.Now().UnixMilli()
+	challengeData := []byte(fmt.Sprintf("%d", timestamp))
+	sig, err := r.privKey.Sign(challengeData)
+	if err != nil {
+		return fmt.Errorf("failed to generate signature: %w", err)
+	}
+
+	// 2. Construct request
+	req := &api.TokenRefreshRequest{
+		ChallengeSignature: sig,
+		Timestamp:          timestamp,
+	}
+	reqData, err := proto.Marshal(req)
+	if err != nil {
+		return fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	url := r.config.ControlPlaneURL + "/refresh"
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(reqData))
+	if err != nil {
+		return fmt.Errorf("failed to create http request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/x-protobuf")
+	// Set current biscuit in authorization header
+	b64Biscuit := base64.StdEncoding.EncodeToString(r.biscuitToken)
+	httpReq.Header.Set("Authorization", "Bearer "+b64Biscuit)
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return fmt.Errorf("http request failed: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode == http.StatusForbidden {
+		logger.Errorf("Refresh rejected: Router is banned (403 Forbidden). Hard-killing router.")
+		if r.Host != nil {
+			_ = r.Host.Close()
+		}
+		os.Exit(1)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("refresh failed with status %s: %s", resp.Status, string(body))
+	}
+
+	respData, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read response: %w", err)
+	}
+
+	var refreshResp api.TokenRefreshResponse
+	if err := proto.Unmarshal(respData, &refreshResp); err != nil {
+		return fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+
+	if refreshResp.ErrorMessage != "" {
+		return fmt.Errorf("refresh error: %s", refreshResp.ErrorMessage)
+	}
+
+	// Update local biscuit token and expiration
+	r.biscuitToken = refreshResp.BiscuitToken
+	r.biscuitExpiration = time.Unix(refreshResp.ExpiresAt, 0)
+	logger.Infof("Router biscuit token refreshed successfully.")
+	return nil
+}
+
+func (r *Router) runBiscuitRenewalLoop() {
+	defer r.wg.Done()
+	ticker := time.NewTicker(api.TokenRefreshCheckInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			r.keysMu.RLock()
+			expiration := r.biscuitExpiration
+			r.keysMu.RUnlock()
+
+			if !expiration.IsZero() && time.Until(expiration) < api.BiscuitTokenTTL/5 { // 80% elapsed lifespan of 24h (remaining time < 20% of TTL)
+				logger.Infof("Router biscuit expiring in %v, triggering proactive refresh...", time.Until(expiration))
+				if err := r.RefreshEnrollment(r.ctx); err != nil {
+					logger.Errorf("Proactive router biscuit refresh failed: %v", err)
+				}
+			}
+		case <-r.ctx.Done():
+			return
+		}
+	}
 }

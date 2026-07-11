@@ -36,6 +36,7 @@ import (
 	"github.com/google/sam/internal/identity"
 	"github.com/google/sam/internal/storage"
 	"github.com/libp2p/go-libp2p"
+	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-msgio"
 	"github.com/multiformats/go-multiaddr"
@@ -223,9 +224,14 @@ func TestRouterIntegration(t *testing.T) {
 
 	// Fetch biscuit for client node via Control Plane HTTP client
 	client := &http.Client{Timeout: 5 * time.Second}
+	nodePubKeyBytes, err := crypto.MarshalPublicKey(nodePrivKey.GetPublic())
+	if err != nil {
+		t.Fatal(err)
+	}
 	enrollNodeReq := &api.EnrollRequest{
-		Jwt:    nodeJWT,
-		PeerId: nodePeerID.String(),
+		Jwt:       nodeJWT,
+		PeerId:    nodePeerID.String(),
+		PublicKey: nodePubKeyBytes,
 	}
 	reqData, _ := proto.Marshal(enrollNodeReq)
 	resp, err := client.Post(cpURL+"/register", "application/x-protobuf", bytes.NewReader(reqData))
@@ -388,5 +394,65 @@ func TestRouterFederation(t *testing.T) {
 	// Assert that Router 2 mutually authenticated Router 1
 	if _, authenticated := r2.authenticatedPeers.Load(r1.Host.ID()); !authenticated {
 		t.Errorf("Router 1 is not authenticated in Router 2's peers")
+	}
+}
+
+func TestRouterProactiveTokenRefresh(t *testing.T) {
+	issuer, mintToken := startCustomMockOIDC(t)
+	cp, cpStore, cpURL := setupControlPlane(t, issuer)
+	defer func() {
+		_ = cp.Close()
+		_ = cpStore.Close()
+	}()
+
+	tempDir := t.TempDir()
+	routerKeyPath := filepath.Join(tempDir, "router.key")
+
+	routerJWT := mintToken(map[string]interface{}{
+		"sub":    "router-refresh-test",
+		"groups": []string{"routers"},
+	})
+
+	rOpts := Options{
+		ControlPlaneURL:    cpURL,
+		ListenAddrs:        []string{"/ip4/127.0.0.1/tcp/0"},
+		KeysSyncInterval:   20 * time.Second,
+		LeaseRenewInterval: 20 * time.Second,
+		OIDCToken:          routerJWT,
+		KeysDBPath:         routerKeyPath,
+		AllowLoopback:      true,
+		BiscuitTimeout:     1 * time.Second,
+	}
+
+	r, err := NewRouter(context.Background(), rOpts)
+	if err != nil {
+		t.Fatalf("failed to create router: %v", err)
+	}
+
+	if err := r.Start(); err != nil {
+		t.Fatalf("failed to start router: %v", err)
+	}
+	defer func() { _ = r.Close() }()
+
+	// Capture initial token and expiration
+	initialToken := r.biscuitToken
+	initialExpiration := r.biscuitExpiration
+
+	if len(initialToken) == 0 {
+		t.Fatal("initial router biscuit token is empty")
+	}
+
+	// Trigger proactive refresh manually
+	err = r.RefreshEnrollment(context.Background())
+	if err != nil {
+		t.Fatalf("manually triggered RefreshEnrollment failed: %v", err)
+	}
+
+	// Assert that token and expiration updated
+	if bytes.Equal(r.biscuitToken, initialToken) {
+		t.Error("biscuit token did not change after refresh")
+	}
+	if !r.biscuitExpiration.After(initialExpiration) {
+		t.Errorf("expected refreshed expiration %v to be after initial expiration %v", r.biscuitExpiration, initialExpiration)
 	}
 }

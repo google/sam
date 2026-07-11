@@ -21,6 +21,7 @@ import (
 	"crypto/rsa"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"math/big"
 	"net/http"
@@ -36,6 +37,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/sam/api"
 	"github.com/google/sam/internal/storage"
+	"github.com/google/sam/internal/node"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"google.golang.org/protobuf/proto"
@@ -249,9 +251,11 @@ func TestNodeAndRouterRegistrationFlow(t *testing.T) {
 		"groups": []string{"users"},
 	})
 
+	nodePubKeyBytes, _ := crypto.MarshalPublicKey(privNode.GetPublic())
 	enrollNodeReq := &api.EnrollRequest{
-		Jwt:    nodeJWT,
-		PeerId: nodePeer.String(),
+		Jwt:       nodeJWT,
+		PeerId:    nodePeer.String(),
+		PublicKey: nodePubKeyBytes,
 	}
 	reqData, _ := proto.Marshal(enrollNodeReq)
 
@@ -289,9 +293,11 @@ func TestNodeAndRouterRegistrationFlow(t *testing.T) {
 		"groups": []string{"routers"},
 	})
 
+	routerPubKeyBytes, _ := crypto.MarshalPublicKey(privRouter.GetPublic())
 	enrollRouterReq := &api.EnrollRequest{
-		Jwt:    routerJWT,
-		PeerId: routerPeer.String(),
+		Jwt:       routerJWT,
+		PeerId:    routerPeer.String(),
+		PublicKey: routerPubKeyBytes,
 	}
 	reqData, _ = proto.Marshal(enrollRouterReq)
 
@@ -491,7 +497,7 @@ func TestEnrollmentWorkflow(t *testing.T) {
 		t.Fatal(err)
 	}
 	pID, _ := peer.IDFromPrivateKey(privNode)
-	pubBytes, _ := pubNode.Raw()
+	pubBytes, _ := crypto.MarshalPublicKey(pubNode)
 
 	// 2. Submit Enrollment Request (Mode B -> PENDING)
 	enrollReq := &api.BootstrapEnrollRequest{
@@ -614,13 +620,14 @@ func TestEnrollmentWorkflow(t *testing.T) {
 	srv.config.AutoApproveEnrollment = true
 
 	// Generate new client key
-	privNode2, _, _ := crypto.GenerateKeyPair(crypto.Ed25519, -1)
+	privNode2, pubNode2, _ := crypto.GenerateKeyPair(crypto.Ed25519, -1)
 	pID2, _ := peer.IDFromPrivateKey(privNode2)
+	pubBytes2, _ := crypto.MarshalPublicKey(pubNode2)
 
 	enrollReq2 := &api.BootstrapEnrollRequest{
 		BootstrapToken: tokenDetails.Token, // use remaining usage
 		PeerId:         pID2.String(),
-		PublicKey:      pubBytes,
+		PublicKey:      pubBytes2,
 	}
 	enrollReqData2, _ := proto.Marshal(enrollReq2)
 
@@ -638,5 +645,257 @@ func TestEnrollmentWorkflow(t *testing.T) {
 	}
 	if len(enrollResp2.BiscuitToken) == 0 {
 		t.Error("biscuit token empty in Auto-Approve response")
+	}
+}
+
+func TestTokenRefreshAndRevocation(t *testing.T) {
+	issuer, mintToken := startCustomMockOIDC(t)
+	srv, store, cpURL := setupTestServer(t, issuer)
+	defer func() {
+		_ = srv.Close()
+		_ = store.Close()
+	}()
+
+	srv.config.AdminToken = "super-secret-admin-token"
+	ctx := context.Background()
+
+	// Setup policy configuration in the database
+	policy := &api.PolicyConfig{
+		Version: "v1alpha1",
+		Bindings: []api.Binding{
+			{Role: api.RoleNode, Members: []string{"group:users"}},
+		},
+	}
+	if err := store.SavePolicy(ctx, policy); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Enroll client node via OIDC
+	privNode, pubNode, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nodePeer, err := peer.IDFromPrivateKey(privNode)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	nodeJWT := mintToken(map[string]interface{}{
+		"sub":    "node-alice",
+		"groups": []string{"users"},
+	})
+
+	nodePubKeyBytes, _ := crypto.MarshalPublicKey(pubNode)
+	enrollNodeReq := &api.EnrollRequest{
+		Jwt:       nodeJWT,
+		PeerId:    nodePeer.String(),
+		PublicKey: nodePubKeyBytes,
+	}
+	reqData, _ := proto.Marshal(enrollNodeReq)
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Post(cpURL+"/register", "application/x-protobuf", bytes.NewReader(reqData))
+	if err != nil {
+		t.Fatalf("node /register failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("node /register status failure: %s (body: %s)", resp.Status, string(body))
+	}
+	body, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+
+	var enrollNodeResp api.EnrollResponse
+	if err := proto.Unmarshal(body, &enrollNodeResp); err != nil {
+		t.Fatalf("failed to unmarshal EnrollResponse: %v", err)
+	}
+	biscuitToken := enrollNodeResp.BiscuitToken
+
+	// 2. Perform refresh
+	timestamp := time.Now().UnixMilli()
+	challengeData := []byte(fmt.Sprintf("%d", timestamp))
+	challengeSig, err := privNode.Sign(challengeData)
+	if err != nil {
+		t.Fatalf("failed to generate challenge signature: %v", err)
+	}
+
+	refreshReq := &api.TokenRefreshRequest{
+		ChallengeSignature: challengeSig,
+		Timestamp:          timestamp,
+	}
+	refreshData, _ := proto.Marshal(refreshReq)
+
+	reqRefresh, _ := http.NewRequest("POST", cpURL+"/refresh", bytes.NewReader(refreshData))
+	b64Biscuit := base64.StdEncoding.EncodeToString(biscuitToken)
+	reqRefresh.Header.Set("Authorization", "Bearer "+b64Biscuit)
+	reqRefresh.Header.Set("Content-Type", "application/x-protobuf")
+
+	resp, err = client.Do(reqRefresh)
+	if err != nil {
+		t.Fatalf("refresh failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("refresh response failure status %s: %s", resp.Status, string(body))
+	}
+	body, _ = io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+
+	var refreshResp api.TokenRefreshResponse
+	if err := proto.Unmarshal(body, &refreshResp); err != nil {
+		t.Fatalf("failed to unmarshal TokenRefreshResponse: %v", err)
+	}
+	if len(refreshResp.BiscuitToken) == 0 {
+		t.Fatal("refreshed biscuit token is empty")
+	}
+
+	// 3. Admin Revocation
+	revokeReq := &api.TokenRevokeRequest{
+		PeerId: nodePeer.String(),
+	}
+	revokeData, _ := proto.Marshal(revokeReq)
+
+	req, _ := http.NewRequest("POST", cpURL+"/admin/revoke", bytes.NewReader(revokeData))
+	req.Header.Set("Authorization", "Bearer super-secret-admin-token")
+	req.Header.Set("Content-Type", "application/x-protobuf")
+
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatalf("admin revoke failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("admin revoke response status failure: %s (body: %s)", resp.Status, string(body))
+	}
+	_ = resp.Body.Close()
+
+	// 4. Verify refresh is rejected after revocation
+	reqRefreshCompromised, _ := http.NewRequest("POST", cpURL+"/refresh", bytes.NewReader(refreshData))
+	reqRefreshCompromised.Header.Set("Authorization", "Bearer "+b64Biscuit)
+	reqRefreshCompromised.Header.Set("Content-Type", "application/x-protobuf")
+
+	resp, err = client.Do(reqRefreshCompromised)
+	if err != nil {
+		t.Fatalf("refresh check failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected refresh to be forbidden after revocation, got %s", resp.Status)
+	}
+	_ = resp.Body.Close()
+}
+
+func TestNodeProactiveTokenRefresh(t *testing.T) {
+	issuer, mintToken := startCustomMockOIDC(t)
+	srv, store, cpURL := setupTestServer(t, issuer)
+	defer func() {
+		_ = srv.Close()
+		_ = store.Close()
+	}()
+
+	srv.config.AdminToken = "super-secret-admin-token"
+	ctx := context.Background()
+
+	// Setup policy configuration in the database
+	policy := &api.PolicyConfig{
+		Version: "v1alpha1",
+		Bindings: []api.Binding{
+			{Role: api.RoleNode, Members: []string{"group:users"}},
+		},
+	}
+	if err := store.SavePolicy(ctx, policy); err != nil {
+		t.Fatal(err)
+	}
+
+	// Generate node keys
+	privNode, pubNode, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nodePeer, err := peer.IDFromPrivateKey(privNode)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	nodeJWT := mintToken(map[string]interface{}{
+		"sub":    "node-refresh-test",
+		"groups": []string{"users"},
+	})
+
+	// Enroll via registration endpoint
+	nodePubKeyBytes, _ := crypto.MarshalPublicKey(pubNode)
+	enrollNodeReq := &api.EnrollRequest{
+		Jwt:       nodeJWT,
+		PeerId:    nodePeer.String(),
+		PublicKey: nodePubKeyBytes,
+	}
+	reqData, _ := proto.Marshal(enrollNodeReq)
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Post(cpURL+"/register", "application/x-protobuf", bytes.NewReader(reqData))
+	if err != nil {
+		t.Fatalf("node /register failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("node /register status failure: %s (body: %s)", resp.Status, string(body))
+	}
+	body, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+
+	var enrollNodeResp api.EnrollResponse
+	if err := proto.Unmarshal(body, &enrollNodeResp); err != nil {
+		t.Fatalf("failed to unmarshal EnrollResponse: %v", err)
+	}
+	biscuitToken := enrollNodeResp.BiscuitToken
+
+	// Set up local node Store
+	tempDir := t.TempDir()
+	nStore, err := node.NewStore(tempDir)
+	if err != nil {
+		t.Fatalf("failed to create node store: %v", err)
+	}
+
+	privKeyBytes, err := crypto.MarshalPrivateKey(privNode)
+	if err != nil {
+		t.Fatalf("failed to marshal private key: %v", err)
+	}
+	if err := nStore.SaveKey(privKeyBytes); err != nil {
+		t.Fatalf("failed to save private key: %v", err)
+	}
+	if err := nStore.SaveHubURL(cpURL); err != nil {
+		t.Fatalf("failed to save hub URL: %v", err)
+	}
+	if err := nStore.SaveIdentity(biscuitToken); err != nil {
+		t.Fatalf("failed to save initial identity: %v", err)
+	}
+	if err := nStore.SaveIdentityExpiration(enrollNodeResp.Expiration); err != nil {
+		t.Fatalf("failed to save initial expiration: %v", err)
+	}
+
+	n := &node.SamNode{
+		Store: nStore,
+	}
+
+	// Trigger proactive refresh
+	err = n.RefreshEnrollment(ctx)
+	if err != nil {
+		t.Fatalf("RefreshEnrollment failed: %v", err)
+	}
+
+	// Assert that token and expiration updated
+	refreshedToken, err := nStore.LoadIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	refreshedExpiration, err := nStore.LoadIdentityExpiration()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if bytes.Equal(refreshedToken, biscuitToken) {
+		t.Error("biscuit token did not change after refresh")
+	}
+	if refreshedExpiration <= enrollNodeResp.Expiration {
+		t.Errorf("expected refreshed expiration %d to be after initial expiration %d", refreshedExpiration, enrollNodeResp.Expiration)
 	}
 }

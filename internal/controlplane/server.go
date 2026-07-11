@@ -20,6 +20,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/tls"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -33,10 +34,12 @@ import (
 
 	"github.com/biscuit-auth/biscuit-go/v2"
 	"github.com/coreos/go-oidc/v3/oidc"
+	jwt "github.com/golang-jwt/jwt/v5"
 	"github.com/google/sam/api"
 	"github.com/google/sam/internal/identity"
 	"github.com/google/sam/internal/storage"
 	golog "github.com/ipfs/go-log/v2"
+	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"golang.org/x/time/rate"
 	"google.golang.org/protobuf/proto"
@@ -165,9 +168,11 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/policies", s.HandlePolicies)
 	mux.HandleFunc("/enroll", s.HandleEnroll)
 	mux.HandleFunc("/enroll/status", s.HandleEnrollStatus)
+	mux.HandleFunc("/refresh", s.HandleRefresh)
 	mux.HandleFunc("/admin/bootstrap-tokens", s.HandleAdminBootstrapTokens)
 	mux.HandleFunc("/admin/enrollments", s.HandleAdminEnrollments)
 	mux.HandleFunc("/admin/enrollments/", s.HandleAdminEnrollmentAction)
+	mux.HandleFunc("/admin/revoke", s.HandleAdminRevoke)
 
 	s.httpServer = &http.Server{
 		Handler: mux,
@@ -365,15 +370,46 @@ func (s *Server) HandleRegister(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Mint token
-	biscuitData, err := identity.MintBiscuitToken(privKey, claims, token, pID, policy)
+	biscuitExpiry := time.Now().Add(api.BiscuitTokenTTL)
+	biscuitData, resolvedRoles, err := identity.MintBiscuitToken(privKey, claims, token, pID, policy, biscuitExpiry)
 	if err != nil {
 		logger.Errorw("Biscuit minting failed", "peer_id", req.PeerId, "error", err)
 		http.Error(w, "Failed to mint biscuit: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
+	// Session TTL is 90 days for OIDC interactive enrollment
+	sessionExpiresAt := time.Now().Add(api.OIDCSessionTTL)
+
+	// Determine primary role from resolved roles
+	primaryRole := api.RoleNode
+	for _, r := range resolvedRoles {
+		if strings.HasPrefix(r, "sam:role:") {
+			primaryRole = r
+			break
+		}
+	}
+
+	claimsBytes, err := json.Marshal(claims)
+	if err != nil {
+		logger.Errorf("Failed to marshal OIDC claims: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	nodeRecord := &storage.EnrolledNode{
+		PeerID:         req.PeerId,
+		PublicKey:      req.PublicKey,
+		Biscuit:        biscuitData,
+		Role:           primaryRole,
+		EnrollmentType: "OIDC",
+		ClaimsJSON:     string(claimsBytes),
+		EnrolledAt:     time.Now(),
+		ExpiresAt:      sessionExpiresAt,
+	}
+
 	// Save to DB
-	if err := s.store.EnrollNode(ctx, req.PeerId, biscuitData, token.Expiry); err != nil {
+	if err := s.store.EnrollNode(ctx, nodeRecord); err != nil {
 		logger.Errorf("Failed to persist node enrollment: %v", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
@@ -397,6 +433,169 @@ func (s *Server) HandleRegister(w http.ResponseWriter, r *http.Request) {
 		HubPublicKey: pubKey,
 		HubAddresses: routerAddrs, // routers nodes multiaddresses
 		Expiration:   token.Expiry.Unix(),
+	}
+
+	respData, err := proto.Marshal(resp)
+	if err != nil {
+		http.Error(w, "Failed to serialize response", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/x-protobuf")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(respData)
+}
+
+// HandleRefresh HTTP POST `/refresh`
+func (s *Server) HandleRefresh(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	ctx := r.Context()
+	authHeader := r.Header.Get("Authorization")
+	if !strings.HasPrefix(authHeader, "Bearer ") {
+		http.Error(w, "Missing current Biscuit token in Authorization header", http.StatusUnauthorized)
+		return
+	}
+	currentBiscuitBase64 := strings.TrimPrefix(authHeader, "Bearer ")
+	currentBiscuitBytes, err := base64.StdEncoding.DecodeString(currentBiscuitBase64)
+	if err != nil {
+		http.Error(w, "Malformed base64 token", http.StatusBadRequest)
+		return
+	}
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "Failed to read body", http.StatusBadRequest)
+		return
+	}
+
+	var req api.TokenRefreshRequest
+	if err := proto.Unmarshal(body, &req); err != nil {
+		http.Error(w, "Invalid request format", http.StatusBadRequest)
+		return
+	}
+
+	// Fetch all valid signing keys
+	validKeys, err := s.store.GetAllValidKeys(ctx)
+	if err != nil {
+		logger.Errorf("Failed to retrieve valid signing keys: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	var trustedKeys []ed25519.PublicKey
+	for _, k := range validKeys {
+		trustedKeys = append(trustedKeys, k.Public)
+	}
+
+	// Verify current biscuit signature and extract peer ID
+	pID, err := identity.VerifyAndExtractPeerID(trustedKeys, currentBiscuitBytes)
+	if err != nil {
+		logger.Warnw("Invalid biscuit presented for refresh", "error", err)
+		http.Error(w, "Invalid biscuit: "+err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	// Fetch node record
+	nodeRecord, err := s.store.GetNode(ctx, pID.String())
+	if err == storage.ErrNotFound {
+		logger.Warnw("Node not found for refresh", "peer_id", pID.String())
+		http.Error(w, "Node not enrolled", http.StatusUnauthorized)
+		return
+	} else if err != nil {
+		logger.Errorf("Failed to retrieve node record: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	if nodeRecord.Banned {
+		logger.Warnw("Banned node attempted refresh", "peer_id", pID.String())
+		http.Error(w, "Node is banned", http.StatusForbidden)
+		return
+	}
+
+	// Check session expiry (OIDC 90 days expiration)
+	if !nodeRecord.ExpiresAt.IsZero() && time.Now().After(nodeRecord.ExpiresAt) {
+		logger.Warnw("Session expired for node", "peer_id", pID.String(), "expires_at", nodeRecord.ExpiresAt)
+		http.Error(w, "Session expired, please re-enroll interactively", http.StatusUnauthorized)
+		return
+	}
+
+	// Verify challenge signature using stored node public key
+	pubKey, err := crypto.UnmarshalPublicKey(nodeRecord.PublicKey)
+	if err != nil {
+		logger.Errorf("Corrupted public key stored for node %s: %v", nodeRecord.PeerID, err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	challengeData := []byte(fmt.Sprintf("%d", req.Timestamp))
+	ok, err := pubKey.Verify(challengeData, req.ChallengeSignature)
+	if err != nil || !ok {
+		logger.Warnw("Challenge signature verification failed", "peer_id", nodeRecord.PeerID, "error", err)
+		http.Error(w, "Challenge signature verification failed", http.StatusUnauthorized)
+		return
+	}
+
+	// Fetch current signing private key and policy config
+	privKey, _, err := s.store.GetCurrentKey(ctx)
+	if err != nil {
+		logger.Errorf("Failed to retrieve current signing key: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	policy, err := s.store.GetPolicy(ctx)
+	if err != nil && err != storage.ErrNotFound {
+		logger.Errorf("Failed to retrieve mesh policy: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	var biscuitBytes []byte
+	biscuitExpiry := time.Now().Add(api.BiscuitTokenTTL)
+
+	if nodeRecord.EnrollmentType == "OIDC" {
+		var claims jwt.MapClaims
+		if err := json.Unmarshal([]byte(nodeRecord.ClaimsJSON), &claims); err != nil {
+			logger.Errorf("Failed to unmarshal OIDC claims for node %s: %v", nodeRecord.PeerID, err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+		bBytes, _, err := identity.MintBiscuitToken(privKey, claims, nil, pID, policy, biscuitExpiry)
+		if err != nil {
+			logger.Errorf("Failed to mint refreshed token for node %s: %v", nodeRecord.PeerID, err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+		biscuitBytes = bBytes
+	} else {
+		// Bootstrap node
+		bBytes, err := identity.MintBootstrapBiscuitToken(privKey, pID, nodeRecord.Role, biscuitExpiry, policy)
+		if err != nil {
+			logger.Errorf("Failed to mint refreshed token for node %s: %v", nodeRecord.PeerID, err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+		biscuitBytes = bBytes
+	}
+
+	// Update node record with new biscuit token
+	nodeRecord.Biscuit = biscuitBytes
+	nodeRecord.EnrolledAt = time.Now()
+	if err := s.store.EnrollNode(ctx, nodeRecord); err != nil {
+		logger.Errorf("Failed to persist node refresh: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	// Write response
+	resp := &api.TokenRefreshResponse{
+		BiscuitToken: biscuitBytes,
+		ExpiresAt:    biscuitExpiry.Unix(),
 	}
 
 	respData, err := proto.Marshal(resp)
@@ -769,8 +968,7 @@ func (s *Server) HandleEnroll(w http.ResponseWriter, r *http.Request) {
 
 	if s.config.AutoApproveEnrollment {
 		// Mode A: Auto-Approve
-		tokenTTL := 24 * time.Hour
-		biscuitBytes, err := identity.MintBootstrapBiscuitToken(privKey, pID, tokenRecord.Role, time.Now().Add(tokenTTL), policy)
+		biscuitBytes, err := identity.MintBootstrapBiscuitToken(privKey, pID, tokenRecord.Role, time.Now().Add(api.BiscuitTokenTTL), policy)
 		if err != nil {
 			logger.Errorf("Failed to mint bootstrap biscuit: %v", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -785,6 +983,21 @@ func (s *Server) HandleEnroll(w http.ResponseWriter, r *http.Request) {
 
 		if err := s.store.CreateEnrollmentRequest(ctx, enrollReq); err != nil {
 			logger.Errorf("Failed to save enrollment request: %v", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+
+		nodeRecord := &storage.EnrolledNode{
+			PeerID:         req.PeerId,
+			PublicKey:      req.PublicKey,
+			Biscuit:        biscuitBytes,
+			Role:           tokenRecord.Role,
+			EnrollmentType: "BOOTSTRAP",
+			EnrolledAt:     time.Now(),
+			ExpiresAt:      time.Time{},
+		}
+		if err := s.store.EnrollNode(ctx, nodeRecord); err != nil {
+			logger.Errorf("Failed to enroll active bootstrap node: %v", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 			return
 		}
@@ -1036,7 +1249,7 @@ func (s *Server) HandleAdminEnrollmentAction(w http.ResponseWriter, r *http.Requ
 			return
 		}
 
-		biscuitBytes, err := identity.MintBootstrapBiscuitToken(privKey, pID, tokenRecord.Role, time.Now().Add(24*time.Hour), policy)
+		biscuitBytes, err := identity.MintBootstrapBiscuitToken(privKey, pID, tokenRecord.Role, time.Now().Add(api.BiscuitTokenTTL), policy)
 		if err != nil {
 			logger.Errorf("Failed to mint bootstrap biscuit: %v", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -1046,6 +1259,21 @@ func (s *Server) HandleAdminEnrollmentAction(w http.ResponseWriter, r *http.Requ
 		err = s.store.UpdateEnrollmentRequest(ctx, id, api.EnrollmentStatus_ENROLLMENT_STATUS_APPROVED, biscuitBytes, adminIdentity)
 		if err != nil {
 			logger.Errorf("Failed to approve enrollment request in DB: %v", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+
+		nodeRecord := &storage.EnrolledNode{
+			PeerID:         enrollReq.PeerID,
+			PublicKey:      enrollReq.PublicKey,
+			Biscuit:        biscuitBytes,
+			Role:           tokenRecord.Role,
+			EnrollmentType: "BOOTSTRAP",
+			EnrolledAt:     time.Now(),
+			ExpiresAt:      time.Time{},
+		}
+		if err := s.store.EnrollNode(ctx, nodeRecord); err != nil {
+			logger.Errorf("Failed to enroll active bootstrap node: %v", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 			return
 		}
@@ -1060,4 +1288,65 @@ func (s *Server) HandleAdminEnrollmentAction(w http.ResponseWriter, r *http.Requ
 	}
 
 	http.Error(w, "Invalid action", http.StatusBadRequest)
+}
+
+// HandleAdminRevoke HTTP POST `/admin/revoke`
+func (s *Server) HandleAdminRevoke(w http.ResponseWriter, r *http.Request) {
+	if !s.checkAdminAuth(w, r) {
+		return
+	}
+
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	ctx := r.Context()
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "Failed to read body", http.StatusBadRequest)
+		return
+	}
+
+	var req api.TokenRevokeRequest
+	if err := proto.Unmarshal(body, &req); err != nil {
+		http.Error(w, "Invalid request format", http.StatusBadRequest)
+		return
+	}
+
+	if req.PeerId == "" {
+		http.Error(w, "peer_id is required", http.StatusBadRequest)
+		return
+	}
+
+	// Retrieve the node from storage to verify it exists
+	_, err = s.store.GetNode(ctx, req.PeerId)
+	if err == storage.ErrNotFound {
+		http.Error(w, "Node not found", http.StatusNotFound)
+		return
+	} else if err != nil {
+		logger.Errorf("Failed to retrieve node record for revocation: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	// Set node as banned (revoked)
+	if err := s.store.SetNodeBanned(ctx, req.PeerId, true); err != nil {
+		logger.Errorf("Failed to ban/revoke node %s: %v", req.PeerId, err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	resp := &api.TokenRevokeResponse{
+		Success: true,
+	}
+	respData, err := proto.Marshal(resp)
+	if err != nil {
+		http.Error(w, "Failed to serialize response", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/x-protobuf")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(respData)
 }

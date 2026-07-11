@@ -56,9 +56,16 @@ func GetOrGenerateKey(s *Store) crypto.PrivKey {
 }
 
 func (n *SamNode) Enroll(ctx context.Context, hubURL string, jwt string) error {
+	pubKey := n.Host.Peerstore().PubKey(n.Host.ID())
+	pubBytes, err := crypto.MarshalPublicKey(pubKey)
+	if err != nil {
+		return fmt.Errorf("failed to marshal public key: %w", err)
+	}
+
 	req := &api.EnrollRequest{
-		Jwt:    jwt,
-		PeerId: n.Host.ID().String(),
+		Jwt:       jwt,
+		PeerId:    n.Host.ID().String(),
+		PublicKey: pubBytes,
 	}
 	data, err := proto.Marshal(req)
 	if err != nil {

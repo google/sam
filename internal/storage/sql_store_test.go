@@ -163,7 +163,17 @@ func TestNodeEnrollmentOps(t *testing.T) {
 	// Enroll node
 	biscuitData := []byte("some-biscuit-token")
 	expiresAt := time.Now().Add(24 * time.Hour)
-	err = store.EnrollNode(ctx, peerID, biscuitData, expiresAt)
+	mockPubKey := []byte("mock-public-key-32bytes-long-12345")
+	nodeRecord := &EnrolledNode{
+		PeerID:         peerID,
+		PublicKey:      mockPubKey,
+		Biscuit:        biscuitData,
+		Role:           "node",
+		EnrollmentType: "OIDC",
+		EnrolledAt:     time.Now(),
+		ExpiresAt:      expiresAt,
+	}
+	err = store.EnrollNode(ctx, nodeRecord)
 	if err != nil {
 		t.Fatalf("failed to enroll node: %v", err)
 	}
@@ -192,7 +202,8 @@ func TestNodeEnrollmentOps(t *testing.T) {
 	}
 
 	// Re-enroll (unbans? No, re-enroll updates details, but let's check what our schema does. We set banned to false or keep? Wait, our EnrollNode query does 'FALSE' / 0 on INSERT, but during UPDATE it doesn't modify banned)
-	err = store.EnrollNode(ctx, peerID, []byte("new-biscuit"), expiresAt)
+	nodeRecord.Biscuit = []byte("new-biscuit")
+	err = store.EnrollNode(ctx, nodeRecord)
 	if err != nil {
 		t.Fatalf("failed to enroll node: %v", err)
 	}

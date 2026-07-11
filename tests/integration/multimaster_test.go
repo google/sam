@@ -28,6 +28,7 @@ import (
 
 	"github.com/google/sam/api"
 	"github.com/libp2p/go-libp2p"
+	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-msgio"
 	"github.com/multiformats/go-multiaddr"
@@ -209,8 +210,12 @@ roles: {}
 	}
 	defer func() { _ = clientHost.Close() }()
 
-	// 8. Enroll client host on CP B (obtaining a biscuit minted by CP B)
-	clientBiscuit := enrollClientOnControlPlane(t, portB, clientHost.ID(), nodeJWT)
+	pubKey := clientHost.Peerstore().PubKey(clientHost.ID())
+	pubBytes, err := crypto.MarshalPublicKey(pubKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clientBiscuit := enrollClientOnControlPlane(t, portB, clientHost.ID(), pubBytes, nodeJWT)
 
 	// 9. Assert that client host can connect and authenticate directly with Router A (registered with CP A!)
 	// This proves Router A accepts biscuits issued by CP B because they share the key-ring.
@@ -270,12 +275,13 @@ roles: {}
 	t.Log("Successfully verified multi-master control plane signature trust!")
 }
 
-func enrollClientOnControlPlane(t *testing.T, cpPort int, clientID peer.ID, jwtToken string) []byte {
+func enrollClientOnControlPlane(t *testing.T, cpPort int, clientID peer.ID, pubBytes []byte, jwtToken string) []byte {
 	t.Helper()
 
 	req := &api.EnrollRequest{
-		Jwt:    jwtToken,
-		PeerId: clientID.String(),
+		Jwt:       jwtToken,
+		PeerId:    clientID.String(),
+		PublicKey: pubBytes,
 	}
 	reqBytes, err := proto.Marshal(req)
 	if err != nil {
