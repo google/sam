@@ -37,11 +37,11 @@ jobs:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Extract metadata for Hub
-      id: meta-hub
+    - name: Extract metadata for Control Plane
+      id: meta-cp
       uses: docker/metadata-action@v6
       with:
-        images: ${{ env.REGISTRY }}/google/sam-hub
+        images: ${{ env.REGISTRY }}/google/sam-control-plane
         tags: |
           type=ref,event=branch
           type=ref,event=tag
@@ -49,15 +49,37 @@ jobs:
           type=raw,value=latest,enable={{is_default_branch}}
           type=raw,value=stable,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
 
-    - name: Build and push Hub image
+    - name: Build and push Control Plane image
       uses: docker/build-push-action@v7
       with:
         context: .
-        file: Dockerfile.sam-hub
+        file: Dockerfile.sam-control-plane
         platforms: ${{ github.ref_type == 'tag' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
         push: true
-        tags: ${{ steps.meta-hub.outputs.tags }}
-        labels: ${{ steps.meta-hub.outputs.labels }}
+        tags: ${{ steps.meta-cp.outputs.tags }}
+        labels: ${{ steps.meta-cp.outputs.labels }}
+
+    - name: Extract metadata for Router
+      id: meta-router
+      uses: docker/metadata-action@v6
+      with:
+        images: ${{ env.REGISTRY }}/google/sam-router
+        tags: |
+          type=ref,event=branch
+          type=ref,event=tag
+          type=raw,value=${{ github.sha }}
+          type=raw,value=latest,enable={{is_default_branch}}
+          type=raw,value=stable,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+
+    - name: Build and push Router image
+      uses: docker/build-push-action@v7
+      with:
+        context: .
+        file: Dockerfile.sam-router
+        platforms: ${{ github.ref_type == 'tag' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
+        push: true
+        tags: ${{ steps.meta-router.outputs.tags }}
+        labels: ${{ steps.meta-router.outputs.labels }}
 
     - name: Extract metadata for Node
       id: meta-node
@@ -200,7 +222,7 @@ jobs:
 
 
 
-      - name: Deploy Hub
+      - name: Deploy Control Plane and Routers
         run: |
           print_rollout_diagnostics() {
             local namespace="$1"
@@ -228,28 +250,33 @@ jobs:
           sudo apt-get install -y gettext-base
           
           export ENV_NAME="${{ vars.ENV_NAME }}"
-          export LOAD_BALANCER_IP="${{ vars.LOAD_BALANCER_IP }}"
-          export EXTERNAL_MULTIADDR="${{ vars.EXTERNAL_MULTIADDR }}"
           export NAMESPACE="sam-${ENV_NAME}"
           export IMAGE_TAG="${{ env.IMAGE_TAG }}"
           export GCP_PROJECT_ID="${{ vars.GCP_PROJECT_ID }}"
           export CLUSTER_REGION="${{ vars.CLUSTER_REGION }}"
           export CLUSTER_NAME="${{ vars.CLUSTER_NAME }}"
 
-          envsubst '${ENV_NAME} ${NAMESPACE} ${GCP_PROJECT_ID} ${CLUSTER_NAME} ${CLUSTER_REGION} ${IMAGE_TAG}' < .github/k8s/sam-hub-template.yaml | kubectl apply -f -
+          envsubst '${ENV_NAME} ${NAMESPACE} ${GCP_PROJECT_ID} ${CLUSTER_NAME} ${CLUSTER_REGION} ${IMAGE_TAG}' < .github/k8s/sam-control-plane-template.yaml | kubectl apply -f -
+          envsubst '${ENV_NAME} ${NAMESPACE} ${GCP_PROJECT_ID} ${CLUSTER_NAME} ${CLUSTER_REGION} ${IMAGE_TAG}' < .github/k8s/sam-router-template.yaml | kubectl apply -f -
           envsubst '${ENV_NAME} ${NAMESPACE} ${GCP_PROJECT_ID}' < .github/k8s/dns-sync-cronjob-template.yaml | kubectl apply -f -
           
-          kubectl rollout status statefulset/sam-hub-${ENV_NAME} -n ${NAMESPACE} --timeout=120s || {
-            echo "Hub Deployment failed!"
-            print_rollout_diagnostics "${NAMESPACE}" "statefulset/sam-hub-${ENV_NAME}" "app=sam-hub-${ENV_NAME}"
-
-            echo "Rolling back Hub deployment..."
-            kubectl rollout undo statefulset/sam-hub-${ENV_NAME} -n ${NAMESPACE}
-            kubectl rollout status statefulset/sam-hub-${ENV_NAME} -n ${NAMESPACE}
+          kubectl rollout status deployment/sam-control-plane-${ENV_NAME} -n ${NAMESPACE} --timeout=120s || {
+            echo "Control Plane Deployment failed!"
+            print_rollout_diagnostics "${NAMESPACE}" "deployment/sam-control-plane-${ENV_NAME}" "app=sam-control-plane-${ENV_NAME}"
             exit 1
           }
 
-          echo "Triggering immediate DNS sync after Hub rollout..."
+          kubectl rollout status statefulset/sam-router-${ENV_NAME} -n ${NAMESPACE} --timeout=120s || {
+            echo "Router Deployment failed!"
+            print_rollout_diagnostics "${NAMESPACE}" "statefulset/sam-router-${ENV_NAME}" "app=sam-router-${ENV_NAME}"
+
+            echo "Rolling back Router deployment..."
+            kubectl rollout undo statefulset/sam-router-${ENV_NAME} -n ${NAMESPACE}
+            kubectl rollout status statefulset/sam-router-${ENV_NAME} -n ${NAMESPACE}
+            exit 1
+          }
+
+          echo "Triggering immediate DNS sync after rollout..."
           kubectl delete job dns-sync-rollout-${ENV_NAME} -n ${NAMESPACE} --ignore-not-found || true
           kubectl create job --from=cronjob/dns-sync-cronjob dns-sync-rollout-${ENV_NAME} -n ${NAMESPACE}
           echo "Waiting for DNS sync job to complete..."

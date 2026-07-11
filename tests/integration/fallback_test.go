@@ -17,7 +17,9 @@ package integration_test
 import (
 	"bytes"
 	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/json"
+	"io"
 
 	"os"
 	"os/exec"
@@ -69,6 +71,11 @@ func TestSelfHealingHTTPFallback(t *testing.T) {
 	var mu sync.Mutex
 	var currentP2PAddr string
 
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("Failed to generate hub key: %v", err)
+	}
+
 	createNewHost := func() host.Host {
 		newH, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 		if err != nil {
@@ -84,7 +91,10 @@ func TestSelfHealingHTTPFallback(t *testing.T) {
 			defer reader.ReleaseMsg(msg)
 
 			writer := msgio.NewVarintWriter(s)
-			resp := &api.AuthResponse{Success: true}
+			resp := &api.AuthResponse{
+				Success: true,
+				Biscuit: createMockBiscuitToken(t, newH.ID().String(), priv),
+			}
 			respBytes, _ := proto.Marshal(resp)
 			_ = writer.WriteMsg(respBytes)
 		})
@@ -132,9 +142,20 @@ func TestSelfHealingHTTPFallback(t *testing.T) {
 		mu.Lock()
 		addr := currentP2PAddr
 		mu.Unlock()
-		pub, _, _ := ed25519.GenerateKey(nil)
+
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "Failed to read body", http.StatusBadRequest)
+			return
+		}
+		var enrollReq api.EnrollRequest
+		if err := proto.Unmarshal(body, &enrollReq); err != nil {
+			http.Error(w, "Invalid request", http.StatusBadRequest)
+			return
+		}
+
 		resp := &api.EnrollResponse{
-			BiscuitToken: []byte("mock-biscuit-token"),
+			BiscuitToken: createMockBiscuitToken(t, enrollReq.PeerId, priv),
 			HubPublicKey: pub,
 			HubAddresses: []string{addr},
 		}

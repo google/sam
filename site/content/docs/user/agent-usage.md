@@ -15,12 +15,12 @@ Connecting your AI agent to the Sovereign Agent Mesh involves two phases:
 sequenceDiagram
     actor User as Developer/Operator
     participant Node as sam-node (Local)
-    participant Hub as sam-hub (Mesh)
+    participant Hub as sam-control-plane (Mesh)
     participant Agent as AI Agent (Gemini/Claude)
     
     Note over User,Hub: Phase 1: Mesh Join (OIDC Authorization)
-    User->>Node: sam-node join <hub-url>
-    Node->>Hub: Get Hub OIDC Info
+    User->>Node: sam-node join <control-plane-url>
+    Node->>Hub: Get OIDC Info
     Hub-->>Node: OIDC Issuer, Client ID
     Node->>User: Display Login URL & Code
     User->>User: Login in Browser

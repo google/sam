@@ -16,12 +16,16 @@ package ffi
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
+	"github.com/biscuit-auth/biscuit-go/v2"
 	"github.com/google/sam/api"
 	"github.com/libp2p/go-libp2p"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
@@ -44,12 +48,67 @@ func TestMobileFFILifecycle(t *testing.T) {
 	}
 	defer func() { _ = hubDHT.Close() }()
 
+	// Generate key-pair for Mock Control Plane signing
+	cpPubKey, cpPrivKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	hubHost.SetStreamHandler(api.AuthProtocolID, func(s network.Stream) {
+		println("--- MOCK HUB: received auth stream connection")
 		defer func() { _ = s.Close() }()
-		resp := &api.AuthResponse{Success: true}
+
+		// Mint a valid Biscuit token signed by CP key and bound to mock hub's Peer ID
+		builder := biscuit.NewBuilder(cpPrivKey)
+		if err := builder.AddAuthorityFact(biscuit.Fact{
+			Predicate: biscuit.Predicate{
+				Name: "node",
+				IDs:  []biscuit.Term{biscuit.String(hubHost.ID().String())},
+			},
+		}); err != nil {
+			println("--- MOCK HUB: failed to add node fact:", err.Error())
+			return
+		}
+		if err := builder.AddAuthorityFact(biscuit.Fact{
+			Predicate: biscuit.Predicate{
+				Name: api.FactRole,
+				IDs:  []biscuit.Term{biscuit.String(api.RoleRouter)},
+			},
+		}); err != nil {
+			println("--- MOCK HUB: failed to add role fact:", err.Error())
+			return
+		}
+		if err := builder.AddAuthorityFact(biscuit.Fact{
+			Predicate: biscuit.Predicate{
+				Name: api.FactExpiration,
+				IDs:  []biscuit.Term{biscuit.Date(time.Now().Add(time.Hour))},
+			},
+		}); err != nil {
+			println("--- MOCK HUB: failed to add expiration fact:", err.Error())
+			return
+		}
+		b, err := builder.Build()
+		if err != nil {
+			println("--- MOCK HUB: failed to build biscuit:", err.Error())
+			return
+		}
+		biscuitBytes, err := b.Serialize()
+		if err != nil {
+			println("--- MOCK HUB: failed to serialize biscuit:", err.Error())
+			return
+		}
+
+		resp := &api.AuthResponse{
+			Success: true,
+			Biscuit: biscuitBytes,
+		}
 		data, _ := proto.Marshal(resp)
 		writer := msgio.NewVarintWriter(s)
-		_ = writer.WriteMsg(data)
+		if err := writer.WriteMsg(data); err != nil {
+			println("--- MOCK HUB: failed to write AuthResponse:", err.Error())
+			return
+		}
+		println("--- MOCK HUB: wrote AuthResponse success with valid biscuit")
 	})
 
 	mux := http.NewServeMux()
@@ -60,7 +119,7 @@ func TestMobileFFILifecycle(t *testing.T) {
 
 		resp := &api.EnrollResponse{
 			BiscuitToken: []byte("mock-biscuit-token"),
-			HubPublicKey: make([]byte, 32),
+			HubPublicKey: cpPubKey,
 			HubAddresses: []string{hubHost.Addrs()[0].String() + "/p2p/" + hubHost.ID().String()},
 		}
 		data, _ := proto.Marshal(resp)

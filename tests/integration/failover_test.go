@@ -17,6 +17,7 @@ package integration_test
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
@@ -29,13 +30,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/sam/api"
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
+	"google.golang.org/protobuf/proto"
 )
 
 func TestFailoverUpdatesRelay(t *testing.T) {
-	hubBin := buildBinary(t, "./cmd/sam-hub")
+	cpBin := buildBinary(t, "./cmd/sam-control-plane")
+	routerBin := buildBinary(t, "./cmd/sam-router")
 	nodeBin := buildBinary(t, "./cmd/sam-node")
 
 	tmpDir := t.TempDir()
@@ -46,25 +50,33 @@ func TestFailoverUpdatesRelay(t *testing.T) {
 bindings: []
 roles: {}
 `
-	if err := os.WriteFile(policyFile, []byte(policyContent), 0644); err != nil {
-		t.Fatal(err)
-	}
+	writePolicyWithRouter(t, policyFile, policyContent)
 
-	httpPortA := getFreePort(t)
-	p2pPortA := getFreePort(t)
-	httpPortB := getFreePort(t)
-	p2pPortB := getFreePort(t)
+	httpPortCP_A := getFreePort(t)
+	routerPortA := getFreePort(t)
+	httpPortCP_B := getFreePort(t)
+	routerPortB := getFreePort(t)
 
 	// Mock OIDC
-	oidcURL, jwtTokenStr := startMockOIDC(t)
+	oidcURL, mintToken := startCustomMockOIDC(t)
+
+	routerJWT := mintToken(map[string]interface{}{
+		"sub":    "router-integration-1",
+		"groups": []string{"routers"},
+	})
+
+	nodeJWT := mintToken(map[string]interface{}{
+		"sub": "mock-user",
+	})
+
 	jwtPath := filepath.Join(tmpDir, "jwt.txt")
-	if err := os.WriteFile(jwtPath, []byte(jwtTokenStr), 0644); err != nil {
+	if err := os.WriteFile(jwtPath, []byte(nodeJWT), 0644); err != nil {
 		t.Fatal(err)
 	}
 
 	// Dynamic Load Balancer for HTTP discovery
 	var lbMu sync.Mutex
-	activeHubPort := httpPortA
+	activeHubPort := httpPortCP_A
 
 	lb := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		lbMu.Lock()
@@ -77,58 +89,111 @@ roles: {}
 	}))
 	defer lb.Close()
 
-	// Start Hub A
-	cmdA := exec.Command(hubBin,
-		"--bind-address", fmt.Sprintf("127.0.0.1:%d", httpPortA),
-		"--listen", fmt.Sprintf("/ip4/127.0.0.1/tcp/%d", p2pPortA),
+	dbPathA := filepath.Join(tmpDir, "cp_keysA.db")
+	dbPathB := filepath.Join(tmpDir, "cp_keysB.db")
+	// We override journal_mode to DELETE (disabling WAL) because WAL mode caches
+	// transactions in a separate -wal file. Since this test copies dbPathA to dbPathB
+	// while CP A is running, WAL mode would cause the copy to be stale/corrupt.
+	// We also retain busy_timeout(5000) so that concurrent operations wait for locks
+	// rather than returning SQLITE_BUSY immediately.
+	dsnA := dbPathA + "?_pragma=journal_mode(DELETE)&_pragma=busy_timeout(5000)"
+	dsnB := dbPathB + "?_pragma=journal_mode(DELETE)&_pragma=busy_timeout(5000)"
+
+	// 1. Start Control Plane A temporarily to generate keyring
+	cmdCP_A_temp := exec.Command(cpBin,
+		"--bind-address", fmt.Sprintf("127.0.0.1:%d", httpPortCP_A),
 		"--policy-file", policyFile,
-		"--keys-db", filepath.Join(tmpDir, "keysA.db"),
-		"--allow-loopback",
+		"--db-dsn", dsnA,
 		"--issuer", oidcURL,
 		"--insecure-skip-tls-verify",
 	)
-	var stdoutA, stderrA safeBuffer
-	cmdA.Stdout = &stdoutA
-	cmdA.Stderr = &stderrA
-	if err := cmdA.Start(); err != nil {
-		t.Fatalf("failed to start Hub A: %v", err)
+	if err := cmdCP_A_temp.Start(); err != nil {
+		t.Fatalf("failed to start temporary CP A: %v", err)
 	}
+	waitForControlPlane(t, httpPortCP_A)
+	_ = cmdCP_A_temp.Process.Signal(os.Interrupt)
+	_ = cmdCP_A_temp.Wait()
 
-	// Fetch Hub A's Peer ID
-	peerIDA := fetchPeerID(t, httpPortA)
-	t.Logf("Hub A PeerID: %s", peerIDA) // Copy keysA.db to keysB.db to avoid bbolt file lock conflicts
-	keysA := filepath.Join(tmpDir, "keysA.db")
-	keysB := filepath.Join(tmpDir, "keysB.db")
-	data, err := os.ReadFile(keysA)
+	// 2. Copy CP A keys to CP B to share the key-ring
+	keysData, err := os.ReadFile(dbPathA)
 	if err != nil {
-		t.Fatalf("Failed to read keysA.db: %v", err)
+		t.Fatalf("Failed to read cp_keysA.db: %v", err)
 	}
-	if err := os.WriteFile(keysB, data, 0600); err != nil {
-		t.Fatalf("Failed to write keysB.db: %v", err)
+	if err := os.WriteFile(dbPathB, keysData, 0600); err != nil {
+		t.Fatalf("Failed to write cp_keysB.db: %v", err)
 	}
 
-	// Start Hub B
-	cmdB := exec.Command(hubBin,
-		"--bind-address", fmt.Sprintf("127.0.0.1:%d", httpPortB),
-		"--listen", fmt.Sprintf("/ip4/127.0.0.1/tcp/%d", p2pPortB),
+	// 3. Start CP A persistently
+	cmdCP_A := exec.Command(cpBin,
+		"--bind-address", fmt.Sprintf("127.0.0.1:%d", httpPortCP_A),
 		"--policy-file", policyFile,
-		"--keys-db", keysB,
-		"--allow-loopback",
+		"--db-dsn", dsnA,
 		"--issuer", oidcURL,
 		"--insecure-skip-tls-verify",
 	)
-	var stdoutB, stderrB safeBuffer
-	cmdB.Stdout = &stdoutB
-	cmdB.Stderr = &stderrB
-	if err := cmdB.Start(); err != nil {
-		t.Fatalf("failed to start Hub B: %v", err)
+	if err := cmdCP_A.Start(); err != nil {
+		t.Fatalf("failed to start CP A: %v", err)
 	}
-	defer func() { _ = cmdB.Process.Kill() }()
+	defer func() { _ = cmdCP_A.Process.Kill(); _ = cmdCP_A.Wait() }()
 
-	peerIDB := fetchPeerID(t, httpPortB)
-	t.Logf("Hub B PeerID: %s", peerIDB)
+	waitForControlPlane(t, httpPortCP_A)
 
-	// Start Node B
+	// 4. Start Router A
+	cmdRouterA := exec.Command(routerBin,
+		"--control-plane", fmt.Sprintf("http://127.0.0.1:%d", httpPortCP_A),
+		"--listen", fmt.Sprintf("/ip4/127.0.0.1/tcp/%d", routerPortA),
+		"--keys-path", filepath.Join(tmpDir, "router_keysA.db"),
+		"--allow-loopback",
+		"--oidc-token", routerJWT,
+	)
+	if err := cmdRouterA.Start(); err != nil {
+		t.Fatalf("failed to start Router A: %v", err)
+	}
+	defer func() { _ = cmdRouterA.Process.Kill(); _ = cmdRouterA.Wait() }()
+
+	// Wait for Router A to renew lease and register in CP A
+	time.Sleep(3 * time.Second)
+
+	// 5. Start CP B
+	cmdCP_B := exec.Command(cpBin,
+		"--bind-address", fmt.Sprintf("127.0.0.1:%d", httpPortCP_B),
+		"--policy-file", policyFile,
+		"--db-dsn", dsnB,
+		"--issuer", oidcURL,
+		"--insecure-skip-tls-verify",
+	)
+	if err := cmdCP_B.Start(); err != nil {
+		t.Fatalf("failed to start CP B: %v", err)
+	}
+	defer func() { _ = cmdCP_B.Process.Kill(); _ = cmdCP_B.Wait() }()
+
+	waitForControlPlane(t, httpPortCP_B)
+
+	// Start Router B
+	cmdRouterB := exec.Command(routerBin,
+		"--control-plane", fmt.Sprintf("http://127.0.0.1:%d", httpPortCP_B),
+		"--listen", fmt.Sprintf("/ip4/127.0.0.1/tcp/%d", routerPortB),
+		"--keys-path", filepath.Join(tmpDir, "router_keysB.db"),
+		"--allow-loopback",
+		"--oidc-token", routerJWT,
+	)
+	if err := cmdRouterB.Start(); err != nil {
+		t.Fatalf("failed to start Router B: %v", err)
+	}
+	defer func() { _ = cmdRouterB.Process.Kill(); _ = cmdRouterB.Wait() }()
+
+	// Wait for Router B to renew lease and register in CP B
+	time.Sleep(3 * time.Second)
+
+	// Fetch Router B PeerID
+	peerInfoList := fetchActiveRouters(t, httpPortCP_B)
+	if len(peerInfoList) != 1 {
+		t.Fatalf("expected 1 router registered on CP B, got %d", len(peerInfoList))
+	}
+	peerIDB := peerInfoList[0]
+	t.Logf("Router B PeerID: %s", peerIDB)
+
+	// Start Node
 	nodeHome := filepath.Join(tmpDir, "node-home")
 	env := append(os.Environ(),
 		"HOME="+nodeHome,
@@ -155,9 +220,9 @@ roles: {}
 	if err := cmdNode.Start(); err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = cmdNode.Process.Kill() }()
+	defer func() { _ = cmdNode.Process.Kill(); _ = cmdNode.Wait() }()
 
-	// Wait for Node B to get a reservation on Hub A
+	// Wait for Node to get a reservation on Router A
 	var nodePeerID string
 	var out string
 	for i := 0; i < 100; i++ {
@@ -175,18 +240,19 @@ roles: {}
 		time.Sleep(100 * time.Millisecond)
 	}
 	if nodePeerID == "" {
-		t.Fatalf("Node B failed to get PeerID in time.\nOutput:\n%s", out)
+		t.Fatalf("Node failed to get PeerID in time.\nOutput:\n%s", out)
 	}
-	t.Logf("Node B started. Node PeerID: %s", nodePeerID)
+	t.Logf("Node started. Node PeerID: %s", nodePeerID)
 
-	// Now FAILOVER: Switch LB to Hub B and KILL Hub A
+	// Now FAILOVER: Switch LB to CP B and KILL CP A and Router A
 	t.Logf("Initiating failover to Hub B...")
 	lbMu.Lock()
-	activeHubPort = httpPortB
+	activeHubPort = httpPortCP_B
 	lbMu.Unlock()
-	_ = cmdA.Process.Kill()
+	_ = cmdCP_A.Process.Kill()
+	_ = cmdRouterA.Process.Kill()
 
-	// Wait for Node B's AutoRelay to get updated
+	// Wait for Node's AutoRelay to get updated
 	for i := 0; i < 150; i++ {
 		out = stdoutNode.String() + stderrNode.String()
 		if strings.Contains(out, "Successfully reconnected to Hub via HTTP fallback") {
@@ -195,12 +261,12 @@ roles: {}
 		time.Sleep(100 * time.Millisecond)
 	}
 	if !strings.Contains(out, "Successfully reconnected to Hub via HTTP fallback") {
-		t.Fatalf("Node B failed to detect failover and reconnect.\nOutput:\n%s", out)
+		t.Fatalf("Node failed to detect failover and reconnect.\nOutput:\n%s", out)
 	}
-	t.Log("Node B successfully reconnected to Hub B!")
+	t.Log("Node successfully reconnected to Hub B!")
 
-	// Final verification: Ensure we can actually reach Node B via the Hub B relay
-	relayAddrStr := fmt.Sprintf("/ip4/127.0.0.1/tcp/%d/p2p/%s/p2p-circuit/p2p/%s", p2pPortB, peerIDB, nodePeerID)
+	// Final verification: Ensure we can actually reach Node B via the Router B relay
+	relayAddrStr := fmt.Sprintf("/ip4/127.0.0.1/tcp/%d/p2p/%s/p2p-circuit/p2p/%s", routerPortB, peerIDB, nodePeerID)
 	relayAddr, err := multiaddr.NewMultiaddr(relayAddrStr)
 	if err != nil {
 		t.Fatal(err)
@@ -220,7 +286,7 @@ roles: {}
 			t.Fatal(err)
 		}
 		connectErr = clientHost.Connect(ctx, *addrInfo)
-		clientHost.Close() // nolint:errcheck
+		_ = clientHost.Close()
 		if connectErr == nil {
 			break
 		}
@@ -231,4 +297,41 @@ roles: {}
 		t.Fatalf("Failed to connect to Node B via Hub B relay: %v\nOutput: %s", connectErr, stdoutNode.String()+stderrNode.String())
 	}
 	t.Log("Successfully connected to Node B via Hub B relay circuit!")
+}
+
+func fetchActiveRouters(t *testing.T, httpPort int) []string {
+	t.Helper()
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/info", httpPort))
+	if err != nil {
+		t.Fatalf("failed to query /info: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("query /info returned status %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var info api.HubInfoResponse
+	if err := proto.Unmarshal(body, &info); err != nil {
+		t.Fatalf("failed to unmarshal HubInfoResponse: %v", err)
+	}
+
+	var peerIDs []string
+	for _, addrStr := range info.HubAddresses {
+		ma, err := multiaddr.NewMultiaddr(addrStr)
+		if err != nil {
+			continue
+		}
+		pi, err := peer.AddrInfoFromP2pAddr(ma)
+		if err == nil {
+			peerIDs = append(peerIDs, pi.ID.String())
+		}
+	}
+	return peerIDs
 }

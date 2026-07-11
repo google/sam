@@ -22,23 +22,25 @@ cd "$REPO_ROOT"
 # Helper to kill background processes and docker containers on exit
 cleanup() {
   echo "[E2E] Cleaning up background processes and containers..."
-  echo "=== DOCKER LOGS: sam-hub ==="
-  docker logs sam-hub 2>&1 || true
+  echo "=== DOCKER LOGS: sam-control-plane ==="
+  docker logs sam-control-plane 2>&1 || true
+  echo "=== DOCKER LOGS: sam-router ==="
+  docker logs sam-router 2>&1 || true
   echo "=== DOCKER LOGS: host-node ==="
   docker logs host-node 2>&1 || true
   echo "=== DOCKER LOGS: host-mock-mcp ==="
   docker logs host-mock-mcp 2>&1 || true
   echo "==============================="
-  docker kill host-node sam-hub mock-oidc host-mock-mcp >/dev/null 2>&1 || true
+  docker kill host-node sam-control-plane sam-router mock-oidc host-mock-mcp >/dev/null 2>&1 || true
   docker network rm sam-net >/dev/null 2>&1 || true
-  rm -rf /tmp/host-node-data
+  rm -rf /tmp/host-node-data /tmp/control-plane-data /tmp/router-data
   adb reverse --remove-all || true
 }
 trap cleanup EXIT
 
 # 1. Build host binaries and docker images
 make build
-make docker-build-hub docker-build-node docker-build-mock-oidc
+make docker-build-control-plane docker-build-router docker-build-node docker-build-mock-oidc
 
 # 2. Build Android x86_64 FFI library using the Makefile and copy to Flutter jniLibs
 make mobile-ffi-android-x86_64
@@ -61,29 +63,50 @@ timeout 15s bash -c 'until curl -s http://127.0.0.1:18080/ >/dev/null; do sleep 
 # Set up adb reverse for OIDC
 adb reverse tcp:18080 tcp:18080
 
-# 4. Start the Hub container
-docker run --name sam-hub \
+# 4. Start the Control Plane and Router containers
+rm -rf /tmp/control-plane-data /tmp/router-data
+mkdir -p /tmp/control-plane-data /tmp/router-data
+
+docker run --name sam-control-plane \
   --network sam-net \
   -p 37001:37001 \
-  -p 37002:37002 \
+  -v /tmp/control-plane-data:/data \
   -v "$REPO_ROOT/tests/e2e/fixtures/default-policy.yaml:/policy.yaml" \
   -d --rm \
-  sam-hub:local \
+  sam-control-plane:local \
   --bind-address 0.0.0.0:37001 \
-  --listen /ip4/0.0.0.0/tcp/37002 \
-  --external-multiaddr /ip4/10.0.2.2/tcp/37002,/ip4/127.0.0.1/tcp/37002,/dns4/sam-hub/tcp/37002 \
+  --db-driver sqlite \
+  --db-dsn /data/control-plane.db \
   --issuer http://mock-oidc:18080 \
-  --mesh public-mesh \
+  --allowed-audiences sam-mesh-audience,sam-hub-audience \
   --policy-file /policy.yaml \
   --insecure-skip-tls-verify \
+  --log-level debug
+
+ROUTER_JWT=$(curl -s -X POST -d "grant_type=client_credentials&client_id=router-client&client_secret=test-secret" http://127.0.0.1:18080/token | jq -r .access_token)
+
+docker run --name sam-router \
+  --network sam-net \
+  -p 37002:37002 \
+  -v /tmp/router-data:/data \
+  -d --rm \
+  sam-router:local \
+  --control-plane http://sam-control-plane:37001 \
+  --listen /ip4/0.0.0.0/tcp/37002 \
+  --listen /ip4/0.0.0.0/udp/37002/quic-v1 \
+  --external-addr /ip4/10.0.2.2/tcp/37002 \
+  --external-addr /ip4/127.0.0.1/tcp/37002 \
+  --external-addr /dns4/sam-router/tcp/37002 \
+  --oidc-token "$ROUTER_JWT" \
+  --keys-path /data/router.key \
   --allow-loopback \
   --log-level debug
 
-# Set up adb reverse for Hub
+# Set up adb reverse for Control Plane and Router
 adb reverse tcp:37001 tcp:37001
 adb reverse tcp:37002 tcp:37002
 
-# Wait for Hub to be ready
+# Wait for Control Plane to be ready
 timeout 15s bash -c 'until curl -s http://127.0.0.1:37001/info >/dev/null; do sleep 0.5; done'
 
 # 5. Enroll and Start the External Node on Host inside Docker
@@ -101,7 +124,7 @@ docker run --name host-node \
   sam-node:local \
   run \
   --data-dir /data \
-  --hub http://sam-hub:37001 \
+  --hub http://sam-control-plane:37001 \
   --jwt "$HOST_JWT" \
   --bind-addr 0.0.0.0:8081 \
   --api-token host-token \

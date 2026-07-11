@@ -1,9 +1,16 @@
 version: v1alpha1
 bindings:
-  - members: ["system:authenticated"]
+  - members: ["sam:system:authenticated"]
     role: admin
+  - members: ["group:routers"]
+    role: "sam:role:router"
 roles:
   admin:
+    allowed_services:
+      - "*"
+    allowed_targets:
+      - "*"
+  "sam:role:router":
     allowed_services:
       - "*"
     allowed_targets:

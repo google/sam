@@ -22,7 +22,8 @@ ANDROID_CC_X86_64=$(ANDROID_NDK_TOOLCHAIN)/x86_64-linux-android30-clang
 
 build:
 	go build -v -o "$(OUT_DIR)/sam-node" ./cmd/sam-node
-	go build -v -o "$(OUT_DIR)/sam-hub" ./cmd/sam-hub
+	go build -v -o "$(OUT_DIR)/sam-control-plane" ./cmd/sam-control-plane
+	go build -v -o "$(OUT_DIR)/sam-router" ./cmd/sam-router
 	go build -v -o "$(OUT_DIR)/mcp-client" ./cmd/mcp-client
 
 .PHONY: mobile-ffi-host mobile-ffi-android mobile-ffi-android-x86_64 mobile-ffi-ios mobile-ffi mobile-app-apk mobile-app-apk-emulator
@@ -115,7 +116,7 @@ test-python-e2e: build docker-build
 	bats --verbose-run tests/e2e/python_sdk_test.bats
 
 e2e-test: build docker-build
-	bats --verbose-run $(if $(WHAT),--filter "$(WHAT)") tests/e2e/
+	bats -j 10 --verbose-run $(if $(WHAT),--filter "$(WHAT)") tests/e2e/
 
 test-e2e: build docker-build
 	@command -v bats >/dev/null 2>&1 || { \
@@ -129,7 +130,7 @@ test-e2e: build docker-build
 			exit 1; \
 		fi; \
 	}
-	SAM_NODE_BINARY=$(OUT_DIR)/sam-node SAM_HUB_BINARY=$(OUT_DIR)/sam-hub bats --verbose-run tests/e2e/
+	SAM_NODE_BINARY=$(OUT_DIR)/sam-node SAM_CONTROL_PLANE_BINARY=$(OUT_DIR)/sam-control-plane SAM_ROUTER_BINARY=$(OUT_DIR)/sam-router bats --verbose-run tests/e2e/
 
 test-e2e-container: build docker-build
 	@command -v docker >/dev/null 2>&1 || { echo "docker not found"; exit 1; }
@@ -153,8 +154,11 @@ verify:
 update:
 	go mod tidy
 
-docker-build-hub:
-	docker build --load -t sam-hub:local -f Dockerfile.sam-hub .
+docker-build-control-plane:
+	docker build --load -t sam-control-plane:local -f Dockerfile.sam-control-plane .
+
+docker-build-router:
+	docker build --load -t sam-router:local -f Dockerfile.sam-router .
 
 docker-build-node:
 	docker build --load --no-cache -t sam-node:local -f Dockerfile.sam-node .
@@ -165,6 +169,6 @@ docker-build-mock-oidc:
 docker-build-e2e-runtime:
 	docker build --load -t sam-e2e-runtime:local -f tests/e2e/docker/Dockerfile.sam-runtime .
 
-docker-build: docker-build-hub docker-build-node docker-build-mock-oidc docker-build-e2e-runtime
+docker-build: docker-build-control-plane docker-build-router docker-build-node docker-build-mock-oidc docker-build-e2e-runtime
 
-.PHONY: docker-build-hub docker-build-node docker-build-mock-oidc docker-build-e2e-runtime docker-build
+.PHONY: docker-build-control-plane docker-build-router docker-build-node docker-build-mock-oidc docker-build-e2e-runtime docker-build

@@ -18,14 +18,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
 func TestMCPLocalTools(t *testing.T) {
-	hubBin := buildBinary(t, "./cmd/sam-hub")
 	nodeBin := buildBinary(t, "./cmd/sam-node")
 
 	tmpDir := t.TempDir()
@@ -40,29 +38,9 @@ roles: {}
 		t.Fatal(err)
 	}
 
-	httpPortHub := getFreePort(t)
-	p2pPortHub := getFreePort(t)
-
-	// Mock OIDC
-	oidcURL, jwtTokenStr := startMockOIDC(t)
-
-	// Start Real Hub
-	cmdHub := exec.Command(hubBin,
-		"--bind-address", fmt.Sprintf("127.0.0.1:%d", httpPortHub),
-		"--listen", fmt.Sprintf("/ip4/127.0.0.1/tcp/%d", p2pPortHub),
-		"--policy-file", policyFile,
-		"--keys-db", filepath.Join(tmpDir, "keys.db"),
-		"--allow-loopback",
-		"--issuer", oidcURL,
-		"--insecure-skip-tls-verify",
-	)
-	var stdoutHub, stderrHub safeBuffer
-	cmdHub.Stdout = &stdoutHub
-	cmdHub.Stderr = &stderrHub
-	if err := cmdHub.Start(); err != nil {
-		t.Fatalf("failed to start Hub: %v", err)
-	}
-	defer func() { _ = cmdHub.Process.Kill() }()
+	oidcURL, mintToken := startCustomMockOIDC(t)
+	httpPortHub, cleanupHub := startControlPlaneAndRouter(t, tmpDir, oidcURL, mintToken, policyFile)
+	defer cleanupHub()
 
 	fetchPeerID(t, httpPortHub)
 
@@ -72,6 +50,10 @@ roles: {}
 	homeA := t.TempDir()
 	homeB := t.TempDir()
 
+	nodeJWT := mintToken(map[string]interface{}{
+		"sub": "mock-user",
+	})
+
 	// Start Node A
 	t.Log("Starting Node A...")
 	_ = startBackgroundNode(t, nodeBin, hubURL, homeA,
@@ -79,7 +61,7 @@ roles: {}
 		"--listen", "/ip4/127.0.0.1/tcp/0",
 		"--bind-addr", "127.0.0.1:0",
 		"--api-token", apiToken,
-		"--jwt", jwtTokenStr,
+		"--jwt", nodeJWT,
 	)
 
 	// Start Node B
@@ -89,7 +71,7 @@ roles: {}
 		"--listen", "/ip4/127.0.0.1/tcp/0",
 		"--bind-addr", "127.0.0.1:0",
 		"--api-token", apiToken,
-		"--jwt", jwtTokenStr,
+		"--jwt", nodeJWT,
 	)
 
 	// Resolve actual MCP address from log

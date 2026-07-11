@@ -2,7 +2,8 @@
 
 setup() {
   export SAM_NODE_BINARY="${SAM_NODE_BINARY:-./bin/sam-node}"
-  export SAM_HUB_BINARY="${SAM_HUB_BINARY:-./bin/sam-hub}"
+  export SAM_CONTROL_PLANE_BINARY="${SAM_CONTROL_PLANE_BINARY:-./bin/sam-control-plane}"
+  export SAM_ROUTER_BINARY="${SAM_ROUTER_BINARY:-./bin/sam-router}"
   export MCP_CLIENT_BINARY="${MCP_CLIENT_BINARY:-./bin/mcp-client}"
 
   export TEST_TMPDIR
@@ -55,8 +56,14 @@ teardown() {
 
 
 
-@test "sam-hub --help returns success" {
-  run "$SAM_HUB_BINARY" --help
+@test "sam-control-plane --help returns success" {
+  run "$SAM_CONTROL_PLANE_BINARY" --help
   [[ "$status" -eq 0 ]]
-  [[ "$output" == *"Sovereign Agent Mesh - Multi-Transport Hub"* ]]
+  [[ "$output" == *"Sovereign Agent Mesh - Control Plane"* ]]
+}
+
+@test "sam-router --help returns success" {
+  run "$SAM_ROUTER_BINARY" --help
+  [[ "$status" -eq 0 ]]
+  [[ "$output" == *"Sovereign Agent Mesh - libp2p Router Node"* ]]
 }

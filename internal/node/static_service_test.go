@@ -2,6 +2,7 @@ package node
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/rand"
 	"io"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/biscuit-auth/biscuit-go/v2"
 	"github.com/google/sam/api"
 	"github.com/libp2p/go-libp2p"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
@@ -34,11 +36,46 @@ func startMockLibp2pHub(t *testing.T) (peer.ID, string) {
 		t.Fatalf("failed to create DHT on mock hub: %v", err)
 	}
 
+	// Generate mock control plane keys
+	cpPub, cpPriv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("failed to generate CP keys: %v", err)
+	}
+
+	// Mint router's biscuit token
+	builder := biscuit.NewBuilder(cpPriv)
+	_ = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+		Name: api.FactNode,
+		IDs:  []biscuit.Term{biscuit.String(h.ID().String())},
+	}})
+	_ = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+		Name: api.FactRole,
+		IDs:  []biscuit.Term{biscuit.String(api.RoleRouter)},
+	}})
+	_ = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+		Name: api.FactExpiration,
+		IDs:  []biscuit.Term{biscuit.Date(time.Now().Add(24 * time.Hour))},
+	}})
+	_ = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+		Name: api.FactTargetUnrestricted,
+	}})
+	tok, err := builder.Build()
+	if err != nil {
+		t.Fatalf("failed to build mock router biscuit: %v", err)
+	}
+	routerBiscuit, err := tok.Serialize()
+	if err != nil {
+		t.Fatalf("failed to serialize mock router biscuit: %v", err)
+	}
+
 	// Add dummy auth handler
 	h.SetStreamHandler(api.AuthProtocolID, func(s network.Stream) {
 		defer func() { _ = s.Close() }()
-		// Just send a success response to make the client happy
-		resp := &api.AuthResponse{Success: true}
+		// Mutual auth response
+		resp := &api.AuthResponse{
+			Success: true,
+			Biscuit: routerBiscuit,
+		}
 		data, _ := proto.Marshal(resp)
 		writer := msgio.NewVarintWriter(s)
 		_ = writer.WriteMsg(data)
@@ -64,7 +101,7 @@ func startMockLibp2pHub(t *testing.T) (peer.ID, string) {
 
 		resp := &api.EnrollResponse{
 			BiscuitToken: []byte("mock-biscuit-token"),
-			HubPublicKey: make([]byte, 32),
+			HubPublicKey: cpPub,
 			HubAddresses: []string{h.Addrs()[0].String() + "/p2p/" + h.ID().String()},
 		}
 		data, err := proto.Marshal(resp)
@@ -123,6 +160,7 @@ func TestStaticServiceRegistrationRequiresConnection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create node: %v", err)
 	}
+	node.BiscuitTimeout = 1 * time.Second
 	ctx := context.Background()
 	if err := node.Start(ctx); err != nil {
 		t.Fatalf("failed to start node: %v", err)
@@ -208,6 +246,7 @@ func TestStaticServiceRegistrationCommandFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create node: %v", err)
 	}
+	node.BiscuitTimeout = 2 * time.Second
 	ctx := context.Background()
 	if err := node.Start(ctx); err != nil {
 		t.Fatalf("failed to start node: %v", err)

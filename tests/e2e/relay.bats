@@ -63,7 +63,7 @@ teardown() {
   CLEANUP_NETWORKS+=("${MESH_NETWORK_2}")
 
   local hub_node
-  hub_node=$(kubectl --context="${KUBECONTEXT}" get pod sam-hub-0 -o jsonpath='{.spec.nodeName}')
+  hub_node=$(kubectl --context="${KUBECONTEXT}" get pod sam-router-0 -o jsonpath='{.spec.nodeName}')
   local oidc_node
   oidc_node=$(kubectl --context="${KUBECONTEXT}" get pod -l app=mock-oidc -o jsonpath='{.items[0].spec.nodeName}')
 

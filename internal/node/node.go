@@ -25,6 +25,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -37,6 +38,7 @@ import (
 	"github.com/biscuit-auth/biscuit-go/v2"
 	"github.com/biscuit-auth/biscuit-go/v2/datalog"
 	"github.com/google/sam/api"
+	"github.com/google/sam/internal/identity"
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/ipfs/go-cid"
 	golog "github.com/ipfs/go-log/v2"
@@ -44,6 +46,7 @@ import (
 	gostream "github.com/libp2p/go-libp2p-gostream"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
+	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/discovery"
 	"github.com/libp2p/go-libp2p/core/event"
 	"github.com/libp2p/go-libp2p/core/host"
@@ -87,10 +90,13 @@ const (
 	// Reprovide interval
 	ReprovideInterval = 5 * time.Minute
 
+)
+
+var (
 	// Renewal timing defaults
-	DefaultRenewalFallback = 50 * time.Minute
-	RenewalBuffer          = 10 * time.Minute
-	RenewalThreshold       = 15 * time.Minute
+	DefaultRenewalFallback = (api.BiscuitTokenTTL * 8) / 10 // 80% of TTL (19.2h)
+	RenewalBuffer          = api.BiscuitTokenTTL / 5         // 20% of TTL (4.8h)
+	RenewalThreshold       = api.BiscuitTokenTTL / 4         // 25% of TTL (6h)
 )
 
 var ErrFatalAuth = errors.New("fatal authentication error")
@@ -243,7 +249,6 @@ func NewSamNode(cfg Options) (*SamNode, error) {
 		reprovideTrigger:  make(chan struct{}, 1),
 		logger:            golog.Logger("sam-node"),
 	}
-	node.BiscuitTimeout = cfg.BiscuitTimeout
 
 	var err error
 	node.rateLimiter, err = NewPeerRateLimiter(RateLimiterSize)
@@ -698,7 +703,7 @@ func (n *SamNode) ConnectAndAuthWithHub(ctx context.Context, addr multiaddr.Mult
 		}
 		_ = s.SetDeadline(time.Now().Add(5 * time.Second))
 
-		success, err := n.performHubAuthHandshake(s, biscuitBytes)
+		success, err := n.performHubAuthHandshake(s, biscuitBytes, addrInfo.ID)
 		if err != nil {
 			_ = s.Reset()
 			cancel()
@@ -734,7 +739,7 @@ func (n *SamNode) ConnectAndAuthWithHub(ctx context.Context, addr multiaddr.Mult
 	return fmt.Errorf("failed to authenticate with any hub addresses: %w", errors.Join(errs...))
 }
 
-func (n *SamNode) performHubAuthHandshake(s network.Stream, biscuitBytes []byte) (bool, error) {
+func (n *SamNode) performHubAuthHandshake(s network.Stream, biscuitBytes []byte, expectedRouter peer.ID) (bool, error) {
 	writer := msgio.NewVarintWriter(s)
 	authFrame := &api.AuthFrame{Biscuit: biscuitBytes}
 	data, err := proto.Marshal(authFrame)
@@ -759,6 +764,47 @@ func (n *SamNode) performHubAuthHandshake(s network.Stream, biscuitBytes []byte)
 
 	if !resp.Success {
 		return false, fmt.Errorf("%w: auth failed: %s", ErrFatalAuth, resp.Error)
+	}
+
+	// Mutual Auth: Verify server/router biscuit
+	if len(resp.Biscuit) == 0 {
+		return false, fmt.Errorf("%w: remote router returned empty biscuit", ErrFatalAuth)
+	}
+
+	n.keysMu.RLock()
+	var trustedKeys []ed25519.PublicKey
+	for _, tk := range n.trustedKeys {
+		trustedKeys = append(trustedKeys, tk.Key)
+	}
+	n.keysMu.RUnlock()
+
+	if len(trustedKeys) == 0 {
+		return false, fmt.Errorf("%w: no trusted control plane keys loaded", ErrFatalAuth)
+	}
+
+	// Verify the router's biscuit using the control plane keys
+	b, err := identity.VerifyBiscuit(resp.Biscuit, expectedRouter, trustedKeys, n.BiscuitTimeout)
+	if err != nil {
+		return false, fmt.Errorf("%w: failed to verify router biscuit: %w", ErrFatalAuth, err)
+	}
+
+	// Enforce role("router") inside the biscuit
+	authorizer, err := b.Authorizer(trustedKeys[0])
+	if err != nil {
+		return false, fmt.Errorf("authorizer instantiation failed: %w", err)
+	}
+
+	authorizer.AddCheck(biscuit.Check{Queries: []biscuit.Rule{
+		{
+			Body: []biscuit.Predicate{
+				{Name: api.FactRole, IDs: []biscuit.Term{biscuit.String(api.RoleRouter)}},
+			},
+		},
+	}})
+	authorizer.AddPolicy(api.AllowIfTruePolicy)
+
+	if err := authorizer.Authorize(); err != nil {
+		return false, fmt.Errorf("%w: remote peer lacks router authorization role: %w", ErrFatalAuth, err)
 	}
 
 	return true, nil
@@ -794,6 +840,16 @@ func (n *SamNode) StartRenewalLoop(ctx context.Context, issuerURL, clientID, cli
 				return
 			case <-timer.C:
 				fmt.Println("Renewing enrollment...")
+
+				// Try proactive biscuit token refresh first
+				refreshErr := n.RefreshEnrollment(ctx)
+				if refreshErr == nil {
+					logger.Infof("Enrollment renewed successfully via proactive refresh.")
+					continue
+				}
+
+				logger.Warnw("Proactive biscuit refresh failed, falling back to full OIDC/JWT re-enrollment", "error", refreshErr)
+
 				var newJWT string
 				var fetchErr error
 
@@ -843,6 +899,118 @@ func (n *SamNode) StartRenewalLoop(ctx context.Context, issuerURL, clientID, cli
 			}
 		}
 	}()
+}
+
+type RefreshError struct {
+	StatusCode int
+	Message    string
+}
+
+func (e *RefreshError) Error() string {
+	return e.Message
+}
+
+// RefreshEnrollment trades the expiring biscuit token for a new one using a cryptographic challenge.
+func (n *SamNode) RefreshEnrollment(ctx context.Context) error {
+	// 1. Fetch current biscuit
+	currentBiscuit, err := n.Store.LoadIdentity()
+	if err != nil {
+		return fmt.Errorf("failed to load current identity: %w", err)
+	}
+
+	// 2. Load private key
+	privKeyBytes, err := n.Store.LoadKey()
+	if err != nil {
+		return fmt.Errorf("failed to load private key: %w", err)
+	}
+	privKey, err := crypto.UnmarshalPrivateKey(privKeyBytes)
+	if err != nil {
+		return fmt.Errorf("corrupted private key: %w", err)
+	}
+
+	// 3. Generate challenge signature over current timestamp
+	timestamp := time.Now().UnixMilli()
+	challengeData := []byte(fmt.Sprintf("%d", timestamp))
+	sig, err := privKey.Sign(challengeData)
+	if err != nil {
+		return fmt.Errorf("failed to generate signature: %w", err)
+	}
+
+	// 4. Construct request
+	req := &api.TokenRefreshRequest{
+		ChallengeSignature: sig,
+		Timestamp:          timestamp,
+	}
+	reqData, err := proto.Marshal(req)
+	if err != nil {
+		return fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	hubURL, err := n.Store.LoadHubURL()
+	if err != nil {
+		return fmt.Errorf("failed to load hub URL: %w", err)
+	}
+
+	if !strings.HasPrefix(hubURL, "http://") && !strings.HasPrefix(hubURL, "https://") {
+		return fmt.Errorf("hub address must be an HTTP or HTTPS URL for renewal: %s", hubURL)
+	}
+
+	url := hubURL + "/refresh"
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(reqData))
+	if err != nil {
+		return fmt.Errorf("failed to create http request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/x-protobuf")
+	// Set current biscuit in authorization header
+	b64Biscuit := base64.StdEncoding.EncodeToString(currentBiscuit)
+	httpReq.Header.Set("Authorization", "Bearer "+b64Biscuit)
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return fmt.Errorf("http request failed: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode == http.StatusForbidden {
+		logger.Errorf("Refresh rejected: Node is banned (403 Forbidden). Initiating hard-kill.")
+		if n.Host != nil {
+			_ = n.Host.Close()
+		}
+		os.Exit(1)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return &RefreshError{
+			StatusCode: resp.StatusCode,
+			Message:    fmt.Sprintf("refresh failed with status %s: %s", resp.Status, string(body)),
+		}
+	}
+
+	respData, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read response: %w", err)
+	}
+
+	var refreshResp api.TokenRefreshResponse
+	if err := proto.Unmarshal(respData, &refreshResp); err != nil {
+		return fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+
+	if refreshResp.ErrorMessage != "" {
+		return fmt.Errorf("refresh error: %s", refreshResp.ErrorMessage)
+	}
+
+	// Save new biscuit and its expiration
+	if err := n.Store.SaveIdentity(refreshResp.BiscuitToken); err != nil {
+		return fmt.Errorf("failed to save refreshed identity: %w", err)
+	}
+	if err := n.Store.SaveIdentityExpiration(refreshResp.ExpiresAt); err != nil {
+		return fmt.Errorf("failed to save refreshed expiration: %w", err)
+	}
+
+	return nil
 }
 
 func (n *SamNode) renewWithRefreshToken(ctx context.Context, clientSecret string) (string, error) {

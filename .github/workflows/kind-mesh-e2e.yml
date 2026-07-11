@@ -63,7 +63,9 @@ jobs:
         run: |
           mkdir -p _artifacts
           kubectl --context kind-sam-kind -n sam-kind get pods -o wide > _artifacts/pods.txt 2>&1 || true
-          for d in sam-hub node-a node-b node-c; do
+          kubectl --context kind-sam-kind -n sam-kind logs deploy/sam-control-plane --all-containers --tail=-1 > _artifacts/sam-control-plane.log 2>&1 || true
+          kubectl --context kind-sam-kind -n sam-kind logs statefulset/sam-router --all-containers --tail=-1 > _artifacts/sam-router.log 2>&1 || true
+          for d in node-a node-b node-c; do
             kubectl --context kind-sam-kind -n sam-kind logs "deploy/$d" --all-containers --tail=-1 > "_artifacts/$d.log" 2>&1 || true
           done
           cp "$RUNNER_TEMP/local-node.log" _artifacts/ 2>/dev/null || true

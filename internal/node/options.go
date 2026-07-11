@@ -26,7 +26,6 @@ import (
 const (
 	DefaultMeshName          = "public-mesh"
 	DefaultDiscoveryInterval = "30s"
-	DefaultHubURL            = "http://localhost:8080"
 	DefaultConfigFile        = "sam-node.yaml"
 	DefaultHubConnectTimeout = 5 * time.Second
 )
@@ -51,8 +50,6 @@ type Options struct {
 	AutoRelayBackoff     time.Duration
 	// HubConnectTimeout bounds each hub address's dial (connect + stream open).
 	HubConnectTimeout time.Duration
-
-	BiscuitTimeout time.Duration
 }
 
 // Default applies default values to Options if they are not specified.

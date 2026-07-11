@@ -1,0 +1,89 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: sam-router-sa
+  namespace: ${NAMESPACE}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sam-router-${ENV_NAME}
+  namespace: ${NAMESPACE}
+spec:
+  clusterIP: None
+  ports:
+    - port: 4501
+      targetPort: 4501
+      protocol: TCP
+      name: p2p-tcp
+    - port: 4501
+      targetPort: 4501
+      protocol: UDP
+      name: p2p-udp
+  selector:
+    app: sam-router-${ENV_NAME}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: sam-router-${ENV_NAME}
+  namespace: ${NAMESPACE}
+spec:
+  serviceName: "sam-router-${ENV_NAME}"
+  replicas: 3
+  selector:
+    matchLabels:
+      app: sam-router-${ENV_NAME}
+  template:
+    metadata:
+      labels:
+        app: sam-router-${ENV_NAME}
+    spec:
+      serviceAccountName: sam-router-sa
+      containers:
+      - name: sam-router
+        image: ghcr.io/google/sam-router:${IMAGE_TAG}
+        ports:
+        - containerPort: 4501
+          hostPort: 4501
+          protocol: TCP
+          name: p2p-tcp
+        - containerPort: 4501
+          hostPort: 4501
+          protocol: UDP
+          name: p2p-udp
+        args:
+        - "--control-plane=http://sam-control-plane-${ENV_NAME}.${NAMESPACE}.svc.cluster.local:8080"
+        - "--listen=/ip4/0.0.0.0/tcp/4501"
+        - "--listen=/ip4/0.0.0.0/udp/4501/quic-v1"
+        - "--jwt-path=/var/run/secrets/tokens/sam-token"
+        - "--keys-path=/data/router.key"
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        volumeMounts:
+        - name: sam-token
+          mountPath: /var/run/secrets/tokens
+          readOnly: true
+        - name: router-data
+          mountPath: /data
+      volumes:
+      - name: sam-token
+        projected:
+          sources:
+          - serviceAccountToken:
+              path: sam-token
+              expirationSeconds: 3600
+              audience: "sam-hub-audience"
+  volumeClaimTemplates:
+  - metadata:
+      name: router-data
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: 1Gi

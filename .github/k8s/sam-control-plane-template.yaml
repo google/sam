@@ -1,89 +1,112 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: sam-hub-${ENV_NAME}
+  name: sam-control-plane-${ENV_NAME}
   namespace: ${NAMESPACE}
 spec:
-  clusterIP: None
   ports:
-    - port: 9090
-      targetPort: 9090
+    - port: 8080
+      targetPort: 8080
       protocol: TCP
       name: http
-    - port: 4501
-      targetPort: 4501
-      protocol: TCP
-      name: p2p-tcp
-    - port: 4501
-      targetPort: 4501
-      protocol: UDP
-      name: p2p-udp
   selector:
-    app: sam-hub-${ENV_NAME}
+    app: sam-control-plane-${ENV_NAME}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sam-db-${ENV_NAME}
+  namespace: ${NAMESPACE}
+spec:
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+  selector:
+    app: sam-db-${ENV_NAME}
 ---
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: sam-hub-${ENV_NAME}
+  name: sam-db-${ENV_NAME}
   namespace: ${NAMESPACE}
 spec:
-  serviceName: "sam-hub-${ENV_NAME}"
-  replicas: 3
+  serviceName: sam-db-${ENV_NAME}
+  replicas: 1
   selector:
     matchLabels:
-      app: sam-hub-${ENV_NAME}
+      app: sam-db-${ENV_NAME}
   template:
     metadata:
       labels:
-        app: sam-hub-${ENV_NAME}
+        app: sam-db-${ENV_NAME}
     spec:
       containers:
-      - name: sam-hub
-        image: ghcr.io/google/sam-hub:${IMAGE_TAG}
+      - name: postgres
+        image: postgres:16-alpine
         env:
-        - name: HOST_IP
-          valueFrom:
-            fieldRef:
-              fieldPath: status.hostIP
-        - name: SAM_HUB_KEY
-          valueFrom:
-            secretKeyRef:
-              name: sam-hub-secret
-              key: sam-hub-key
-              optional: true # Make it optional so it doesn't block local kind testing if not created
+        - name: POSTGRES_DB
+          value: sam_mesh
+        - name: POSTGRES_USER
+          value: sam
+        - name: POSTGRES_PASSWORD
+          value: sam-secret-password
         ports:
-        - containerPort: 9090
+        - containerPort: 5432
           protocol: TCP
-          name: metrics
-        - containerPort: 4501
-          hostPort: 4501
+        volumeMounts:
+        - name: db-data
+          mountPath: /var/lib/postgresql/data
+  volumeClaimTemplates:
+  - metadata:
+      name: db-data
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: 5Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sam-control-plane-${ENV_NAME}
+  namespace: ${NAMESPACE}
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: sam-control-plane-${ENV_NAME}
+  template:
+    metadata:
+      labels:
+        app: sam-control-plane-${ENV_NAME}
+    spec:
+      containers:
+      - name: sam-control-plane
+        image: ghcr.io/google/sam-control-plane:${IMAGE_TAG}
+        ports:
+        - containerPort: 8080
           protocol: TCP
-          name: p2p-tcp
-        - containerPort: 4501
-          hostPort: 4501
-          protocol: UDP
-          name: p2p-udp
+          name: http
         readinessProbe:
           httpGet:
-            path: /healthz
-            port: metrics
+            path: /info
+            port: http
             scheme: HTTP
           initialDelaySeconds: 5
           periodSeconds: 10
         livenessProbe:
           httpGet:
-            path: /healthz
-            port: metrics
+            path: /info
+            port: http
             scheme: HTTP
           initialDelaySeconds: 15
           periodSeconds: 20
         args:
-        - "--listen=/ip4/0.0.0.0/tcp/4501"
-        - "--listen=/ip4/0.0.0.0/udp/4501/quic-v1"
-        - "--external-multiaddr=/dnsaddr/bootstrap.${ENV_NAME}.sam-mesh.dev"
-        # 1. Trust Dex for humans/Google/GitHub. 2. Trust GKE for internal Canaries.
+        - "--bind-address=0.0.0.0:8080"
+        - "--db-driver=postgres"
+        - "--db-dsn=postgres://sam:sam-secret-password@sam-db-${ENV_NAME}:5432/sam_mesh?sslmode=disable"
         - "--issuer=https://auth.sam-mesh.dev,https://container.googleapis.com/v1/projects/${GCP_PROJECT_ID}/locations/${CLUSTER_REGION}/clusters/${CLUSTER_NAME}"
-        # 1. Dex CLI client ID. 2. Canary projected volume audience.
         - "--allowed-audiences=sam-mesh-audience,sam-hub-audience"
         - "--policy-file=/etc/sam/policies/policies.yaml"
         resources:
@@ -100,12 +123,12 @@ spec:
       volumes:
       - name: policies-volume
         configMap:
-          name: sam-hub-policies-${ENV_NAME}
+          name: sam-control-plane-policies-${ENV_NAME}
 ---
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: sam-hub-policies-${ENV_NAME}
+  name: sam-control-plane-policies-${ENV_NAME}
   namespace: ${NAMESPACE}
 data:
   policies.yaml: |
@@ -113,10 +136,17 @@ data:
     bindings:
       - members: ["user:system:serviceaccount:sam-canary-${ENV_NAME}:sam-node-sa"]
         role: "sam-canary"
-      - members: ["system:authenticated"]
+      - members: ["group:routers", "user:system:serviceaccount:${NAMESPACE}:sam-router-sa"]
+        role: "sam:role:router"
+      - members: ["sam:system:authenticated"]
         role: "public-mesh"
     roles:
       sam-canary:
+        allowed_services:
+          - "*"
+        allowed_targets:
+          - "*"
+      "sam:role:router":
         allowed_services:
           - "*"
         allowed_targets:
@@ -127,25 +157,10 @@ data:
         allowed_targets:
           - "*"
 ---
-apiVersion: monitoring.googleapis.com/v1
-kind: PodMonitoring
-metadata:
-  name: sam-hub-monitor-${ENV_NAME}
-  namespace: ${NAMESPACE}
-spec:
-  selector:
-    matchLabels:
-      app: sam-hub-${ENV_NAME}
-  endpoints:
-  - port: metrics
-    interval: 30s
-    path: /metrics
-    scheme: http
----
 apiVersion: networking.gke.io/v1
 kind: HealthCheckPolicy
 metadata:
-  name: sam-hub-healthcheck-${ENV_NAME}
+  name: sam-control-plane-healthcheck-${ENV_NAME}
   namespace: ${NAMESPACE}
 spec:
   default:
@@ -156,16 +171,16 @@ spec:
     config:
       type: HTTP
       httpHealthCheck:
-        requestPath: /healthz
+        requestPath: /info
   targetRef:
     group: ""
     kind: Service
-    name: sam-hub-${ENV_NAME}
+    name: sam-control-plane-${ENV_NAME}
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
 metadata:
-  name: sam-hub-gateway-${ENV_NAME}
+  name: sam-control-plane-gateway-${ENV_NAME}
   namespace: ${NAMESPACE}
   annotations:
     networking.gke.io/certmap: sam-hub-cert-map-${ENV_NAME}
@@ -185,11 +200,11 @@ spec:
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
-  name: sam-hub-route-${ENV_NAME}
+  name: sam-control-plane-route-${ENV_NAME}
   namespace: ${NAMESPACE}
 spec:
   parentRefs:
-  - name: sam-hub-gateway-${ENV_NAME}
+  - name: sam-control-plane-gateway-${ENV_NAME}
   hostnames:
   - "${ENV_NAME}.sam-mesh.dev"
   rules:
@@ -200,7 +215,24 @@ spec:
     - path:
         type: Exact
         value: /info
+    - path:
+        type: Exact
+        value: /keys
+    - path:
+        type: Exact
+        value: /routers/lease
+    - path:
+        type: Exact
+        value: /policies
+    - path:
+        type: Exact
+        value: /enroll
+    - path:
+        type: Exact
+        value: /enroll/status
+    - path:
+        type: Exact
+        value: /refresh
     backendRefs:
-    - name: sam-hub-${ENV_NAME}
-      port: 9090
-
+    - name: sam-control-plane-${ENV_NAME}
+      port: 8080

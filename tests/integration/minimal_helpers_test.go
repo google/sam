@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -29,6 +30,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -208,6 +210,11 @@ func runCommandWithCallback(
 func startMockLibp2pHub(t *testing.T) (peer.ID, string) {
 	t.Helper()
 
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("Failed to generate hub key: %v", err)
+	}
+
 	h, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 	if err != nil {
 		t.Fatalf("failed to create mock libp2p host: %v", err)
@@ -223,7 +230,10 @@ func startMockLibp2pHub(t *testing.T) (peer.ID, string) {
 		defer reader.ReleaseMsg(msg)
 
 		writer := msgio.NewVarintWriter(s)
-		resp := &api.AuthResponse{Success: true}
+		resp := &api.AuthResponse{
+			Success: true,
+			Biscuit: createMockBiscuitToken(t, h.ID().String(), priv),
+		}
 		respBytes, _ := proto.Marshal(resp)
 		_ = writer.WriteMsg(respBytes)
 	})
@@ -234,10 +244,6 @@ func startMockLibp2pHub(t *testing.T) (peer.ID, string) {
 	}
 
 	// Start HTTP server for enrollment
-	pub, priv, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatalf("Failed to generate hub key: %v", err)
-	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/register", func(w http.ResponseWriter, r *http.Request) {
@@ -285,6 +291,11 @@ func startMockLibp2pHub(t *testing.T) (peer.ID, string) {
 func startMockLibp2pHubWithOIDC(t *testing.T, oidcIssuerURL string) (peer.ID, string) {
 	t.Helper()
 
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("Failed to generate hub key: %v", err)
+	}
+
 	h, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 	if err != nil {
 		t.Fatalf("failed to create mock libp2p host: %v", err)
@@ -300,7 +311,10 @@ func startMockLibp2pHubWithOIDC(t *testing.T, oidcIssuerURL string) (peer.ID, st
 		defer reader.ReleaseMsg(msg)
 
 		writer := msgio.NewVarintWriter(s)
-		resp := &api.AuthResponse{Success: true}
+		resp := &api.AuthResponse{
+			Success: true,
+			Biscuit: createMockBiscuitToken(t, h.ID().String(), priv),
+		}
 		respBytes, _ := proto.Marshal(resp)
 		_ = writer.WriteMsg(respBytes)
 	})
@@ -311,10 +325,6 @@ func startMockLibp2pHubWithOIDC(t *testing.T, oidcIssuerURL string) (peer.ID, st
 	}
 
 	// Start HTTP server for enrollment and info
-	pub, priv, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatalf("Failed to generate hub key: %v", err)
-	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/info", func(w http.ResponseWriter, r *http.Request) {
@@ -380,9 +390,28 @@ func startMockLibp2pHubWithOIDC(t *testing.T, oidcIssuerURL string) (peer.ID, st
 
 func createMockBiscuitToken(t *testing.T, peerID string, priv ed25519.PrivateKey) []byte {
 	builder := biscuit.NewBuilder(priv)
-	_ = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{Name: "target_unrestricted"}})
+	err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{Name: "target_unrestricted"}})
+	if err != nil {
+		t.Fatalf("failed to add target_unrestricted: %v", err)
+	}
 
-	err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+	err = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+		Name: api.FactExpiration,
+		IDs:  []biscuit.Term{biscuit.Date(time.Now().Add(1 * time.Hour))},
+	}})
+	if err != nil {
+		t.Fatalf("failed to add FactExpiration fact: %v", err)
+	}
+
+	err = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+		Name: api.FactRole,
+		IDs:  []biscuit.Term{biscuit.String(api.RoleRouter)},
+	}})
+	if err != nil {
+		t.Fatalf("failed to add role fact: %v", err)
+	}
+
+	err = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
 		Name: "node",
 		IDs:  []biscuit.Term{biscuit.String(peerID)},
 	}})
@@ -414,4 +443,215 @@ func createMockBiscuitToken(t *testing.T, peerID string, priv ed25519.PrivateKey
 		t.Fatalf("failed to serialize biscuit: %v", err)
 	}
 	return serialized
+}
+
+func startControlPlaneAndRouter(t *testing.T, tmpDir string, oidcURL string, mintToken func(map[string]interface{}) string, policyFile string) (int, func()) {
+	cpBin := buildBinary(t, "./cmd/sam-control-plane")
+	routerBin := buildBinary(t, "./cmd/sam-router")
+
+	cpPort := getFreePort(t)
+	routerPort := getFreePort(t)
+
+	// Automatically adjust the policy file to grant the "router" role to group "routers"
+	originalPolicy, err := os.ReadFile(policyFile)
+	if err == nil {
+		writePolicyWithRouter(t, policyFile, string(originalPolicy))
+	}
+
+	// 1. Start Control Plane
+	cpCmd := exec.Command(cpBin,
+		"--bind-address", fmt.Sprintf("127.0.0.1:%d", cpPort),
+		"--policy-file", policyFile,
+		"--db-dsn", filepath.Join(tmpDir, "cp-keys.db"),
+		"--issuer", oidcURL,
+		"--insecure-skip-tls-verify",
+	)
+	cpCmd.Stdout = os.Stdout
+	cpCmd.Stderr = os.Stderr
+	if err := cpCmd.Start(); err != nil {
+		t.Fatalf("failed to start control plane: %v", err)
+	}
+
+	// Wait for CP to be up
+	waitForControlPlane(t, cpPort)
+
+	// 2. Start Router
+	routerJWT := mintToken(map[string]interface{}{
+		"sub":    "router-integration-1",
+		"groups": []string{"routers"},
+	})
+
+	routerCmd := exec.Command(routerBin,
+		"--control-plane", fmt.Sprintf("http://127.0.0.1:%d", cpPort),
+		"--listen", fmt.Sprintf("/ip4/127.0.0.1/tcp/%d", routerPort),
+		"--keys-path", filepath.Join(tmpDir, "router-keys.db"),
+		"--allow-loopback",
+		"--oidc-token", routerJWT,
+	)
+	routerCmd.Stdout = os.Stdout
+	routerCmd.Stderr = os.Stderr
+	if err := routerCmd.Start(); err != nil {
+		_ = cpCmd.Process.Kill()
+		_ = cpCmd.Wait()
+		t.Fatalf("failed to start router: %v", err)
+	}
+
+	// Wait for router lease to be active and registered
+	fetchPeerID(t, cpPort)
+
+	cleanup := func() {
+		_ = routerCmd.Process.Kill()
+		_ = routerCmd.Wait()
+		_ = cpCmd.Process.Kill()
+		_ = cpCmd.Wait()
+	}
+
+	return cpPort, cleanup
+}
+
+func getFreePort(t *testing.T) int {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := l.Addr().(*net.TCPAddr).Port
+	_ = l.Close()
+	return port
+}
+
+func fetchPeerID(t *testing.T, port int) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	for {
+		var peerID string
+		resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/info", port))
+		if err == nil {
+			bodyBytes, err := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			if err == nil {
+				var info api.HubInfoResponse
+				if err := proto.Unmarshal(bodyBytes, &info); err == nil {
+					if len(info.HubAddresses) > 0 {
+						peerID = extractPeerID(info.HubAddresses[0])
+					}
+				}
+			}
+		}
+
+		if peerID != "" {
+			return peerID
+		}
+
+		select {
+		case <-ctx.Done():
+			t.Fatalf("timed out waiting for router lease registration on /info: %v", err)
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+}
+
+func extractPeerID(maddrStr string) string {
+	parts := strings.Split(maddrStr, "/")
+	for i, part := range parts {
+		if part == "p2p" && i+1 < len(parts) {
+			return parts[i+1]
+		}
+	}
+	return ""
+}
+
+func waitForDHTReady(t *testing.T, clientBin string, apiPort int, token string) {
+	t.Helper()
+	deadline := time.Now().Add(45 * time.Second)
+	cmdArgs := []string{
+		"-url", fmt.Sprintf("http://127.0.0.1:%d/mcp", apiPort),
+		"-token", token,
+		"-tool", "get_mesh_info",
+		"-args", `{}`,
+	}
+
+	for time.Now().Before(deadline) {
+		cmd := exec.Command(clientBin, cmdArgs...)
+		out, err := cmd.Output()
+		if err == nil {
+			if strings.Contains(string(out), `"dht_size":`) && !strings.Contains(string(out), `"dht_size":0`) {
+				return
+			}
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	t.Fatalf("DHT not ready on port %d", apiPort)
+}
+
+func waitForControlPlane(t *testing.T, port int) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	for {
+		resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/info", port))
+		if err == nil {
+			_ = resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				return
+			}
+		}
+
+		select {
+		case <-ctx.Done():
+			t.Fatalf("timed out waiting for control plane: %v", err)
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+}
+
+func writePolicyWithRouter(t *testing.T, path string, yamlContent string) {
+	t.Helper()
+	content := yamlContent
+
+	// Replace empty markers first
+	content = strings.ReplaceAll(content, "bindings: []", "bindings:")
+	content = strings.ReplaceAll(content, "roles: {}", "roles:")
+
+	routerRole := fmt.Sprintf(`  %s:
+    allowed_services: []
+    allowed_targets: []`, api.RoleRouter)
+	routerBinding := fmt.Sprintf(`  - role: %s
+    members: ["group:routers"]`, api.RoleRouter)
+
+	if strings.Contains(content, "roles:") {
+		content = strings.Replace(content, "roles:", "roles:\n"+routerRole, 1)
+	} else {
+		content += "\nroles:\n" + routerRole
+	}
+
+	if strings.Contains(content, "bindings:") {
+		content = strings.Replace(content, "bindings:", "bindings:\n"+routerBinding, 1)
+	} else {
+		content += "\nbindings:\n" + routerBinding
+	}
+
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func waitForNodeOnline(t *testing.T, logPath string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	for {
+		data, err := os.ReadFile(logPath)
+		if err == nil && strings.Contains(string(data), "SAM Node Online") {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("timed out waiting for node to go online")
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
 }

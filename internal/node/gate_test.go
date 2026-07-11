@@ -125,11 +125,11 @@ func startBareNode(t *testing.T, ctx context.Context) (*SamNode, func()) {
 		AllowLoopback:     true,
 		MonitorBootstrap:  2 * time.Minute,
 		MonitorInterval:   1 * time.Minute,
-		BiscuitTimeout:    500 * time.Millisecond,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	node.BiscuitTimeout = 500 * time.Millisecond
 	if err := node.Start(ctx); err != nil {
 		t.Fatal(err)
 	}

@@ -1,0 +1,102 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+apiVersion: v1
+kind: Secret
+metadata:
+  name: sam-control-plane-secret
+type: Opaque
+stringData:
+  SAM_OIDC_ISSUER: "http://mock-oidc:18080"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sam-control-plane
+  labels:
+    app: sam-control-plane
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sam-control-plane
+  template:
+    metadata:
+      labels:
+        app: sam-control-plane
+    spec:
+      containers:
+      - name: sam-control-plane
+        image: sam-control-plane:local
+        imagePullPolicy: IfNotPresent
+        args:
+        - "--bind-address=0.0.0.0:8080"
+        - "--db-driver=sqlite"
+        - "--db-dsn=/data/control-plane.db"
+        - "--issuer=$(SAM_OIDC_ISSUER)"
+        - "--allowed-audiences=sam-mesh-audience,sam-hub-audience"
+        - "--policy-file=/etc/sam/policies/policies.yaml"
+        - "--insecure-skip-tls-verify"
+        ports:
+        - containerPort: 8080
+          name: http
+        env:
+        - name: SAM_OIDC_ISSUER
+          valueFrom:
+            secretKeyRef:
+              name: sam-control-plane-secret
+              key: SAM_OIDC_ISSUER
+        volumeMounts:
+        - name: policies-volume
+          mountPath: /etc/sam/policies
+          readOnly: true
+        - name: db-data
+          mountPath: /data
+      volumes:
+      - name: policies-volume
+        configMap:
+          name: sam-control-plane-policies
+      - name: db-data
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sam-control-plane
+spec:
+  type: ClusterIP
+  selector:
+    app: sam-control-plane
+  ports:
+  - protocol: TCP
+    port: 8080
+    targetPort: 8080
+    name: http
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sam-control-plane-policies
+data:
+  policies.yaml: |
+    version: "v1alpha1"
+    bindings:
+      - members: ["sam:system:authenticated"]
+        role: "public-mesh"
+    roles:
+      public-mesh:
+        allowed_services:
+          - "*"
+        allowed_targets:
+          - "*"

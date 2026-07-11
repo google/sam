@@ -55,9 +55,10 @@ logs() { echo "printf '\\033[1;36m==== %s ====\\033[0m\\n' '$1'; kubectl --conte
 tmuxs() { tmux -L samsocket -f /dev/null "$@"; }
 
 show_cluster_logs() {
-    tmuxs kill-session -t "${SESSION}" 2>/dev/null || true
+  tmuxs kill-session -t "${SESSION}" 2>/dev/null || true
 
-  tmuxs new-session -d -s "${SESSION}" -n mesh "$(logs hub 'deploy/sam-hub')" \; set -t "${SESSION}" destroy-unattached off
+  tmuxs new-session -d -s "${SESSION}" -n mesh "$(logs control-plane 'deploy/sam-control-plane')" \; set -t "${SESSION}" destroy-unattached off
+  tmuxs split-window -t "${SESSION}:0" "$(logs router 'statefulset/sam-router')"
   for node in "${NODES[@]}"; do
     tmuxs split-window -t "${SESSION}:0" "$(logs "$node" "deploy/${node} -c sam-node")"
     tmuxs select-layout -t "${SESSION}:0" tiled
@@ -65,8 +66,8 @@ show_cluster_logs() {
   tmuxs set-option -t "${SESSION}" -g pane-border-status top
   tmuxs set-option -t "${SESSION}" -g pane-border-format ' #{pane_title} '
 
-  # Title the tmux panes in creation order: hub first, then the nodes.
-  titles=(hub "${NODES[@]}")
+  # Title the tmux panes in creation order: control-plane, router, then the nodes.
+  titles=(control-plane router "${NODES[@]}")
   i=0
   for pane in $(tmuxs list-panes -t "${SESSION}:0" -F '#{pane_id}'); do
     tmuxs select-pane -t "$pane" -T "${titles[$i]}"
@@ -106,24 +107,28 @@ echo "== Creating kind cluster '${CLUSTER}' =="
 kind create cluster --name "${CLUSTER}" --config "${SCRIPT_DIR}/kind-config.yaml"
 
 echo "== Building sam images =="
-make docker-build-hub docker-build-node
+make docker-build-control-plane docker-build-router docker-build-node
 echo "== Loading sam images into kind =="
-kind load docker-image --name "${CLUSTER}" "sam-hub:${IMAGE_TAG}" "sam-node:${IMAGE_TAG}"
+kind load docker-image --name "${CLUSTER}" "sam-control-plane:${IMAGE_TAG}" "sam-router:${IMAGE_TAG}" "sam-node:${IMAGE_TAG}"
 
 read_mesh_nodes
 
-# Apply the hub and wait until it accepts connections
+# Apply the control plane and router, and wait until they accept connections
 ISSUER="$(kubectl --context "${KCTX}" get --raw /.well-known/openid-configuration | jq -r .issuer)"
 [[ -n "$ISSUER" ]] || { echo "could not determine cluster OIDC issuer" >&2; exit 1; }
 export NAMESPACE ISSUER IMAGE_TAG
 
-echo "== Applying sam-hub (issuer: ${ISSUER}) =="
-for f in "${SCRIPT_DIR}"/00-*.yaml "${SCRIPT_DIR}"/10-*.yaml; do
+echo "== Applying control plane and router (issuer: ${ISSUER}) =="
+for f in "${SCRIPT_DIR}"/00-*.yaml "${SCRIPT_DIR}"/10-*.yaml "${SCRIPT_DIR}"/11-*.yaml; do
   envsubst '${NAMESPACE} ${ISSUER} ${IMAGE_TAG}' < "$f" | kubectl --context "${KCTX}" apply -f -
 done
 
-echo "== Waiting for sam-hub to be ready =="
-kubectl --context "${KCTX}" -n "${NAMESPACE}" wait --for=condition=available --timeout=180s deployment/sam-hub
+echo "== Waiting for database to be ready =="
+kubectl --context "${KCTX}" -n "${NAMESPACE}" wait --for=condition=ready --timeout=180s pod -l app=sam-db
+echo "== Waiting for control plane to be ready =="
+kubectl --context "${KCTX}" -n "${NAMESPACE}" wait --for=condition=available --timeout=180s deployment/sam-control-plane
+echo "== Waiting for router to be ready =="
+kubectl --context "${KCTX}" -n "${NAMESPACE}" wait --for=condition=ready --timeout=180s pod -l app=sam-router
 
 echo "== Applying sam-nodes =="
 for line in "${NODE_LINES[@]}"; do

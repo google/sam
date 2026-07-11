@@ -17,6 +17,7 @@ package node
 import (
 	"context"
 	"crypto/ed25519"
+	"fmt"
 
 	"io"
 	"os"
@@ -28,6 +29,7 @@ import (
 	"github.com/biscuit-auth/biscuit-go/v2/parser"
 	"github.com/google/sam/api"
 	lru "github.com/hashicorp/golang-lru/v2"
+	golog "github.com/ipfs/go-log/v2"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -97,6 +99,7 @@ func TestAuthorize(t *testing.T) {
 	defer func() {
 		_ = store.Close()
 	}()
+	golog.SetAllLoggers(golog.LevelDebug)
 
 	// Create a biscuit token
 	pub, priv, err := ed25519.GenerateKey(nil)
@@ -128,8 +131,8 @@ func TestAuthorize(t *testing.T) {
 
 	// Add fact to match baseline rule
 	err = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
-		Name: "granted_service_exact",
-		IDs:  []biscuit.Term{biscuit.String("system"), biscuit.String("/test/proto")},
+		Name: api.FactGrantedServiceExact,
+		IDs:  []biscuit.Term{biscuit.String(api.SystemNamespace), biscuit.String("/test/proto")},
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -179,7 +182,7 @@ func TestBaselineRules(t *testing.T) {
 		{
 			name: "Baseline Rule 1: Exact Match",
 			mintToken: func(t *testing.T, builder biscuit.Builder) {
-				factStr := `granted_service_exact("mcp", "test_tool")`
+				factStr := fmt.Sprintf(`%s("mcp", "test_tool")`, api.FactGrantedServiceExact)
 				fact, _ := parser.FromStringFact(factStr)
 				_ = builder.AddAuthorityFact(fact)
 			},
@@ -190,7 +193,7 @@ func TestBaselineRules(t *testing.T) {
 		{
 			name: "Baseline Rule 2: Global Wildcard",
 			mintToken: func(t *testing.T, builder biscuit.Builder) {
-				factStr := `granted_service_all_types()`
+				factStr := fmt.Sprintf(`%s()`, api.FactGrantedServiceAllTypes)
 				fact, _ := parser.FromStringFact(factStr)
 				_ = builder.AddAuthorityFact(fact)
 			},
@@ -202,7 +205,7 @@ func TestBaselineRules(t *testing.T) {
 		{
 			name: "Baseline Rule 4: Type Wildcard",
 			mintToken: func(t *testing.T, builder biscuit.Builder) {
-				factStr := `granted_service_all("mcp")`
+				factStr := fmt.Sprintf(`%s("mcp")`, api.FactGrantedServiceAll)
 				fact, _ := parser.FromStringFact(factStr)
 				_ = builder.AddAuthorityFact(fact)
 			},
@@ -213,7 +216,7 @@ func TestBaselineRules(t *testing.T) {
 		{
 			name: "Baseline Rule Rejection: Type Wildcard does not allow other types",
 			mintToken: func(t *testing.T, builder biscuit.Builder) {
-				factStr := `granted_service_all("mcp")`
+				factStr := fmt.Sprintf(`%s("mcp")`, api.FactGrantedServiceAll)
 				fact, _ := parser.FromStringFact(factStr)
 				_ = builder.AddAuthorityFact(fact)
 			},
@@ -224,12 +227,12 @@ func TestBaselineRules(t *testing.T) {
 		{
 			name: "Baseline Replay Check Rejection: mismatched peer ID",
 			mintToken: func(t *testing.T, builder biscuit.Builder) {
-				factStr := `granted_service_exact("mcp", "test_tool")`
+				factStr := fmt.Sprintf(`%s("mcp", "test_tool")`, api.FactGrantedServiceExact)
 				fact, _ := parser.FromStringFact(factStr)
 				_ = builder.AddAuthorityFact(fact)
 				// deliberately add a different client_peer_id than the connection peer ID
 				err = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
-					Name: "client_peer_id",
+					Name: api.FactClientPeerID,
 					IDs:  []biscuit.Term{biscuit.String("different-peer")},
 				}})
 			},
@@ -300,7 +303,7 @@ func TestEnterprisePolicyEngine(t *testing.T) {
 		{
 			name: "Case 1 (Happy Path)",
 			mintToken: func(t *testing.T, builder biscuit.Builder) {
-				fact, err := parser.FromStringFact(`granted_service_exact("system", "query_db")`)
+				fact, err := parser.FromStringFact(fmt.Sprintf(`%s(%q, "query_db")`, api.FactGrantedServiceExact, api.SystemNamespace))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -314,7 +317,7 @@ func TestEnterprisePolicyEngine(t *testing.T) {
 		{
 			name: "Case 2 (Unauthorized Tool)",
 			mintToken: func(t *testing.T, builder biscuit.Builder) {
-				fact, err := parser.FromStringFact(`granted_service_exact("system", "query_db")`)
+				fact, err := parser.FromStringFact(fmt.Sprintf(`%s(%q, "query_db")`, api.FactGrantedServiceExact, api.SystemNamespace))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -328,7 +331,7 @@ func TestEnterprisePolicyEngine(t *testing.T) {
 		{
 			name: "Case 3 (Wildcard Access)",
 			mintToken: func(t *testing.T, builder biscuit.Builder) {
-				fact, err := parser.FromStringFact(`granted_service_all_types()`)
+				fact, err := parser.FromStringFact(fmt.Sprintf(`%s()`, api.FactGrantedServiceAllTypes))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -342,7 +345,7 @@ func TestEnterprisePolicyEngine(t *testing.T) {
 		{
 			name: "Case 4 (Local Attenuation Override)",
 			mintToken: func(t *testing.T, builder biscuit.Builder) {
-				fact1, err := parser.FromStringFact(`granted_service_all_types()`)
+				fact1, err := parser.FromStringFact(fmt.Sprintf(`%s()`, api.FactGrantedServiceAllTypes))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -371,10 +374,10 @@ attenuation:
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			builder := biscuit.NewBuilder(priv)
-			_ = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{Name: "target_unrestricted"}})
+			_ = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{Name: api.FactTargetUnrestricted}})
 
 			err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
-				Name: "node",
+				Name: api.FactNode,
 				IDs:  []biscuit.Term{biscuit.String(dummyPeer.String())},
 			}})
 			if err != nil {
@@ -383,7 +386,7 @@ attenuation:
 
 			// Add client_peer_id for replay check
 			err = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
-				Name: "client_peer_id",
+				Name: api.FactClientPeerID,
 				IDs:  []biscuit.Term{biscuit.String(dummyPeer.String())},
 			}})
 			if err != nil {
@@ -589,7 +592,7 @@ func TestMiddlewareTargetChecks(t *testing.T) {
 			name: "Target Check: Allowed by User Fact",
 			mintToken: func(t *testing.T, builder biscuit.Builder) {
 				_ = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
-					Name: "granted_target_exact",
+					Name: api.FactGrantedTargetExact,
 					IDs:  []biscuit.Term{biscuit.String("user"), biscuit.String("bob")},
 				}})
 			},
@@ -605,7 +608,7 @@ func TestMiddlewareTargetChecks(t *testing.T) {
 			name: "Target Check: Rejected by wrong User Fact",
 			mintToken: func(t *testing.T, builder biscuit.Builder) {
 				_ = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
-					Name: "granted_target_exact",
+					Name: api.FactGrantedTargetExact,
 					IDs:  []biscuit.Term{biscuit.String("user"), biscuit.String("alice")},
 				}})
 			},
@@ -621,7 +624,7 @@ func TestMiddlewareTargetChecks(t *testing.T) {
 			name: "Target Check: Allowed by Group Fact",
 			mintToken: func(t *testing.T, builder biscuit.Builder) {
 				_ = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
-					Name: "granted_target_exact",
+					Name: api.FactGrantedTargetExact,
 					IDs:  []biscuit.Term{biscuit.String("group"), biscuit.String("eng")},
 				}})
 			},
@@ -640,15 +643,15 @@ func TestMiddlewareTargetChecks(t *testing.T) {
 			builder := biscuit.NewBuilder(priv)
 			// Required basic facts
 			_ = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
-				Name: "client_peer_id",
+				Name: api.FactClientPeerID,
 				IDs:  []biscuit.Term{biscuit.String(dummyPeer.String())},
 			}})
 			_ = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
-				Name: "node",
+				Name: api.FactNode,
 				IDs:  []biscuit.Term{biscuit.String(dummyPeer.String())},
 			}})
 			// Allow exact service
-			factStr := `granted_service_exact("mcp", "test_tool")`
+			factStr := fmt.Sprintf(`%s("mcp", "test_tool")`, api.FactGrantedServiceExact)
 			fact, _ := parser.FromStringFact(factStr)
 			_ = builder.AddAuthorityFact(fact)
 

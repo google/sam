@@ -187,14 +187,19 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
     local custom_hub="${MESH_PREFIX}-hub"
     if docker inspect "${custom_hub}" >/dev/null 2>&1; then
       hub_ip=$(docker inspect -f "{{(index .NetworkSettings.Networks \"${net}\").IPAddress}}" "${custom_hub}")
-      echo "--add-host mock-oidc:${oidc_node_ip} --add-host sam-hub:${hub_ip}"
+      local cp_ip=""
+      local custom_cp="${MESH_PREFIX}-hub-cp"
+      if docker inspect "${custom_cp}" >/dev/null 2>&1; then
+        cp_ip=$(docker inspect -f "{{(index .NetworkSettings.Networks \"${net}\").IPAddress}}" "${custom_cp}")
+      fi
+      echo "--add-host mock-oidc:${oidc_node_ip} --add-host sam-hub:${hub_ip} --add-host sam-control-plane:${cp_ip}"
     else
-      # Resolve sam-hub-0 node IP
-      local hub_node
-      hub_node=$(kubectl --context="${KUBECONTEXT:-kind-sam-wi-test}" get pod sam-hub-0 -o jsonpath='{.spec.nodeName}')
-      local hub_node_ip
-      hub_node_ip=$(docker inspect -f "{{(index .NetworkSettings.Networks \"${net}\").IPAddress}}" "${hub_node}")
-      echo "--add-host mock-oidc:${oidc_node_ip} --add-host sam-hub:${hub_node_ip} --add-host ${hub_node}:${hub_node_ip}"
+      # Resolve sam-router-0 node IP
+      local router_node
+      router_node=$(kubectl --context="${KUBECONTEXT:-kind-sam-wi-test}" get pod sam-router-0 -o jsonpath='{.spec.nodeName}')
+      local router_node_ip
+      router_node_ip=$(docker inspect -f "{{(index .NetworkSettings.Networks \"${net}\").IPAddress}}" "${router_node}")
+      echo "--add-host mock-oidc:${oidc_node_ip} --add-host sam-hub:${router_node_ip} --add-host sam-router:${router_node_ip} --add-host sam-control-plane:${router_node_ip} --add-host ${router_node}:${router_node_ip}"
     fi
   }
 
@@ -222,7 +227,7 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
     make
     make docker-build
 
-    if [[ ! -x "./bin/sam-node" || ! -x "./bin/sam-hub" || ! -x "./bin/mcp-client" ]]; then
+    if [[ ! -x "./bin/sam-node" || ! -x "./bin/sam-control-plane" || ! -x "./bin/sam-router" || ! -x "./bin/mcp-client" ]]; then
       echo "missing binaries; run: make build" >&2
       return 1
     fi
@@ -232,21 +237,15 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
 
     if ! kind get clusters | grep -q "^${KUBERNETES_CLUSTER_NAME}$"; then
       kind delete cluster --name "${KUBERNETES_CLUSTER_NAME}" >/dev/null 2>&1 || true
-      cat <<KIND | kind create cluster --name "${KUBERNETES_CLUSTER_NAME}" --config=-
-kind: Cluster
-apiVersion: kind.x-k8s.io/v1alpha4
-nodes:
-- role: control-plane
-- role: worker
-- role: worker
-KIND
-
-      kind load docker-image sam-hub:local --name "${KUBERNETES_CLUSTER_NAME}"
-      kind load docker-image sam-node:local --name "${KUBERNETES_CLUSTER_NAME}"
-      kind load docker-image sam-mock-oidc:local --name "${KUBERNETES_CLUSTER_NAME}"
+      kind create cluster --name "${KUBERNETES_CLUSTER_NAME}" --config=tests/e2e/fixtures/kind-cluster.yaml
     else
       kind export kubeconfig --name "${KUBERNETES_CLUSTER_NAME}"
     fi
+
+    kind load docker-image sam-control-plane:local --name "${KUBERNETES_CLUSTER_NAME}"
+    kind load docker-image sam-router:local --name "${KUBERNETES_CLUSTER_NAME}"
+    kind load docker-image sam-node:local --name "${KUBERNETES_CLUSTER_NAME}"
+    kind load docker-image sam-mock-oidc:local --name "${KUBERNETES_CLUSTER_NAME}"
 
     kubectl --context="${KUBECONTEXT}" apply -f tests/e2e/fixtures/mock-oidc.yaml
     kubectl --context="${KUBECONTEXT}" rollout status deployment/mock-oidc --timeout=60s
@@ -257,20 +256,33 @@ KIND
 
     kubectl --context="${KUBECONTEXT}" apply -f tests/e2e/fixtures/allow-anonymous-oidc.yaml
 
-    export ISSUERS="${kube_issuer},http://mock-oidc:18080"
-    envsubst '$ISSUERS' < tests/e2e/fixtures/sam-hub.yaml | kubectl --context="${KUBECONTEXT}" apply -f -
-    kubectl --context="${KUBECONTEXT}" rollout restart statefulset/sam-hub
-    kubectl --context="${KUBECONTEXT}" rollout status statefulset/sam-hub --timeout=60s
+    export ISSUERS="http://mock-oidc:18080,${kube_issuer}"
+
+    local oidc_node
+    oidc_node=$(kubectl --context="${KUBECONTEXT}" get pod -l app=mock-oidc -o jsonpath='{.items[0].spec.nodeName}')
+    local oidc_node_ip
+    oidc_node_ip=$(docker inspect -f "{{(index .NetworkSettings.Networks \"${MESH_NETWORK:-kind}\").IPAddress}}" "${oidc_node}")
+
+    local router_token="super-secret-bootstrap-token"
+    kubectl --context="${KUBECONTEXT}" create secret generic sam-router-token --from-literal=token="${router_token}" --dry-run=client -o yaml | kubectl --context="${KUBECONTEXT}" apply -f -
+
+    envsubst '$ISSUERS' < tests/e2e/fixtures/control-plane-router.yaml | kubectl --context="${KUBECONTEXT}" apply -f -
+    kubectl --context="${KUBECONTEXT}" rollout restart deployment/sam-db || true
+    kubectl --context="${KUBECONTEXT}" rollout status deployment/sam-db --timeout=60s
+    kubectl --context="${KUBECONTEXT}" rollout restart deployment/sam-control-plane
+    kubectl --context="${KUBECONTEXT}" rollout restart statefulset/sam-router
+    kubectl --context="${KUBECONTEXT}" rollout status deployment/sam-control-plane --timeout=60s
+    kubectl --context="${KUBECONTEXT}" rollout status statefulset/sam-router --timeout=60s
 
     local i
     for ((i=0; i<200; i++)); do
-      if kubectl --context="${KUBECONTEXT}" logs "sam-hub-0" 2>&1 | grep -q "PeerID:"; then
+      if kubectl --context="${KUBECONTEXT}" logs "sam-router-0" 2>&1 | grep -q "PeerID:"; then
         break
       fi
       sleep 0.1
     done
     local hub_peer_id
-    hub_peer_id=$(kubectl --context="${KUBECONTEXT}" logs "sam-hub-0" | grep -oE '12D3Koo[a-zA-Z0-9]+' | head -n 1 || true)
+    hub_peer_id=$(kubectl --context="${KUBECONTEXT}" logs "sam-router-0" | grep -oE '12D3Koo[a-zA-Z0-9]+' | head -n 1 || true)
     [[ -n "${hub_peer_id}" ]]
 
     echo "${hub_peer_id}" > "/tmp/sam-wi-test-hub-peer-id"
@@ -280,7 +292,7 @@ KIND
   mesh_teardown_suite() {
     cd "${BATS_TEST_DIRNAME}/../.."
     mesh_cleanup_stale_resources
-    kind delete cluster --name "${KUBERNETES_CLUSTER_NAME:-sam-wi-test}" >/dev/null 2>&1 || true
+    # kind delete cluster --name "${KUBERNETES_CLUSTER_NAME:-sam-wi-test}" >/dev/null 2>&1 || true
     echo "teardown suite"
   }
 
@@ -316,7 +328,7 @@ KIND
       ${flags} \
       --log-level debug \
       --discovery-interval 2s \
-      --hub "http://sam-hub:9090" \
+      --hub "http://sam-control-plane:8080" \
       --client-id "sam-mesh-audience" \
       --client-secret "sam-e2e-secret" \
       --oidc-issuer "http://mock-oidc:18080" \
@@ -346,7 +358,7 @@ KIND
   mesh_assert_container_running() {
     local name="$1"
     if [[ "${name}" == *"-hub" ]]; then
-      kubectl --context="${KUBECONTEXT:-kind-sam-wi-test}" get pod sam-hub-0 -o jsonpath='{.status.phase}' | grep -q "Running"
+      kubectl --context="${KUBECONTEXT:-kind-sam-wi-test}" get pod sam-router-0 -o jsonpath='{.status.phase}' | grep -q "Running"
       return $?
     fi
     local state

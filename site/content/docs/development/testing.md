@@ -38,7 +38,8 @@ go test ./tests/integration/...
 These tests validate current command behavior for:
 
 - `sam-node`
-- `sam-hub`
+- `sam-control-plane`
+- `sam-router`
 
 Run:
 
@@ -55,8 +56,9 @@ The container framework is implemented in:
 It starts:
 
 1. mock OIDC container
-2. `sam-hub` container
-3. multiple `sam-node` containers
+2. `sam-control-plane` container
+3. `sam-router` container
+4. multiple `sam-node` containers
 
 Run:
 
