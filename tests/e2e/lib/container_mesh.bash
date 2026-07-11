@@ -54,16 +54,6 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
       for c in "${MESH_CONTAINERS[@]}"; do
         docker logs "${c}" > "tests/e2e/logs/${c}.log" 2>&1 || true
       done
-      local db_container=""
-      for c in "${MESH_CONTAINERS[@]}"; do
-        if [[ "${c}" == *"-db" ]]; then
-          db_container="${c}"
-          break
-        fi
-      done
-      if [[ -n "${db_container}" ]]; then
-        docker exec "${db_container}" pg_dump -U sam -d sam_mesh > "tests/e2e/logs/${db_container}.sql" 2>&1 || true
-      fi
     fi
 
     local c
@@ -385,3 +375,4 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
     state="$(docker inspect -f '{{.State.Running}}' "${name}" 2>/dev/null || true)"
     [[ "${state}" == "true" ]]
   }
+fi
