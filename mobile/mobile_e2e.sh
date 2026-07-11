@@ -22,14 +22,14 @@ cd "$REPO_ROOT"
 # Helper to kill background processes and docker containers on exit
 cleanup() {
   echo "[E2E] Cleaning up background processes and containers..."
-  echo "=== DOCKER LOGS: sam-hub ==="
-  docker logs sam-hub 2>&1 || true
+  echo "=== DOCKER LOGS: sam-control-plane ==="
+  docker logs sam-control-plane 2>&1 || true
   echo "=== DOCKER LOGS: host-node ==="
   docker logs host-node 2>&1 || true
   echo "=== DOCKER LOGS: host-mock-mcp ==="
   docker logs host-mock-mcp 2>&1 || true
   echo "==============================="
-  docker kill host-node sam-hub mock-oidc host-mock-mcp >/dev/null 2>&1 || true
+  docker kill host-node sam-control-plane mock-oidc host-mock-mcp >/dev/null 2>&1 || true
   docker network rm sam-net >/dev/null 2>&1 || true
   rm -rf /tmp/host-node-data
   adb reverse --remove-all || true
@@ -38,7 +38,7 @@ trap cleanup EXIT
 
 # 1. Build host binaries and docker images
 make build
-make docker-build-hub docker-build-node docker-build-mock-oidc
+make docker-build-control-plane docker-build-node docker-build-mock-oidc
 
 # 2. Build Android x86_64 FFI library using the Makefile and copy to Flutter jniLibs
 make mobile-ffi-android-x86_64
@@ -62,16 +62,16 @@ timeout 15s bash -c 'until curl -s http://127.0.0.1:18080/ >/dev/null; do sleep 
 adb reverse tcp:18080 tcp:18080
 
 # 4. Start the Hub container
-docker run --name sam-hub \
+docker run --name sam-control-plane \
   --network sam-net \
   -p 37001:37001 \
   -p 37002:37002 \
   -v "$REPO_ROOT/tests/e2e/fixtures/default-policy.yaml:/policy.yaml" \
   -d --rm \
-  sam-hub:local \
+  sam-control-plane:local \
   --bind-address 0.0.0.0:37001 \
   --listen /ip4/0.0.0.0/tcp/37002 \
-  --external-multiaddr /ip4/10.0.2.2/tcp/37002,/ip4/127.0.0.1/tcp/37002,/dns4/sam-hub/tcp/37002 \
+  --external-multiaddr /ip4/10.0.2.2/tcp/37002,/ip4/127.0.0.1/tcp/37002,/dns4/sam-control-plane/tcp/37002 \
   --issuer http://mock-oidc:18080 \
   --mesh public-mesh \
   --policy-file /policy.yaml \
@@ -101,7 +101,7 @@ docker run --name host-node \
   sam-node:local \
   run \
   --data-dir /data \
-  --hub http://sam-hub:37001 \
+  --hub http://sam-control-plane:37001 \
   --jwt "$HOST_JWT" \
   --bind-addr 0.0.0.0:8081 \
   --api-token host-token \
