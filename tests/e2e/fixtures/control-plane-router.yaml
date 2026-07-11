@@ -17,7 +17,7 @@ data:
       - members: ["user:admin-user"]
         role: admin
       - members: ["group:routers"]
-        role: router
+        role: "sam:role:router"
     roles:
       admin:
         allowed_services:
@@ -33,7 +33,7 @@ data:
           - "system://sam.catalog"
         allowed_targets:
           - "*"
-      router:
+      "sam:role:router":
         allowed_services:
           - "*"
         allowed_targets:
