@@ -19,7 +19,7 @@ spec:
         command: ["/sam-node", "run"]
         args:
         - "--hub"
-        - "http://sam-hub.default.svc.cluster.local:9090"
+        - "http://sam-control-plane.default.svc.cluster.local:8080"
         - "--jwt-path"
         - "/var/run/secrets/tokens/sam-token"
         - "--api-token"

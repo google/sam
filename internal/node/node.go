@@ -89,14 +89,13 @@ const (
 
 	// Reprovide interval
 	ReprovideInterval = 5 * time.Minute
-
 )
 
 var (
 	// Renewal timing defaults
 	DefaultRenewalFallback = (api.BiscuitTokenTTL * 8) / 10 // 80% of TTL (19.2h)
-	RenewalBuffer          = api.BiscuitTokenTTL / 5         // 20% of TTL (4.8h)
-	RenewalThreshold       = api.BiscuitTokenTTL / 4         // 25% of TTL (6h)
+	RenewalBuffer          = api.BiscuitTokenTTL / 5        // 20% of TTL (4.8h)
+	RenewalThreshold       = api.BiscuitTokenTTL / 4        // 25% of TTL (6h)
 )
 
 var ErrFatalAuth = errors.New("fatal authentication error")

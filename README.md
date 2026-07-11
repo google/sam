@@ -13,8 +13,9 @@ SAM is a smart network built for autonomous AI agents:
 
 ## Architecture Components
 
-*   `sam-hub`: The control plane for identity mapping and policy distribution.
-*   `sam-node`: The P2P nodes providing the mesh transport layer and local MCP interfaces.
+*   `sam-control-plane`: The registry control plane for node identity registration, authorization policies, and router coordinating.
+*   `sam-router`: The libp2p bootstrap nodes and relays providing data-plane connectivity and forwarding.
+*   `sam-node`: The local node clients providing mesh transport integration and MCP sidecar routing.
 
 ---
 
