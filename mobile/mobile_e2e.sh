@@ -83,7 +83,7 @@ docker run --name sam-control-plane \
   --insecure-skip-tls-verify \
   --log-level debug
 
-ROUTER_JWT=$(curl -s -X POST -d "grant_type=client_credentials&client_id=test-client&client_secret=test-secret" http://127.0.0.1:18080/token | jq -r .access_token)
+ROUTER_JWT=$(curl -s -X POST -d "grant_type=client_credentials&client_id=router-client&client_secret=test-secret" http://127.0.0.1:18080/token | jq -r .access_token)
 
 docker run --name sam-router \
   --network sam-net \
