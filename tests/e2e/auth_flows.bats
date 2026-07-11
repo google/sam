@@ -144,3 +144,66 @@ teardown() {
 
   mesh_wait_for_log "${node_name}" "SAM Node Online" 20
 }
+
+@test "Authentication Flow 4: Bootstrap Token Flow (Headless)" {
+  run mesh_start_mock_oidc
+  [[ "$status" -eq 0 ]]
+
+  run mesh_start_hub
+  [[ "$status" -eq 0 ]]
+
+  # 1. Generate bootstrap token via control plane API running in Kubernetes
+  # Create curl pod in background to request token
+  kubectl --context="${KUBECONTEXT}" run curl-token-gen-node \
+    --image=curlimages/curl:8.6.0 \
+    --restart=Never \
+    --overrides='{"spec": {"activeDeadlineSeconds": 30}}' \
+    -- \
+    curl -s -X POST \
+      -H "Content-Type: application/json" \
+      -H "Authorization: Bearer super-secret-admin-token" \
+      -d '{"role": "sam:role:node", "max_usages": 1}' \
+      http://sam-control-plane:8080/admin/bootstrap-tokens
+
+  if ! kubectl --context="${KUBECONTEXT}" wait --for=jsonpath='{.status.phase}'=Succeeded pod/curl-token-gen-node --timeout=15s; then
+    echo "ERROR: Token generation pod failed! Diagnostics:"
+    kubectl --context="${KUBECONTEXT}" describe pod curl-token-gen-node || true
+    kubectl --context="${KUBECONTEXT}" logs pod/curl-token-gen-node || true
+    kubectl --context="${KUBECONTEXT}" delete pod curl-token-gen-node --ignore-not-found || true
+    exit 1
+  fi
+
+  local token_json
+  token_json=$(kubectl --context="${KUBECONTEXT}" logs pod/curl-token-gen-node)
+  kubectl --context="${KUBECONTEXT}" delete pod curl-token-gen-node --ignore-not-found
+
+  local node_token
+  node_token=$(echo "${token_json}" | jq -r .token)
+  [[ -n "${node_token}" && "${node_token}" != "null" ]]
+
+  # 2. Run sam-node join with the bootstrap token
+  local node_name="${MESH_PREFIX}-node-bootstrap"
+  local data_vol="${MESH_PREFIX}-data-bootstrap"
+  docker volume create "${data_vol}"
+  CLEANUP_VOLUMES+=("${data_vol}")
+
+  docker run --name "${node_name}-join" \
+    --network "${MESH_NETWORK}" \
+    $(mesh_get_add_hosts) \
+    -v "${data_vol}:/root/.config/sam-mesh" \
+    "sam-node:local" \
+    join --bootstrap-token "${node_token}" "http://sam-control-plane:8080"
+
+  # 3. Start the node container with stored identity
+  docker run -d \
+    --name "${node_name}" \
+    --network "${MESH_NETWORK}" \
+    $(mesh_get_add_hosts) \
+    -v "${data_vol}:/root/.config/sam-mesh" \
+    "sam-node:local" \
+    run \
+    --hub "http://sam-control-plane:8080"
+  MESH_CONTAINERS+=("${node_name}")
+
+  mesh_wait_for_log "${node_name}" "Using stored identity." 20
+}

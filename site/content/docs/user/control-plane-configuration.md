@@ -153,3 +153,61 @@ Administrators can immediately revoke any active session to disable a node's abi
   }
   ```
 * **Enforcement**: Revoked nodes are marked as banned in the database. When the node next attempts a proactive `/refresh` handshake, the request is denied with a `403 Forbidden` status, and the node's local daemon immediately terminates.
+
+---
+
+## 6. Headless Node Enrollment (Bootstrap Token Flow)
+
+To enroll a headless server, router, or background daemon that cannot complete interactive OIDC authentication, SAM supports a **Bootstrap Token** flow.
+
+### Step 1: Generate a Bootstrap Token
+
+An administrator with the `admin-token` can dynamically generate a time-bounded, single-use bootstrap token:
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer <your-admin-token>" \
+  -H "Content-Type: application/json" \
+  -d '{"role": "sam:role:node", "ttl_hours": 24, "max_usages": 1, "description": "Headless node deployment token"}' \
+  http://<control-plane-ip>:8080/admin/bootstrap-tokens
+```
+
+This returns a JSON response containing the plaintext token:
+```json
+{
+  "id": "62e92ffca...",
+  "token": "sam-bt-72fb0175788dee0...",
+  "role": "sam:role:node",
+  "expires_at": "2026-07-12T15:00:00Z"
+}
+```
+
+### Step 2: Request Enrollment on the Node
+
+Run the node `join` command with the generated token:
+
+```bash
+sam-node join --bootstrap-token sam-bt-72fb0175788dee0... http://<control-plane-ip>:8080
+```
+
+The node submits its enrollment request and waits (polls) for approval.
+
+### Step 3: Approve the Enrollment
+
+Administrators can review pending enrollment requests:
+
+```bash
+# List all pending enrollments
+curl -H "Authorization: Bearer <your-admin-token>" http://<control-plane-ip>:8080/admin/enrollments
+```
+
+To approve the request and issue the node its identity Biscuit:
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer <your-admin-token>" \
+  http://<control-plane-ip>:8080/admin/enrollments/<request-id>/approve
+```
+
+Alternatively, you can boot the control plane with `--auto-approve-enrollment` to automatically approve all valid bootstrap token requests without manual gates.
+

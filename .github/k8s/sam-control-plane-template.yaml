@@ -41,6 +41,8 @@ spec:
       labels:
         app: sam-db-${ENV_NAME}
     spec:
+      securityContext:
+        fsGroup: 999
       containers:
       - name: postgres
         image: postgres:16-alpine
@@ -51,6 +53,8 @@ spec:
           value: sam
         - name: POSTGRES_PASSWORD
           value: sam-secret-password
+        - name: PGDATA
+          value: /var/lib/postgresql/data/pgdata
         ports:
         - containerPort: 5432
           protocol: TCP
@@ -81,9 +85,20 @@ spec:
       labels:
         app: sam-control-plane-${ENV_NAME}
     spec:
+      initContainers:
+      - name: wait-for-db
+        image: busybox:1.36.1
+        command: ['sh', '-c', 'until nc -z -w3 sam-db-${ENV_NAME} 5432; do echo waiting for db; sleep 1; done']
       containers:
       - name: sam-control-plane
         image: ghcr.io/google/sam-control-plane:${IMAGE_TAG}
+        env:
+        - name: ADMIN_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: sam-control-plane-secret-${ENV_NAME}
+              key: admin-token
+              optional: true
         ports:
         - containerPort: 8080
           protocol: TCP
@@ -109,6 +124,7 @@ spec:
         - "--issuer=https://auth.sam-mesh.dev,https://container.googleapis.com/v1/projects/${GCP_PROJECT_ID}/locations/${CLUSTER_REGION}/clusters/${CLUSTER_NAME}"
         - "--allowed-audiences=sam-mesh-audience,sam-hub-audience"
         - "--policy-file=/etc/sam/policies/policies.yaml"
+        - "--admin-token=$(ADMIN_TOKEN)"
         resources:
           requests:
             cpu: 100m

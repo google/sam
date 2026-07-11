@@ -128,7 +128,7 @@ func setupTestServer(t *testing.T, oidcIssuer string) (*Server, storage.Store, s
 		KeyRotationInterval:   12 * time.Hour,
 		KeyGracePeriod:        10 * time.Minute,
 		InsecureSkipTLSVerify: true,
-		BiscuitTimeout:        1 * time.Second,
+		BiscuitTimeout:        10 * time.Second,
 	}
 
 	srv, err := NewServer(opts, store)
@@ -582,6 +582,9 @@ func TestEnrollmentWorkflow(t *testing.T) {
 	}
 	if len(statusResp.BiscuitToken) == 0 {
 		t.Fatalf("biscuit token is empty")
+	}
+	if len(statusResp.HubPublicKey) == 0 {
+		t.Fatalf("hub public key is empty")
 	}
 
 	// Verify Biscuit router rights

@@ -263,15 +263,41 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
     local oidc_node_ip
     oidc_node_ip=$(docker inspect -f "{{(index .NetworkSettings.Networks \"${MESH_NETWORK:-kind}\").IPAddress}}" "${oidc_node}")
 
-    local router_token="super-secret-bootstrap-token"
+    envsubst '$ISSUERS' < tests/e2e/fixtures/control-plane.yaml | kubectl --context="${KUBECONTEXT}" apply -f -
+    kubectl --context="${KUBECONTEXT}" rollout status deployment/sam-db --timeout=60s
+    kubectl --context="${KUBECONTEXT}" rollout status deployment/sam-control-plane --timeout=60s
+
+    # Create curl pod in background to request token
+    kubectl --context="${KUBECONTEXT}" run curl-token-gen \
+      --image=curlimages/curl:8.6.0 \
+      --restart=Never \
+      --overrides='{"spec": {"activeDeadlineSeconds": 30}}' \
+      -- \
+      curl -s -X POST \
+        -H "Content-Type: application/json" \
+        -H "Authorization: Bearer super-secret-admin-token" \
+        -d '{"role": "sam:role:router", "max_usages": 999999}' \
+        http://sam-control-plane:8080/admin/bootstrap-tokens
+
+    if ! kubectl --context="${KUBECONTEXT}" wait --for=jsonpath='{.status.phase}'=Succeeded pod/curl-token-gen --timeout=15s; then
+      echo "ERROR: Token generation pod failed! Diagnostics:"
+      kubectl --context="${KUBECONTEXT}" describe pod curl-token-gen || true
+      kubectl --context="${KUBECONTEXT}" logs pod/curl-token-gen || true
+      kubectl --context="${KUBECONTEXT}" delete pod curl-token-gen --ignore-not-found || true
+      exit 1
+    fi
+
+    local token_json
+    token_json=$(kubectl --context="${KUBECONTEXT}" logs pod/curl-token-gen)
+    kubectl --context="${KUBECONTEXT}" delete pod curl-token-gen --ignore-not-found
+
+    local router_token
+    router_token=$(echo "${token_json}" | jq -r .token)
+    [[ -n "${router_token}" && "${router_token}" != "null" ]]
+
     kubectl --context="${KUBECONTEXT}" create secret generic sam-router-token --from-literal=token="${router_token}" --dry-run=client -o yaml | kubectl --context="${KUBECONTEXT}" apply -f -
 
-    envsubst '$ISSUERS' < tests/e2e/fixtures/control-plane-router.yaml | kubectl --context="${KUBECONTEXT}" apply -f -
-    kubectl --context="${KUBECONTEXT}" rollout restart deployment/sam-db || true
-    kubectl --context="${KUBECONTEXT}" rollout status deployment/sam-db --timeout=60s
-    kubectl --context="${KUBECONTEXT}" rollout restart deployment/sam-control-plane
-    kubectl --context="${KUBECONTEXT}" rollout restart statefulset/sam-router
-    kubectl --context="${KUBECONTEXT}" rollout status deployment/sam-control-plane --timeout=60s
+    kubectl --context="${KUBECONTEXT}" apply -f tests/e2e/fixtures/router.yaml
     kubectl --context="${KUBECONTEXT}" rollout status statefulset/sam-router --timeout=60s
 
     local i

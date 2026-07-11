@@ -40,15 +40,18 @@ Expand-Archive -Path "sam.zip" -DestinationPath "$env:ProgramFiles\sam"
 
 ## 2. Join the Mesh
 
-To register your node with the mesh and obtain a cryptographic identity token (Biscuit), run the OIDC authorization flow. 
+To register your node with the mesh and obtain a cryptographic identity token (Biscuit), you can use either the interactive OIDC authorization flow or the non-interactive bootstrap token flow. 
 
-### Using the Binary
+### Option A: Interactive OIDC Flow (Default)
+
+The interactive flow uses your browser to authenticate your identity against Dex (OIDC):
+
+#### Using the Binary
 ```bash
 sam-node join https://bananas.sam-mesh.dev
 ```
 
-### Using Docker
-Create a local directory to persist your node identity:
+#### Using Docker
 ```bash
 mkdir -p $(pwd)/sam-data
 docker run -it \
@@ -57,7 +60,26 @@ docker run -it \
   join --data-dir /data https://bananas.sam-mesh.dev
 ```
 
-The CLI will output a Device Authorization URL (if headless/Docker) or open your browser (if using the binary natively). Once authenticated, the node registers and saves the identity to `~/.config/sam-mesh/agent.db` (or `/data/agent.db` in Docker).
+The CLI will output a Device Authorization URL (if headless/Docker) or open your browser natively. Once authenticated, the node registers and saves the identity database.
+
+### Option B: Non-Interactive Bootstrap Flow (Headless)
+
+If you are deploying a headless server or router and have a generated bootstrap token from the Control Plane API:
+
+#### Using the Binary
+```bash
+sam-node join --bootstrap-token <your-token> https://bananas.sam-mesh.dev
+```
+
+#### Using Docker
+```bash
+docker run -it \
+  -v $(pwd)/sam-data:/data \
+  ghcr.io/google/sam-node:latest \
+  join --data-dir /data --bootstrap-token <your-token> https://bananas.sam-mesh.dev
+```
+
+*Note: In non-interactive mode, unless the Hub runs with `--auto-approve-enrollment`, the enrollment request remains **PENDING** until approved manually by a network administrator.*
 
 ---
 

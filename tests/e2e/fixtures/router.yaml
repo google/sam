@@ -1,0 +1,76 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: sam-router
+spec:
+  clusterIP: None
+  ports:
+  - port: 4501
+    targetPort: 4501
+    protocol: TCP
+    name: p2p-tcp
+  - port: 4501
+    targetPort: 4501
+    protocol: UDP
+    name: p2p-udp
+  selector:
+    app: sam-router
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: sam-router
+spec:
+  serviceName: "sam-router"
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sam-router
+  template:
+    metadata:
+      labels:
+        app: sam-router
+    spec:
+      containers:
+      - name: sam-router
+        image: sam-router:local
+        ports:
+        - containerPort: 4501
+          hostPort: 4501
+          protocol: TCP
+        - containerPort: 4501
+          hostPort: 4501
+          protocol: UDP
+        env:
+        - name: ROUTER_NODE_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.hostIP
+        args:
+        - "--control-plane=http://sam-control-plane:8080"
+        - "--listen=/ip4/0.0.0.0/tcp/4501"
+        - "--listen=/ip4/0.0.0.0/udp/4501/quic-v1"
+        - "--external-addr=/dns4/sam-router/tcp/4501"
+        - "--external-addr=/dns4/sam-router/udp/4501/quic-v1"
+        - "--external-addr=/ip4/$(ROUTER_NODE_IP)/tcp/4501"
+        - "--external-addr=/ip4/$(ROUTER_NODE_IP)/udp/4501/quic-v1"
+        - "--bootstrap-token-path=/var/run/secrets/tokens/sa-token"
+        - "--keys-path=/data/router.key"
+        - "--allow-loopback"
+        - "--lease-renew-interval=5s"
+        - "--log-level=debug"
+        volumeMounts:
+        - name: router-data
+          mountPath: /data
+        - name: router-token-vol
+          mountPath: /var/run/secrets/tokens
+          readOnly: true
+      volumes:
+      - name: router-data
+        emptyDir: {}
+      - name: router-token-vol
+        secret:
+          secretName: sam-router-token
+          items:
+          - key: token
+            path: sa-token
