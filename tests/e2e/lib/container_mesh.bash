@@ -263,15 +263,28 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
     local oidc_node_ip
     oidc_node_ip=$(docker inspect -f "{{(index .NetworkSettings.Networks \"${MESH_NETWORK:-kind}\").IPAddress}}" "${oidc_node}")
 
-    local router_token="super-secret-bootstrap-token"
+    envsubst '$ISSUERS' < tests/e2e/fixtures/control-plane.yaml | kubectl --context="${KUBECONTEXT}" apply -f -
+    kubectl --context="${KUBECONTEXT}" rollout status deployment/sam-db --timeout=60s
+    kubectl --context="${KUBECONTEXT}" rollout status deployment/sam-control-plane --timeout=60s
+
+    local cp_pod
+    cp_pod=$(kubectl --context="${KUBECONTEXT}" get pod -l app=sam-control-plane -o jsonpath='{.items[0].metadata.name}')
+
+    local token_json
+    token_json=$(kubectl --context="${KUBECONTEXT}" exec "${cp_pod}" -c sam-control-plane -- \
+      wget -qO- \
+        --post-data='{"role": "sam:role:router", "max_usages": 999999}' \
+        --header="Content-Type: application/json" \
+        --header="Authorization: Bearer super-secret-admin-token" \
+        http://localhost:8080/admin/bootstrap-tokens)
+
+    local router_token
+    router_token=$(echo "${token_json}" | jq -r .token)
+    [[ -n "${router_token}" && "${router_token}" != "null" ]]
+
     kubectl --context="${KUBECONTEXT}" create secret generic sam-router-token --from-literal=token="${router_token}" --dry-run=client -o yaml | kubectl --context="${KUBECONTEXT}" apply -f -
 
-    envsubst '$ISSUERS' < tests/e2e/fixtures/control-plane-router.yaml | kubectl --context="${KUBECONTEXT}" apply -f -
-    kubectl --context="${KUBECONTEXT}" rollout restart deployment/sam-db || true
-    kubectl --context="${KUBECONTEXT}" rollout status deployment/sam-db --timeout=60s
-    kubectl --context="${KUBECONTEXT}" rollout restart deployment/sam-control-plane
-    kubectl --context="${KUBECONTEXT}" rollout restart statefulset/sam-router
-    kubectl --context="${KUBECONTEXT}" rollout status deployment/sam-control-plane --timeout=60s
+    kubectl --context="${KUBECONTEXT}" apply -f tests/e2e/fixtures/router.yaml
     kubectl --context="${KUBECONTEXT}" rollout status statefulset/sam-router --timeout=60s
 
     local i

@@ -123,30 +123,7 @@ func (s *Server) Start() error {
 		}
 	}
 
-	// Seed the initial command-line bootstrap token if provided
-	if s.config.BootstrapToken != "" {
-		hash := sha256.Sum256([]byte(s.config.BootstrapToken))
-		tokenID := fmt.Sprintf("%x", hash)
-		_, err := s.store.GetBootstrapToken(ctx, tokenID)
-		if err == storage.ErrNotFound {
-			logger.Infof("Seeding initial bootstrap token into database (ID: %s)...", tokenID)
-			tokenRecord := &storage.BootstrapToken{
-				ID:          tokenID,
-				TokenHash:   tokenID,
-				Role:        api.RoleRouter,
-				MaxUsages:   10000,
-				UsagesCount: 0,
-				Description: "Command Line Seeded Token",
-				CreatedAt:   time.Now(),
-				ExpiresAt:   time.Now().Add(365 * 24 * time.Hour),
-			}
-			if err := s.store.SaveBootstrapToken(ctx, tokenRecord); err != nil {
-				return fmt.Errorf("failed to save initial bootstrap token: %w", err)
-			}
-		} else if err != nil {
-			return fmt.Errorf("failed to check initial bootstrap token state: %w", err)
-		}
-	}
+
 
 	// Initialize OIDC Providers
 	if err := s.discoverProviders(); err != nil {

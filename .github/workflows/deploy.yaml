@@ -222,6 +222,20 @@ jobs:
 
 
 
+      - name: Provision Control Plane Secrets
+        run: |
+          export ENV_NAME="${{ vars.ENV_NAME }}"
+          export NAMESPACE="sam-${ENV_NAME}"
+          if ! kubectl get secret sam-control-plane-secret-${ENV_NAME} -n ${NAMESPACE} >/dev/null 2>&1; then
+            echo "Generating a new random 32-byte hex key for admin-token..."
+            ADMIN_TOKEN=$(openssl rand -hex 32)
+            kubectl create secret generic sam-control-plane-secret-${ENV_NAME} \
+              --namespace=${NAMESPACE} \
+              --from-literal=admin-token="${ADMIN_TOKEN}"
+          else
+            echo "sam-control-plane-secret-${ENV_NAME} already exists in namespace ${NAMESPACE}. Skipping generation."
+          fi
+
       - name: Deploy Control Plane and Routers
         run: |
           print_rollout_diagnostics() {
