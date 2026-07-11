@@ -267,16 +267,18 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
     kubectl --context="${KUBECONTEXT}" rollout status deployment/sam-db --timeout=60s
     kubectl --context="${KUBECONTEXT}" rollout status deployment/sam-control-plane --timeout=60s
 
-    local cp_pod
-    cp_pod=$(kubectl --context="${KUBECONTEXT}" get pod -l app=sam-control-plane -o jsonpath='{.items[0].metadata.name}')
-
     local token_json
-    token_json=$(kubectl --context="${KUBECONTEXT}" exec "${cp_pod}" -c sam-control-plane -- \
-      wget -qO- \
-        --post-data='{"role": "sam:role:router", "max_usages": 999999}' \
-        --header="Content-Type: application/json" \
-        --header="Authorization: Bearer super-secret-admin-token" \
-        http://localhost:8080/admin/bootstrap-tokens)
+    token_json=$(kubectl --context="${KUBECONTEXT}" run curl-token-gen \
+      --image=curlimages/curl:8.6.0 \
+      --restart=Never \
+      --rm \
+      -i \
+      -- \
+      curl -s -X POST \
+        -H "Content-Type: application/json" \
+        -H "Authorization: Bearer super-secret-admin-token" \
+        -d '{"role": "sam:role:router", "max_usages": 999999}' \
+        http://sam-control-plane:8080/admin/bootstrap-tokens)
 
     local router_token
     router_token=$(echo "${token_json}" | jq -r .token)
