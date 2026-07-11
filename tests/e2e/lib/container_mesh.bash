@@ -267,18 +267,29 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
     kubectl --context="${KUBECONTEXT}" rollout status deployment/sam-db --timeout=60s
     kubectl --context="${KUBECONTEXT}" rollout status deployment/sam-control-plane --timeout=60s
 
-    local token_json
-    token_json=$(kubectl --context="${KUBECONTEXT}" run curl-token-gen \
+    # Create curl pod in background to request token
+    kubectl --context="${KUBECONTEXT}" run curl-token-gen \
       --image=curlimages/curl:8.6.0 \
       --restart=Never \
-      --rm \
-      -i \
+      --overrides='{"spec": {"activeDeadlineSeconds": 30}}' \
       -- \
       curl -s -X POST \
         -H "Content-Type: application/json" \
         -H "Authorization: Bearer super-secret-admin-token" \
         -d '{"role": "sam:role:router", "max_usages": 999999}' \
-        http://sam-control-plane:8080/admin/bootstrap-tokens)
+        http://sam-control-plane:8080/admin/bootstrap-tokens
+
+    if ! kubectl --context="${KUBECONTEXT}" wait --for=jsonpath='{.status.phase}'=Succeeded pod/curl-token-gen --timeout=15s; then
+      echo "ERROR: Token generation pod failed! Diagnostics:"
+      kubectl --context="${KUBECONTEXT}" describe pod curl-token-gen || true
+      kubectl --context="${KUBECONTEXT}" logs pod/curl-token-gen || true
+      kubectl --context="${KUBECONTEXT}" delete pod curl-token-gen --ignore-not-found || true
+      exit 1
+    fi
+
+    local token_json
+    token_json=$(kubectl --context="${KUBECONTEXT}" logs pod/curl-token-gen)
+    kubectl --context="${KUBECONTEXT}" delete pod curl-token-gen --ignore-not-found
 
     local router_token
     router_token=$(echo "${token_json}" | jq -r .token)
