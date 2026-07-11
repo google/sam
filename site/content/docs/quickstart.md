@@ -20,7 +20,10 @@ curl -sL https://sam-mesh.dev/install.sh | bash
 If you have Go installed, you can compile and install directly from the repository:
 ```bash
 go install github.com/google/sam/cmd/sam-node@latest
-go install github.com/google/sam/cmd/sam-hub@latest
+
+# Optional: if you want to run your own control plane and router:
+go install github.com/google/sam/cmd/sam-control-plane@latest
+go install github.com/google/sam/cmd/sam-router@latest
 ```
 
 ### Option C: PowerShell (Windows)

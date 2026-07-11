@@ -1,0 +1,88 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: sam-router-sa
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sam-router
+  labels:
+    app: sam-router
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sam-router
+  template:
+    metadata:
+      labels:
+        app: sam-router
+    spec:
+      serviceAccountName: sam-router-sa
+      containers:
+      - name: sam-router
+        image: sam-router:local
+        imagePullPolicy: IfNotPresent
+        args:
+        - "--control-plane=http://sam-control-plane:8080"
+        - "--listen=/ip4/0.0.0.0/tcp/4501"
+        - "--listen=/ip4/0.0.0.0/udp/4501/quic-v1"
+        - "--jwt-path=/var/run/secrets/tokens/sam-token"
+        - "--keys-path=/data/router.key"
+        - "--allow-loopback"
+        ports:
+        - containerPort: 4501
+          protocol: TCP
+          name: p2p-tcp
+        - containerPort: 4501
+          protocol: UDP
+          name: p2p-udp
+        volumeMounts:
+        - name: sam-token
+          mountPath: /var/run/secrets/tokens
+          readOnly: true
+        - name: router-data
+          mountPath: /data
+      volumes:
+      - name: sam-token
+        projected:
+          sources:
+          - serviceAccountToken:
+              path: sam-token
+              expirationSeconds: 3600
+              audience: "sam-hub-audience"
+      - name: router-data
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sam-router
+spec:
+  type: LoadBalancer
+  selector:
+    app: sam-router
+  ports:
+  - protocol: TCP
+    port: 4501
+    targetPort: 4501
+    name: p2p-tcp
+  - protocol: UDP
+    port: 4501
+    targetPort: 4501
+    name: p2p-udp

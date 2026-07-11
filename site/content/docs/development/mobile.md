@@ -118,7 +118,7 @@ If you have an active emulator running locally, you can run the full E2E orchest
 ```
 
 #### What the E2E test validates:
-1. Starts a local **Mock OIDC Server** and **sam-hub** process on the host.
+1. Starts a local **Mock OIDC Server** and **sam-control-plane** process on the host.
 2. Registers a dummy tool (`host-tool`) on a host-level **sam-node**.
 3. Boots the **Android Emulator**, installs the FFI-embedded app, and starts the node inside the emulator.
 4. Registers an `emulator-tool` inside the emulator app.

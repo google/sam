@@ -2,7 +2,7 @@
 title: "Kubernetes Deployment and Local Testing Guide"
 linkTitle: "Kubernetes Deployment and Local Testing Guide"
 ---
-This guide explains how to deploy the `sam-hub` in a Kubernetes cluster and how to test it locally with `kind` — using the bundled `make kind-*` targets for a one-command mesh, or a manual setup with `cloud-provider-kind`.
+This guide explains how to deploy the SAM control plane and router in a Kubernetes cluster and how to test it locally with `kind` — using the bundled `make kind-*` targets for a one-command mesh, or a manual setup with `cloud-provider-kind`.
 
 > [!TIP]
 > This guide focuses on local development sandboxing. For production-grade Kubernetes deployments (GKE, EKS, AKS), see the [Production Kubernetes Deployment](../../user/kubernetes-deployment/) guide.
@@ -19,9 +19,9 @@ The repository ships a one-command local mesh under `development/kind/`, driven 
 make kind-up
 ```
 
-This creates a `sam-kind` cluster (one control-plane plus workers for the hub and `node-a`, `node-b`, `node-c`), builds the `sam-hub:local` and `sam-node:local` images, loads them into the cluster, and deploys:
+This creates a `sam-kind` cluster (one control-plane plus workers for the control plane, router, and `node-a`, `node-b`, `node-c`), builds the `sam-control-plane:local`, `sam-router:local`, and `sam-node:local` images, loads them into the cluster, and deploys:
 
-- The **hub**, configured to trust the cluster's own OIDC issuer.
+- The **control plane**, configured to trust the cluster's own OIDC issuer.
 - Three **nodes** declared in `development/kind/mesh-config.yaml`: `node-a` (bare), `node-b` (hosts the `calc-mcp` example service), and `node-c` (hosts the `greeter-mcp` example service).
 
 Nodes authenticate to the hub via **Workload Identity Federation** (projected ServiceAccount tokens), so no static secrets or mock OIDC provider are needed. The hub is exposed to the host on `127.0.0.1:9090` (HTTP enroll) and `127.0.0.1:4001` (libp2p) via a NodePort and the cluster's `extraPortMappings` — `cloud-provider-kind` is not required.
@@ -136,18 +136,20 @@ The manifests for the mock OIDC provider are available in [mock-oidc.yaml](manif
 
 [mock-oidc.yaml](manifests/mock-oidc.yaml ':include')
 
-### SAM Hub Manifests
+### SAM Control Plane and Router Manifests
 
-The manifests for the SAM Hub are available in [sam-hub.yaml](manifests/sam-hub.yaml).
+The manifests for the SAM Control Plane and Router are available in [sam-control-plane.yaml](manifests/sam-control-plane.yaml) and [sam-router.yaml](manifests/sam-router.yaml).
 
-[sam-hub.yaml](manifests/sam-hub.yaml ':include')
+[sam-control-plane.yaml](manifests/sam-control-plane.yaml ':include')
+
+[sam-router.yaml](manifests/sam-router.yaml ':include')
 
 ### Configuring Google OIDC (Optional)
 
 To use Google as the OIDC provider instead of the mock provider:
 
 2.  **No Redirect URI required:** Because `sam-node` implements RFC 8252 (dynamic loopback port selection for native apps), you don't need to configure a specific Redirect URI when setting up a Desktop app. The authorization server will automatically allow loopback redirects.
-3.  **Update Secret:** Update the `sam-hub-secret` in `sam-hub.yaml` with your Google credentials:
+3.  **Update Secret:** Update the `sam-control-plane-secret` in `sam-control-plane.yaml` with your Google credentials:
     ```yaml
     SAM_OIDC_ISSUER: "https://accounts.google.com"
     SAM_OIDC_ID: "<your-client-id>.apps.googleusercontent.com"
@@ -169,7 +171,8 @@ cloud-provider-kind
 
 #### Step 3: Load Images into Kind
 ```bash
-kind load docker-image sam-hub:local --name sam-test
+kind load docker-image sam-control-plane:local --name sam-test
+kind load docker-image sam-router:local --name sam-test
 kind load docker-image sam-node:local --name sam-test
 ```
 
@@ -178,19 +181,21 @@ kind load docker-image sam-node:local --name sam-test
 If using the **Mock OIDC Provider**:
 ```bash
 kubectl apply -f mock-oidc.yaml
-kubectl apply -f sam-hub.yaml
+kubectl apply -f sam-control-plane.yaml
+kubectl apply -f sam-router.yaml
 ```
 
 If using **Google OIDC**:
 ```bash
-kubectl apply -f sam-hub.yaml
+kubectl apply -f sam-control-plane.yaml
+kubectl apply -f sam-router.yaml
 ```
 
 #### Step 5: Get the External IP
 You can use the following command to extract the allocated IP into an environment variable:
 
 ```bash
-HUB_IP=$(kubectl get svc sam-hub -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+HUB_IP=$(kubectl get svc sam-control-plane -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
 ```
 
 ---
@@ -262,7 +267,7 @@ spec:
         command: ["sam-node", "run"]
         args:
         - "--hub"
-        - "http://sam-hub:9090"
+        - "http://sam-control-plane:8080"
         - "--oidc-issuer"
         - "http://mock-oidc:18080"
         - "--client-id"
@@ -313,7 +318,7 @@ sam-node run
 #### 3. Workload Identity Federation (Secretless Kubernetes)
 *   **Description:** The current best practice in Kubernetes. It removes the need for static secrets entirely. The machine proves its identity based on where it is running by presenting a ServiceAccount token (a signed JWT issued by the K8s API).
 *   **Use Case:** Production Kubernetes deployments.
-*   **How it works:** The Pod has a ServiceAccount token mounted. The Pod presents this token to the `sam-hub`. The hub verifies it by calling back to the Kubernetes OIDC discovery endpoint.
+*   **How it works:** The Pod has a ServiceAccount token mounted. The Pod presents this token to the `sam-control-plane`. The control plane verifies it by calling back to the Kubernetes OIDC discovery endpoint.
 *   **How to use:** Pass the path to the mounted ServiceAccount token to the `--jwt-path` flag.
 *   **Example:**
 ```bash
@@ -322,13 +327,13 @@ sam-node run \
   --jwt-path "/var/run/secrets/kubernetes.io/serviceaccount/token"
 ```
 > [!NOTE]
-> The `sam-hub` must be configured to trust the Kubernetes API server as an OIDC issuer for this flow to work.
+> The `sam-control-plane` must be configured to trust the Kubernetes API server as an OIDC issuer for this flow to work.
 
 ---
 
 ## 5. Configuring Workload Identity in Kubernetes
 
-Workload Identity allows `sam-node` pods to authenticate with the `sam-hub` using their Kubernetes ServiceAccount token, removing the need for static credentials.
+Workload Identity allows `sam-node` pods to authenticate with the `sam-control-plane` using their Kubernetes ServiceAccount token, removing the need for static credentials.
 
 Here are the exact steps to configure this:
 
@@ -340,16 +345,16 @@ kubectl get --raw /.well-known/openid-configuration | jq -r .issuer
 ```
 (Or check your cloud provider's documentation for the public issuer URL).
 
-### Step 2: Configure the Hub to trust the Kubernetes Issuer
-Update the `sam-hub` deployment to include the Kubernetes issuer URL in the `--issuer` flag.
+### Step 2: Configure the Control Plane to trust the Kubernetes Issuer
+Update the `sam-control-plane` deployment to include the Kubernetes issuer URL in the `--issuer` flag.
 
 If you are using `kind`, the issuer URL is usually `https://kubernetes.default.svc.cluster.local` (internal) or the external URL mapped by kind.
 
-Update `sam-hub.yaml`:
+Update `sam-control-plane.yaml`:
 ```yaml
     spec:
       containers:
-      - name: sam-hub
+      - name: sam-control-plane
         args:
         - "--issuer"
         - "https://accounts.google.com,https://kubernetes.default.svc.cluster.local"
@@ -389,7 +394,7 @@ spec:
         command: ["sam-node", "run"]
         args:
         - "--hub"
-        - "http://sam-hub:9090"
+        - "http://sam-control-plane:8080"
         - "--jwt-path"
         - "/var/run/secrets/tokens/sam-token"
         volumeMounts:
@@ -403,5 +408,5 @@ spec:
           - serviceAccountToken:
               path: sam-token
               expirationSeconds: 3600
-              audience: "sam-hub-audience" # Match this with what the hub expects
+              audience: "sam-hub-audience" # Match this with what the control plane expects
 ```

@@ -276,7 +276,7 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
 
     kubectl --context="${KUBECONTEXT}" create secret generic sam-router-token --from-literal=token="${router_token}" --dry-run=client -o yaml | kubectl --context="${KUBECONTEXT}" apply -f -
 
-    envsubst '$ISSUERS' < tests/e2e/fixtures/sam-hub.yaml | kubectl --context="${KUBECONTEXT}" apply -f -
+    envsubst '$ISSUERS' < tests/e2e/fixtures/control-plane-router.yaml | kubectl --context="${KUBECONTEXT}" apply -f -
     kubectl --context="${KUBECONTEXT}" rollout restart deployment/sam-db || true
     kubectl --context="${KUBECONTEXT}" rollout status deployment/sam-db --timeout=60s
     kubectl --context="${KUBECONTEXT}" rollout restart deployment/sam-control-plane

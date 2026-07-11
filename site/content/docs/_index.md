@@ -11,7 +11,7 @@ Instead of exposing your agent's tools (like local scripts, LLM endpoints, or in
 **Security & Trust Boundaries (Read This First!)**
 * **Isolated by Default:** You do NOT join any mesh by default. You must explicitly configure the control plane (Hub) you want to join.
 * **Closed by Default:** Joining a mesh does not expose your tools. By default, your node does not allow any services to be reached by others. You must explicitly configure policies to share tools.
-* **Bring Your Own Control Plane (DIY):** While we offer public testnets, the core design allows you to host your own `sam-hub` control plane. You retain 100% control over your data, identities, and authorization policies.
+* **Bring Your Own Control Plane (DIY):** While we offer public testnets, the core design allows you to host your own SAM control plane. You retain 100% control over your data, identities, and authorization policies.
 
 ---
 
@@ -33,5 +33,6 @@ Compile from source, run local clusters, host your own control plane, or execute
 
 ## Architecture
 
-*   **`sam-hub`**: The control plane for identity mapping, token issuing, and policy distribution.
+*   **`sam-control-plane`**: The control plane for identity mapping, token issuing, and policy distribution.
+*   **`sam-router`**: The GossipSub routing overlays and bootstrap points for the P2P mesh.
 *   **`sam-node`**: The P2P nodes providing the mesh transport layer, self-healing connectivity, and local Model Context Protocol (MCP) HTTP interfaces.

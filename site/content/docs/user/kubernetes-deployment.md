@@ -12,15 +12,18 @@ This guide explains how to deploy a production-grade SAM cluster (Hub, DNS synch
 
 A production SAM deployment consists of:
 *   **Dex (OIDC Provider)**: Serves as the identity bridge, federation point, and login broker.
-*   **SAM Hub (`sam-hub`)**: Runs as a **StatefulSet** to maintain stable network identity. P2P nodes query these bootstrap pods to connect to the mesh.
-*   **DNS Sync CronJob**: Dynamically queries the StatefulSet pod IP addresses and updates DNS A/AAAA records for P2P bootstrap resolution.
-*   **SAM Nodes (`sam-node`)**: Deployed as containerized gateways that authenticate securely to the hub using Kubernetes Workload Identity (ServiceAccount token projection).
+*   **SAM Control Plane (`sam-control-plane`)**: Runs as a stateless **Deployment** to verify OIDC tokens and issue capabilities (Biscuits) based on identity policies.
+*   **SAM Router (`sam-router`)**: Runs as a **StatefulSet** to maintain stable network identity. P2P nodes use these bootstrap routers to connect to the GossipSub mesh overlay.
+*   **DNS Sync CronJob**: Dynamically queries the `sam-router` StatefulSet pod IP addresses and updates DNS A/AAAA records for P2P bootstrap resolution.
+*   **SAM Nodes (`sam-node`)**: Deployed as containerized gateways that authenticate securely to the control plane using Kubernetes Workload Identity (ServiceAccount token projection).
 
 ```mermaid
 graph TD
     User([User / Client]) -->|HTTPS / OIDC| Dex[Dex Identity Bridge]
-    Node[sam-node Gateway Pod] -->|ServiceAccount Token| Hub[sam-hub StatefulSet]
-    Hub -->|OIDC Discovery Check| Dex
+    Node[sam-node Gateway Pod] -->|HTTPS Enroll| CP[sam-control-plane Deployment]
+    Router[sam-router StatefulSet] -->|HTTPS Enroll| CP
+    Node -->|P2P Mesh Overlay| Router
+    CP -->|OIDC Discovery Check| Dex
     Cron[DNS Sync CronJob] -->|Poll Pod IPs| K8sApi[Kubernetes API]
     Cron -->|Update A Records| CloudDNS[Cloud DNS / DNS Registry]
     Node -->|Bootstrap DNS Resolution| CloudDNS
@@ -86,26 +89,17 @@ kubectl rollout status deployment/dex -n dex
 
 ---
 
-## 3. Step 2: Deploying the SAM Hub
+## 3. Step 2: Deploying SAM Control Plane and Router
 
-The SAM Hub must have a stable network identifier (multiaddr) so nodes can discover it.
+The Control Plane verifies OIDC tokens and manages access policies. The Routers handle peer discovery and routing within the GossipSub mesh.
 
-### 1. Generate the Hub Private Key Secret
-Generate and save a random 32-byte signing seed key:
-```bash
-HUB_KEY=$(openssl rand -hex 32)
-kubectl create secret generic sam-hub-secret \
-  --namespace=sam \
-  --from-literal=sam-hub-key="${HUB_KEY}"
-```
-
-### 2. Configure Access Control policies (`policies.yaml`)
-Map identities (ServiceAccounts or email handles) to authorized roles. Save this as a ConfigMap:
+### 1. Configure Access Control Policies (`policies.yaml`)
+Create a ConfigMap defining your global mesh access rules:
 ```yaml
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: sam-hub-policies
+  name: sam-control-plane-policies
   namespace: sam
 data:
   policies.yaml: |
@@ -115,43 +109,88 @@ data:
         role: "node-role"
     roles:
       node-role:
-        mcp:
-          allowed_services:
-            - "system:sam.catalog"
+        allowed_services:
+          - "*"
+        allowed_targets:
+          - "*"
 ```
 ```bash
 kubectl apply -f policies-configmap.yaml
 ```
 
-### 3. Deploy the Hub StatefulSet
-Deploy a StatefulSet to allocate stable hostnames (`sam-hub-0`, `sam-hub-1`):
+### 2. Deploy SAM Control Plane
+The Control Plane is stateless and can scale horizontally. It connects to a shared PostgreSQL database to persist active leases and rotated capability signing keys.
+
 ```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sam-control-plane
+  namespace: sam
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: sam-control-plane
+  template:
+    metadata:
+      labels:
+        app: sam-control-plane
+    spec:
+      containers:
+      - name: sam-control-plane
+        image: ghcr.io/google/sam-control-plane:latest
+        args:
+        - "--bind-address=0.0.0.0:8080"
+        - "--db-driver=postgres"
+        - "--db-dsn=postgres://sam:password@sam-db-service:5432/sam_mesh?sslmode=disable"
+        - "--issuer=https://AUTH.YOUR-DOMAIN.COM"
+        - "--allowed-audiences=YOUR-CLIENT-AUDIENCE"
+        - "--policy-file=/etc/sam/policies/policies.yaml"
+        ports:
+        - containerPort: 8080
+          name: http
+        volumeMounts:
+        - name: policies-volume
+          mountPath: /etc/sam/policies
+          readOnly: true
+      volumes:
+      - name: policies-volume
+        configMap:
+          name: sam-control-plane-policies
+```
+
+### 3. Deploy SAM Router StatefulSet
+The Router must be deployed as a StatefulSet to allocate a persistent volume for storing its libp2p identity key, ensuring a stable Peer ID across pod restarts.
+
+```yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: sam-router-sa
+  namespace: sam
+---
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: sam-hub
+  name: sam-router
   namespace: sam
 spec:
-  serviceName: "sam-hub"
+  serviceName: "sam-router"
   replicas: 3
+  selector:
+    matchLabels:
+      app: sam-router
   template:
+    metadata:
+      labels:
+        app: sam-router
     spec:
+      serviceAccountName: sam-router-sa
       containers:
-      - name: sam-hub
-        image: ghcr.io/google/sam-hub:latest
-        env:
-        - name: HOST_IP
-          valueFrom:
-            fieldRef:
-              fieldPath: status.hostIP
-        - name: SAM_HUB_KEY
-          valueFrom:
-            secretKeyRef:
-              name: sam-hub-secret
-              key: sam-hub-key
+      - name: sam-router
+        image: ghcr.io/google/sam-router:latest
         ports:
-        - containerPort: 9090
-          name: metrics
         - containerPort: 4501
           protocol: TCP
           name: p2p-tcp
@@ -159,19 +198,33 @@ spec:
           protocol: UDP
           name: p2p-udp
         args:
+        - "--control-plane=http://sam-control-plane.sam.svc.cluster.local:8080"
         - "--listen=/ip4/0.0.0.0/tcp/4501"
         - "--listen=/ip4/0.0.0.0/udp/4501/quic-v1"
-        - "--external-multiaddr=/dnsaddr/BOOTSTRAP.YOUR-DOMAIN.COM"
-        - "--issuer=https://AUTH.YOUR-DOMAIN.COM"
-        - "--allowed-audiences=YOUR-CLI-AUDIENCE"
-        - "--policy-file=/etc/sam/policies/policies.yaml"
+        - "--jwt-path=/var/run/secrets/tokens/sam-token"
+        - "--keys-path=/data/router.key"
         volumeMounts:
-        - name: policies-volume
-          mountPath: /etc/sam/policies
+        - name: sam-token
+          mountPath: /var/run/secrets/tokens
+          readOnly: true
+        - name: router-data
+          mountPath: /data
       volumes:
-      - name: policies-volume
-        configMap:
-          name: sam-hub-policies
+      - name: sam-token
+        projected:
+          sources:
+          - serviceAccountToken:
+              path: sam-token
+              expirationSeconds: 3600
+              audience: "sam-hub-audience"
+  volumeClaimTemplates:
+  - metadata:
+      name: router-data
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: 1Gi
 ```
 
 ---
@@ -182,7 +235,7 @@ In a decentralized DHT network, nodes need stable DNS multiaddrs (`/dnsaddr/BOOT
 
 ### DNS Sync CronJob Example
 The sync script:
-1. Queries the Kubernetes API for the external/internal IP addresses of the `sam-hub` pods.
+1. Queries the Kubernetes API for the external/internal IP addresses of the `sam-router` pods.
 2. Updates your Cloud DNS zone (e.g. Google Cloud DNS, AWS Route53) dynamically.
 3. Announce new multiaddrs via TXT records.
 
@@ -227,7 +280,7 @@ data:
 ```
 
 ### 3. Deploy Nodes using Token Projection
-Deploy the nodes. We use a `projected` volume to request a short-lived token containing the audience expected by the hub (`sam-hub-audience`):
+Deploy the nodes. We use a `projected` volume to request a short-lived token containing the audience expected by the control plane (`sam-hub-audience`):
 
 ```yaml
 apiVersion: apps/v1
@@ -246,7 +299,7 @@ spec:
         args: 
           - "run"
           - "--config=/etc/sam/sam-node.yaml"
-          - "--hub=http://sam-hub.sam.svc.cluster.local:9090"
+          - "--hub=http://sam-control-plane.sam.svc.cluster.local:8080"
           - "--jwt-path=/var/run/secrets/tokens/sam-token"
           - "--api-token=secret-token"
         volumeMounts:
@@ -265,7 +318,7 @@ spec:
           - serviceAccountToken:
               path: sam-token
               expirationSeconds: 3600
-              audience: "sam-hub-audience"
+              audience: "sam-hub-audience" # Match this with what the control plane expects
 ```
 
 ---

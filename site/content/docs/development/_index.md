@@ -29,24 +29,32 @@ make build
 
 This compiles and generates the following binaries under `./bin/`:
 
-- `./bin/sam-hub`: The OIDC identity bridge and cryptographic Biscuit token issuer.
+- `./bin/sam-control-plane`: The OIDC identity bridge and cryptographic Biscuit token issuer.
+- `./bin/sam-router`: The GossipSub routing overlays and bootstrap points for the P2P mesh.
 - `./bin/sam-node`: The mesh agent node CLI supporting `join` and `run` commands.
 - `./bin/mcp-client`: A CLI-based utility to interact with MCP servers.
 
 ---
 
-## Running a Local Dev Hub
+## Running a Local Dev Control Plane and Router
 
-To run `sam-hub` locally for testing, you must supply OIDC issuer configurations and a 32-byte hexadecimal seed key:
+To run the control plane and router locally for testing:
 
+1. **Start the Control Plane**:
 ```bash
-# Generate a random 32-byte key for biscuit signing
-export SAM_HUB_KEY=$(openssl rand -hex 32)
 export SAM_OIDC_ISSUER=https://issuer.example.com
 export SAM_OIDC_ID=sam-client
 export SAM_OIDC_SECRET=sam-secret
 
-./bin/sam-hub
+./bin/sam-control-plane --issuer=$SAM_OIDC_ISSUER --allowed-audiences=sam-mesh-audience
+```
+
+2. **Start the Router**:
+```bash
+./bin/sam-router \
+  --control-plane=http://localhost:8080 \
+  --listen=/ip4/127.0.0.1/tcp/4501 \
+  --api-token=devtoken
 ```
 
 ---
@@ -62,13 +70,13 @@ make test
 ```
 
 ### 2. Local E2E Tests (BATS)
-Validates local command-line behaviors for `sam-node` and `sam-hub`:
+Validates local command-line behaviors for `sam-node`, `sam-control-plane`, and `sam-router`:
 ```bash
 make test-e2e
 ```
 
 ### 3. Containerized Mesh E2E (BATS)
-Builds local Docker images, spins up a mock OIDC server, runs `sam-hub` and multiple `sam-node` containers in a local bridge network, and performs end-to-end device flows and tool discovery:
+Builds local Docker images, spins up a mock OIDC server, runs control-plane, router, and multiple `sam-node` containers in a local bridge network, and performs end-to-end device flows and tool discovery:
 ```bash
 make test-e2e-container
 ```
@@ -80,10 +88,10 @@ make test-e2e-container
 For end-to-end integration testing in a local Kubernetes environment, the repository provides `make` targets that stand up a complete mesh in `kind` with a single command:
 
 ```bash
-make kind-up          # create the sam-kind cluster, build+load images, deploy hub + nodes
+make kind-up          # create the sam-kind cluster, build+load images, deploy control-plane + router + nodes
 make kind-local-node  # enroll a locally-built ./bin/sam-node into the mesh
 make kind-e2e-mesh    # run the end-to-end discover-and-call check
 make kind-down        # tear the cluster down
 ```
 
-`make kind-up` builds the `sam-hub:local` and `sam-node:local` images, creates a `sam-kind` cluster, and deploys the hub plus the nodes declared in `development/kind/mesh-config.yaml`. See the [Kubernetes Deployment and Local Testing Guide](kubernetes-deployment/#1-local-testing-with-kind) for details.
+`make kind-up` builds the `sam-control-plane:local`, `sam-router:local`, and `sam-node:local` images, creates a `sam-kind` cluster, and deploys the control-plane and router plus the nodes declared in `development/kind/mesh-config.yaml`. See the [Kubernetes Deployment and Local Testing Guide](kubernetes-deployment/#1-local-testing-with-kind) for details.
