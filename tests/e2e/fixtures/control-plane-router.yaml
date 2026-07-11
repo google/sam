@@ -137,6 +137,9 @@ spec:
         - "--policy-file=/etc/sam/policy.yaml"
         - "--insecure-skip-tls-verify"
         - "--lease-duration=15s"
+        - "--admin-token=super-secret-admin-token"
+        - "--bootstrap-token=super-secret-bootstrap-token"
+        - "--auto-approve-enrollment"
         - "--log-level=debug"
         volumeMounts:
         - name: config-volume
@@ -203,7 +206,7 @@ spec:
         - "--external-addr=/dns4/sam-router/udp/4501/quic-v1"
         - "--external-addr=/ip4/$(ROUTER_NODE_IP)/tcp/4501"
         - "--external-addr=/ip4/$(ROUTER_NODE_IP)/udp/4501/quic-v1"
-        - "--jwt-path=/var/run/secrets/tokens/sa-token"
+        - "--bootstrap-token-path=/var/run/secrets/tokens/sa-token"
         - "--keys-path=/data/router.key"
         - "--allow-loopback"
         - "--lease-renew-interval=5s"

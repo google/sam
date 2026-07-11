@@ -130,7 +130,7 @@ func TestMintBiscuitToken(t *testing.T) {
 		t.Errorf("Expected mapped role 'canary-role' to be authorized: %v", err)
 	}
 
-	// Case 3: Unmapped OIDC group and undefined direct role
+	// Case 3: Unmapped OIDC group and undefined direct role -> falls back to sam:role:node
 	claims3 := jwt.MapClaims{
 		"groups": []any{"unknown-group"},
 		"roles":  []any{"undefined-role"},
@@ -151,13 +151,13 @@ func TestMintBiscuitToken(t *testing.T) {
 		{
 			Head: biscuit.Predicate{Name: "allow", IDs: []biscuit.Term{}},
 			Body: []biscuit.Predicate{
-				{Name: "role", IDs: []biscuit.Term{biscuit.Variable("any_role")}},
+				{Name: "role", IDs: []biscuit.Term{biscuit.String(api.RoleNode)}},
 			},
 		},
 	}, Kind: biscuit.PolicyKindAllow}
 	authorizer3.AddPolicy(rule3)
-	if err := authorizer3.Authorize(); err == nil {
-		t.Error("Expected authorizer to fail when checking for any roles in undefined configuration")
+	if err := authorizer3.Authorize(); err != nil {
+		t.Errorf("Expected authorizer to pass fallback role '%s', got err: %v", api.RoleNode, err)
 	}
 
 	// Case 4: GKE Workload Identity projected token (no groups claim, sub-based mapping)
@@ -615,5 +615,111 @@ func TestMintBiscuitToken_FactDeduplication(t *testing.T) {
 
 	if len(biscuitData) == 0 {
 		t.Error("Expected valid biscuit data, got empty")
+	}
+}
+
+func TestMintBootstrapBiscuitToken(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	privNode, _, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dummyPeer, err := peer.IDFromPrivateKey(privNode)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	policy := &api.PolicyConfig{
+		Roles: map[string]api.RolePolicy{
+			"custom-node-role": {
+				AllowedServices: []string{"mcp:service1"},
+			},
+		},
+	}
+
+	// Case 1: Router Role
+	biscuitData1, err := MintBootstrapBiscuitToken(priv, dummyPeer, api.RoleRouter, time.Now().Add(1*time.Hour), policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	b1, err := biscuit.Unmarshal(biscuitData1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authorizer1, err := b1.Authorizer(pub, biscuit.WithWorldOptions(datalog.WithMaxDuration(500*time.Millisecond)))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify right("relay") fact is present
+	checkRelay := biscuit.Check{Queries: []biscuit.Rule{
+		{
+			Body: []biscuit.Predicate{
+				{Name: api.FactRight, IDs: []biscuit.Term{biscuit.String(api.RightRelay)}},
+			},
+		},
+	}}
+	authorizer1.AddCheck(checkRelay)
+
+	// Verify target_unrestricted() fact is present
+	checkUnrestricted := biscuit.Check{Queries: []biscuit.Rule{
+		{
+			Body: []biscuit.Predicate{
+				{Name: "target_unrestricted", IDs: []biscuit.Term{}},
+			},
+		},
+	}}
+	authorizer1.AddCheck(checkUnrestricted)
+
+	authorizer1.AddPolicy(biscuit.Policy{Queries: []biscuit.Rule{
+		{
+			Head: biscuit.Predicate{Name: "allow", IDs: []biscuit.Term{}},
+			Body: []biscuit.Predicate{},
+		},
+	}, Kind: biscuit.PolicyKindAllow})
+
+	if err := authorizer1.Authorize(); err != nil {
+		t.Errorf("Expected router facts checks to succeed: %v", err)
+	}
+
+	// Case 2: Custom Node Role
+	biscuitData2, err := MintBootstrapBiscuitToken(priv, dummyPeer, "custom-node-role", time.Now().Add(1*time.Hour), policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	b2, err := biscuit.Unmarshal(biscuitData2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authorizer2, err := b2.Authorizer(pub, biscuit.WithWorldOptions(datalog.WithMaxDuration(500*time.Millisecond)))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify exact match service fact derived from policy
+	checkServiceExact := biscuit.Check{Queries: []biscuit.Rule{
+		{
+			Body: []biscuit.Predicate{
+				{Name: "granted_service_exact", IDs: []biscuit.Term{biscuit.String("mcp"), biscuit.String("service1")}},
+			},
+		},
+	}}
+	authorizer2.AddCheck(checkServiceExact)
+
+	authorizer2.AddPolicy(biscuit.Policy{Queries: []biscuit.Rule{
+		{
+			Head: biscuit.Predicate{Name: "allow", IDs: []biscuit.Term{}},
+			Body: []biscuit.Predicate{},
+		},
+	}, Kind: biscuit.PolicyKindAllow})
+
+	if err := authorizer2.Authorize(); err != nil {
+		t.Errorf("Expected custom node role service checks to succeed: %v", err)
 	}
 }

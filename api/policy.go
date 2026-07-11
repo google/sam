@@ -16,7 +16,7 @@ package api
 
 const (
 	// SystemAuthenticated is a special member string representing any authenticated user.
-	SystemAuthenticated = "system:authenticated"
+	SystemAuthenticated = "sam:system:authenticated"
 )
 
 var (

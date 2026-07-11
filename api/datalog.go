@@ -80,9 +80,20 @@ const (
 	// Example Datalog: allow if role("mesh-member")
 	FactRole = "role"
 
+	// FactRight defines the cryptographically signed capability/right.
+	// Contains: biscuit.String(rightName)
+	// Example Datalog: allow if right("relay")
+	FactRight = "right"
+
+	// RightRelay defines the transport relaying/bridging right.
+	RightRelay = "relay"
+
+	// RightServiceInvoke defines the edge service invocation right.
+	RightServiceInvoke = "service:invoke"
+
 	// Standard role values
-	RoleRouter    = "router"
-	RoleBootstrap = "bootstrap"
+	RoleRouter = "sam:role:router"
+	RoleNode   = "sam:role:node"
 
 	// FactUser defines the subject (username/userID) claim extracted from the OIDC token.
 	// Contains: biscuit.String(username)

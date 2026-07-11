@@ -92,7 +92,7 @@ data:
   policies.yaml: |
     version: "v1alpha1"
     bindings:
-      - members: ["system:authenticated"]
+      - members: ["sam:system:authenticated"]
         role: "public-mesh"
     roles:
       public-mesh:

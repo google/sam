@@ -56,6 +56,33 @@ message EnrollResponse {
   int64 expiration = 5;
 }
 
+enum EnrollmentStatus {
+  ENROLLMENT_STATUS_UNSPECIFIED = 0;
+  ENROLLMENT_STATUS_PENDING = 1;
+  ENROLLMENT_STATUS_APPROVED = 2;
+  ENROLLMENT_STATUS_REJECTED = 3;
+}
+
+message BootstrapEnrollRequest {
+  string bootstrap_token = 1;
+  string peer_id = 2;
+  bytes public_key = 3;
+}
+
+message BootstrapEnrollResponse {
+  EnrollmentStatus status = 1;
+  bytes biscuit_token = 2;         // Populated only if APPROVED
+  int32 poll_interval_seconds = 3; // Recommended polling wait time
+  string error_message = 4;
+  bytes hub_public_key = 5;         // Populated only if APPROVED
+  repeated string hub_addresses = 6; // Populated only if APPROVED
+  int64 expiration = 7;             // Populated only if APPROVED
+}
+
+message EnrollmentStatusRequest {
+  string peer_id = 1;
+}
+
 enum ServiceType {
   SERVICE_TYPE_UNSPECIFIED = 0;
   SERVICE_TYPE_MCP = 1;

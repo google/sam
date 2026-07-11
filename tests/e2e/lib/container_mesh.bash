@@ -263,17 +263,7 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
     local oidc_node_ip
     oidc_node_ip=$(docker inspect -f "{{(index .NetworkSettings.Networks \"${MESH_NETWORK:-kind}\").IPAddress}}" "${oidc_node}")
 
-    local router_token=""
-    local i
-    for ((i=0; i<15; i++)); do
-      router_token=$(curl -s -d "client_id=router-client" http://${oidc_node_ip}:18080/token | jq -r .access_token || true)
-      if [[ -n "${router_token}" && "${router_token}" != "null" ]]; then
-        break
-      fi
-      sleep 0.5
-    done
-    [[ -n "${router_token}" && "${router_token}" != "null" ]]
-
+    local router_token="super-secret-bootstrap-token"
     kubectl --context="${KUBECONTEXT}" create secret generic sam-router-token --from-literal=token="${router_token}" --dry-run=client -o yaml | kubectl --context="${KUBECONTEXT}" apply -f -
 
     envsubst '$ISSUERS' < tests/e2e/fixtures/control-plane-router.yaml | kubectl --context="${KUBECONTEXT}" apply -f -

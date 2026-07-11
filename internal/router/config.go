@@ -27,7 +27,9 @@ type Options struct {
 	KeysSyncInterval   time.Duration
 	LeaseRenewInterval time.Duration
 	OIDCProvider       string // For OIDC enrollment
-	OIDCToken          string // OIDC JWT or bootstrap token for enrollment
+	OIDCToken          string // OIDC JWT token for enrollment
+	BootstrapToken     string // Pre-shared bootstrap token for enrollment
+	BootstrapTokenPath string // File path containing pre-shared bootstrap token
 	JWTPath            string // File path containing OIDC JWT token
 	KeysDBPath         string // Path to save peer private key
 	AllowLoopback      bool

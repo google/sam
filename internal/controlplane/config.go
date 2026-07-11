@@ -32,6 +32,9 @@ type Options struct {
 	InsecureSkipTLSVerify bool
 	BiscuitTimeout        time.Duration
 	PolicyPath            string // Optional: path to bootstrap policy configuration
+	BootstrapToken        string // Optional: pre-shared bootstrap token for bypassing OIDC verification (e.g. for router enrollment)
+	AdminToken            string // Optional: administrative bearer token for protecting policy and enrollment queue REST APIs
+	AutoApproveEnrollment bool   // If true, valid bootstrap token enrollment requests are immediately approved without administrative manual gate
 }
 
 // Default sets default values for control plane options.

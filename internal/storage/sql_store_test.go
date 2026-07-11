@@ -343,3 +343,93 @@ func TestTimezoneComparison(t *testing.T) {
 		t.Fatalf("expected router %s, got %s", peerID, routers[0].PeerID)
 	}
 }
+
+func TestBootstrapTokensAndEnrollmentRequestsOps(t *testing.T) {
+	store := newTestStore(t)
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+
+	// 1. Test BootstrapToken Operations
+	tok := &BootstrapToken{
+		ID:          "token-id-1",
+		TokenHash:   "hash-1",
+		Role:        "sam:role:router",
+		MaxUsages:   5,
+		UsagesCount: 0,
+		Description: "Router join token",
+		CreatedAt:   time.Now().Truncate(time.Second),
+		ExpiresAt:   time.Now().Add(24 * time.Hour).Truncate(time.Second),
+	}
+
+	if err := store.SaveBootstrapToken(ctx, tok); err != nil {
+		t.Fatalf("failed to save bootstrap token: %v", err)
+	}
+
+	ret, err := store.GetBootstrapToken(ctx, tok.ID)
+	if err != nil {
+		t.Fatalf("failed to get bootstrap token: %v", err)
+	}
+	if ret.TokenHash != tok.TokenHash || ret.Role != tok.Role || ret.MaxUsages != tok.MaxUsages {
+		t.Errorf("retrieved token mismatch: %+v", ret)
+	}
+
+	if err := store.IncrementBootstrapTokenUsage(ctx, tok.ID); err != nil {
+		t.Fatalf("failed to increment usage: %v", err)
+	}
+	ret2, _ := store.GetBootstrapToken(ctx, tok.ID)
+	if ret2.UsagesCount != 1 {
+		t.Errorf("expected usage count 1, got %d", ret2.UsagesCount)
+	}
+
+	// 2. Test EnrollmentRequest Operations
+	req := &EnrollmentRequest{
+		ID:           "req-id-1",
+		PeerID:       "peer-id-1",
+		PublicKey:    []byte("my-public-key-bytes"),
+		TokenID:      tok.ID,
+		Status:       api.EnrollmentStatus_ENROLLMENT_STATUS_PENDING,
+		BiscuitToken: nil,
+		CreatedAt:    time.Now().Truncate(time.Second),
+	}
+
+	if err := store.CreateEnrollmentRequest(ctx, req); err != nil {
+		t.Fatalf("failed to create enrollment request: %v", err)
+	}
+
+	gotReq, err := store.GetEnrollmentRequest(ctx, req.PeerID)
+	if err != nil {
+		t.Fatalf("failed to get enrollment request by PeerID: %v", err)
+	}
+	if gotReq.ID != req.ID || gotReq.Status != req.Status || !bytes.Equal(gotReq.PublicKey, req.PublicKey) {
+		t.Errorf("retrieved request mismatch: %+v", gotReq)
+	}
+
+	gotReqByID, err := store.GetEnrollmentRequestByID(ctx, req.ID)
+	if err != nil {
+		t.Fatalf("failed to get enrollment request by ID: %v", err)
+	}
+	if gotReqByID.PeerID != req.PeerID {
+		t.Errorf("retrieved request by ID mismatch: %+v", gotReqByID)
+	}
+
+	list, err := store.ListEnrollmentRequests(ctx)
+	if err != nil {
+		t.Fatalf("failed to list enrollment requests: %v", err)
+	}
+	if len(list) != 1 || list[0].ID != req.ID {
+		t.Errorf("unexpected list size or content: %+v", list)
+	}
+
+	// 3. Test UpdateEnrollmentRequest
+	biscuitToken := []byte("signed-biscuit-token-bytes")
+	err = store.UpdateEnrollmentRequest(ctx, req.ID, api.EnrollmentStatus_ENROLLMENT_STATUS_APPROVED, biscuitToken, "admin-oidc")
+	if err != nil {
+		t.Fatalf("failed to update enrollment request: %v", err)
+	}
+
+	updatedReq, _ := store.GetEnrollmentRequestByID(ctx, req.ID)
+	if updatedReq.Status != api.EnrollmentStatus_ENROLLMENT_STATUS_APPROVED || !bytes.Equal(updatedReq.BiscuitToken, biscuitToken) || updatedReq.ResolvedBy != "admin-oidc" || updatedReq.ResolvedAt == nil {
+		t.Errorf("updated request details mismatch: %+v", updatedReq)
+	}
+}

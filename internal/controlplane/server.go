@@ -18,8 +18,10 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/tls"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -118,6 +120,31 @@ func (s *Server) Start() error {
 		}
 	}
 
+	// Seed the initial command-line bootstrap token if provided
+	if s.config.BootstrapToken != "" {
+		hash := sha256.Sum256([]byte(s.config.BootstrapToken))
+		tokenID := fmt.Sprintf("%x", hash)
+		_, err := s.store.GetBootstrapToken(ctx, tokenID)
+		if err == storage.ErrNotFound {
+			logger.Infof("Seeding initial bootstrap token into database (ID: %s)...", tokenID)
+			tokenRecord := &storage.BootstrapToken{
+				ID:          tokenID,
+				TokenHash:   tokenID,
+				Role:        api.RoleRouter,
+				MaxUsages:   10000,
+				UsagesCount: 0,
+				Description: "Command Line Seeded Token",
+				CreatedAt:   time.Now(),
+				ExpiresAt:   time.Now().Add(365 * 24 * time.Hour),
+			}
+			if err := s.store.SaveBootstrapToken(ctx, tokenRecord); err != nil {
+				return fmt.Errorf("failed to save initial bootstrap token: %w", err)
+			}
+		} else if err != nil {
+			return fmt.Errorf("failed to check initial bootstrap token state: %w", err)
+		}
+	}
+
 	// Initialize OIDC Providers
 	if err := s.discoverProviders(); err != nil {
 		return fmt.Errorf("failed OIDC discovery: %w", err)
@@ -136,6 +163,11 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/keys", s.HandleKeys)
 	mux.HandleFunc("/routers/lease", s.HandleRouterLease)
 	mux.HandleFunc("/policies", s.HandlePolicies)
+	mux.HandleFunc("/enroll", s.HandleEnroll)
+	mux.HandleFunc("/enroll/status", s.HandleEnrollStatus)
+	mux.HandleFunc("/admin/bootstrap-tokens", s.HandleAdminBootstrapTokens)
+	mux.HandleFunc("/admin/enrollments", s.HandleAdminEnrollments)
+	mux.HandleFunc("/admin/enrollments/", s.HandleAdminEnrollmentAction)
 
 	s.httpServer = &http.Server{
 		Handler: mux,
@@ -472,11 +504,6 @@ func (s *Server) HandleRouterLease(w http.ResponseWriter, r *http.Request) {
 				{Name: api.FactRole, IDs: []biscuit.Term{biscuit.String(api.RoleRouter)}},
 			},
 		},
-		{
-			Body: []biscuit.Predicate{
-				{Name: api.FactRole, IDs: []biscuit.Term{biscuit.String(api.RoleBootstrap)}},
-			},
-		},
 	}})
 	authorizer.AddPolicy(api.AllowIfTruePolicy)
 
@@ -614,4 +641,423 @@ func (s *Server) Addr() string {
 		return ""
 	}
 	return s.listener.Addr().String()
+}
+
+func cryptoRandUUID() string {
+	b := make([]byte, 16)
+	_, _ = rand.Read(b)
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:])
+}
+
+func (s *Server) writeEnrollResponse(w http.ResponseWriter, resp *api.BootstrapEnrollResponse) {
+	respData, err := proto.Marshal(resp)
+	if err != nil {
+		http.Error(w, "Failed to serialize response", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/x-protobuf")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(respData)
+}
+
+func (s *Server) writeEnrollError(w http.ResponseWriter, status api.EnrollmentStatus, errMsg string) {
+	s.writeEnrollResponse(w, &api.BootstrapEnrollResponse{
+		Status:       status,
+		ErrorMessage: errMsg,
+	})
+}
+
+// HandleEnroll HTTP POST `/enroll`
+func (s *Server) HandleEnroll(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "Failed to read body", http.StatusBadRequest)
+		return
+	}
+	defer func() { _ = r.Body.Close() }()
+
+	var req api.BootstrapEnrollRequest
+	if err := proto.Unmarshal(body, &req); err != nil {
+		http.Error(w, "Invalid request format", http.StatusBadRequest)
+		return
+	}
+
+	if !s.limiter.Allow() {
+		http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
+		return
+	}
+
+	ctx := r.Context()
+	tokenID := fmt.Sprintf("%x", sha256.Sum256([]byte(req.BootstrapToken)))
+
+	// 1. Get and validate bootstrap token
+	tokenRecord, err := s.store.GetBootstrapToken(ctx, tokenID)
+	if err == storage.ErrNotFound {
+		logger.Errorw("Invalid bootstrap token attempt", "peer_id", req.PeerId)
+		s.writeEnrollError(w, api.EnrollmentStatus_ENROLLMENT_STATUS_REJECTED, "Invalid bootstrap token")
+		return
+	} else if err != nil {
+		logger.Errorf("Failed to retrieve bootstrap token: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	if time.Now().After(tokenRecord.ExpiresAt) {
+		logger.Warnw("Expired bootstrap token used", "peer_id", req.PeerId, "token_id", tokenRecord.ID)
+		s.writeEnrollError(w, api.EnrollmentStatus_ENROLLMENT_STATUS_REJECTED, "Bootstrap token expired")
+		return
+	}
+
+	if tokenRecord.UsagesCount >= tokenRecord.MaxUsages {
+		logger.Warnw("Max usages exceeded for bootstrap token", "peer_id", req.PeerId, "token_id", tokenRecord.ID)
+		s.writeEnrollError(w, api.EnrollmentStatus_ENROLLMENT_STATUS_REJECTED, "Bootstrap token max usages exceeded")
+		return
+	}
+
+	pID, err := peer.Decode(req.PeerId)
+	if err != nil {
+		http.Error(w, "Invalid Peer ID", http.StatusBadRequest)
+		return
+	}
+
+	// 2. Check for existing enrollment request
+	existingReq, err := s.store.GetEnrollmentRequest(ctx, req.PeerId)
+	if err == nil {
+		// Request already exists, return status
+		resp := &api.BootstrapEnrollResponse{
+			Status:       existingReq.Status,
+			BiscuitToken: existingReq.BiscuitToken,
+		}
+		s.writeEnrollResponse(w, resp)
+		return
+	} else if err != storage.ErrNotFound {
+		logger.Errorf("Failed to query enrollment request: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	// 3. Create new enrollment request
+	enrollReq := &storage.EnrollmentRequest{
+		ID:        cryptoRandUUID(),
+		PeerID:    req.PeerId,
+		PublicKey: req.PublicKey,
+		TokenID:   tokenRecord.ID,
+		Status:    api.EnrollmentStatus_ENROLLMENT_STATUS_PENDING,
+		CreatedAt: time.Now(),
+	}
+
+	// Fetch mesh policy
+	policy, err := s.store.GetPolicy(ctx)
+	if err != nil && err != storage.ErrNotFound {
+		logger.Errorf("Failed to retrieve policy: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	// Fetch current signing private key
+	privKey, _, err := s.store.GetCurrentKey(ctx)
+	if err != nil {
+		logger.Errorf("Failed to retrieve signing key: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	if s.config.AutoApproveEnrollment {
+		// Mode A: Auto-Approve
+		tokenTTL := 24 * time.Hour
+		biscuitBytes, err := identity.MintBootstrapBiscuitToken(privKey, pID, tokenRecord.Role, time.Now().Add(tokenTTL), policy)
+		if err != nil {
+			logger.Errorf("Failed to mint bootstrap biscuit: %v", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+
+		enrollReq.Status = api.EnrollmentStatus_ENROLLMENT_STATUS_APPROVED
+		enrollReq.BiscuitToken = biscuitBytes
+		tNow := time.Now()
+		enrollReq.ResolvedAt = &tNow
+		enrollReq.ResolvedBy = "auto-approver"
+
+		if err := s.store.CreateEnrollmentRequest(ctx, enrollReq); err != nil {
+			logger.Errorf("Failed to save enrollment request: %v", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+
+		if err := s.store.IncrementBootstrapTokenUsage(ctx, tokenRecord.ID); err != nil {
+			logger.Errorf("Failed to increment token usage: %v", err)
+		}
+
+		resp := &api.BootstrapEnrollResponse{
+			Status:       api.EnrollmentStatus_ENROLLMENT_STATUS_APPROVED,
+			BiscuitToken: biscuitBytes,
+		}
+		s.writeEnrollResponse(w, resp)
+		return
+	}
+
+	// Mode B: Manual approval queue
+	if err := s.store.CreateEnrollmentRequest(ctx, enrollReq); err != nil {
+		logger.Errorf("Failed to save pending enrollment request: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	resp := &api.BootstrapEnrollResponse{
+		Status:              api.EnrollmentStatus_ENROLLMENT_STATUS_PENDING,
+		PollIntervalSeconds: 30,
+	}
+	s.writeEnrollResponse(w, resp)
+}
+
+// HandleEnrollStatus HTTP GET `/enroll/status`
+func (s *Server) HandleEnrollStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	peerID := r.URL.Query().Get("peer_id")
+	if peerID == "" {
+		http.Error(w, "Missing peer_id parameter", http.StatusBadRequest)
+		return
+	}
+
+	ctx := r.Context()
+	enrollReq, err := s.store.GetEnrollmentRequest(ctx, peerID)
+	if err == storage.ErrNotFound {
+		s.writeEnrollError(w, api.EnrollmentStatus_ENROLLMENT_STATUS_REJECTED, "Enrollment request not found")
+		return
+	} else if err != nil {
+		logger.Errorf("Failed to retrieve enrollment status: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	resp := &api.BootstrapEnrollResponse{
+		Status:       enrollReq.Status,
+		BiscuitToken: enrollReq.BiscuitToken,
+	}
+	if enrollReq.Status == api.EnrollmentStatus_ENROLLMENT_STATUS_PENDING {
+		resp.PollIntervalSeconds = 30
+	}
+	s.writeEnrollResponse(w, resp)
+}
+
+func (s *Server) checkAdminAuth(w http.ResponseWriter, r *http.Request) bool {
+	if s.config.AdminToken == "" {
+		return true
+	}
+	authHeader := r.Header.Get("Authorization")
+	if !strings.HasPrefix(authHeader, "Bearer ") {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return false
+	}
+	token := strings.TrimPrefix(authHeader, "Bearer ")
+	if token != s.config.AdminToken {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return false
+	}
+	return true
+}
+
+// HandleAdminBootstrapTokens HTTP POST `/admin/bootstrap-tokens`
+func (s *Server) HandleAdminBootstrapTokens(w http.ResponseWriter, r *http.Request) {
+	if !s.checkAdminAuth(w, r) {
+		return
+	}
+
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Role        string `json:"role"`
+		TTLHours    int    `json:"ttl_hours"`
+		MaxUsages   int    `json:"max_usages"`
+		Description string `json:"description"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON body", http.StatusBadRequest)
+		return
+	}
+	defer func() { _ = r.Body.Close() }()
+
+	if req.Role == "" {
+		req.Role = api.RoleRouter
+	}
+	if req.TTLHours <= 0 {
+		req.TTLHours = 24
+	}
+	if req.MaxUsages <= 0 {
+		req.MaxUsages = 1
+	}
+
+	randBytes := make([]byte, 16)
+	if _, err := rand.Read(randBytes); err != nil {
+		http.Error(w, "Internal keygen error", http.StatusInternalServerError)
+		return
+	}
+	tokenVal := fmt.Sprintf("sam-bt-%x", randBytes)
+	tokenID := fmt.Sprintf("%x", sha256.Sum256([]byte(tokenVal)))
+
+	tokenRecord := &storage.BootstrapToken{
+		ID:          tokenID,
+		TokenHash:   tokenID,
+		Role:        req.Role,
+		MaxUsages:   req.MaxUsages,
+		UsagesCount: 0,
+		Description: req.Description,
+		CreatedAt:   time.Now(),
+		ExpiresAt:   time.Now().Add(time.Duration(req.TTLHours) * time.Hour),
+	}
+
+	if err := s.store.SaveBootstrapToken(r.Context(), tokenRecord); err != nil {
+		logger.Errorf("Failed to save bootstrap token: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"id":         tokenRecord.ID,
+		"token":      tokenVal,
+		"role":       tokenRecord.Role,
+		"expires_at": tokenRecord.ExpiresAt.Format(time.RFC3339),
+	})
+}
+
+// HandleAdminEnrollments HTTP GET `/admin/enrollments`
+func (s *Server) HandleAdminEnrollments(w http.ResponseWriter, r *http.Request) {
+	if !s.checkAdminAuth(w, r) {
+		return
+	}
+
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	list, err := s.store.ListEnrollmentRequests(r.Context())
+	if err != nil {
+		logger.Errorf("Failed to list enrollment requests: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(list)
+}
+
+// HandleAdminEnrollmentAction HTTP POST `/admin/enrollments/{id}/approve` or `/admin/enrollments/{id}/reject`
+func (s *Server) HandleAdminEnrollmentAction(w http.ResponseWriter, r *http.Request) {
+	if !s.checkAdminAuth(w, r) {
+		return
+	}
+
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	path := strings.TrimPrefix(r.URL.Path, "/admin/enrollments/")
+	parts := strings.Split(path, "/")
+	if len(parts) != 2 {
+		http.Error(w, "Not found", http.StatusNotFound)
+		return
+	}
+	id := parts[0]
+	action := parts[1]
+
+	ctx := r.Context()
+	enrollReq, err := s.store.GetEnrollmentRequestByID(ctx, id)
+	if err == storage.ErrNotFound {
+		http.Error(w, "Enrollment request not found", http.StatusNotFound)
+		return
+	} else if err != nil {
+		logger.Errorf("Failed to query enrollment request: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	if enrollReq.Status != api.EnrollmentStatus_ENROLLMENT_STATUS_PENDING {
+		http.Error(w, "Enrollment request is already resolved", http.StatusConflict)
+		return
+	}
+
+	adminIdentity := "admin"
+
+	if action == "reject" {
+		err = s.store.UpdateEnrollmentRequest(ctx, id, api.EnrollmentStatus_ENROLLMENT_STATUS_REJECTED, nil, adminIdentity)
+		if err != nil {
+			logger.Errorf("Failed to reject enrollment: %v", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("Enrollment rejected"))
+		return
+	}
+
+	if action == "approve" {
+		tokenRecord, err := s.store.GetBootstrapToken(ctx, enrollReq.TokenID)
+		if err != nil {
+			logger.Errorf("Failed to retrieve token for request: %v", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+
+		pID, err := peer.Decode(enrollReq.PeerID)
+		if err != nil {
+			http.Error(w, "Invalid Peer ID stored in request", http.StatusInternalServerError)
+			return
+		}
+
+		policy, err := s.store.GetPolicy(ctx)
+		if err != nil && err != storage.ErrNotFound {
+			logger.Errorf("Failed to retrieve policy: %v", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+
+		privKey, _, err := s.store.GetCurrentKey(ctx)
+		if err != nil {
+			logger.Errorf("Failed to retrieve signing key: %v", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+
+		biscuitBytes, err := identity.MintBootstrapBiscuitToken(privKey, pID, tokenRecord.Role, time.Now().Add(24*time.Hour), policy)
+		if err != nil {
+			logger.Errorf("Failed to mint bootstrap biscuit: %v", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+
+		err = s.store.UpdateEnrollmentRequest(ctx, id, api.EnrollmentStatus_ENROLLMENT_STATUS_APPROVED, biscuitBytes, adminIdentity)
+		if err != nil {
+			logger.Errorf("Failed to approve enrollment request in DB: %v", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+
+		if err := s.store.IncrementBootstrapTokenUsage(ctx, tokenRecord.ID); err != nil {
+			logger.Errorf("Failed to increment token usage: %v", err)
+		}
+
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("Enrollment approved"))
+		return
+	}
+
+	http.Error(w, "Invalid action", http.StatusBadRequest)
 }

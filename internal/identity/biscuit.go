@@ -31,7 +31,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 )
 
-// MintBiscuitToken generates a signed Biscuit token for a peer with policy rules based on JWT claims.
+// // MintBiscuitToken generates a signed Biscuit token for a peer with policy rules based on JWT claims.
 func MintBiscuitToken(signingKey ed25519.PrivateKey, claims jwt.MapClaims, token *oidc.IDToken, remotePeer peer.ID, policy *api.PolicyConfig) ([]byte, error) {
 	if token == nil {
 		return nil, fmt.Errorf("token cannot be nil")
@@ -91,6 +91,28 @@ func MintBiscuitToken(signingKey ed25519.PrivateKey, claims jwt.MapClaims, token
 		}
 	}
 
+	roles := make([]string, 0, len(resolvedRoles))
+	for role := range resolvedRoles {
+		roles = append(roles, role)
+	}
+
+	// Ensure all tokens have a defined sam:role. If no custom role is resolved,
+	// assign the default node role: sam:role:node.
+	hasSamRole := false
+	for _, r := range roles {
+		if strings.HasPrefix(r, "sam:role:") {
+			hasSamRole = true
+			break
+		}
+	}
+	if !hasSamRole {
+		roles = append(roles, api.RoleNode)
+	}
+
+	return mintBiscuit(signingKey, remotePeer, roles, token.Expiry, policy, claims)
+}
+
+func mintBiscuit(signingKey ed25519.PrivateKey, remotePeer peer.ID, roles []string, expiration time.Time, policy *api.PolicyConfig, claims jwt.MapClaims) ([]byte, error) {
 	builder := biscuit.NewBuilder(signingKey)
 	addedFacts := make(map[string]bool)
 	addFact := func(fact biscuit.Fact) error {
@@ -107,7 +129,7 @@ func MintBiscuitToken(signingKey ed25519.PrivateKey, claims jwt.MapClaims, token
 
 	if err := addFact(biscuit.Fact{Predicate: biscuit.Predicate{
 		Name: api.FactExpiration,
-		IDs:  []biscuit.Term{biscuit.Date(token.Expiry)},
+		IDs:  []biscuit.Term{biscuit.Date(expiration)},
 	}}); err != nil {
 		return nil, fmt.Errorf("failed to add expiration fact: %w", err)
 	}
@@ -126,16 +148,13 @@ func MintBiscuitToken(signingKey ed25519.PrivateKey, claims jwt.MapClaims, token
 		return nil, fmt.Errorf("failed to add client_peer_id fact: %w", err)
 	}
 
-	if err := translateClaimsToFacts(addFact, claims); err != nil {
-		return nil, err
+	if claims != nil {
+		if err := translateClaimsToFacts(addFact, claims); err != nil {
+			return nil, err
+		}
 	}
 
-	roles := make([]string, 0, len(resolvedRoles))
-	for role := range resolvedRoles {
-		roles = append(roles, role)
-	}
 	sort.Strings(roles)
-
 	var errs []error
 	for _, role := range roles {
 		if err := addFact(biscuit.Fact{Predicate: biscuit.Predicate{
@@ -143,6 +162,22 @@ func MintBiscuitToken(signingKey ed25519.PrivateKey, claims jwt.MapClaims, token
 			IDs:  []biscuit.Term{biscuit.String(role)},
 		}}); err != nil {
 			errs = append(errs, fmt.Errorf("failed to add role fact for %s: %w", role, err))
+			continue
+		}
+
+		if role == api.RoleRouter {
+			if err := addFact(biscuit.Fact{Predicate: biscuit.Predicate{
+				Name: api.FactRight,
+				IDs:  []biscuit.Term{biscuit.String(api.RightRelay)},
+			}}); err != nil {
+				errs = append(errs, fmt.Errorf("failed to add relay right: %w", err))
+			}
+			if err := addFact(biscuit.Fact{Predicate: biscuit.Predicate{
+				Name: api.FactTargetUnrestricted,
+				IDs:  []biscuit.Term{},
+			}}); err != nil {
+				errs = append(errs, fmt.Errorf("failed to add target unrestricted: %w", err))
+			}
 			continue
 		}
 
@@ -190,6 +225,7 @@ func MintBiscuitToken(signingKey ed25519.PrivateKey, claims jwt.MapClaims, token
 						}
 					}
 				}
+
 				for _, target := range rolePolicy.AllowedTargets {
 					targetFact, targetVal := api.ParseServiceTarget(target)
 
@@ -232,6 +268,7 @@ func MintBiscuitToken(signingKey ed25519.PrivateKey, claims jwt.MapClaims, token
 						}
 					}
 				}
+
 				for _, customFact := range rolePolicy.CustomDatalog {
 					trimmed := strings.TrimRight(strings.TrimSpace(customFact), ";")
 					if trimmed == "" {
@@ -291,12 +328,12 @@ func MintBiscuitToken(signingKey ed25519.PrivateKey, claims jwt.MapClaims, token
 		return nil, fmt.Errorf("failed to build biscuit: %w", err)
 	}
 
-	biscuitData, err := t.Serialize()
+	bBytes, err := t.Serialize()
 	if err != nil {
 		return nil, fmt.Errorf("failed to serialize biscuit: %w", err)
 	}
 
-	return biscuitData, nil
+	return bBytes, nil
 }
 
 // VerifyBiscuit verifies the validity of a Biscuit token.
@@ -423,4 +460,9 @@ func toStringSlice(val any) []string {
 		return res
 	}
 	return nil
+}
+
+// MintBootstrapBiscuitToken generates a signed Biscuit token for a peer using a bootstrap role.
+func MintBootstrapBiscuitToken(signingKey ed25519.PrivateKey, remotePeer peer.ID, role string, expiration time.Time, policy *api.PolicyConfig) ([]byte, error) {
+	return mintBiscuit(signingKey, remotePeer, []string{role}, expiration, policy, nil)
 }

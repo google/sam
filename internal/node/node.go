@@ -783,7 +783,7 @@ func (n *SamNode) performHubAuthHandshake(s network.Stream, biscuitBytes []byte,
 		return false, fmt.Errorf("%w: failed to verify router biscuit: %w", ErrFatalAuth, err)
 	}
 
-	// Enforce role("router"), role("router-role") or role("bootstrap") inside the biscuit
+	// Enforce role("router") inside the biscuit
 	authorizer, err := b.Authorizer(trustedKeys[0])
 	if err != nil {
 		return false, fmt.Errorf("authorizer instantiation failed: %w", err)
@@ -793,11 +793,6 @@ func (n *SamNode) performHubAuthHandshake(s network.Stream, biscuitBytes []byte,
 		{
 			Body: []biscuit.Predicate{
 				{Name: api.FactRole, IDs: []biscuit.Term{biscuit.String(api.RoleRouter)}},
-			},
-		},
-		{
-			Body: []biscuit.Predicate{
-				{Name: api.FactRole, IDs: []biscuit.Term{biscuit.String(api.RoleBootstrap)}},
 			},
 		},
 	}})

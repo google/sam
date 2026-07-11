@@ -31,6 +31,8 @@ var (
 	keysSyncInterval   time.Duration
 	leaseRenewInterval time.Duration
 	oidcToken          string
+	bootstrapToken     string
+	bootstrapTokenPath string
 	jwtPath            string
 	keysPath           string
 	allowLoopback      bool
@@ -63,6 +65,8 @@ func main() {
 				KeysSyncInterval:   keysSyncInterval,
 				LeaseRenewInterval: leaseRenewInterval,
 				OIDCToken:          oidcToken,
+				BootstrapToken:     bootstrapToken,
+				BootstrapTokenPath: bootstrapTokenPath,
 				JWTPath:            jwtPath,
 				KeysDBPath:         keysPath,
 				AllowLoopback:      allowLoopback,
@@ -91,7 +95,9 @@ func main() {
 	rootCmd.Flags().StringSliceVar(&externalAddrs, "external-addr", []string{}, "External addresses to announce to control plane")
 	rootCmd.Flags().DurationVar(&keysSyncInterval, "keys-sync-interval", 5*time.Minute, "Key synchronization polling interval")
 	rootCmd.Flags().DurationVar(&leaseRenewInterval, "lease-renew-interval", 300*time.Second, "Lease renewal registration interval")
-	rootCmd.Flags().StringVar(&oidcToken, "oidc-token", "", "OIDC ID token or bootstrap secret token for enrollment")
+	rootCmd.Flags().StringVar(&oidcToken, "oidc-token", "", "OIDC ID token for enrollment")
+	rootCmd.Flags().StringVar(&bootstrapToken, "bootstrap-token", "", "Pre-shared bootstrap token for enrollment")
+	rootCmd.Flags().StringVar(&bootstrapTokenPath, "bootstrap-token-path", "", "Path to file containing bootstrap token for enrollment")
 	rootCmd.Flags().StringVar(&jwtPath, "jwt-path", "", "Path to file containing OIDC JWT token")
 	rootCmd.Flags().StringVar(&keysPath, "keys-path", "router.key", "Path to save/load persistent private key")
 	rootCmd.Flags().BoolVar(&allowLoopback, "allow-loopback", false, "Allow loopback and link-local addresses for discovery")

@@ -32,6 +32,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/biscuit-auth/biscuit-go/v2"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/sam/api"
 	"github.com/google/sam/internal/storage"
@@ -214,11 +215,11 @@ func TestNodeAndRouterRegistrationFlow(t *testing.T) {
 	policy := &api.PolicyConfig{
 		Version: "v1alpha1",
 		Bindings: []api.Binding{
-			{Role: "router", Members: []string{"group:routers"}},
+			{Role: api.RoleRouter, Members: []string{"group:routers"}},
 			{Role: "user-role", Members: []string{"group:users"}},
 		},
 		Roles: map[string]api.RolePolicy{
-			"router": {
+			api.RoleRouter: {
 				AllowedServices: []string{"*"},
 				AllowedTargets:  []string{"*"},
 			},
@@ -435,5 +436,207 @@ roles:
 
 	if !strings.Contains(getResp.YamlContent, "role: dev") || !strings.Contains(getResp.YamlContent, "group:developers") {
 		t.Errorf("returned policy content mismatch: %s", getResp.YamlContent)
+	}
+}
+
+func TestEnrollmentWorkflow(t *testing.T) {
+	issuer, _ := startCustomMockOIDC(t)
+	srv, store, baseURL := setupTestServer(t, issuer)
+	defer func() {
+		_ = srv.Close()
+		_ = store.Close()
+	}()
+
+	// Configure admin token
+	srv.config.AdminToken = "super-secret-admin-token"
+
+	client := &http.Client{Timeout: 5 * time.Second}
+
+	// 1. Create Bootstrap Token (Manual Approval Gate)
+	srv.config.AutoApproveEnrollment = false
+
+	adminReqBody := []byte(`{
+		"role": "sam:role:router",
+		"ttl_hours": 2,
+		"max_usages": 2,
+		"description": "Test Mode B"
+	}`)
+
+	req, _ := http.NewRequest("POST", baseURL+"/admin/bootstrap-tokens", bytes.NewBuffer(adminReqBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer super-secret-admin-token")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("failed to create bootstrap token: %v", err)
+	}
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("unexpected status creating token: %s", resp.Status)
+	}
+
+	var tokenDetails struct {
+		ID    string `json:"id"`
+		Token string `json:"token"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&tokenDetails)
+	_ = resp.Body.Close()
+
+	if tokenDetails.Token == "" || tokenDetails.ID == "" {
+		t.Fatalf("empty token details received: %+v", tokenDetails)
+	}
+
+	// Generate Client node key
+	privNode, pubNode, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pID, _ := peer.IDFromPrivateKey(privNode)
+	pubBytes, _ := pubNode.Raw()
+
+	// 2. Submit Enrollment Request (Mode B -> PENDING)
+	enrollReq := &api.BootstrapEnrollRequest{
+		BootstrapToken: tokenDetails.Token,
+		PeerId:         pID.String(),
+		PublicKey:      pubBytes,
+	}
+	enrollReqData, _ := proto.Marshal(enrollReq)
+
+	resp, err = client.Post(baseURL+"/enroll", "application/x-protobuf", bytes.NewBuffer(enrollReqData))
+	if err != nil {
+		t.Fatalf("failed to enroll: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected enroll status: %s", resp.Status)
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+
+	var enrollResp api.BootstrapEnrollResponse
+	if err := proto.Unmarshal(body, &enrollResp); err != nil {
+		t.Fatalf("failed to unmarshal enroll response: %v", err)
+	}
+	if enrollResp.Status != api.EnrollmentStatus_ENROLLMENT_STATUS_PENDING {
+		t.Errorf("expected PENDING status, got %v", enrollResp.Status)
+	}
+
+	// 3. Poll Enrollment Status -> PENDING
+	resp, err = client.Get(baseURL + "/enroll/status?peer_id=" + pID.String())
+	if err != nil {
+		t.Fatalf("failed to get status: %v", err)
+	}
+	body, _ = io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+
+	var statusResp api.BootstrapEnrollResponse
+	_ = proto.Unmarshal(body, &statusResp)
+	if statusResp.Status != api.EnrollmentStatus_ENROLLMENT_STATUS_PENDING {
+		t.Errorf("expected polled status to be PENDING, got %v", statusResp.Status)
+	}
+
+	// 4. Admin query list & approve
+	req, _ = http.NewRequest("GET", baseURL+"/admin/enrollments", nil)
+	req.Header.Set("Authorization", "Bearer super-secret-admin-token")
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var enrollList []storage.EnrollmentRequest
+	_ = json.NewDecoder(resp.Body).Decode(&enrollList)
+	_ = resp.Body.Close()
+
+	if len(enrollList) != 1 || enrollList[0].PeerID != pID.String() {
+		t.Fatalf("unexpected enrollments list: %+v", enrollList)
+	}
+	reqID := enrollList[0].ID
+
+	// Approve
+	req, _ = http.NewRequest("POST", baseURL+"/admin/enrollments/"+reqID+"/approve", nil)
+	req.Header.Set("Authorization", "Bearer super-secret-admin-token")
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("failed to approve enrollment: %s", resp.Status)
+	}
+	_ = resp.Body.Close()
+
+	// 5. Poll Status -> APPROVED & Validate Biscuit
+	resp, err = client.Get(baseURL + "/enroll/status?peer_id=" + pID.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ = io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+
+	_ = proto.Unmarshal(body, &statusResp)
+	if statusResp.Status != api.EnrollmentStatus_ENROLLMENT_STATUS_APPROVED {
+		t.Fatalf("expected APPROVED, got %v", statusResp.Status)
+	}
+	if len(statusResp.BiscuitToken) == 0 {
+		t.Fatalf("biscuit token is empty")
+	}
+
+	// Verify Biscuit router rights
+	_, cpPub, err := store.GetCurrentKey(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := biscuit.Unmarshal(statusResp.BiscuitToken)
+	if err != nil {
+		t.Fatalf("failed to unmarshal biscuit: %v", err)
+	}
+	authorizer, err := b.Authorizer(cpPub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkRelay := biscuit.Check{Queries: []biscuit.Rule{
+		{
+			Body: []biscuit.Predicate{
+				{Name: api.FactRight, IDs: []biscuit.Term{biscuit.String(api.RightRelay)}},
+			},
+		},
+	}}
+	authorizer.AddCheck(checkRelay)
+	authorizer.AddPolicy(biscuit.Policy{Queries: []biscuit.Rule{
+		{
+			Head: biscuit.Predicate{Name: "allow", IDs: []biscuit.Term{}},
+			Body: []biscuit.Predicate{},
+		},
+	}, Kind: biscuit.PolicyKindAllow})
+
+	if err := authorizer.Authorize(); err != nil {
+		t.Errorf("biscuit validation failed: %v", err)
+	}
+
+	// 6. Test Mode A (Auto-Approve)
+	srv.config.AutoApproveEnrollment = true
+
+	// Generate new client key
+	privNode2, _, _ := crypto.GenerateKeyPair(crypto.Ed25519, -1)
+	pID2, _ := peer.IDFromPrivateKey(privNode2)
+
+	enrollReq2 := &api.BootstrapEnrollRequest{
+		BootstrapToken: tokenDetails.Token, // use remaining usage
+		PeerId:         pID2.String(),
+		PublicKey:      pubBytes,
+	}
+	enrollReqData2, _ := proto.Marshal(enrollReq2)
+
+	resp, err = client.Post(baseURL+"/enroll", "application/x-protobuf", bytes.NewBuffer(enrollReqData2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ = io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+
+	var enrollResp2 api.BootstrapEnrollResponse
+	_ = proto.Unmarshal(body, &enrollResp2)
+	if enrollResp2.Status != api.EnrollmentStatus_ENROLLMENT_STATUS_APPROVED {
+		t.Errorf("expected immediate APPROVED status in Auto-Approve mode, got %v", enrollResp2.Status)
+	}
+	if len(enrollResp2.BiscuitToken) == 0 {
+		t.Error("biscuit token empty in Auto-Approve response")
 	}
 }

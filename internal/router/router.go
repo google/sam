@@ -131,22 +131,36 @@ func (r *Router) Start() error {
 		return err
 	}
 
-	// 2. Enroll with Control Plane
-	if r.config.OIDCToken == "" && r.config.JWTPath != "" {
-		tokenData, err := os.ReadFile(r.config.JWTPath)
+	if r.config.BootstrapToken == "" && r.config.BootstrapTokenPath != "" {
+		tokenData, err := os.ReadFile(r.config.BootstrapTokenPath)
 		if err != nil {
-			return fmt.Errorf("failed to read JWT from path %s: %w", r.config.JWTPath, err)
+			return fmt.Errorf("failed to read bootstrap token from path %s: %w", r.config.BootstrapTokenPath, err)
 		}
-		r.config.OIDCToken = strings.TrimSpace(string(tokenData))
+		r.config.BootstrapToken = strings.TrimSpace(string(tokenData))
 	}
 
-	if r.config.OIDCToken != "" {
-		logger.Infof("Enrolling router %s with Control Plane at %s...", peerID, r.config.ControlPlaneURL)
-		if err := r.enroll(peerID); err != nil {
-			return fmt.Errorf("failed router enrollment: %w", err)
+	if r.config.BootstrapToken != "" {
+		logger.Infof("Enrolling router %s with Control Plane at %s using Bootstrap Token...", peerID, r.config.ControlPlaneURL)
+		if err := r.enrollBootstrap(peerID); err != nil {
+			return fmt.Errorf("failed router bootstrap enrollment: %w", err)
 		}
 	} else {
-		logger.Warn("Router started without OIDCToken/JWTPath. Enrollment bypassed. Expecting local keys sync.")
+		if r.config.OIDCToken == "" && r.config.JWTPath != "" {
+			tokenData, err := os.ReadFile(r.config.JWTPath)
+			if err != nil {
+				return fmt.Errorf("failed to read JWT from path %s: %w", r.config.JWTPath, err)
+			}
+			r.config.OIDCToken = strings.TrimSpace(string(tokenData))
+		}
+
+		if r.config.OIDCToken != "" {
+			logger.Infof("Enrolling router %s with Control Plane at %s using OIDC Token...", peerID, r.config.ControlPlaneURL)
+			if err := r.enroll(peerID); err != nil {
+				return fmt.Errorf("failed router enrollment: %w", err)
+			}
+		} else {
+			logger.Warn("Router started without OIDCToken or BootstrapToken. Enrollment bypassed. Expecting local keys sync.")
+		}
 	}
 
 	// 3. Initial Keys Sync
@@ -284,6 +298,123 @@ func (r *Router) enroll(peerID peer.ID) error {
 	r.trustedPublicKeys = []ed25519.PublicKey{enrollResp.HubPublicKey}
 	r.keysMu.Unlock()
 
+	return nil
+}
+
+func (r *Router) enrollBootstrap(peerID peer.ID) error {
+	pubKey := r.privKey.GetPublic()
+	pubBytes, err := crypto.MarshalPublicKey(pubKey)
+	if err != nil {
+		return fmt.Errorf("failed to marshal router public key: %w", err)
+	}
+
+	req := &api.BootstrapEnrollRequest{
+		BootstrapToken: r.config.BootstrapToken,
+		PeerId:         peerID.String(),
+		PublicKey:      pubBytes,
+	}
+	data, err := proto.Marshal(req)
+	if err != nil {
+		return err
+	}
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Post(r.config.ControlPlaneURL+"/enroll", "application/x-protobuf", bytes.NewReader(data))
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("bootstrap enrollment request response status %s: %s", resp.Status, string(body))
+	}
+
+	respData, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+
+	enrollResp := &api.BootstrapEnrollResponse{}
+	if err := proto.Unmarshal(respData, enrollResp); err != nil {
+		return fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+
+	if enrollResp.ErrorMessage != "" {
+		return fmt.Errorf("enrollment failed: %s", enrollResp.ErrorMessage)
+	}
+
+	if enrollResp.Status == api.EnrollmentStatus_ENROLLMENT_STATUS_PENDING {
+		logger.Infof("Enrollment is pending approval. Polling status...")
+		statusReq := &api.EnrollmentStatusRequest{
+			PeerId: peerID.String(),
+		}
+		statusData, err := proto.Marshal(statusReq)
+		if err != nil {
+			return fmt.Errorf("failed to marshal status request: %w", err)
+		}
+
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+
+	pollLoop:
+		for {
+			select {
+			case <-r.ctx.Done():
+				return r.ctx.Err()
+			case <-ticker.C:
+				statusResp, err := client.Post(r.config.ControlPlaneURL+"/enroll/status", "application/x-protobuf", bytes.NewReader(statusData))
+				if err != nil {
+					logger.Warnf("failed to poll enrollment status: %v", err)
+					continue
+				}
+
+				if statusResp.StatusCode != http.StatusOK {
+					body, _ := io.ReadAll(statusResp.Body)
+					_ = statusResp.Body.Close()
+					logger.Warnf("status poll returned code %s: %s", statusResp.Status, string(body))
+					continue
+				}
+
+				statusBody, err := io.ReadAll(statusResp.Body)
+				_ = statusResp.Body.Close()
+				if err != nil {
+					logger.Warnf("failed to read status body: %v", err)
+					continue
+				}
+
+				pollResp := &api.BootstrapEnrollResponse{}
+				if err := proto.Unmarshal(statusBody, pollResp); err != nil {
+					logger.Warnf("failed to unmarshal poll response: %v", err)
+					continue
+				}
+
+				if pollResp.ErrorMessage != "" {
+					return fmt.Errorf("enrollment rejected: %s", pollResp.ErrorMessage)
+				}
+
+				if pollResp.Status == api.EnrollmentStatus_ENROLLMENT_STATUS_APPROVED {
+					enrollResp = pollResp
+					break pollLoop
+				}
+				if pollResp.Status == api.EnrollmentStatus_ENROLLMENT_STATUS_REJECTED {
+					return fmt.Errorf("enrollment rejected by administrator")
+				}
+				logger.Infof("Enrollment is still pending approval...")
+			}
+		}
+	}
+
+	if enrollResp.Status != api.EnrollmentStatus_ENROLLMENT_STATUS_APPROVED {
+		return fmt.Errorf("enrollment not approved (status: %v)", enrollResp.Status)
+	}
+
+	r.biscuitToken = enrollResp.BiscuitToken
+	r.keysMu.Lock()
+	r.trustedPublicKeys = []ed25519.PublicKey{enrollResp.HubPublicKey}
+	r.keysMu.Unlock()
+
+	logger.Infof("Router bootstrap enrollment approved! Biscuit received.")
 	return nil
 }
 
@@ -598,11 +729,6 @@ func (r *Router) performMutualAuth(s network.Stream) error {
 		{
 			Body: []biscuit.Predicate{
 				{Name: api.FactRole, IDs: []biscuit.Term{biscuit.String(api.RoleRouter)}},
-			},
-		},
-		{
-			Body: []biscuit.Predicate{
-				{Name: api.FactRole, IDs: []biscuit.Term{biscuit.String(api.RoleBootstrap)}},
 			},
 		},
 	}})

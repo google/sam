@@ -53,6 +53,7 @@ var (
 	hubAddr                  string
 	jwtFlag                  string
 	jwtPathFlag              string
+	bootstrapTokenFlag       string
 	clientIDFlag             string
 	clientSecretFlag         string
 	hubPublicKeyFlag         string
@@ -176,7 +177,7 @@ func main() {
 				}
 			}
 
-			if jwtStr == "" {
+			if jwtStr == "" && bootstrapTokenFlag == "" {
 				token, _ := store.LoadIdentity()
 				if len(token) == 0 {
 					displayHub := hubAddr
@@ -291,7 +292,11 @@ func main() {
 					logger.Fatalf("Failed to start node for enrollment: %v", err)
 				}
 
-				err = meshNode.Enroll(enrollCtx, hubAddr, jwtStr)
+				if bootstrapTokenFlag != "" {
+					err = meshNode.EnrollBootstrap(enrollCtx, hubAddr, bootstrapTokenFlag)
+				} else {
+					err = meshNode.Enroll(enrollCtx, hubAddr, jwtStr)
+				}
 				if err != nil {
 					if teardownErr := meshNode.Teardown(); teardownErr != nil {
 						logger.Errorf("Teardown failed during enrollment error cleanup: %v", teardownErr)
@@ -426,18 +431,21 @@ func main() {
 				logger.Fatalf("Failed to discover hub info: %v", err)
 			}
 
-			fmt.Printf("OIDC Issuer discovered: %s\n", hubInfo.OidcIssuer)
-			fmt.Printf("Client ID discovered: %s\n", hubInfo.ClientId)
+			var jwtStr string
+			if bootstrapTokenFlag == "" {
+				fmt.Printf("OIDC Issuer discovered: %s\n", hubInfo.OidcIssuer)
+				fmt.Printf("Client ID discovered: %s\n", hubInfo.ClientId)
 
-			logger.Info("Discovering OIDC endpoints...")
-			tokenURL, authURL, err := dummyNode.DiscoverEndpoints(ctx, hubInfo.OidcIssuer)
-			if err != nil {
-				logger.Fatalf("Failed to discover OIDC endpoints: %v", err)
-			}
+				logger.Info("Discovering OIDC endpoints...")
+				tokenURL, authURL, err := dummyNode.DiscoverEndpoints(ctx, hubInfo.OidcIssuer)
+				if err != nil {
+					logger.Fatalf("Failed to discover OIDC endpoints: %v", err)
+				}
 
-			jwtStr, err := dummyNode.InteractiveLogin(ctx, authURL, tokenURL, hubInfo.ClientId, hubInfo.Audience, offlineAccessFlag, headlessFlag)
-			if err != nil {
-				logger.Fatalf("Failed to get token: %v", err)
+				jwtStr, err = dummyNode.InteractiveLogin(ctx, authURL, tokenURL, hubInfo.ClientId, hubInfo.Audience, offlineAccessFlag, headlessFlag)
+				if err != nil {
+					logger.Fatalf("Failed to get token: %v", err)
+				}
 			}
 
 			// Override global hubAddr with targetHub for enrollment
@@ -496,15 +504,21 @@ func main() {
 				logger.Fatalf("Failed to start node for enrollment: %v", err)
 			}
 
-			err = meshNode.Enroll(context.Background(), targetHub, jwtStr)
+			if bootstrapTokenFlag != "" {
+				err = meshNode.EnrollBootstrap(ctx, targetHub, bootstrapTokenFlag)
+			} else {
+				err = meshNode.Enroll(ctx, targetHub, jwtStr)
+			}
 			if err != nil {
 				logger.Fatalf("Enrollment failed: %v", err)
 			}
 			if err := store.SaveHubURL(targetHub); err != nil {
 				logger.Warnf("Failed to save hub URL: %v", err)
 			}
-			if err := store.SaveOIDCConfig(hubInfo.OidcIssuer, hubInfo.ClientId, hubInfo.Audience); err != nil {
-				logger.Warnf("Failed to save OIDC config: %v", err)
+			if bootstrapTokenFlag == "" {
+				if err := store.SaveOIDCConfig(hubInfo.OidcIssuer, hubInfo.ClientId, hubInfo.Audience); err != nil {
+					logger.Warnf("Failed to save OIDC config: %v", err)
+				}
 			}
 
 			fmt.Println("Successfully joined the Sovereign Agent Mesh!")
@@ -515,6 +529,7 @@ func main() {
 	runCmd.Flags().StringSliceVar(&listenAddrs, "listen", []string{"/ip4/0.0.0.0/udp/5001/quic-v1", "/ip4/0.0.0.0/tcp/5002"}, "libp2p Listen Addrs")
 	runCmd.Flags().StringVar(&jwtFlag, "jwt", "", "Pre-fetched JWT token")
 	runCmd.Flags().StringVar(&jwtPathFlag, "jwt-path", "", "Path to file containing JWT token")
+	runCmd.Flags().StringVar(&bootstrapTokenFlag, "bootstrap-token", "", "Pre-shared bootstrap token for enrollment")
 	runCmd.Flags().StringVar(&clientIDFlag, "client-id", "", "OIDC Client ID for M2M")
 	runCmd.Flags().StringVar(&clientSecretFlag, "client-secret", "", "OIDC Client Secret for M2M")
 	runCmd.Flags().StringVar(&hubPublicKeyFlag, "hub-public-key", "", "Hub Public Key (32-byte Hex)")
@@ -534,6 +549,7 @@ func main() {
 	joinCmd.Flags().BoolVar(&allowLoopbackFlag, "allow-loopback", false, "Allow publishing and connecting to loopback/link-local addresses")
 	joinCmd.Flags().DurationVar(&hubConnectTimeoutFlag, "hub-connect-timeout", node.DefaultHubConnectTimeout, "Timeout for dialing each hub address")
 	joinCmd.Flags().BoolVar(&offlineAccessFlag, "offline-access", false, "Request OIDC offline access/refresh token for automatic renewal")
+	joinCmd.Flags().StringVar(&bootstrapTokenFlag, "bootstrap-token", "", "Pre-shared bootstrap token for enrollment")
 	runCmd.Flags().StringVar(&apiTokenFlag, "api-token", "", "Static Bearer token for API authorization")
 	runCmd.Flags().StringVar(&tlsCertFlag, "tls-cert", "", "Path to TLS certificate for sidecar API")
 	runCmd.Flags().StringVar(&tlsKeyFlag, "tls-key", "", "Path to TLS key for sidecar API")

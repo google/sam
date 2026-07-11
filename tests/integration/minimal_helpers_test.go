@@ -615,11 +615,11 @@ func writePolicyWithRouter(t *testing.T, path string, yamlContent string) {
 	content = strings.ReplaceAll(content, "bindings: []", "bindings:")
 	content = strings.ReplaceAll(content, "roles: {}", "roles:")
 
-	routerRole := `  router:
+	routerRole := fmt.Sprintf(`  %s:
     allowed_services: []
-    allowed_targets: []`
-	routerBinding := `  - role: router
-    members: ["group:routers"]`
+    allowed_targets: []`, api.RoleRouter)
+	routerBinding := fmt.Sprintf(`  - role: %s
+    members: ["group:routers"]`, api.RoleRouter)
 
 	if strings.Contains(content, "roles:") {
 		content = strings.Replace(content, "roles:", "roles:\n"+routerRole, 1)

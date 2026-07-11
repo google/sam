@@ -50,7 +50,7 @@ func startMockLibp2pHub(t *testing.T) (peer.ID, string) {
 	}})
 	_ = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
 		Name: api.FactRole,
-		IDs:  []biscuit.Term{biscuit.String("router")},
+		IDs:  []biscuit.Term{biscuit.String(api.RoleRouter)},
 	}})
 	_ = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
 		Name: api.FactExpiration,

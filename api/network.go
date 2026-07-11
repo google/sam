@@ -83,7 +83,7 @@ const (
 
 const (
 	// SystemNamespace is the namespace reserved for built-in mesh services and protocols.
-	SystemNamespace = "system"
+	SystemNamespace = "sam:system"
 
 	// CatalogTarget is the special system service name used to retrieve tool catalogs.
 	// In policy rules, it must be referred to explicitly as: system://sam.catalog

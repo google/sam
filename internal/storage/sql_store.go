@@ -75,6 +75,7 @@ func (s *SQLStore) isPostgres() bool {
 
 func (s *SQLStore) initSchema() error {
 	var keyringSchema, nodesSchema, routersSchema, policiesSchema string
+	var bootstrapTokensSchema, enrollmentRequestsSchema string
 
 	if s.isPostgres() {
 		keyringSchema = `
@@ -106,6 +107,29 @@ func (s *SQLStore) initSchema() error {
 				content TEXT NOT NULL,
 				updated_at BIGINT NOT NULL
 			)`
+		bootstrapTokensSchema = `
+			CREATE TABLE IF NOT EXISTS bootstrap_tokens (
+				id VARCHAR(64) PRIMARY KEY,
+				token_hash VARCHAR(64) UNIQUE NOT NULL,
+				role VARCHAR(64) NOT NULL,
+				max_usages INT NOT NULL,
+				usages_count INT NOT NULL,
+				description TEXT,
+				created_at BIGINT NOT NULL,
+				expires_at BIGINT NOT NULL
+			)`
+		enrollmentRequestsSchema = `
+			CREATE TABLE IF NOT EXISTS enrollment_requests (
+				id VARCHAR(64) PRIMARY KEY,
+				peer_id VARCHAR(255) UNIQUE NOT NULL,
+				public_key BYTEA NOT NULL,
+				token_id VARCHAR(64) REFERENCES bootstrap_tokens(id),
+				status INT NOT NULL,
+				biscuit_token BYTEA,
+				created_at BIGINT NOT NULL,
+				resolved_at BIGINT,
+				resolved_by VARCHAR(255)
+			)`
 	} else {
 		keyringSchema = `
 			CREATE TABLE IF NOT EXISTS keyring (
@@ -136,9 +160,32 @@ func (s *SQLStore) initSchema() error {
 				content TEXT NOT NULL,
 				updated_at BIGINT NOT NULL
 			)`
+		bootstrapTokensSchema = `
+			CREATE TABLE IF NOT EXISTS bootstrap_tokens (
+				id TEXT PRIMARY KEY,
+				token_hash TEXT UNIQUE NOT NULL,
+				role TEXT NOT NULL,
+				max_usages INTEGER NOT NULL,
+				usages_count INTEGER NOT NULL,
+				description TEXT,
+				created_at BIGINT NOT NULL,
+				expires_at BIGINT NOT NULL
+			)`
+		enrollmentRequestsSchema = `
+			CREATE TABLE IF NOT EXISTS enrollment_requests (
+				id TEXT PRIMARY KEY,
+				peer_id TEXT UNIQUE NOT NULL,
+				public_key BLOB NOT NULL,
+				token_id TEXT REFERENCES bootstrap_tokens(id),
+				status INTEGER NOT NULL,
+				biscuit_token BLOB,
+				created_at BIGINT NOT NULL,
+				resolved_at BIGINT,
+				resolved_by TEXT
+			)`
 	}
 
-	schemas := []string{keyringSchema, nodesSchema, routersSchema, policiesSchema}
+	schemas := []string{keyringSchema, nodesSchema, routersSchema, policiesSchema, bootstrapTokensSchema, enrollmentRequestsSchema}
 	for _, schema := range schemas {
 		if _, err := s.db.Exec(schema); err != nil {
 			return err
@@ -401,6 +448,177 @@ func (s *SQLStore) GetPolicy(ctx context.Context) (*api.PolicyConfig, error) {
 		return nil, err
 	}
 	return &policy, nil
+}
+
+// SaveBootstrapToken persists a new bootstrap token.
+func (s *SQLStore) SaveBootstrapToken(ctx context.Context, token *BootstrapToken) error {
+	query := `INSERT INTO bootstrap_tokens (id, token_hash, role, max_usages, usages_count, description, created_at, expires_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+	_, err := s.db.ExecContext(ctx, s.rebind(query),
+		token.ID,
+		token.TokenHash,
+		token.Role,
+		token.MaxUsages,
+		token.UsagesCount,
+		token.Description,
+		token.CreatedAt.Unix(),
+		token.ExpiresAt.Unix(),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to save bootstrap token: %w", err)
+	}
+	return nil
+}
+
+// GetBootstrapToken retrieves a bootstrap token by its ID.
+func (s *SQLStore) GetBootstrapToken(ctx context.Context, id string) (*BootstrapToken, error) {
+	query := `SELECT id, token_hash, role, max_usages, usages_count, description, created_at, expires_at 
+		FROM bootstrap_tokens WHERE id = ?`
+	var created, expires int64
+	var t BootstrapToken
+	err := s.db.QueryRowContext(ctx, s.rebind(query), id).Scan(
+		&t.ID,
+		&t.TokenHash,
+		&t.Role,
+		&t.MaxUsages,
+		&t.UsagesCount,
+		&t.Description,
+		&created,
+		&expires,
+	)
+	if err == sql.ErrNoRows {
+		return nil, ErrNotFound
+	} else if err != nil {
+		return nil, fmt.Errorf("failed to scan bootstrap token: %w", err)
+	}
+	t.CreatedAt = time.Unix(created, 0)
+	t.ExpiresAt = time.Unix(expires, 0)
+	return &t, nil
+}
+
+// IncrementBootstrapTokenUsage increments usage count.
+func (s *SQLStore) IncrementBootstrapTokenUsage(ctx context.Context, id string) error {
+	query := `UPDATE bootstrap_tokens SET usages_count = usages_count + 1 WHERE id = ?`
+	_, err := s.db.ExecContext(ctx, s.rebind(query), id)
+	if err != nil {
+		return fmt.Errorf("failed to increment usage: %w", err)
+	}
+	return nil
+}
+
+// CreateEnrollmentRequest saves a new pending request.
+func (s *SQLStore) CreateEnrollmentRequest(ctx context.Context, req *EnrollmentRequest) error {
+	query := `INSERT INTO enrollment_requests (id, peer_id, public_key, token_id, status, biscuit_token, created_at, resolved_at, resolved_by)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	var resAt sql.NullInt64
+	if req.ResolvedAt != nil {
+		resAt = sql.NullInt64{Int64: req.ResolvedAt.Unix(), Valid: true}
+	}
+	_, err := s.db.ExecContext(ctx, s.rebind(query),
+		req.ID,
+		req.PeerID,
+		req.PublicKey,
+		req.TokenID,
+		int(req.Status),
+		req.BiscuitToken,
+		req.CreatedAt.Unix(),
+		resAt,
+		req.ResolvedBy,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create enrollment request: %w", err)
+	}
+	return nil
+}
+
+// GetEnrollmentRequest retrieves request by PeerID.
+func (s *SQLStore) GetEnrollmentRequest(ctx context.Context, peerID string) (*EnrollmentRequest, error) {
+	query := `SELECT id, peer_id, public_key, token_id, status, biscuit_token, created_at, resolved_at, resolved_by 
+		FROM enrollment_requests WHERE peer_id = ?`
+	return s.scanEnrollmentRequest(s.db.QueryRowContext(ctx, s.rebind(query), peerID))
+}
+
+// GetEnrollmentRequestByID retrieves request by UUID.
+func (s *SQLStore) GetEnrollmentRequestByID(ctx context.Context, id string) (*EnrollmentRequest, error) {
+	query := `SELECT id, peer_id, public_key, token_id, status, biscuit_token, created_at, resolved_at, resolved_by 
+		FROM enrollment_requests WHERE id = ?`
+	return s.scanEnrollmentRequest(s.db.QueryRowContext(ctx, s.rebind(query), id))
+}
+
+type scannable interface {
+	Scan(dest ...any) error
+}
+
+func (s *SQLStore) scanEnrollmentRequest(row scannable) (*EnrollmentRequest, error) {
+	var created int64
+	var resAt sql.NullInt64
+	var statusVal int
+	var req EnrollmentRequest
+
+	err := row.Scan(
+		&req.ID,
+		&req.PeerID,
+		&req.PublicKey,
+		&req.TokenID,
+		&statusVal,
+		&req.BiscuitToken,
+		&created,
+		&resAt,
+		&req.ResolvedBy,
+	)
+	if err == sql.ErrNoRows {
+		return nil, ErrNotFound
+	} else if err != nil {
+		return nil, fmt.Errorf("failed to scan enrollment request: %w", err)
+	}
+
+	req.CreatedAt = time.Unix(created, 0)
+	req.Status = api.EnrollmentStatus(statusVal)
+	if resAt.Valid {
+		t := time.Unix(resAt.Int64, 0)
+		req.ResolvedAt = &t
+	}
+	return &req, nil
+}
+
+// ListEnrollmentRequests retrieves all requests.
+func (s *SQLStore) ListEnrollmentRequests(ctx context.Context) ([]EnrollmentRequest, error) {
+	query := `SELECT id, peer_id, public_key, token_id, status, biscuit_token, created_at, resolved_at, resolved_by 
+		FROM enrollment_requests ORDER BY created_at DESC`
+	rows, err := s.db.QueryContext(ctx, s.rebind(query))
+	if err != nil {
+		return nil, fmt.Errorf("failed to query enrollment requests: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var reqs []EnrollmentRequest
+	for rows.Next() {
+		req, err := s.scanEnrollmentRequest(rows)
+		if err != nil {
+			return nil, err
+		}
+		reqs = append(reqs, *req)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return reqs, nil
+}
+
+// UpdateEnrollmentRequest updates status, timestamp and biscuit token.
+func (s *SQLStore) UpdateEnrollmentRequest(ctx context.Context, id string, status api.EnrollmentStatus, biscuit []byte, resolvedBy string) error {
+	query := `UPDATE enrollment_requests SET status = ?, biscuit_token = ?, resolved_at = ?, resolved_by = ? WHERE id = ?`
+	_, err := s.db.ExecContext(ctx, s.rebind(query),
+		int(status),
+		biscuit,
+		time.Now().Unix(),
+		resolvedBy,
+		id,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update enrollment request: %w", err)
+	}
+	return nil
 }
 
 // Close implements Store.

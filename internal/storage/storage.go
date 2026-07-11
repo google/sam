@@ -51,6 +51,31 @@ type EnrolledNode struct {
 	Banned     bool
 }
 
+// BootstrapToken represents a pre-shared token for node enrollment.
+type BootstrapToken struct {
+	ID          string
+	TokenHash   string
+	Role        string
+	MaxUsages   int
+	UsagesCount int
+	Description string
+	CreatedAt   time.Time
+	ExpiresAt   time.Time
+}
+
+// EnrollmentRequest represents a pending or resolved node registration request (CSR).
+type EnrollmentRequest struct {
+	ID           string
+	PeerID       string
+	PublicKey    []byte
+	TokenID      string
+	Status       api.EnrollmentStatus
+	BiscuitToken []byte
+	CreatedAt    time.Time
+	ResolvedAt   *time.Time
+	ResolvedBy   string
+}
+
 // Store defines the persistent operations for the SAM control plane.
 type Store interface {
 	// GetCurrentKey retrieves the active key pair for biscuit signing.
@@ -88,6 +113,30 @@ type Store interface {
 
 	// GetPolicy loads the mesh configurations.
 	GetPolicy(ctx context.Context) (*api.PolicyConfig, error)
+
+	// SaveBootstrapToken persists a new bootstrap token.
+	SaveBootstrapToken(ctx context.Context, token *BootstrapToken) error
+
+	// GetBootstrapToken retrieves a bootstrap token by its ID (sha256 hash).
+	GetBootstrapToken(ctx context.Context, id string) (*BootstrapToken, error)
+
+	// IncrementBootstrapTokenUsage increments the usage count of a token.
+	IncrementBootstrapTokenUsage(ctx context.Context, id string) error
+
+	// CreateEnrollmentRequest saves a new pending enrollment request.
+	CreateEnrollmentRequest(ctx context.Context, req *EnrollmentRequest) error
+
+	// GetEnrollmentRequest retrieves an enrollment request by PeerID.
+	GetEnrollmentRequest(ctx context.Context, peerID string) (*EnrollmentRequest, error)
+
+	// GetEnrollmentRequestByID retrieves an enrollment request by ID.
+	GetEnrollmentRequestByID(ctx context.Context, id string) (*EnrollmentRequest, error)
+
+	// ListEnrollmentRequests retrieves all enrollment requests.
+	ListEnrollmentRequests(ctx context.Context) ([]EnrollmentRequest, error)
+
+	// UpdateEnrollmentRequest updates status, resolved details, and stored Biscuit of a request.
+	UpdateEnrollmentRequest(ctx context.Context, id string, status api.EnrollmentStatus, biscuit []byte, resolvedBy string) error
 
 	// Close closes the underlying database connection.
 	Close() error

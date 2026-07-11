@@ -137,8 +137,8 @@ data:
       - members: ["user:system:serviceaccount:sam-canary-${ENV_NAME}:sam-node-sa"]
         role: "sam-canary"
       - members: ["group:routers", "user:system:serviceaccount:${NAMESPACE}:sam-router-sa"]
-        role: "router-role"
-      - members: ["system:authenticated"]
+        role: "sam:role:router"
+      - members: ["sam:system:authenticated"]
         role: "public-mesh"
     roles:
       sam-canary:
@@ -146,7 +146,7 @@ data:
           - "*"
         allowed_targets:
           - "*"
-      router-role:
+      "sam:role:router":
         allowed_services:
           - "*"
         allowed_targets:
