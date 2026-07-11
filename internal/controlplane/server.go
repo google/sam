@@ -905,9 +905,19 @@ func (s *Server) HandleEnroll(w http.ResponseWriter, r *http.Request) {
 	existingReq, err := s.store.GetEnrollmentRequest(ctx, req.PeerId)
 	if err == nil {
 		// Request already exists, return status
-		resp := &api.BootstrapEnrollResponse{
-			Status:       existingReq.Status,
-			BiscuitToken: existingReq.BiscuitToken,
+		var resp *api.BootstrapEnrollResponse
+		if existingReq.Status == api.EnrollmentStatus_ENROLLMENT_STATUS_APPROVED {
+			resp, err = s.buildApprovedBootstrapEnrollResponse(ctx, existingReq.BiscuitToken)
+			if err != nil {
+				logger.Errorf("Failed to build approved response: %v", err)
+				http.Error(w, "Internal server error", http.StatusInternalServerError)
+				return
+			}
+		} else {
+			resp = &api.BootstrapEnrollResponse{
+				Status:       existingReq.Status,
+				BiscuitToken: existingReq.BiscuitToken,
+			}
 		}
 		s.writeEnrollResponse(w, resp)
 		return
@@ -983,9 +993,11 @@ func (s *Server) HandleEnroll(w http.ResponseWriter, r *http.Request) {
 			logger.Errorf("Failed to increment token usage: %v", err)
 		}
 
-		resp := &api.BootstrapEnrollResponse{
-			Status:       api.EnrollmentStatus_ENROLLMENT_STATUS_APPROVED,
-			BiscuitToken: biscuitBytes,
+		resp, err := s.buildApprovedBootstrapEnrollResponse(ctx, biscuitBytes)
+		if err != nil {
+			logger.Errorf("Failed to build approved response: %v", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
 		}
 		s.writeEnrollResponse(w, resp)
 		return
@@ -1029,12 +1041,22 @@ func (s *Server) HandleEnrollStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := &api.BootstrapEnrollResponse{
-		Status:       enrollReq.Status,
-		BiscuitToken: enrollReq.BiscuitToken,
-	}
-	if enrollReq.Status == api.EnrollmentStatus_ENROLLMENT_STATUS_PENDING {
-		resp.PollIntervalSeconds = 30
+	var resp *api.BootstrapEnrollResponse
+	if enrollReq.Status == api.EnrollmentStatus_ENROLLMENT_STATUS_APPROVED {
+		resp, err = s.buildApprovedBootstrapEnrollResponse(ctx, enrollReq.BiscuitToken)
+		if err != nil {
+			logger.Errorf("Failed to build approved response: %v", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+	} else {
+		resp = &api.BootstrapEnrollResponse{
+			Status:       enrollReq.Status,
+			BiscuitToken: enrollReq.BiscuitToken,
+		}
+		if enrollReq.Status == api.EnrollmentStatus_ENROLLMENT_STATUS_PENDING {
+			resp.PollIntervalSeconds = 30
+		}
 	}
 	s.writeEnrollResponse(w, resp)
 }
@@ -1327,3 +1349,31 @@ func (s *Server) HandleAdminRevoke(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(respData)
 }
+
+func (s *Server) buildApprovedBootstrapEnrollResponse(ctx context.Context, biscuitToken []byte) (*api.BootstrapEnrollResponse, error) {
+	_, pubKey, err := s.store.GetCurrentKey(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve signing key: %w", err)
+	}
+
+	activeRouters, err := s.store.GetActiveRouters(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve active routers: %w", err)
+	}
+
+	var routerAddrs []string
+	for _, r := range activeRouters {
+		routerAddrs = append(routerAddrs, r.Addresses...)
+	}
+
+	expiration := time.Now().Add(api.BiscuitTokenTTL).Unix()
+
+	return &api.BootstrapEnrollResponse{
+		Status:         api.EnrollmentStatus_ENROLLMENT_STATUS_APPROVED,
+		BiscuitToken:  biscuitToken,
+		HubPublicKey:  pubKey,
+		HubAddresses:  routerAddrs,
+		Expiration:     expiration,
+	}, nil
+}
+
