@@ -15,9 +15,23 @@ builds:
       - arm64
     ldflags:
       - -s -w
-  - id: sam-hub
-    main: ./cmd/sam-hub
-    binary: sam-hub
+  - id: sam-control-plane
+    main: ./cmd/sam-control-plane
+    binary: sam-control-plane
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - windows
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+  - id: sam-router
+    main: ./cmd/sam-router
+    binary: sam-router
     env:
       - CGO_ENABLED=0
     goos:

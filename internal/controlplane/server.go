@@ -123,8 +123,6 @@ func (s *Server) Start() error {
 		}
 	}
 
-
-
 	// Initialize OIDC Providers
 	if err := s.discoverProviders(); err != nil {
 		return fmt.Errorf("failed OIDC discovery: %w", err)
@@ -1372,11 +1370,10 @@ func (s *Server) buildApprovedBootstrapEnrollResponse(ctx context.Context, biscu
 	}
 
 	return &api.BootstrapEnrollResponse{
-		Status:         api.EnrollmentStatus_ENROLLMENT_STATUS_APPROVED,
-		BiscuitToken:  biscuitToken,
-		HubPublicKey:  pubKey,
-		HubAddresses:  routerAddrs,
-		Expiration:     expiration,
+		Status:       api.EnrollmentStatus_ENROLLMENT_STATUS_APPROVED,
+		BiscuitToken: biscuitToken,
+		HubPublicKey: pubKey,
+		HubAddresses: routerAddrs,
+		Expiration:   expiration,
 	}, nil
 }
-

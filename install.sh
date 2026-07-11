@@ -55,9 +55,9 @@ tar -xzf "${TAR_NAME}"
 echo "Installing to ${INSTALL_DIR} (may require sudo)..."
 # In some environments, sudo might not be available or required
 if [ -w "$INSTALL_DIR" ]; then
-    mv sam-node sam-hub mcp-client "$INSTALL_DIR/" 2>/dev/null || true
+    mv sam-node sam-control-plane sam-router mcp-client "$INSTALL_DIR/" 2>/dev/null || true
 else
-    sudo mv sam-node sam-hub mcp-client "$INSTALL_DIR/" 2>/dev/null || true
+    sudo mv sam-node sam-control-plane sam-router mcp-client "$INSTALL_DIR/" 2>/dev/null || true
 fi
 
 # Cleanup
