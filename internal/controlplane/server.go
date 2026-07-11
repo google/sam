@@ -907,7 +907,7 @@ func (s *Server) HandleEnroll(w http.ResponseWriter, r *http.Request) {
 		// Request already exists, return status
 		var resp *api.BootstrapEnrollResponse
 		if existingReq.Status == api.EnrollmentStatus_ENROLLMENT_STATUS_APPROVED {
-			resp, err = s.buildApprovedBootstrapEnrollResponse(ctx, existingReq.BiscuitToken)
+			resp, err = s.buildApprovedBootstrapEnrollResponse(ctx, existingReq.BiscuitToken, existingReq.ResolvedAt)
 			if err != nil {
 				logger.Errorf("Failed to build approved response: %v", err)
 				http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -993,7 +993,7 @@ func (s *Server) HandleEnroll(w http.ResponseWriter, r *http.Request) {
 			logger.Errorf("Failed to increment token usage: %v", err)
 		}
 
-		resp, err := s.buildApprovedBootstrapEnrollResponse(ctx, biscuitBytes)
+		resp, err := s.buildApprovedBootstrapEnrollResponse(ctx, biscuitBytes, enrollReq.ResolvedAt)
 		if err != nil {
 			logger.Errorf("Failed to build approved response: %v", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -1043,7 +1043,7 @@ func (s *Server) HandleEnrollStatus(w http.ResponseWriter, r *http.Request) {
 
 	var resp *api.BootstrapEnrollResponse
 	if enrollReq.Status == api.EnrollmentStatus_ENROLLMENT_STATUS_APPROVED {
-		resp, err = s.buildApprovedBootstrapEnrollResponse(ctx, enrollReq.BiscuitToken)
+		resp, err = s.buildApprovedBootstrapEnrollResponse(ctx, enrollReq.BiscuitToken, enrollReq.ResolvedAt)
 		if err != nil {
 			logger.Errorf("Failed to build approved response: %v", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -1350,7 +1350,7 @@ func (s *Server) HandleAdminRevoke(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(respData)
 }
 
-func (s *Server) buildApprovedBootstrapEnrollResponse(ctx context.Context, biscuitToken []byte) (*api.BootstrapEnrollResponse, error) {
+func (s *Server) buildApprovedBootstrapEnrollResponse(ctx context.Context, biscuitToken []byte, resolvedAt *time.Time) (*api.BootstrapEnrollResponse, error) {
 	_, pubKey, err := s.store.GetCurrentKey(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to retrieve signing key: %w", err)
@@ -1367,6 +1367,9 @@ func (s *Server) buildApprovedBootstrapEnrollResponse(ctx context.Context, biscu
 	}
 
 	expiration := time.Now().Add(api.BiscuitTokenTTL).Unix()
+	if resolvedAt != nil {
+		expiration = resolvedAt.Add(api.BiscuitTokenTTL).Unix()
+	}
 
 	return &api.BootstrapEnrollResponse{
 		Status:         api.EnrollmentStatus_ENROLLMENT_STATUS_APPROVED,

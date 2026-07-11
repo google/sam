@@ -87,7 +87,7 @@ spec:
     spec:
       initContainers:
       - name: wait-for-db
-        image: busybox:latest
+        image: busybox:1.36.1
         command: ['sh', '-c', 'until nc -z -w3 sam-db-${ENV_NAME} 5432; do echo waiting for db; sleep 1; done']
       containers:
       - name: sam-control-plane
