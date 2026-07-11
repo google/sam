@@ -91,6 +91,7 @@ spec:
         - "--issuer=${ISSUER}"
         - "--allowed-audiences=sam-mesh-audience,sam-hub-audience"
         - "--policy-file=/etc/sam/policies/policies.yaml"
+        - "--insecure-skip-tls-verify"
         ports:
         - { containerPort: 8080, name: http, protocol: TCP }
         readinessProbe:
