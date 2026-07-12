@@ -867,6 +867,23 @@ const adminHTML = `<!DOCTYPE html>
     <div class="toast-container" id="toast-container"></div>
 
     <script>
+        function escapeHTML(str) {
+            if (!str) return '';
+            return str.replace(/[&<>"']/g, function(m) {
+                switch (m) {
+                    case '&': return '&amp;';
+                    case '<': return '&lt;';
+                    case '>': return '&gt;';
+                    case '"': return '&quot;';
+                    case "'": return '&#039;';
+                    default: return m;
+                }
+            });
+        }
+
+        let adminToken = localStorage.getItem('sam_admin_token') || '';
+        let modalCancelled = false;
+
         function writeVarint(value) {
             const bytes = [];
             while (value > 127) {
@@ -876,8 +893,6 @@ const adminHTML = `<!DOCTYPE html>
             bytes.push(value);
             return bytes;
         }
-
-        let adminToken = localStorage.getItem('sam_admin_token') || '';
 
         function showToast(message, type) {
             type = type || 'success';
@@ -894,12 +909,14 @@ const adminHTML = `<!DOCTYPE html>
         }
 
         function openTokenModal() {
+            modalCancelled = false;
             document.getElementById('admin-token-input').value = adminToken;
             document.getElementById('token-modal').classList.add('active');
         }
 
         function closeTokenModal() {
             document.getElementById('token-modal').classList.remove('active');
+            modalCancelled = true;
         }
 
         function saveAdminToken() {
@@ -975,7 +992,9 @@ const adminHTML = `<!DOCTYPE html>
                 const response = await fetch(endpoint, options);
                 if (response.status === 401) {
                     showToast('Unauthorized: Check your admin token', 'error');
-                    openTokenModal();
+                    if (!modalCancelled) {
+                        openTokenModal();
+                    }
                     return null;
                 }
                 if (!response.ok) {
@@ -1047,14 +1066,14 @@ const adminHTML = `<!DOCTYPE html>
                         peersHTML = '<li>No connected peers</li>';
                     } else {
                         conns.forEach(function(p) {
-                            peersHTML += '<li>' + p.substring(0, 15) + '... (' + p.substring(p.length - 8) + ')</li>';
+                            peersHTML += '<li>' + escapeHTML(p.substring(0, 15)) + '... (' + escapeHTML(p.substring(p.length - 8)) + ')</li>';
                         });
                     }
 
                     topoList.innerHTML += 
                         '<div class="router-item-card">' +
                             '<div class="router-header">' +
-                                '<span class="router-peer-id" title="' + r.PeerID + '">' + r.PeerID.substring(0, 12) + '...' + r.PeerID.substring(r.PeerID.length - 8) + '</span>' +
+                                '<span class="router-peer-id" title="' + escapeHTML(r.PeerID) + '">' + escapeHTML(r.PeerID.substring(0, 12)) + '...' + escapeHTML(r.PeerID.substring(r.PeerID.length - 8)) + '</span>' +
                                 '<span class="status-badge" style="background: rgba(16,185,129,0.1); color: var(--green); border-color: rgba(16,185,129,0.15)">Lease: ' + elapsed + 's</span>' +
                             '</div>' +
                             '<div class="router-metrics">' +
@@ -1084,28 +1103,32 @@ const adminHTML = `<!DOCTYPE html>
                     let actionButtons = '';
                     const dateStr = new Date(r.CreatedAt).toLocaleString();
 
+                    const escapedID = escapeHTML(r.ID);
+                    const escapedPeerID = escapeHTML(r.PeerID);
+                    const escapedResolvedBy = escapeHTML(r.ResolvedBy || '');
+
                     if (r.Status === 1) { // PENDING
                         statusBadge = '<span class="badge badge-pending">PENDING</span>';
                         actionButtons = 
-                            '<button class="btn btn-secondary" style="padding: 0.4rem 0.8rem; font-size: 0.75rem; background: var(--green);" onclick="resolveEnrollment(\'' + r.ID + '\', \'approve\')">Approve</button>' +
-                            '<button class="btn btn-danger" style="padding: 0.4rem 0.8rem; font-size: 0.75rem;" onclick="resolveEnrollment(\'' + r.ID + '\', \'reject\')">Reject</button>';
+                            '<button class="btn btn-secondary" style="padding: 0.4rem 0.8rem; font-size: 0.75rem; background: var(--green);" onclick="resolveEnrollment(\'' + escapedID + '\', \'approve\')">Approve</button>' +
+                            '<button class="btn btn-danger" style="padding: 0.4rem 0.8rem; font-size: 0.75rem;" onclick="resolveEnrollment(\'' + escapedID + '\', \'reject\')">Reject</button>';
                     } else if (r.Status === 2) { // APPROVED
                         statusBadge = '<span class="badge badge-approved">APPROVED</span>';
-                        actionButtons = '<span style="font-size:0.8rem; color:var(--text-secondary)">By ' + r.ResolvedBy + '</span>';
+                        actionButtons = '<span style="font-size:0.8rem; color:var(--text-secondary)">By ' + escapedResolvedBy + '</span>';
                     } else if (r.Status === 3) { // REJECTED
                         statusBadge = '<span class="badge badge-rejected">REJECTED</span>';
-                        actionButtons = '<span style="font-size:0.8rem; color:var(--text-secondary)">By ' + r.ResolvedBy + '</span>';
+                        actionButtons = '<span style="font-size:0.8rem; color:var(--text-secondary)">By ' + escapedResolvedBy + '</span>';
                     }
 
                     enrollTbody.innerHTML += 
                         '<tr>' +
                             '<td>' +
                                 '<div class="peer-id-cell">' +
-                                    '<span>' + r.PeerID.substring(0, 16) + '...</span>' +
-                                    '<button class="copy-btn" onclick="copyToClipboard(\'' + r.PeerID + '\')">📋</button>' +
+                                    '<span>' + escapedPeerID.substring(0, 16) + '...</span>' +
+                                    '<button class="copy-btn" onclick="copyToClipboard(\'' + escapedPeerID + '\')">📋</button>' +
                                 '</div>' +
                             '</td>' +
-                            '<td style="font-family: monospace; font-size:0.8rem;">' + (r.TokenID ? r.TokenID.substring(0, 8) + '...' : 'OIDC') + '</td>' +
+                            '<td style="font-family: monospace; font-size:0.8rem;">' + (r.TokenID ? escapeHTML(r.TokenID).substring(0, 8) + '...' : 'OIDC') + '</td>' +
                             '<td>' + dateStr + '</td>' +
                             '<td>' + statusBadge + '</td>' +
                             '<td style="display: flex; gap: 0.5rem;">' + actionButtons + '</td>' +
@@ -1124,20 +1147,25 @@ const adminHTML = `<!DOCTYPE html>
                     const enrollDate = new Date(n.EnrolledAt).toLocaleString();
                     const expiryDate = n.ExpiresAt && !n.ExpiresAt.startsWith('0001') ? new Date(n.ExpiresAt).toLocaleString() : 'Never';
                     const roleBadge = n.Role.includes('router') ? 'badge-router' : 'badge-node';
+                    
+                    const escapedPeerID = escapeHTML(n.PeerID);
+                    const escapedRole = escapeHTML(n.Role);
+                    const escapedType = escapeHTML(n.EnrollmentType);
+                    
                     const actionBtn = n.Banned 
-                        ? '<button class="btn btn-secondary" style="padding: 0.35rem 0.75rem; font-size: 0.75rem;" onclick="toggleBan(\'' + n.PeerID + '\', false)">Unban</button>'
-                        : '<button class="btn btn-danger" style="padding: 0.35rem 0.75rem; font-size: 0.75rem;" onclick="toggleBan(\'' + n.PeerID + '\', true)">Ban</button>';
+                        ? '<button class="btn btn-secondary" style="padding: 0.35rem 0.75rem; font-size: 0.75rem;" onclick="toggleBan(\'' + escapedPeerID + '\', false)">Unban</button>'
+                        : '<button class="btn btn-danger" style="padding: 0.35rem 0.75rem; font-size: 0.75rem;" onclick="toggleBan(\'' + escapedPeerID + '\', true)">Ban</button>';
 
                     nodesTbody.innerHTML += 
                         '<tr>' +
                             '<td>' +
                                 '<div class="peer-id-cell">' +
-                                    '<span>' + n.PeerID.substring(0, 16) + '...</span>' +
-                                    '<button class="copy-btn" onclick="copyToClipboard(\'' + n.PeerID + '\')">📋</button>' +
+                                    '<span>' + escapedPeerID.substring(0, 16) + '...</span>' +
+                                    '<button class="copy-btn" onclick="copyToClipboard(\'' + escapedPeerID + '\')">📋</button>' +
                                 '</div>' +
                             '</td>' +
-                            '<td><span class="badge ' + roleBadge + '">' + n.Role + '</span></td>' +
-                            '<td><span style="font-weight:600; font-size:0.8rem;">' + n.EnrollmentType + '</span></td>' +
+                            '<td><span class="badge ' + roleBadge + '">' + escapedRole + '</span></td>' +
+                            '<td><span style="font-weight:600; font-size:0.8rem;">' + escapedType + '</span></td>' +
                             '<td>' + enrollDate + '</td>' +
                             '<td>' + expiryDate + '</td>' +
                             '<td>' + statusBadge + '</td>' +
@@ -1153,18 +1181,20 @@ const adminHTML = `<!DOCTYPE html>
                 routersTbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: var(--text-secondary);">No active routers online.</td></tr>';
             } else {
                 routers.forEach(function(r) {
-                    const addressesHTML = r.Addresses.map(function(a) { return '<div style="font-family: monospace; font-size:0.75rem; margin-bottom: 0.2rem;">' + a + '</div>'; }).join('');
+                    const addressesHTML = r.Addresses.map(function(a) { return '<div style="font-family: monospace; font-size:0.75rem; margin-bottom: 0.2rem;">' + escapeHTML(a) + '</div>'; }).join('');
                     const renewalDate = new Date(r.LastRenewal).toLocaleTimeString();
                     const expiryDate = new Date(r.ExpiresAt).toLocaleTimeString();
                     const conns = r.ConnectedPeers || [];
                     const dhtSize = r.DHTSize || 0;
 
+                    const escapedPeerID = escapeHTML(r.PeerID);
+
                     routersTbody.innerHTML += 
                         '<tr>' +
                             '<td>' +
                                 '<div class="peer-id-cell">' +
-                                    '<span>' + r.PeerID.substring(0, 16) + '...</span>' +
-                                    '<button class="copy-btn" onclick="copyToClipboard(\'' + r.PeerID + '\')">📋</button>' +
+                                    '<span>' + escapedPeerID.substring(0, 16) + '...</span>' +
+                                    '<button class="copy-btn" onclick="copyToClipboard(\'' + escapedPeerID + '\')">📋</button>' +
                                 '</div>' +
                             '</td>' +
                             '<td>' + addressesHTML + '</td>' +
@@ -1186,13 +1216,17 @@ const adminHTML = `<!DOCTYPE html>
                     const expDate = new Date(t.ExpiresAt).toLocaleString();
                     const usageStr = t.UsagesCount + '/' + t.MaxUsages;
 
+                    const escapedID = escapeHTML(t.ID);
+                    const escapedRole = escapeHTML(t.Role);
+                    const escapedDesc = escapeHTML(t.Description || '');
+
                     tokensTbody.innerHTML += 
                         '<tr>' +
-                            '<td style="font-family: monospace; font-size:0.8rem;">' + t.ID.substring(0, 16) + '...</td>' +
-                            '<td><span class="badge ' + (t.Role.includes('router') ? 'badge-router' : 'badge-node') + '">' + t.Role + '</span></td>' +
+                            '<td style="font-family: monospace; font-size:0.8rem;">' + escapedID.substring(0, 16) + '...</td>' +
+                            '<td><span class="badge ' + (escapedRole.includes('router') ? 'badge-router' : 'badge-node') + '">' + escapedRole + '</span></td>' +
                             '<td style="font-weight: 600;">' + usageStr + '</td>' +
                             '<td>' + expDate + '</td>' +
-                            '<td style="color:var(--text-secondary); font-size:0.8rem;">' + (t.Description || '') + '</td>' +
+                            '<td style="color:var(--text-secondary); font-size:0.8rem;">' + escapedDesc + '</td>' +
                         '</tr>';
                 });
             }
