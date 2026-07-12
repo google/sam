@@ -193,8 +193,8 @@ var migrations = []migration{
 	{
 		version: 2,
 		postgres: []string{
-			`ALTER TABLE routers ADD COLUMN connected_peers TEXT`,
-			`ALTER TABLE routers ADD COLUMN dht_size INT`,
+			`ALTER TABLE routers ADD COLUMN IF NOT EXISTS connected_peers TEXT`,
+			`ALTER TABLE routers ADD COLUMN IF NOT EXISTS dht_size INT`,
 		},
 		sqlite: []string{
 			`ALTER TABLE routers ADD COLUMN connected_peers TEXT`,
