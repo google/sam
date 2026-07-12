@@ -1068,7 +1068,8 @@ func (s *Server) HandleEnrollStatus(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) checkAdminAuth(w http.ResponseWriter, r *http.Request) bool {
 	if s.config.AdminToken == "" {
-		return true
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return false
 	}
 	authHeader := r.Header.Get("Authorization")
 	if !strings.HasPrefix(authHeader, "Bearer ") {
@@ -1076,7 +1077,7 @@ func (s *Server) checkAdminAuth(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 	token := strings.TrimPrefix(authHeader, "Bearer ")
-	if token != s.config.AdminToken {
+	if token == "" || token != s.config.AdminToken {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return false
 	}
