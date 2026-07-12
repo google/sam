@@ -389,10 +389,36 @@ func TestPoliciesConfigurationREST(t *testing.T) {
 		_ = store.Close()
 	}()
 
+	srv.config.AdminToken = "super-secret-admin-token"
 	client := &http.Client{Timeout: 5 * time.Second}
 
-	// 1. Get policies (should return 404 since none exists)
-	resp, err := client.Get(baseURL + "/policies")
+	// 1. Get policies without token (should return 401)
+	req, _ := http.NewRequest(http.MethodGet, baseURL+"/policies", nil)
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("GET /policies failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("expected 401 for unauthenticated request, got %d", resp.StatusCode)
+	}
+	_ = resp.Body.Close()
+
+	// 2. Get policies with incorrect token (should return 401)
+	req, _ = http.NewRequest(http.MethodGet, baseURL+"/policies", nil)
+	req.Header.Set("Authorization", "Bearer wrong-token")
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatalf("GET /policies failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("expected 401 for invalid token, got %d", resp.StatusCode)
+	}
+	_ = resp.Body.Close()
+
+	// 3. Get policies with correct token (should return 404 since none exists)
+	req, _ = http.NewRequest(http.MethodGet, baseURL+"/policies", nil)
+	req.Header.Set("Authorization", "Bearer super-secret-admin-token")
+	resp, err = client.Do(req)
 	if err != nil {
 		t.Fatalf("GET /policies failed: %v", err)
 	}
@@ -401,7 +427,7 @@ func TestPoliciesConfigurationREST(t *testing.T) {
 	}
 	_ = resp.Body.Close()
 
-	// 2. Put policies
+	// 4. Put policies (should succeed)
 	newPolicyYaml := `
 version: v1alpha1
 bindings:
@@ -416,7 +442,10 @@ roles:
 	updateReq := &api.PolicyConfigUpdateRequest{YamlContent: newPolicyYaml}
 	reqData, _ := proto.Marshal(updateReq)
 
-	resp, err = client.Post(baseURL+"/policies", "application/x-protobuf", bytes.NewReader(reqData))
+	req, _ = http.NewRequest(http.MethodPost, baseURL+"/policies", bytes.NewReader(reqData))
+	req.Header.Set("Content-Type", "application/x-protobuf")
+	req.Header.Set("Authorization", "Bearer super-secret-admin-token")
+	resp, err = client.Do(req)
 	if err != nil {
 		t.Fatalf("POST /policies failed: %v", err)
 	}
@@ -426,8 +455,10 @@ roles:
 	}
 	_ = resp.Body.Close()
 
-	// 3. Get policies again (verify content)
-	resp, err = client.Get(baseURL + "/policies")
+	// 5. Get policies again with correct token (verify content)
+	req, _ = http.NewRequest(http.MethodGet, baseURL+"/policies", nil)
+	req.Header.Set("Authorization", "Bearer super-secret-admin-token")
+	resp, err = client.Do(req)
 	if err != nil {
 		t.Fatalf("GET /policies failed: %v", err)
 	}
