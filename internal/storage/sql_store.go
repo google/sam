@@ -678,6 +678,7 @@ func (s *SQLStore) ListNodes(ctx context.Context) ([]EnrolledNode, error) {
 	var nodes []EnrolledNode
 	for rows.Next() {
 		var node EnrolledNode
+		var claimsJSON sql.NullString
 		var enrolledAtUnix, expiresAtUnix int64
 		err := rows.Scan(
 			&node.PeerID,
@@ -685,13 +686,16 @@ func (s *SQLStore) ListNodes(ctx context.Context) ([]EnrolledNode, error) {
 			&node.Biscuit,
 			&node.Role,
 			&node.EnrollmentType,
-			&node.ClaimsJSON,
+			&claimsJSON,
 			&enrolledAtUnix,
 			&expiresAtUnix,
 			&node.Banned,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan enrolled node: %w", err)
+		}
+		if claimsJSON.Valid {
+			node.ClaimsJSON = claimsJSON.String
 		}
 		node.EnrolledAt = time.UnixMilli(enrolledAtUnix)
 		node.ExpiresAt = time.UnixMilli(expiresAtUnix)
@@ -715,6 +719,7 @@ func (s *SQLStore) ListBootstrapTokens(ctx context.Context) ([]BootstrapToken, e
 	var tokens []BootstrapToken
 	for rows.Next() {
 		var t BootstrapToken
+		var desc sql.NullString
 		var created, expires int64
 		err := rows.Scan(
 			&t.ID,
@@ -722,12 +727,15 @@ func (s *SQLStore) ListBootstrapTokens(ctx context.Context) ([]BootstrapToken, e
 			&t.Role,
 			&t.MaxUsages,
 			&t.UsagesCount,
-			&t.Description,
+			&desc,
 			&created,
 			&expires,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan bootstrap token: %w", err)
+		}
+		if desc.Valid {
+			t.Description = desc.String
 		}
 		t.CreatedAt = time.Unix(created, 0)
 		t.ExpiresAt = time.Unix(expires, 0)
