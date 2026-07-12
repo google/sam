@@ -6,7 +6,7 @@ import random
 import httpx
 from typing import Optional, Dict, Any, List
 from mcp import ClientSession
-from mcp.client.sse import sse_client
+from mcp.client.streamable_http import streamablehttp_client
 
 class SamClient:
     """Inlined SAM Client for self-contained execution."""
@@ -25,8 +25,8 @@ class SamClient:
         headers = {"Accept": "application/json, text/event-stream"}
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
-        self._sse_cm = sse_client(self.server_url, headers=headers)
-        read_stream, write_stream = await self._sse_cm.__aenter__()
+        self._sse_cm = streamablehttp_client(self.server_url, headers=headers)
+        read_stream, write_stream, _ = await self._sse_cm.__aenter__()
         self.session = ClientSession(read_stream, write_stream)
         await self.session.__aenter__()
         await self.session.initialize()
@@ -104,7 +104,7 @@ class FallbackAgent:
         self.client = client
         self.api_key = api_key
         self.token = token
-        self.base_url = local_node_url.rsplit("/mcp/", 1)[0]
+        self.base_url = local_node_url.rsplit("/mcp", 1)[0]
         self.current_model = None
         self.mesh_history = []
         self.gemini_history = []
