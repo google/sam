@@ -82,6 +82,10 @@ var (
 	tlsCertFlag              string
 	tlsKeyFlag               string
 	tlsCAFlag                string
+	dhtProviderAddrTTLFlag   time.Duration
+	dhtMaxRecordAgeFlag      time.Duration
+	dhtLookupLimitFlag       int
+	discoveryConcurrencyFlag int
 )
 
 var logger = golog.Logger("sam-node-cli")
@@ -223,6 +227,10 @@ func main() {
 					AutoRelayBootDelay:   autoRelayBootDelayFlag,
 					AutoRelayBackoff:     autoRelayBackoffFlag,
 					HubConnectTimeout:    hubConnectTimeoutFlag,
+					DHTProviderAddrTTL:   dhtProviderAddrTTLFlag,
+					DHTMaxRecordAge:      dhtMaxRecordAgeFlag,
+					DHTLookupLimit:       dhtLookupLimitFlag,
+					DiscoveryConcurrency: discoveryConcurrencyFlag,
 				})
 				if err != nil {
 					logger.Fatalf("Failed to initialize mesh node: %v", err)
@@ -282,6 +290,10 @@ func main() {
 					AutoRelayBootDelay:   autoRelayBootDelayFlag,
 					AutoRelayBackoff:     autoRelayBackoffFlag,
 					HubConnectTimeout:    hubConnectTimeoutFlag,
+					DHTProviderAddrTTL:   dhtProviderAddrTTLFlag,
+					DHTMaxRecordAge:      dhtMaxRecordAgeFlag,
+					DHTLookupLimit:       dhtLookupLimitFlag,
+					DiscoveryConcurrency: discoveryConcurrencyFlag,
 				})
 				if err != nil {
 					enrollCancel()
@@ -554,6 +566,10 @@ func main() {
 	runCmd.Flags().StringVar(&tlsCertFlag, "tls-cert", "", "Path to TLS certificate for sidecar API")
 	runCmd.Flags().StringVar(&tlsKeyFlag, "tls-key", "", "Path to TLS key for sidecar API")
 	runCmd.Flags().StringVar(&tlsCAFlag, "tls-ca", "", "Path to TLS CA for sidecar API mTLS")
+	runCmd.Flags().DurationVar(&dhtProviderAddrTTLFlag, "dht-provider-addr-ttl", 0, "Time-To-Live for DHT provider addresses (0s uses library default)")
+	runCmd.Flags().DurationVar(&dhtMaxRecordAgeFlag, "dht-max-record-age", 0, "Maximum age for DHT records (0s uses library default)")
+	runCmd.Flags().IntVar(&dhtLookupLimitFlag, "dht-lookup-limit", 0, "Maximum number of providers to query from the DHT (0 uses default 20)")
+	runCmd.Flags().IntVar(&discoveryConcurrencyFlag, "discovery-concurrency", 0, "Max concurrent catalog fetches during discovery (0 uses default 10)")
 	rootCmd.PersistentFlags().StringVar(&hubAddr, "hub", "", "Hub URL")
 	rootCmd.PersistentFlags().StringVar(&configFile, "config", node.DefaultConfigFile, "Path to sam-node.yaml configuration file")
 	rootCmd.PersistentFlags().StringVar(&oidcIssuerFlag, "oidc-issuer", "", "OIDC Issuer URL")
