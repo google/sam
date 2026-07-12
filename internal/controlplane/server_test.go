@@ -941,7 +941,7 @@ func TestAdminPanelAndUI(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("expected 200 status for authenticated status query, got: %d", resp.StatusCode)
 	}
-	
+
 	var statusData map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&statusData); err != nil {
 		t.Fatalf("failed to decode admin status response: %v", err)
@@ -986,4 +986,3 @@ func TestAdminPanelAndUI(t *testing.T) {
 	}
 	_ = resp.Body.Close()
 }
-

@@ -221,36 +221,42 @@ func (s *SQLStore) initSchema() error {
 			continue
 		}
 
-		tx, err := s.db.Begin()
+		err := func() error {
+			tx, err := s.db.Begin()
+			if err != nil {
+				return err
+			}
+			defer func() { _ = tx.Rollback() }()
+
+			queries := m.sqlite
+			if s.isPostgres() {
+				queries = m.postgres
+			}
+
+			for _, query := range queries {
+				if _, err := tx.Exec(query); err != nil {
+					errStr := strings.ToLower(err.Error())
+					if strings.Contains(errStr, "duplicate column") || strings.Contains(errStr, "already exists") {
+						continue
+					}
+					return fmt.Errorf("migration version %d failed: query %q failed: %w", m.version, query, err)
+				}
+			}
+
+			insertQuery := s.rebind("INSERT INTO schema_migrations (version) VALUES (?)")
+			if _, err := tx.Exec(insertQuery, m.version); err != nil {
+				return fmt.Errorf("failed to update schema_migrations version: %w", err)
+			}
+
+			if err := tx.Commit(); err != nil {
+				return err
+			}
+			logger.Infof("Applied schema migration version %d successfully", m.version)
+			return nil
+		}()
 		if err != nil {
 			return err
 		}
-		defer func() { _ = tx.Rollback() }()
-
-		queries := m.sqlite
-		if s.isPostgres() {
-			queries = m.postgres
-		}
-
-		for _, query := range queries {
-			if _, err := tx.Exec(query); err != nil {
-				errStr := strings.ToLower(err.Error())
-				if strings.Contains(errStr, "duplicate column") || strings.Contains(errStr, "already exists") {
-					continue
-				}
-				return fmt.Errorf("migration version %d failed: query %q failed: %w", m.version, query, err)
-			}
-		}
-
-		insertQuery := s.rebind("INSERT INTO schema_migrations (version) VALUES (?)")
-		if _, err := tx.Exec(insertQuery, m.version); err != nil {
-			return fmt.Errorf("failed to update schema_migrations version: %w", err)
-		}
-
-		if err := tx.Commit(); err != nil {
-			return err
-		}
-		logger.Infof("Applied schema migration version %d successfully", m.version)
 	}
 	return nil
 }
