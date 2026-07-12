@@ -59,6 +59,8 @@ spec:
         - "--allow-loopback"
         - "--lease-renew-interval=5s"
         - "--log-level=debug"
+        - "--dht-provider-addr-ttl=5s"
+        - "--dht-max-record-age=5s"
         volumeMounts:
         - name: router-data
           mountPath: /data

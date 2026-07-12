@@ -72,8 +72,6 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
   mesh_cleanup_env() {
     mesh_cleanup_test_resources
   }
-  
-
 
   mesh_gen_hex32() {
     hexdump -vn 32 -e '1/1 "%02x"' /dev/urandom
@@ -363,6 +361,8 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
       --bind-addr "0.0.0.0:8080" \
       --api-token "secret-token" \
       --mesh "${MESH_PREFIX}" \
+      --dht-provider-addr-ttl 5s \
+      --dht-max-record-age 5s \
       "${config_args[@]}" >/dev/null
 
     MESH_CONTAINERS+=("${name}")
