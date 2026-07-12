@@ -127,6 +127,8 @@ message RouterLeaseRequest {
   string peer_id = 1;
   repeated string addresses = 2;
   bytes biscuit = 3;
+  repeated string connected_peers = 4;
+  int32 dht_size = 5;
 }
 
 message RouterLeaseResponse {

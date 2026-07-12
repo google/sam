@@ -24,12 +24,15 @@ import (
 	"time"
 
 	"github.com/google/sam/api"
+	log "github.com/ipfs/go-log/v2"
 	"gopkg.in/yaml.v2"
 
 	// Register PG and SQLite drivers
 	_ "github.com/jackc/pgx/v5/stdlib"
 	_ "modernc.org/sqlite"
 )
+
+var logger = log.Logger("sam-storage")
 
 // SQLStore implements Store interface using database/sql.
 type SQLStore struct {
@@ -73,21 +76,24 @@ func (s *SQLStore) isPostgres() bool {
 	return strings.Contains(s.driverName, "postgres") || strings.Contains(s.driverName, "pgx")
 }
 
-func (s *SQLStore) initSchema() error {
-	var keyringSchema, nodesSchema, routersSchema, policiesSchema string
-	var bootstrapTokensSchema, enrollmentRequestsSchema string
+type migration struct {
+	version  int
+	sqlite   []string
+	postgres []string
+}
 
-	if s.isPostgres() {
-		keyringSchema = `
-			CREATE TABLE IF NOT EXISTS keyring (
+var migrations = []migration{
+	{
+		version: 1,
+		postgres: []string{
+			`CREATE TABLE IF NOT EXISTS keyring (
 				id SERIAL PRIMARY KEY,
 				private_key BYTEA NOT NULL,
 				public_key BYTEA NOT NULL UNIQUE,
 				expiration BIGINT,
 				created_at BIGINT NOT NULL
-			)`
-		nodesSchema = `
-			CREATE TABLE IF NOT EXISTS nodes (
+			)`,
+			`CREATE TABLE IF NOT EXISTS nodes (
 				peer_id VARCHAR(255) PRIMARY KEY,
 				public_key BYTEA NOT NULL,
 				biscuit_token BYTEA NOT NULL,
@@ -97,22 +103,19 @@ func (s *SQLStore) initSchema() error {
 				enrolled_at BIGINT NOT NULL,
 				expires_at BIGINT NOT NULL,
 				banned BOOLEAN DEFAULT FALSE NOT NULL
-			)`
-		routersSchema = `
-			CREATE TABLE IF NOT EXISTS routers (
+			)`,
+			`CREATE TABLE IF NOT EXISTS routers (
 				peer_id VARCHAR(255) PRIMARY KEY,
 				multiaddresses TEXT NOT NULL,
 				last_lease_renewal BIGINT NOT NULL,
 				expires_at BIGINT NOT NULL
-			)`
-		policiesSchema = `
-			CREATE TABLE IF NOT EXISTS policies (
+			)`,
+			`CREATE TABLE IF NOT EXISTS policies (
 				id VARCHAR(255) PRIMARY KEY,
 				content TEXT NOT NULL,
 				updated_at BIGINT NOT NULL
-			)`
-		bootstrapTokensSchema = `
-			CREATE TABLE IF NOT EXISTS bootstrap_tokens (
+			)`,
+			`CREATE TABLE IF NOT EXISTS bootstrap_tokens (
 				id VARCHAR(64) PRIMARY KEY,
 				token_hash VARCHAR(64) UNIQUE NOT NULL,
 				role VARCHAR(64) NOT NULL,
@@ -121,9 +124,8 @@ func (s *SQLStore) initSchema() error {
 				description TEXT,
 				created_at BIGINT NOT NULL,
 				expires_at BIGINT NOT NULL
-			)`
-		enrollmentRequestsSchema = `
-			CREATE TABLE IF NOT EXISTS enrollment_requests (
+			)`,
+			`CREATE TABLE IF NOT EXISTS enrollment_requests (
 				id VARCHAR(64) PRIMARY KEY,
 				peer_id VARCHAR(255) UNIQUE NOT NULL,
 				public_key BYTEA NOT NULL,
@@ -133,18 +135,17 @@ func (s *SQLStore) initSchema() error {
 				created_at BIGINT NOT NULL,
 				resolved_at BIGINT,
 				resolved_by VARCHAR(255)
-			)`
-	} else {
-		keyringSchema = `
-			CREATE TABLE IF NOT EXISTS keyring (
+			)`,
+		},
+		sqlite: []string{
+			`CREATE TABLE IF NOT EXISTS keyring (
 				id INTEGER PRIMARY KEY AUTOINCREMENT,
 				private_key BLOB NOT NULL,
 				public_key BLOB NOT NULL UNIQUE,
 				expiration BIGINT,
 				created_at BIGINT NOT NULL
-			)`
-		nodesSchema = `
-			CREATE TABLE IF NOT EXISTS nodes (
+			)`,
+			`CREATE TABLE IF NOT EXISTS nodes (
 				peer_id TEXT PRIMARY KEY,
 				public_key BLOB NOT NULL,
 				biscuit_token BLOB NOT NULL,
@@ -154,22 +155,19 @@ func (s *SQLStore) initSchema() error {
 				enrolled_at BIGINT NOT NULL,
 				expires_at BIGINT NOT NULL,
 				banned BOOLEAN DEFAULT FALSE NOT NULL
-			)`
-		routersSchema = `
-			CREATE TABLE IF NOT EXISTS routers (
+			)`,
+			`CREATE TABLE IF NOT EXISTS routers (
 				peer_id TEXT PRIMARY KEY,
 				multiaddresses TEXT NOT NULL,
 				last_lease_renewal BIGINT NOT NULL,
 				expires_at BIGINT NOT NULL
-			)`
-		policiesSchema = `
-			CREATE TABLE IF NOT EXISTS policies (
+			)`,
+			`CREATE TABLE IF NOT EXISTS policies (
 				id TEXT PRIMARY KEY,
 				content TEXT NOT NULL,
 				updated_at BIGINT NOT NULL
-			)`
-		bootstrapTokensSchema = `
-			CREATE TABLE IF NOT EXISTS bootstrap_tokens (
+			)`,
+			`CREATE TABLE IF NOT EXISTS bootstrap_tokens (
 				id TEXT PRIMARY KEY,
 				token_hash TEXT UNIQUE NOT NULL,
 				role TEXT NOT NULL,
@@ -178,9 +176,8 @@ func (s *SQLStore) initSchema() error {
 				description TEXT,
 				created_at BIGINT NOT NULL,
 				expires_at BIGINT NOT NULL
-			)`
-		enrollmentRequestsSchema = `
-			CREATE TABLE IF NOT EXISTS enrollment_requests (
+			)`,
+			`CREATE TABLE IF NOT EXISTS enrollment_requests (
 				id TEXT PRIMARY KEY,
 				peer_id TEXT UNIQUE NOT NULL,
 				public_key BLOB NOT NULL,
@@ -190,12 +187,74 @@ func (s *SQLStore) initSchema() error {
 				created_at BIGINT NOT NULL,
 				resolved_at BIGINT,
 				resolved_by TEXT
-			)`
+			)`,
+		},
+	},
+	{
+		version: 2,
+		postgres: []string{
+			`ALTER TABLE routers ADD COLUMN IF NOT EXISTS connected_peers TEXT`,
+			`ALTER TABLE routers ADD COLUMN IF NOT EXISTS dht_size INT`,
+		},
+		sqlite: []string{
+			`ALTER TABLE routers ADD COLUMN connected_peers TEXT`,
+			`ALTER TABLE routers ADD COLUMN dht_size INTEGER`,
+		},
+	},
+}
+
+func (s *SQLStore) initSchema() error {
+	// Create schema_migrations table
+	createMigrationsTable := `CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY)`
+	if _, err := s.db.Exec(createMigrationsTable); err != nil {
+		return fmt.Errorf("failed to create schema_migrations table: %w", err)
 	}
 
-	schemas := []string{keyringSchema, nodesSchema, routersSchema, policiesSchema, bootstrapTokensSchema, enrollmentRequestsSchema}
-	for _, schema := range schemas {
-		if _, err := s.db.Exec(schema); err != nil {
+	var currentVersion int
+	err := s.db.QueryRow("SELECT COALESCE(MAX(version), 0) FROM schema_migrations").Scan(&currentVersion)
+	if err != nil {
+		return fmt.Errorf("failed to check current schema version: %w", err)
+	}
+
+	for _, m := range migrations {
+		if m.version <= currentVersion {
+			continue
+		}
+
+		err := func() error {
+			tx, err := s.db.Begin()
+			if err != nil {
+				return err
+			}
+			defer func() { _ = tx.Rollback() }()
+
+			queries := m.sqlite
+			if s.isPostgres() {
+				queries = m.postgres
+			}
+
+			for _, query := range queries {
+				if _, err := tx.Exec(query); err != nil {
+					errStr := strings.ToLower(err.Error())
+					if strings.Contains(errStr, "duplicate column") || strings.Contains(errStr, "already exists") {
+						continue
+					}
+					return fmt.Errorf("migration version %d failed: query %q failed: %w", m.version, query, err)
+				}
+			}
+
+			insertQuery := s.rebind("INSERT INTO schema_migrations (version) VALUES (?)")
+			if _, err := tx.Exec(insertQuery, m.version); err != nil {
+				return fmt.Errorf("failed to update schema_migrations version: %w", err)
+			}
+
+			if err := tx.Commit(); err != nil {
+				return err
+			}
+			logger.Infof("Applied schema migration version %d successfully", m.version)
+			return nil
+		}()
+		if err != nil {
 			return err
 		}
 	}
@@ -385,29 +444,33 @@ func (s *SQLStore) UpsertRouterLease(ctx context.Context, lease *RouterLease) er
 	if err != nil {
 		return err
 	}
+	peersBytes, err := json.Marshal(lease.ConnectedPeers)
+	if err != nil {
+		return err
+	}
 
 	var query string
 	if s.isPostgres() {
 		query = s.rebind(`
-			INSERT INTO routers (peer_id, multiaddresses, last_lease_renewal, expires_at) 
-			VALUES (?, ?, ?, ?)
+			INSERT INTO routers (peer_id, multiaddresses, last_lease_renewal, expires_at, connected_peers, dht_size) 
+			VALUES (?, ?, ?, ?, ?, ?)
 			ON CONFLICT (peer_id) 
-			DO UPDATE SET multiaddresses = EXCLUDED.multiaddresses, last_lease_renewal = EXCLUDED.last_lease_renewal, expires_at = EXCLUDED.expires_at`)
+			DO UPDATE SET multiaddresses = EXCLUDED.multiaddresses, last_lease_renewal = EXCLUDED.last_lease_renewal, expires_at = EXCLUDED.expires_at, connected_peers = EXCLUDED.connected_peers, dht_size = EXCLUDED.dht_size`)
 	} else {
 		query = s.rebind(`
-			INSERT INTO routers (peer_id, multiaddresses, last_lease_renewal, expires_at) 
-			VALUES (?, ?, ?, ?)
+			INSERT INTO routers (peer_id, multiaddresses, last_lease_renewal, expires_at, connected_peers, dht_size) 
+			VALUES (?, ?, ?, ?, ?, ?)
 			ON CONFLICT (peer_id) 
-			DO UPDATE SET multiaddresses = excluded.multiaddresses, last_lease_renewal = excluded.last_lease_renewal, expires_at = excluded.expires_at`)
+			DO UPDATE SET multiaddresses = excluded.multiaddresses, last_lease_renewal = excluded.last_lease_renewal, expires_at = excluded.expires_at, connected_peers = excluded.connected_peers, dht_size = excluded.dht_size`)
 	}
 
-	_, err = s.db.ExecContext(ctx, query, lease.PeerID, string(addrsBytes), lease.LastRenewal.UnixMilli(), lease.ExpiresAt.UnixMilli())
+	_, err = s.db.ExecContext(ctx, query, lease.PeerID, string(addrsBytes), lease.LastRenewal.UnixMilli(), lease.ExpiresAt.UnixMilli(), string(peersBytes), lease.DHTSize)
 	return err
 }
 
 // GetActiveRouters implements Store.
 func (s *SQLStore) GetActiveRouters(ctx context.Context) ([]RouterLease, error) {
-	query := s.rebind(`SELECT peer_id, multiaddresses, last_lease_renewal, expires_at FROM routers WHERE expires_at > ?`)
+	query := s.rebind(`SELECT peer_id, multiaddresses, last_lease_renewal, expires_at, connected_peers, dht_size FROM routers WHERE expires_at > ?`)
 	rows, err := s.db.QueryContext(ctx, query, time.Now().UnixMilli())
 	if err != nil {
 		return nil, err
@@ -418,12 +481,22 @@ func (s *SQLStore) GetActiveRouters(ctx context.Context) ([]RouterLease, error) 
 	for rows.Next() {
 		var l RouterLease
 		var addrsStr string
+		var peersStr sql.NullString
+		var dhtSize sql.NullInt64
 		var lastRenewalUnix, expiresAtUnix int64
-		if err := rows.Scan(&l.PeerID, &addrsStr, &lastRenewalUnix, &expiresAtUnix); err != nil {
+		if err := rows.Scan(&l.PeerID, &addrsStr, &lastRenewalUnix, &expiresAtUnix, &peersStr, &dhtSize); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal([]byte(addrsStr), &l.Addresses); err != nil {
 			return nil, err
+		}
+		if peersStr.Valid && peersStr.String != "" {
+			if err := json.Unmarshal([]byte(peersStr.String), &l.ConnectedPeers); err != nil {
+				return nil, err
+			}
+		}
+		if dhtSize.Valid {
+			l.DHTSize = int(dhtSize.Int64)
 		}
 		l.LastRenewal = time.UnixMilli(lastRenewalUnix)
 		l.ExpiresAt = time.UnixMilli(expiresAtUnix)
@@ -646,6 +719,87 @@ func (s *SQLStore) UpdateEnrollmentRequest(ctx context.Context, id string, statu
 		return fmt.Errorf("failed to update enrollment request: %w", err)
 	}
 	return nil
+}
+
+// ListNodes retrieves all enrolled nodes.
+func (s *SQLStore) ListNodes(ctx context.Context) ([]EnrolledNode, error) {
+	query := s.rebind(`SELECT peer_id, public_key, biscuit_token, role, enrollment_type, claims_json, enrolled_at, expires_at, banned FROM nodes ORDER BY enrolled_at DESC`)
+	rows, err := s.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query nodes: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var nodes []EnrolledNode
+	for rows.Next() {
+		var node EnrolledNode
+		var claimsJSON sql.NullString
+		var enrolledAtUnix, expiresAtUnix int64
+		err := rows.Scan(
+			&node.PeerID,
+			&node.PublicKey,
+			&node.Biscuit,
+			&node.Role,
+			&node.EnrollmentType,
+			&claimsJSON,
+			&enrolledAtUnix,
+			&expiresAtUnix,
+			&node.Banned,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan enrolled node: %w", err)
+		}
+		if claimsJSON.Valid {
+			node.ClaimsJSON = claimsJSON.String
+		}
+		node.EnrolledAt = time.UnixMilli(enrolledAtUnix)
+		node.ExpiresAt = time.UnixMilli(expiresAtUnix)
+		nodes = append(nodes, node)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return nodes, nil
+}
+
+// ListBootstrapTokens retrieves all bootstrap tokens.
+func (s *SQLStore) ListBootstrapTokens(ctx context.Context) ([]BootstrapToken, error) {
+	query := s.rebind(`SELECT id, token_hash, role, max_usages, usages_count, description, created_at, expires_at FROM bootstrap_tokens ORDER BY created_at DESC`)
+	rows, err := s.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query bootstrap tokens: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var tokens []BootstrapToken
+	for rows.Next() {
+		var t BootstrapToken
+		var desc sql.NullString
+		var created, expires int64
+		err := rows.Scan(
+			&t.ID,
+			&t.TokenHash,
+			&t.Role,
+			&t.MaxUsages,
+			&t.UsagesCount,
+			&desc,
+			&created,
+			&expires,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan bootstrap token: %w", err)
+		}
+		if desc.Valid {
+			t.Description = desc.String
+		}
+		t.CreatedAt = time.Unix(created, 0)
+		t.ExpiresAt = time.Unix(expires, 0)
+		tokens = append(tokens, t)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return tokens, nil
 }
 
 // Close implements Store.

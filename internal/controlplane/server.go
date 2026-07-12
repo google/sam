@@ -148,6 +148,8 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/admin/enrollments", s.HandleAdminEnrollments)
 	mux.HandleFunc("/admin/enrollments/", s.HandleAdminEnrollmentAction)
 	mux.HandleFunc("/admin/revoke", s.HandleAdminRevoke)
+	mux.HandleFunc("/admin/status", s.HandleAdminStatus)
+	mux.HandleFunc("/admin/", s.HandleAdminUI)
 
 	s.httpServer = &http.Server{
 		Handler: mux,
@@ -690,10 +692,12 @@ func (s *Server) HandleRouterLease(w http.ResponseWriter, r *http.Request) {
 	// Expose lease renewal
 	expiresAt := time.Now().Add(s.config.LeaseDuration)
 	lease := &storage.RouterLease{
-		PeerID:      req.PeerId,
-		Addresses:   req.Addresses,
-		LastRenewal: time.Now(),
-		ExpiresAt:   expiresAt,
+		PeerID:         req.PeerId,
+		Addresses:      req.Addresses,
+		LastRenewal:    time.Now(),
+		ExpiresAt:      expiresAt,
+		ConnectedPeers: req.ConnectedPeers,
+		DHTSize:        int(req.DhtSize),
 	}
 
 	if err := s.store.UpsertRouterLease(r.Context(), lease); err != nil {
@@ -720,6 +724,9 @@ func (s *Server) HandleRouterLease(w http.ResponseWriter, r *http.Request) {
 
 // HandlePolicies HTTP GET/POST/PUT `/policies`
 func (s *Server) HandlePolicies(w http.ResponseWriter, r *http.Request) {
+	if !s.checkAdminAuth(w, r) {
+		return
+	}
 	// Simple HTTP admin methods for policies
 	switch r.Method {
 	case http.MethodGet:
@@ -1061,7 +1068,8 @@ func (s *Server) HandleEnrollStatus(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) checkAdminAuth(w http.ResponseWriter, r *http.Request) bool {
 	if s.config.AdminToken == "" {
-		return true
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return false
 	}
 	authHeader := r.Header.Get("Authorization")
 	if !strings.HasPrefix(authHeader, "Bearer ") {
@@ -1069,7 +1077,7 @@ func (s *Server) checkAdminAuth(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 	token := strings.TrimPrefix(authHeader, "Bearer ")
-	if token != s.config.AdminToken {
+	if token == "" || token != s.config.AdminToken {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return false
 	}
