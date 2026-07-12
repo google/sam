@@ -302,6 +302,93 @@ jobs:
           }
 
 
+      - name: Deploy GCE VM Router
+        run: |
+          export ENV_NAME="${{ vars.ENV_NAME }}"
+          export NAMESPACE="sam-${ENV_NAME}"
+          export IMAGE_TAG="${{ env.IMAGE_TAG }}"
+          export GCP_PROJECT_ID="${{ vars.GCP_PROJECT_ID }}"
+          export CLUSTER_REGION="${{ vars.CLUSTER_REGION }}"
+          export ZONE="${CLUSTER_REGION}-a"
+
+          echo "Ensuring Firewall Rule for GCE VM Router exists..."
+          if ! gcloud compute firewall-rules describe allow-sam-router --project=${GCP_PROJECT_ID} >/dev/null 2>&1; then
+            gcloud compute firewall-rules create allow-sam-router \
+              --project=${GCP_PROJECT_ID} \
+              --allow=tcp:4501,udp:4501 \
+              --target-tags=sam-router \
+              --description="Allow SAM router peer-to-peer traffic"
+          fi
+
+          echo "Retrieving Admin Token to generate Bootstrap Token..."
+          ADMIN_TOKEN=$(kubectl get secret sam-control-plane-secret-${ENV_NAME} -n ${NAMESPACE} -o jsonpath='{.data.admin-token}' | base64 -d)
+
+          echo "Generating Bootstrap Token via internal GCP/GKE Control Plane service..."
+          
+          # Clean up any leftover token generator pod
+          kubectl delete pod curl-token-gen-vm -n ${NAMESPACE} --ignore-not-found || true
+          
+          # Run temporary curl pod in control plane namespace
+          kubectl run curl-token-gen-vm \
+            -n ${NAMESPACE} \
+            --image=curlimages/curl:8.6.0 \
+            --restart=Never \
+            --overrides='{"spec": {"activeDeadlineSeconds": 30}}' \
+            -- \
+            curl -s -X POST \
+              -H "Content-Type: application/json" \
+              -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+              -d '{"role": "sam:role:router", "max_usages": 1}' \
+              http://sam-control-plane-${ENV_NAME}:8080/admin/bootstrap-tokens
+
+          if ! kubectl wait -n ${NAMESPACE} --for=jsonpath='{.status.phase}'=Succeeded pod/curl-token-gen-vm --timeout=15s; then
+            echo "ERROR: Token generation pod failed!"
+            kubectl describe pod curl-token-gen-vm -n ${NAMESPACE} || true
+            kubectl logs pod/curl-token-gen-vm -n ${NAMESPACE} || true
+            kubectl delete pod curl-token-gen-vm -n ${NAMESPACE} --ignore-not-found || true
+            exit 1
+          fi
+
+          TOKEN_JSON=$(kubectl logs pod/curl-token-gen-vm -n ${NAMESPACE})
+          kubectl delete pod curl-token-gen-vm -n ${NAMESPACE} --ignore-not-found
+
+          BOOTSTRAP_TOKEN=$(echo "${TOKEN_JSON}" | jq -r .token)
+          if [ -z "${BOOTSTRAP_TOKEN}" ] || [ "${BOOTSTRAP_TOKEN}" = "null" ]; then
+            echo "ERROR: Generated bootstrap token is empty or invalid!"
+            echo "Response: ${TOKEN_JSON}"
+            exit 1
+          fi
+          
+          echo "Successfully generated bootstrap token."
+
+          echo "Provisioning GCE VM Router instance..."
+          # Delete existing VM if it exists to ensure fresh deployment with the new token and image
+          gcloud compute instances delete sam-router-${ENV_NAME}-vm --zone=${ZONE} --project=${GCP_PROJECT_ID} --quiet || true
+
+          # Create a new COS VM instance running the sam-router
+          gcloud compute instances create sam-router-${ENV_NAME}-vm \
+            --project=${GCP_PROJECT_ID} \
+            --zone=${ZONE} \
+            --machine-type=e2-micro \
+            --image-family=cos-stable \
+            --image-project=cos-cloud \
+            --tags=sam-router \
+            --metadata=startup-script='#!/bin/bash
+          set -euo pipefail
+          EXTERNAL_IP=$(curl -s -H "Metadata-Flavor: Google" http://metadata.google.internal/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip)
+          docker run -d \
+            --name sam-router \
+            --network host \
+            --restart always \
+            ghcr.io/google/sam-router:'"${IMAGE_TAG}"' \
+            --control-plane=https://'"${ENV_NAME}"'.sam-mesh.dev \
+            --bootstrap-token='"${BOOTSTRAP_TOKEN}"' \
+            --listen=/ip4/0.0.0.0/tcp/4501 \
+            --listen=/ip4/0.0.0.0/udp/4501/quic-v1 \
+            --external-addr=/ip4/${EXTERNAL_IP}/tcp/4501 \
+            --external-addr=/ip4/${EXTERNAL_IP}/udp/4501/quic-v1'
+
+
       - name: Deploy Canaries
         run: |
           print_rollout_diagnostics() {

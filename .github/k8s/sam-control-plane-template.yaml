@@ -125,6 +125,7 @@ spec:
         - "--allowed-audiences=sam-mesh-audience,sam-hub-audience"
         - "--policy-file=/etc/sam/policies/policies.yaml"
         - "--admin-token=$(ADMIN_TOKEN)"
+        - "--auto-approve-enrollment"
         resources:
           requests:
             cpu: 100m
