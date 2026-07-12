@@ -56,6 +56,7 @@ spec:
         - "--control-plane=http://sam-control-plane-${ENV_NAME}.${NAMESPACE}.svc.cluster.local:8080"
         - "--listen=/ip4/0.0.0.0/tcp/4501"
         - "--listen=/ip4/0.0.0.0/udp/4501/quic-v1"
+        - "--external-addr=/dnsaddr/bootstrap.${ENV_NAME}.sam-mesh.dev"
         - "--jwt-path=/var/run/secrets/tokens/sam-token"
         - "--keys-path=/data/router.key"
         resources:
