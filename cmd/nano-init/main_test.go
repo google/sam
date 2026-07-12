@@ -187,7 +187,7 @@ func TestDNSSpoofer(t *testing.T) {
 		t.Fatalf("Expected AAAAResource body type")
 	}
 
-	expectedAAAA := net.ParseIP("127.0.0.1").To16()
+	expectedAAAA := net.ParseIP("::1").To16()
 	var expectedAAAABytes [16]byte
 	copy(expectedAAAABytes[:], expectedAAAA)
 

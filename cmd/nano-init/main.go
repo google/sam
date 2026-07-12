@@ -97,7 +97,8 @@ func main() {
 					return
 				default:
 					log.Printf("TCP Accept error: %v", err)
-					return
+					time.Sleep(50 * time.Millisecond)
+					continue
 				}
 			}
 			go handleConnection(conn, udsPath)
@@ -288,7 +289,8 @@ func startDNSSpoofer(ctx context.Context, dnsAddr string) error {
 					return
 				default:
 					log.Printf("DNS Server read error: %v", err)
-					return
+					time.Sleep(50 * time.Millisecond)
+					continue
 				}
 			}
 
@@ -319,7 +321,7 @@ func startDNSSpoofer(ctx context.Context, dnsAddr string) error {
 							Body:   &dnsmessage.AResource{A: [4]byte{127, 0, 0, 1}},
 						})
 					case dnsmessage.TypeAAAA:
-						ip := net.ParseIP("127.0.0.1").To16()
+						ip := net.ParseIP("::1").To16()
 						var aaaa [16]byte
 						copy(aaaa[:], ip)
 						resp.Answers = append(resp.Answers, dnsmessage.Resource{
@@ -371,7 +373,7 @@ func setupPID1Duties(agentPid int, exitChan chan<- syscall.WaitStatus) {
 	signal.Notify(sigCh, syscall.SIGCHLD)
 
 	go func() {
-		for range sigCh {
+		reap := func() {
 			for {
 				var status syscall.WaitStatus
 				pid, err := syscall.Wait4(-1, &status, syscall.WNOHANG, nil)
@@ -385,6 +387,11 @@ func setupPID1Duties(agentPid int, exitChan chan<- syscall.WaitStatus) {
 					}
 				}
 			}
+		}
+		// Initial reap pass to catch any processes that exited before signal.Notify was registered
+		reap()
+		for range sigCh {
+			reap()
 		}
 	}()
 }

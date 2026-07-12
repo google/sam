@@ -315,9 +315,7 @@ func main() {
 			if err := os.Remove(udsPathFlag); err != nil && !os.IsNotExist(err) {
 				logger.Fatalf("Failed to remove existing UDS file: %v", err)
 			}
-			oldUmask := syscall.Umask(0177)
 			listener, err := net.Listen("unix", udsPathFlag)
-			syscall.Umask(oldUmask)
 			if err != nil {
 				logger.Fatalf("Failed to listen on UDS socket: %v", err)
 			}

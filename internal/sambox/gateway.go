@@ -26,6 +26,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"math/big"
 	"net"
 	"net/http"
@@ -245,7 +246,12 @@ func (g *Gateway) Serve(listener net.Listener) error {
 			case <-tlsListener.closed:
 				return nil
 			default:
-				return err
+				if errors.Is(err, net.ErrClosed) {
+					return nil
+				}
+				log.Printf("Accept error: %v; retrying in 50ms", err)
+				time.Sleep(50 * time.Millisecond)
+				continue
 			}
 		}
 
@@ -292,8 +298,8 @@ func (g *Gateway) handleConnection(rawConn net.Conn, tlsListener *channelListene
 	}
 }
 
-func (g *Gateway) handleHTTPConnection(conn net.Conn, tlsListener *channelListener) {
-	req, err := http.ReadRequest(bufio.NewReader(conn))
+func (g *Gateway) handleHTTPConnection(conn *bufferedConn, tlsListener *channelListener) {
+	req, err := http.ReadRequest(conn.r)
 	if err != nil {
 		_ = conn.Close()
 		return
@@ -402,7 +408,7 @@ func (g *Gateway) upgradeToTLS(rawConn net.Conn, sni string, tlsListener *channe
 
 type bufferedConn struct {
 	net.Conn
-	r io.Reader
+	r *bufio.Reader
 }
 
 func (c *bufferedConn) Read(b []byte) (int, error) {
