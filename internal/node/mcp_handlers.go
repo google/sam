@@ -91,7 +91,7 @@ func (n *SamNode) handleDiscoverRemoteServices(ctx context.Context, req *mcp.Cal
 		providers = []*api.DiscoveredProvider{}
 	} else {
 		end := offset + limit
-		if end > len(providers) {
+		if end > len(providers) || end < offset {
 			end = len(providers)
 		}
 		providers = providers[offset:end]

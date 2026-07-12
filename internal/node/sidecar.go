@@ -411,7 +411,7 @@ func handleDiscoverService(node *SamNode, w http.ResponseWriter, r *http.Request
 		providers = []*api.DiscoveredProvider{}
 	} else {
 		end := offset + limit
-		if end > len(providers) {
+		if end > len(providers) || end < offset {
 			end = len(providers)
 		}
 		providers = providers[offset:end]
