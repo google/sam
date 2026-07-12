@@ -1459,7 +1459,11 @@ func (n *SamNode) findProvidersByCID(ctx context.Context, c cid.Cid) ([]peer.Add
 	// DHT walk converges from different paths; dedupe so downstream
 	// fan-out (e.g. discoverServicesByType) doesn't double-fetch.
 	providersMap := make(map[peer.ID]peer.AddrInfo)
-	for p := range n.DHT.FindProvidersAsync(lookupCtx, c, n.config.DHTLookupLimit) {
+	limit := n.config.DHTLookupLimit
+	if limit <= 0 {
+		limit = 20
+	}
+	for p := range n.DHT.FindProvidersAsync(lookupCtx, c, limit) {
 		providersMap[p.ID] = p
 	}
 	providers := make([]peer.AddrInfo, 0, len(providersMap))
@@ -1565,7 +1569,11 @@ func (n *SamNode) DiscoverRemoteServicesStream(ctx context.Context, serviceType 
 		fanoutCtx, cancel := context.WithTimeout(ctx, discoveryFanoutTimeout)
 		defer cancel()
 
-		sem := make(chan struct{}, n.config.DiscoveryConcurrency)
+		concurrency := n.config.DiscoveryConcurrency
+		if concurrency <= 0 {
+			concurrency = 10
+		}
+		sem := make(chan struct{}, concurrency)
 		var wg sync.WaitGroup
 		for _, p := range peers {
 			if p.ID == n.Host.ID() {
@@ -1643,7 +1651,11 @@ func (n *SamNode) discoverServicesByType(ctx context.Context, serviceType api.Se
 		services []*api.ServiceInfo
 	}
 	results := make(chan peerCatalog, len(peers))
-	sem := make(chan struct{}, n.config.DiscoveryConcurrency)
+	concurrency := n.config.DiscoveryConcurrency
+	if concurrency <= 0 {
+		concurrency = 10
+	}
+	sem := make(chan struct{}, concurrency)
 	var wg sync.WaitGroup
 	for _, p := range peers {
 		if p.ID == n.Host.ID() {

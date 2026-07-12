@@ -28,6 +28,7 @@ import (
 	"github.com/libp2p/go-libp2p"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 
+	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -541,5 +542,111 @@ func TestStartSidecarServer_TokenMandatory(t *testing.T) {
 		if strings.Contains(err.Error(), "token is mandatory when not using mTLS") {
 			t.Fatalf("Did not expect 'token is mandatory' error when token is provided, got: %v", err)
 		}
+	}
+}
+
+func TestDiscoverService_Pagination(t *testing.T) {
+	h, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = h.Close() }()
+	d, err := dht.New(context.Background(), h, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/sam"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = d.Close() }()
+
+	node := &SamNode{
+		BiscuitTimeout: 500 * time.Millisecond,
+		services:       NewServiceRegistry(d),
+		DHT:            d,
+		Host:           h,
+		BoundHTTPAddr:  "127.0.0.1:8080",
+	}
+
+	var hosts []host.Host
+	var dhts []*dht.IpfsDHT
+	defer func() {
+		for _, hs := range hosts {
+			_ = hs.Close()
+		}
+		for _, dt := range dhts {
+			_ = dt.Close()
+		}
+	}()
+
+	serviceInfo := &api.ServiceInfo{Type: api.ServiceType_SERVICE_TYPE_MCP, Name: "paginated-service"}
+	c, err := serviceNameToCID(serviceInfo.Type, serviceInfo.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for i := 0; i < 3; i++ {
+		h2, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		hosts = append(hosts, h2)
+
+		d2, err := dht.New(context.Background(), h2, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/sam"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		dhts = append(dhts, d2)
+
+		err = h.Connect(context.Background(), peer.AddrInfo{ID: h2.ID(), Addrs: h2.Addrs()})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		_ = d2.Provide(context.Background(), c, true)
+	}
+
+	time.Sleep(200 * time.Millisecond) // Wait for DHT propagation
+
+	// 1. Query page 1 (limit=2, offset=0)
+	req := httptest.NewRequest("GET", "/sam/service/discover?type=mcp&name=paginated-service&limit=2&offset=0", nil)
+	rr := httptest.NewRecorder()
+	handleDiscoverService(node, rr, req)
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected status OK, got %d, body: %s", rr.Code, rr.Body.String())
+	}
+	var page1 []*api.DiscoveredProvider
+	if err := json.NewDecoder(rr.Body).Decode(&page1); err != nil {
+		t.Fatal(err)
+	}
+	if len(page1) != 2 {
+		t.Errorf("expected 2 providers on page 1, got %d", len(page1))
+	}
+
+	// 2. Query page 2 (limit=2, offset=2)
+	req2 := httptest.NewRequest("GET", "/sam/service/discover?type=mcp&name=paginated-service&limit=2&offset=2", nil)
+	rr2 := httptest.NewRecorder()
+	handleDiscoverService(node, rr2, req2)
+	if rr2.Code != http.StatusOK {
+		t.Errorf("expected status OK, got %d, body: %s", rr2.Code, rr2.Body.String())
+	}
+	var page2 []*api.DiscoveredProvider
+	if err := json.NewDecoder(rr2.Body).Decode(&page2); err != nil {
+		t.Fatal(err)
+	}
+	if len(page2) != 1 {
+		t.Errorf("expected 1 provider on page 2, got %d", len(page2))
+	}
+
+	// 3. Query page 3 (limit=2, offset=4)
+	req3 := httptest.NewRequest("GET", "/sam/service/discover?type=mcp&name=paginated-service&limit=2&offset=4", nil)
+	rr3 := httptest.NewRecorder()
+	handleDiscoverService(node, rr3, req3)
+	if rr3.Code != http.StatusOK {
+		t.Errorf("expected status OK, got %d, body: %s", rr3.Code, rr3.Body.String())
+	}
+	var page3 []*api.DiscoveredProvider
+	if err := json.NewDecoder(rr3.Body).Decode(&page3); err != nil {
+		t.Fatal(err)
+	}
+	if len(page3) != 0 {
+		t.Errorf("expected 0 providers on page 3, got %d", len(page3))
 	}
 }

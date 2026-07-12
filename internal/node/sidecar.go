@@ -26,6 +26,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -385,10 +386,35 @@ func handleDiscoverService(node *SamNode, w http.ResponseWriter, r *http.Request
 		}
 	}
 
+	limitStr := r.URL.Query().Get("limit")
+	offsetStr := r.URL.Query().Get("offset")
+	limit := 20
+	offset := 0
+	if limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
+			limit = l
+		}
+	}
+	if offsetStr != "" {
+		if o, err := strconv.Atoi(offsetStr); err == nil && o >= 0 {
+			offset = o
+		}
+	}
+
 	providers, err := node.DiscoverRemoteServices(ctx, serviceType, serviceName)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to discover services: %v", err), http.StatusInternalServerError)
 		return
+	}
+
+	if offset >= len(providers) {
+		providers = []*api.DiscoveredProvider{}
+	} else {
+		end := offset + limit
+		if end > len(providers) {
+			end = len(providers)
+		}
+		providers = providers[offset:end]
 	}
 
 	w.Header().Set("Content-Type", "application/json")

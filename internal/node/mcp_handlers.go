@@ -61,8 +61,10 @@ func (n *SamNode) handleListLocalServices(ctx context.Context, req *mcp.CallTool
 
 // DiscoverRemoteServicesParams defines the parameters for the discover_remote_services tool.
 type DiscoverRemoteServicesParams struct {
-	Type string `json:"type" jsonschema:"Service type (mcp, inference, a2a)"`
-	Name string `json:"name,omitempty" jsonschema:"Optional service name. Omit to list all services of the given type."`
+	Type   string `json:"type" jsonschema:"Service type (mcp, inference, a2a)"`
+	Name   string `json:"name,omitempty" jsonschema:"Optional service name. Omit to list all services of the given type."`
+	Limit  int    `json:"limit,omitempty" jsonschema:"Optional limit for pagination. Defaults to 20."`
+	Offset int    `json:"offset,omitempty" jsonschema:"Optional offset for pagination. Defaults to 0."`
 }
 
 // handleDiscoverRemoteServices implements the discover_remote_services tool.
@@ -75,6 +77,26 @@ func (n *SamNode) handleDiscoverRemoteServices(ctx context.Context, req *mcp.Cal
 	if err != nil {
 		return nil, nil, err
 	}
+
+	limit := params.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+	offset := params.Offset
+	if offset < 0 {
+		offset = 0
+	}
+
+	if offset >= len(providers) {
+		providers = []*api.DiscoveredProvider{}
+	} else {
+		end := offset + limit
+		if end > len(providers) {
+			end = len(providers)
+		}
+		providers = providers[offset:end]
+	}
+
 	respData, err := json.Marshal(providers)
 	if err != nil {
 		return nil, nil, err
