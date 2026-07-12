@@ -311,15 +311,6 @@ jobs:
           export CLUSTER_REGION="${{ vars.CLUSTER_REGION }}"
           export ZONE="${CLUSTER_REGION}-a"
 
-          echo "Ensuring Firewall Rule for GCE VM Router exists..."
-          if ! gcloud compute firewall-rules describe allow-sam-router --project=${GCP_PROJECT_ID} >/dev/null 2>&1; then
-            gcloud compute firewall-rules create allow-sam-router \
-              --project=${GCP_PROJECT_ID} \
-              --allow=tcp:4501,udp:4501 \
-              --target-tags=sam-router \
-              --description="Allow SAM router peer-to-peer traffic"
-          fi
-
           echo "Retrieving Admin Token to generate Bootstrap Token..."
           ADMIN_TOKEN=$(kubectl get secret sam-control-plane-secret-${ENV_NAME} -n ${NAMESPACE} -o jsonpath='{.data.admin-token}' | base64 -d)
 
