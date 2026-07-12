@@ -908,3 +908,82 @@ func TestNodeProactiveTokenRefresh(t *testing.T) {
 		t.Errorf("expected refreshed expiration %d to be after initial expiration %d", refreshedExpiration, enrollNodeResp.Expiration)
 	}
 }
+
+func TestAdminPanelAndUI(t *testing.T) {
+	issuer, _ := startCustomMockOIDC(t)
+	srv, store, baseURL := setupTestServer(t, issuer)
+	defer func() {
+		_ = srv.Close()
+		_ = store.Close()
+	}()
+
+	srv.config.AdminToken = "test-admin-pass"
+
+	client := &http.Client{Timeout: 5 * time.Second}
+
+	// 1. Query /admin/status without token -> should fail with 401
+	resp, err := client.Get(baseURL + "/admin/status")
+	if err != nil {
+		t.Fatalf("GET /admin/status failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("expected 401 status for unauthenticated status query, got: %d", resp.StatusCode)
+	}
+	_ = resp.Body.Close()
+
+	// 2. Query /admin/status with token -> should succeed
+	req, _ := http.NewRequest("GET", baseURL+"/admin/status", nil)
+	req.Header.Set("Authorization", "Bearer test-admin-pass")
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatalf("GET /admin/status failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200 status for authenticated status query, got: %d", resp.StatusCode)
+	}
+	
+	var statusData map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&statusData); err != nil {
+		t.Fatalf("failed to decode admin status response: %v", err)
+	}
+	_ = resp.Body.Close()
+
+	if _, ok := statusData["active_routers"]; !ok {
+		t.Error("status response missing active_routers")
+	}
+	if _, ok := statusData["enrolled_nodes"]; !ok {
+		t.Error("status response missing enrolled_nodes")
+	}
+	if _, ok := statusData["enrollment_requests"]; !ok {
+		t.Error("status response missing enrollment_requests")
+	}
+	if _, ok := statusData["bootstrap_tokens"]; !ok {
+		t.Error("status response missing bootstrap_tokens")
+	}
+
+	// 3. Query /admin/ UI page -> should succeed and serve the index.html without auth header
+	resp, err = client.Get(baseURL + "/admin/")
+	if err != nil {
+		t.Fatalf("GET /admin/ failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200 status for /admin/ UI page, got: %d", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+
+	if !strings.Contains(string(body), "<title>SAM Control Plane Admin</title>") {
+		t.Error("UI page does not contain expected HTML title")
+	}
+
+	// 4. Query /policies without token -> should fail with 401
+	resp, err = client.Get(baseURL + "/policies")
+	if err != nil {
+		t.Fatalf("GET /policies failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("expected 401 status for unauthenticated GET /policies, got: %d", resp.StatusCode)
+	}
+	_ = resp.Body.Close()
+}
+

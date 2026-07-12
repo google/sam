@@ -550,10 +550,23 @@ func (r *Router) renewLease() {
 		}
 	}
 
+	var connectedPeers []string
+	if r.Host != nil && r.Host.Network() != nil {
+		for _, p := range r.Host.Network().Peers() {
+			connectedPeers = append(connectedPeers, p.String())
+		}
+	}
+	var dhtSize int32
+	if r.DHT != nil && r.DHT.RoutingTable() != nil {
+		dhtSize = int32(r.DHT.RoutingTable().Size())
+	}
+
 	req := &api.RouterLeaseRequest{
-		PeerId:    r.Host.ID().String(),
-		Addresses: addrs,
-		Biscuit:   r.biscuitToken,
+		PeerId:         r.Host.ID().String(),
+		Addresses:      addrs,
+		Biscuit:        r.biscuitToken,
+		ConnectedPeers: connectedPeers,
+		DhtSize:        dhtSize,
 	}
 	data, _ := proto.Marshal(req)
 
