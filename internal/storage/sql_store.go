@@ -24,12 +24,15 @@ import (
 	"time"
 
 	"github.com/google/sam/api"
+	log "github.com/ipfs/go-log/v2"
 	"gopkg.in/yaml.v2"
 
 	// Register PG and SQLite drivers
 	_ "github.com/jackc/pgx/v5/stdlib"
 	_ "modernc.org/sqlite"
 )
+
+var logger = log.Logger("sam-storage")
 
 // SQLStore implements Store interface using database/sql.
 type SQLStore struct {
@@ -73,21 +76,24 @@ func (s *SQLStore) isPostgres() bool {
 	return strings.Contains(s.driverName, "postgres") || strings.Contains(s.driverName, "pgx")
 }
 
-func (s *SQLStore) initSchema() error {
-	var keyringSchema, nodesSchema, routersSchema, policiesSchema string
-	var bootstrapTokensSchema, enrollmentRequestsSchema string
+type migration struct {
+	version  int
+	sqlite   []string
+	postgres []string
+}
 
-	if s.isPostgres() {
-		keyringSchema = `
-			CREATE TABLE IF NOT EXISTS keyring (
+var migrations = []migration{
+	{
+		version: 1,
+		postgres: []string{
+			`CREATE TABLE IF NOT EXISTS keyring (
 				id SERIAL PRIMARY KEY,
 				private_key BYTEA NOT NULL,
 				public_key BYTEA NOT NULL UNIQUE,
 				expiration BIGINT,
 				created_at BIGINT NOT NULL
-			)`
-		nodesSchema = `
-			CREATE TABLE IF NOT EXISTS nodes (
+			)`,
+			`CREATE TABLE IF NOT EXISTS nodes (
 				peer_id VARCHAR(255) PRIMARY KEY,
 				public_key BYTEA NOT NULL,
 				biscuit_token BYTEA NOT NULL,
@@ -97,24 +103,19 @@ func (s *SQLStore) initSchema() error {
 				enrolled_at BIGINT NOT NULL,
 				expires_at BIGINT NOT NULL,
 				banned BOOLEAN DEFAULT FALSE NOT NULL
-			)`
-		routersSchema = `
-			CREATE TABLE IF NOT EXISTS routers (
+			)`,
+			`CREATE TABLE IF NOT EXISTS routers (
 				peer_id VARCHAR(255) PRIMARY KEY,
 				multiaddresses TEXT NOT NULL,
 				last_lease_renewal BIGINT NOT NULL,
-				expires_at BIGINT NOT NULL,
-				connected_peers TEXT,
-				dht_size INT
-			)`
-		policiesSchema = `
-			CREATE TABLE IF NOT EXISTS policies (
+				expires_at BIGINT NOT NULL
+			)`,
+			`CREATE TABLE IF NOT EXISTS policies (
 				id VARCHAR(255) PRIMARY KEY,
 				content TEXT NOT NULL,
 				updated_at BIGINT NOT NULL
-			)`
-		bootstrapTokensSchema = `
-			CREATE TABLE IF NOT EXISTS bootstrap_tokens (
+			)`,
+			`CREATE TABLE IF NOT EXISTS bootstrap_tokens (
 				id VARCHAR(64) PRIMARY KEY,
 				token_hash VARCHAR(64) UNIQUE NOT NULL,
 				role VARCHAR(64) NOT NULL,
@@ -123,9 +124,8 @@ func (s *SQLStore) initSchema() error {
 				description TEXT,
 				created_at BIGINT NOT NULL,
 				expires_at BIGINT NOT NULL
-			)`
-		enrollmentRequestsSchema = `
-			CREATE TABLE IF NOT EXISTS enrollment_requests (
+			)`,
+			`CREATE TABLE IF NOT EXISTS enrollment_requests (
 				id VARCHAR(64) PRIMARY KEY,
 				peer_id VARCHAR(255) UNIQUE NOT NULL,
 				public_key BYTEA NOT NULL,
@@ -135,18 +135,17 @@ func (s *SQLStore) initSchema() error {
 				created_at BIGINT NOT NULL,
 				resolved_at BIGINT,
 				resolved_by VARCHAR(255)
-			)`
-	} else {
-		keyringSchema = `
-			CREATE TABLE IF NOT EXISTS keyring (
+			)`,
+		},
+		sqlite: []string{
+			`CREATE TABLE IF NOT EXISTS keyring (
 				id INTEGER PRIMARY KEY AUTOINCREMENT,
 				private_key BLOB NOT NULL,
 				public_key BLOB NOT NULL UNIQUE,
 				expiration BIGINT,
 				created_at BIGINT NOT NULL
-			)`
-		nodesSchema = `
-			CREATE TABLE IF NOT EXISTS nodes (
+			)`,
+			`CREATE TABLE IF NOT EXISTS nodes (
 				peer_id TEXT PRIMARY KEY,
 				public_key BLOB NOT NULL,
 				biscuit_token BLOB NOT NULL,
@@ -156,24 +155,19 @@ func (s *SQLStore) initSchema() error {
 				enrolled_at BIGINT NOT NULL,
 				expires_at BIGINT NOT NULL,
 				banned BOOLEAN DEFAULT FALSE NOT NULL
-			)`
-		routersSchema = `
-			CREATE TABLE IF NOT EXISTS routers (
+			)`,
+			`CREATE TABLE IF NOT EXISTS routers (
 				peer_id TEXT PRIMARY KEY,
 				multiaddresses TEXT NOT NULL,
 				last_lease_renewal BIGINT NOT NULL,
-				expires_at BIGINT NOT NULL,
-				connected_peers TEXT,
-				dht_size INTEGER
-			)`
-		policiesSchema = `
-			CREATE TABLE IF NOT EXISTS policies (
+				expires_at BIGINT NOT NULL
+			)`,
+			`CREATE TABLE IF NOT EXISTS policies (
 				id TEXT PRIMARY KEY,
 				content TEXT NOT NULL,
 				updated_at BIGINT NOT NULL
-			)`
-		bootstrapTokensSchema = `
-			CREATE TABLE IF NOT EXISTS bootstrap_tokens (
+			)`,
+			`CREATE TABLE IF NOT EXISTS bootstrap_tokens (
 				id TEXT PRIMARY KEY,
 				token_hash TEXT UNIQUE NOT NULL,
 				role TEXT NOT NULL,
@@ -182,9 +176,8 @@ func (s *SQLStore) initSchema() error {
 				description TEXT,
 				created_at BIGINT NOT NULL,
 				expires_at BIGINT NOT NULL
-			)`
-		enrollmentRequestsSchema = `
-			CREATE TABLE IF NOT EXISTS enrollment_requests (
+			)`,
+			`CREATE TABLE IF NOT EXISTS enrollment_requests (
 				id TEXT PRIMARY KEY,
 				peer_id TEXT UNIQUE NOT NULL,
 				public_key BLOB NOT NULL,
@@ -194,14 +187,70 @@ func (s *SQLStore) initSchema() error {
 				created_at BIGINT NOT NULL,
 				resolved_at BIGINT,
 				resolved_by TEXT
-			)`
+			)`,
+		},
+	},
+	{
+		version: 2,
+		postgres: []string{
+			`ALTER TABLE routers ADD COLUMN connected_peers TEXT`,
+			`ALTER TABLE routers ADD COLUMN dht_size INT`,
+		},
+		sqlite: []string{
+			`ALTER TABLE routers ADD COLUMN connected_peers TEXT`,
+			`ALTER TABLE routers ADD COLUMN dht_size INTEGER`,
+		},
+	},
+}
+
+func (s *SQLStore) initSchema() error {
+	// Create schema_migrations table
+	createMigrationsTable := `CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY)`
+	if _, err := s.db.Exec(createMigrationsTable); err != nil {
+		return fmt.Errorf("failed to create schema_migrations table: %w", err)
 	}
 
-	schemas := []string{keyringSchema, nodesSchema, routersSchema, policiesSchema, bootstrapTokensSchema, enrollmentRequestsSchema}
-	for _, schema := range schemas {
-		if _, err := s.db.Exec(schema); err != nil {
+	var currentVersion int
+	err := s.db.QueryRow("SELECT COALESCE(MAX(version), 0) FROM schema_migrations").Scan(&currentVersion)
+	if err != nil {
+		return fmt.Errorf("failed to check current schema version: %w", err)
+	}
+
+	for _, m := range migrations {
+		if m.version <= currentVersion {
+			continue
+		}
+
+		tx, err := s.db.Begin()
+		if err != nil {
 			return err
 		}
+		defer func() { _ = tx.Rollback() }()
+
+		queries := m.sqlite
+		if s.isPostgres() {
+			queries = m.postgres
+		}
+
+		for _, query := range queries {
+			if _, err := tx.Exec(query); err != nil {
+				errStr := strings.ToLower(err.Error())
+				if strings.Contains(errStr, "duplicate column") || strings.Contains(errStr, "already exists") {
+					continue
+				}
+				return fmt.Errorf("migration version %d failed: query %q failed: %w", m.version, query, err)
+			}
+		}
+
+		insertQuery := s.rebind("INSERT INTO schema_migrations (version) VALUES (?)")
+		if _, err := tx.Exec(insertQuery, m.version); err != nil {
+			return fmt.Errorf("failed to update schema_migrations version: %w", err)
+		}
+
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+		logger.Infof("Applied schema migration version %d successfully", m.version)
 	}
 	return nil
 }

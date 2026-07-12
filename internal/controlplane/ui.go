@@ -932,6 +932,22 @@ const adminHTML = `<!DOCTYPE html>
         }
 
         function copyToClipboard(text) {
+            if (!navigator.clipboard) {
+                const textArea = document.createElement("textarea");
+                textArea.value = text;
+                textArea.style.position = "fixed";
+                document.body.appendChild(textArea);
+                textArea.focus();
+                textArea.select();
+                try {
+                    document.execCommand('copy');
+                    showToast('Copied to clipboard');
+                } catch (err) {
+                    showToast('Failed to copy', 'error');
+                }
+                document.body.removeChild(textArea);
+                return;
+            }
             navigator.clipboard.writeText(text).then(function() {
                 showToast('Copied to clipboard');
             }).catch(function(err) {
