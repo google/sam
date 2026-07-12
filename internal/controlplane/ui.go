@@ -867,6 +867,16 @@ const adminHTML = `<!DOCTYPE html>
     <div class="toast-container" id="toast-container"></div>
 
     <script>
+        function writeVarint(value) {
+            const bytes = [];
+            while (value > 127) {
+                bytes.push((value & 127) | 128);
+                value >>>= 7;
+            }
+            bytes.push(value);
+            return bytes;
+        }
+
         let adminToken = localStorage.getItem('sam_admin_token') || '';
 
         function showToast(message, type) {
@@ -1195,10 +1205,11 @@ const adminHTML = `<!DOCTYPE html>
             const endpoint = '/admin/revoke';
             const encoder = new TextEncoder();
             const peerIdBytes = encoder.encode(peerId);
-            const pbBytes = new Uint8Array(2 + peerIdBytes.length);
+            const lenBytes = writeVarint(peerIdBytes.length);
+            const pbBytes = new Uint8Array(1 + lenBytes.length + peerIdBytes.length);
             pbBytes[0] = 0x0a;
-            pbBytes[1] = peerIdBytes.length;
-            pbBytes.set(peerIdBytes, 2);
+            pbBytes.set(lenBytes, 1);
+            pbBytes.set(peerIdBytes, 1 + lenBytes.length);
 
             const headers = {};
             if (adminToken) {
@@ -1251,16 +1262,6 @@ const adminHTML = `<!DOCTYPE html>
             const encoder = new TextEncoder();
             const yamlBytes = encoder.encode(yamlContent);
             
-            function writeVarint(value) {
-                const bytes = [];
-                while (value > 127) {
-                    bytes.push((value & 127) | 128);
-                    value >>>= 7;
-                }
-                bytes.push(value);
-                return bytes;
-            }
-            
             const lenBytes = writeVarint(yamlBytes.length);
             const pbBytes = new Uint8Array(1 + lenBytes.length + yamlBytes.length);
             pbBytes[0] = 0x0a;
@@ -1292,11 +1293,12 @@ const adminHTML = `<!DOCTYPE html>
             }
         }
 
-        // Initial fetch
-        fetchData();
-
-        // Refresh loop
-        setInterval(fetchData, 5000);
+        // Initial fetch and poll loop
+        async function poll() {
+            await fetchData();
+            setTimeout(poll, 5000);
+        }
+        poll();
     </script>
 </body>
 </html>
