@@ -103,7 +103,9 @@ func (s *SQLStore) initSchema() error {
 				peer_id VARCHAR(255) PRIMARY KEY,
 				multiaddresses TEXT NOT NULL,
 				last_lease_renewal BIGINT NOT NULL,
-				expires_at BIGINT NOT NULL
+				expires_at BIGINT NOT NULL,
+				connected_peers TEXT,
+				dht_size INT
 			)`
 		policiesSchema = `
 			CREATE TABLE IF NOT EXISTS policies (
@@ -160,7 +162,9 @@ func (s *SQLStore) initSchema() error {
 				peer_id TEXT PRIMARY KEY,
 				multiaddresses TEXT NOT NULL,
 				last_lease_renewal BIGINT NOT NULL,
-				expires_at BIGINT NOT NULL
+				expires_at BIGINT NOT NULL,
+				connected_peers TEXT,
+				dht_size INTEGER
 			)`
 		policiesSchema = `
 			CREATE TABLE IF NOT EXISTS policies (
@@ -385,29 +389,33 @@ func (s *SQLStore) UpsertRouterLease(ctx context.Context, lease *RouterLease) er
 	if err != nil {
 		return err
 	}
+	peersBytes, err := json.Marshal(lease.ConnectedPeers)
+	if err != nil {
+		return err
+	}
 
 	var query string
 	if s.isPostgres() {
 		query = s.rebind(`
-			INSERT INTO routers (peer_id, multiaddresses, last_lease_renewal, expires_at) 
-			VALUES (?, ?, ?, ?)
+			INSERT INTO routers (peer_id, multiaddresses, last_lease_renewal, expires_at, connected_peers, dht_size) 
+			VALUES (?, ?, ?, ?, ?, ?)
 			ON CONFLICT (peer_id) 
-			DO UPDATE SET multiaddresses = EXCLUDED.multiaddresses, last_lease_renewal = EXCLUDED.last_lease_renewal, expires_at = EXCLUDED.expires_at`)
+			DO UPDATE SET multiaddresses = EXCLUDED.multiaddresses, last_lease_renewal = EXCLUDED.last_lease_renewal, expires_at = EXCLUDED.expires_at, connected_peers = EXCLUDED.connected_peers, dht_size = EXCLUDED.dht_size`)
 	} else {
 		query = s.rebind(`
-			INSERT INTO routers (peer_id, multiaddresses, last_lease_renewal, expires_at) 
-			VALUES (?, ?, ?, ?)
+			INSERT INTO routers (peer_id, multiaddresses, last_lease_renewal, expires_at, connected_peers, dht_size) 
+			VALUES (?, ?, ?, ?, ?, ?)
 			ON CONFLICT (peer_id) 
-			DO UPDATE SET multiaddresses = excluded.multiaddresses, last_lease_renewal = excluded.last_lease_renewal, expires_at = excluded.expires_at`)
+			DO UPDATE SET multiaddresses = excluded.multiaddresses, last_lease_renewal = excluded.last_lease_renewal, expires_at = excluded.expires_at, connected_peers = excluded.connected_peers, dht_size = excluded.dht_size`)
 	}
 
-	_, err = s.db.ExecContext(ctx, query, lease.PeerID, string(addrsBytes), lease.LastRenewal.UnixMilli(), lease.ExpiresAt.UnixMilli())
+	_, err = s.db.ExecContext(ctx, query, lease.PeerID, string(addrsBytes), lease.LastRenewal.UnixMilli(), lease.ExpiresAt.UnixMilli(), string(peersBytes), lease.DHTSize)
 	return err
 }
 
 // GetActiveRouters implements Store.
 func (s *SQLStore) GetActiveRouters(ctx context.Context) ([]RouterLease, error) {
-	query := s.rebind(`SELECT peer_id, multiaddresses, last_lease_renewal, expires_at FROM routers WHERE expires_at > ?`)
+	query := s.rebind(`SELECT peer_id, multiaddresses, last_lease_renewal, expires_at, connected_peers, dht_size FROM routers WHERE expires_at > ?`)
 	rows, err := s.db.QueryContext(ctx, query, time.Now().UnixMilli())
 	if err != nil {
 		return nil, err
@@ -418,12 +426,22 @@ func (s *SQLStore) GetActiveRouters(ctx context.Context) ([]RouterLease, error) 
 	for rows.Next() {
 		var l RouterLease
 		var addrsStr string
+		var peersStr sql.NullString
+		var dhtSize sql.NullInt64
 		var lastRenewalUnix, expiresAtUnix int64
-		if err := rows.Scan(&l.PeerID, &addrsStr, &lastRenewalUnix, &expiresAtUnix); err != nil {
+		if err := rows.Scan(&l.PeerID, &addrsStr, &lastRenewalUnix, &expiresAtUnix, &peersStr, &dhtSize); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal([]byte(addrsStr), &l.Addresses); err != nil {
 			return nil, err
+		}
+		if peersStr.Valid && peersStr.String != "" {
+			if err := json.Unmarshal([]byte(peersStr.String), &l.ConnectedPeers); err != nil {
+				return nil, err
+			}
+		}
+		if dhtSize.Valid {
+			l.DHTSize = int(dhtSize.Int64)
 		}
 		l.LastRenewal = time.UnixMilli(lastRenewalUnix)
 		l.ExpiresAt = time.UnixMilli(expiresAtUnix)
@@ -646,6 +664,79 @@ func (s *SQLStore) UpdateEnrollmentRequest(ctx context.Context, id string, statu
 		return fmt.Errorf("failed to update enrollment request: %w", err)
 	}
 	return nil
+}
+
+// ListNodes retrieves all enrolled nodes.
+func (s *SQLStore) ListNodes(ctx context.Context) ([]EnrolledNode, error) {
+	query := s.rebind(`SELECT peer_id, public_key, biscuit_token, role, enrollment_type, claims_json, enrolled_at, expires_at, banned FROM nodes ORDER BY enrolled_at DESC`)
+	rows, err := s.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query nodes: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var nodes []EnrolledNode
+	for rows.Next() {
+		var node EnrolledNode
+		var enrolledAtUnix, expiresAtUnix int64
+		err := rows.Scan(
+			&node.PeerID,
+			&node.PublicKey,
+			&node.Biscuit,
+			&node.Role,
+			&node.EnrollmentType,
+			&node.ClaimsJSON,
+			&enrolledAtUnix,
+			&expiresAtUnix,
+			&node.Banned,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan enrolled node: %w", err)
+		}
+		node.EnrolledAt = time.UnixMilli(enrolledAtUnix)
+		node.ExpiresAt = time.UnixMilli(expiresAtUnix)
+		nodes = append(nodes, node)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return nodes, nil
+}
+
+// ListBootstrapTokens retrieves all bootstrap tokens.
+func (s *SQLStore) ListBootstrapTokens(ctx context.Context) ([]BootstrapToken, error) {
+	query := s.rebind(`SELECT id, token_hash, role, max_usages, usages_count, description, created_at, expires_at FROM bootstrap_tokens ORDER BY created_at DESC`)
+	rows, err := s.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query bootstrap tokens: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var tokens []BootstrapToken
+	for rows.Next() {
+		var t BootstrapToken
+		var created, expires int64
+		err := rows.Scan(
+			&t.ID,
+			&t.TokenHash,
+			&t.Role,
+			&t.MaxUsages,
+			&t.UsagesCount,
+			&t.Description,
+			&created,
+			&expires,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan bootstrap token: %w", err)
+		}
+		t.CreatedAt = time.Unix(created, 0)
+		t.ExpiresAt = time.Unix(expires, 0)
+		tokens = append(tokens, t)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return tokens, nil
 }
 
 // Close implements Store.

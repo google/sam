@@ -1041,12 +1041,14 @@ func (x *HubInfoResponse) GetHubAddresses() []string {
 }
 
 type RouterLeaseRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	PeerId        string                 `protobuf:"bytes,1,opt,name=peer_id,json=peerId,proto3" json:"peer_id,omitempty"`
-	Addresses     []string               `protobuf:"bytes,2,rep,name=addresses,proto3" json:"addresses,omitempty"`
-	Biscuit       []byte                 `protobuf:"bytes,3,opt,name=biscuit,proto3" json:"biscuit,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	PeerId         string                 `protobuf:"bytes,1,opt,name=peer_id,json=peerId,proto3" json:"peer_id,omitempty"`
+	Addresses      []string               `protobuf:"bytes,2,rep,name=addresses,proto3" json:"addresses,omitempty"`
+	Biscuit        []byte                 `protobuf:"bytes,3,opt,name=biscuit,proto3" json:"biscuit,omitempty"`
+	ConnectedPeers []string               `protobuf:"bytes,4,rep,name=connected_peers,json=connectedPeers,proto3" json:"connected_peers,omitempty"`
+	DhtSize        int32                  `protobuf:"varint,5,opt,name=dht_size,json=dhtSize,proto3" json:"dht_size,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *RouterLeaseRequest) Reset() {
@@ -1098,6 +1100,20 @@ func (x *RouterLeaseRequest) GetBiscuit() []byte {
 		return x.Biscuit
 	}
 	return nil
+}
+
+func (x *RouterLeaseRequest) GetConnectedPeers() []string {
+	if x != nil {
+		return x.ConnectedPeers
+	}
+	return nil
+}
+
+func (x *RouterLeaseRequest) GetDhtSize() int32 {
+	if x != nil {
+		return x.DhtSize
+	}
+	return 0
 }
 
 type RouterLeaseResponse struct {
@@ -1666,11 +1682,13 @@ const file_api_sam_proto_rawDesc = "" +
 	"oidcIssuer\x12\x1b\n" +
 	"\tclient_id\x18\x02 \x01(\tR\bclientId\x12\x1a\n" +
 	"\baudience\x18\x03 \x01(\tR\baudience\x12#\n" +
-	"\rhub_addresses\x18\x04 \x03(\tR\fhubAddresses\"e\n" +
+	"\rhub_addresses\x18\x04 \x03(\tR\fhubAddresses\"\xa9\x01\n" +
 	"\x12RouterLeaseRequest\x12\x17\n" +
 	"\apeer_id\x18\x01 \x01(\tR\x06peerId\x12\x1c\n" +
 	"\taddresses\x18\x02 \x03(\tR\taddresses\x12\x18\n" +
-	"\abiscuit\x18\x03 \x01(\fR\abiscuit\"d\n" +
+	"\abiscuit\x18\x03 \x01(\fR\abiscuit\x12'\n" +
+	"\x0fconnected_peers\x18\x04 \x03(\tR\x0econnectedPeers\x12\x19\n" +
+	"\bdht_size\x18\x05 \x01(\x05R\adhtSize\"d\n" +
 	"\x13RouterLeaseResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x14\n" +
 	"\x05error\x18\x02 \x01(\tR\x05error\x12\x1d\n" +

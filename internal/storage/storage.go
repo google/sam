@@ -36,10 +36,12 @@ type KeyPair struct {
 
 // RouterLease represents a router registered with the control plane.
 type RouterLease struct {
-	PeerID      string
-	Addresses   []string
-	LastRenewal time.Time
-	ExpiresAt   time.Time
+	PeerID         string
+	Addresses      []string
+	LastRenewal    time.Time
+	ExpiresAt      time.Time
+	ConnectedPeers []string
+	DHTSize        int
 }
 
 // EnrolledNode represents a node enrolled in the mesh.
@@ -141,6 +143,12 @@ type Store interface {
 
 	// UpdateEnrollmentRequest updates status, resolved details, and stored Biscuit of a request.
 	UpdateEnrollmentRequest(ctx context.Context, id string, status api.EnrollmentStatus, biscuit []byte, resolvedBy string) error
+
+	// ListNodes retrieves all enrolled nodes.
+	ListNodes(ctx context.Context) ([]EnrolledNode, error)
+
+	// ListBootstrapTokens retrieves all bootstrap tokens.
+	ListBootstrapTokens(ctx context.Context) ([]BootstrapToken, error)
 
 	// Close closes the underlying database connection.
 	Close() error
