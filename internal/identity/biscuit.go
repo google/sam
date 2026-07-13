@@ -114,7 +114,7 @@ func MintBiscuitToken(signingKey ed25519.PrivateKey, claims jwt.MapClaims, token
 	for r := range resolvedRoles {
 		if strings.HasPrefix(r, "sam:role:") {
 			hasCapabilityRoles = true
-		} else {
+		} else if r != requestedRole {
 			customAccessRoles = append(customAccessRoles, r)
 		}
 	}
