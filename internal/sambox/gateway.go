@@ -42,9 +42,9 @@ import (
 type SecretKind string
 
 const (
-	SecretKindBearer       SecretKind = "Bearer"
-	SecretKindCustomHeader SecretKind = "CustomHeader"
-	SecretKindBasicAuth    SecretKind = "BasicAuth"
+	SecretKindBearer       SecretKind = "bearer"
+	SecretKindCustomHeader SecretKind = "customheader"
+	SecretKindBasicAuth    SecretKind = "basicauth"
 )
 
 type SecretConfig struct {
@@ -107,13 +107,19 @@ func GenerateEphemeralCA() (*CA, error) {
 }
 
 type CertCache struct {
-	mu    sync.RWMutex
-	certs map[string]*tls.Certificate
+	mu      sync.RWMutex
+	certs   map[string]*tls.Certificate
+	leafKey *rsa.PrivateKey
 }
 
 func NewCertCache() *CertCache {
+	priv, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		panic(fmt.Sprintf("failed to generate reusable leaf private key: %v", err))
+	}
 	return &CertCache{
-		certs: make(map[string]*tls.Certificate),
+		certs:   make(map[string]*tls.Certificate),
+		leafKey: priv,
 	}
 }
 
@@ -131,7 +137,7 @@ func (c *CertCache) GetCertificate(sni string, ca *CA) (*tls.Certificate, error)
 		return cert, nil
 	}
 
-	newCert, err := GenerateLeafCert(sni, ca)
+	newCert, err := GenerateLeafCert(sni, ca, c.leafKey)
 	if err != nil {
 		return nil, err
 	}
@@ -139,12 +145,7 @@ func (c *CertCache) GetCertificate(sni string, ca *CA) (*tls.Certificate, error)
 	return newCert, nil
 }
 
-func GenerateLeafCert(sni string, ca *CA) (*tls.Certificate, error) {
-	priv, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		return nil, err
-	}
-
+func GenerateLeafCert(sni string, ca *CA, priv *rsa.PrivateKey) (*tls.Certificate, error) {
 	serialNumberLimit := new(big.Int).Lsh(big.NewInt(1), 128)
 	serialNumber, err := rand.Int(rand.Reader, serialNumberLimit)
 	if err != nil {
@@ -224,8 +225,12 @@ func (g *Gateway) Serve(listener net.Listener) error {
 	director := func(req *http.Request) {
 		req.URL.Scheme = "https"
 		req.URL.Host = req.Host
-		if config, ok := g.SecretStore[req.Host]; ok {
-			switch config.Kind {
+		host, _, err := net.SplitHostPort(req.Host)
+		if err != nil {
+			host = req.Host
+		}
+		if config, ok := g.SecretStore[host]; ok {
+			switch SecretKind(strings.ToLower(string(config.Kind))) {
 			case SecretKindBearer:
 				req.Header.Set("Authorization", "Bearer "+config.Value)
 			case SecretKindBasicAuth:
