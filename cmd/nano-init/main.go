@@ -490,13 +490,13 @@ func copyFile(src, dest string) error {
 	if err != nil {
 		return err
 	}
-	defer in.Close()
+	defer in.Close() //nolint:errcheck
 	out, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
 	if err != nil {
 		return err
 	}
 	if _, err = io.Copy(out, in); err != nil {
-		out.Close()
+		out.Close() //nolint:errcheck
 		return err
 	}
 	return out.Close()
