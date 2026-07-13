@@ -25,7 +25,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/google/sam/internal/sambox"
@@ -49,6 +48,9 @@ func TestSamBoxNanoInitIntegration(t *testing.T) {
 			t.Skip("requires the `unshare` binary to isolate nano-init from the host")
 		}
 
+		// Compile the binary in the host/parent context where permissions are regular
+		nanoInitBin := buildBinary(t, "./cmd/nano-init")
+
 		self, err := os.Executable()
 		if err != nil {
 			t.Fatalf("Failed to get self executable: %v", err)
@@ -60,14 +62,16 @@ func TestSamBoxNanoInitIntegration(t *testing.T) {
 		}
 
 		bashCmd := fmt.Sprintf(
-			"ip link set lo up && mount --bind %s /etc/resolv.conf && %s %s",
+			"ip link set lo up && mount --bind %s /etc/resolv.conf && %s -test.run=TestSamBoxNanoInitIntegration",
 			tempFile,
 			self,
-			strings.Join(os.Args[1:], " "),
 		)
 
 		cmd := exec.Command("unshare", "-m", "-n", "-r", "bash", "-c", bashCmd)
-		cmd.Env = append(os.Environ(), "SAM_TEST_IS_ISOLATED=1")
+		cmd.Env = append(os.Environ(),
+			"SAM_TEST_IS_ISOLATED=1",
+			"SAM_NANO_INIT_BIN="+nanoInitBin,
+		)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
@@ -80,8 +84,10 @@ func TestSamBoxNanoInitIntegration(t *testing.T) {
 		t.Skip("requires root (or mapped root namespace) to create mount/network namespaces and bind-mount /etc/resolv.conf")
 	}
 
-	// Build binaries (specifically we want to verify nano-init builds and runs)
-	nanoInitBin := buildBinary(t, "./cmd/nano-init")
+	nanoInitBin := os.Getenv("SAM_NANO_INIT_BIN")
+	if nanoInitBin == "" {
+		t.Fatal("SAM_NANO_INIT_BIN environment variable not set")
+	}
 
 	// 1. Setup mock upstream "internet" server representing api.github.com
 	var mockServerReceivedAuth string
