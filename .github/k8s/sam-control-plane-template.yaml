@@ -153,12 +153,19 @@ data:
     bindings:
       - members: ["user:system:serviceaccount:sam-canary-${ENV_NAME}:sam-node-sa"]
         role: "sam-canary"
+      - members: ["user:system:serviceaccount:sam-canary-${ENV_NAME}:sam-box-sa"]
+        role: "sam:role:sambox"
       - members: ["group:routers", "user:system:serviceaccount:${NAMESPACE}:sam-router-sa"]
         role: "sam:role:router"
       - members: ["sam:system:authenticated"]
         role: "public-mesh"
     roles:
       sam-canary:
+        allowed_services:
+          - "*"
+        allowed_targets:
+          - "*"
+      "sam:role:sambox":
         allowed_services:
           - "*"
         allowed_targets:

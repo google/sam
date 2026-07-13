@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/google/sam/api"
+	"github.com/google/sam/internal/identity"
 	golog "github.com/ipfs/go-log/v2"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/multiformats/go-multiaddr"
@@ -63,9 +64,10 @@ func (n *SamNode) Enroll(ctx context.Context, hubURL string, jwt string) error {
 	}
 
 	req := &api.EnrollRequest{
-		Jwt:       jwt,
-		PeerId:    n.Host.ID().String(),
-		PublicKey: pubBytes,
+		Jwt:           jwt,
+		PeerId:        n.Host.ID().String(),
+		PublicKey:     pubBytes,
+		RequestedRole: n.config.RequiredRole,
 	}
 	data, err := proto.Marshal(req)
 	if err != nil {
@@ -124,6 +126,12 @@ func (n *SamNode) Enroll(ctx context.Context, hubURL string, jwt string) error {
 		return fmt.Errorf("received invalid hub public key size: %d bytes (expected %d)", len(enrollResp.HubPublicKey), ed25519.PublicKeySize)
 	}
 
+	if n.config.RequiredRole != "" {
+		if err := identity.VerifyBiscuitRole(enrollResp.BiscuitToken, ed25519.PublicKey(enrollResp.HubPublicKey), n.config.RequiredRole); err != nil {
+			return fmt.Errorf("enrolled biscuit token lacks required role %q: %w", n.config.RequiredRole, err)
+		}
+	}
+
 	if err := n.Store.SaveIdentity(enrollResp.BiscuitToken); err != nil {
 		return fmt.Errorf("failed to save identity: %v", err)
 	}
@@ -180,6 +188,7 @@ func (n *SamNode) EnrollBootstrap(ctx context.Context, hubURL string, bootstrapT
 		BootstrapToken: bootstrapToken,
 		PeerId:         n.Host.ID().String(),
 		PublicKey:      pubBytes,
+		RequestedRole:  n.config.RequiredRole,
 	}
 	data, err := proto.Marshal(req)
 	if err != nil {
@@ -296,6 +305,10 @@ func (n *SamNode) EnrollBootstrap(ctx context.Context, hubURL string, bootstrapT
 
 	if len(enrollResp.HubPublicKey) != ed25519.PublicKeySize {
 		return fmt.Errorf("received invalid hub public key size: %d bytes", len(enrollResp.HubPublicKey))
+	}
+
+	if err := identity.VerifyBiscuitRole(enrollResp.BiscuitToken, ed25519.PublicKey(enrollResp.HubPublicKey), n.config.RequiredRole); err != nil {
+		return fmt.Errorf("enrolled biscuit token lacks required role %q: %w", n.config.RequiredRole, err)
 	}
 
 	if err := n.Store.SaveIdentity(enrollResp.BiscuitToken); err != nil {

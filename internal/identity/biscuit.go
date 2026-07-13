@@ -31,10 +31,29 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 )
 
-// // MintBiscuitToken generates a signed Biscuit token for a peer with policy rules based on JWT claims.
-func MintBiscuitToken(signingKey ed25519.PrivateKey, claims jwt.MapClaims, token *oidc.IDToken, remotePeer peer.ID, policy *api.PolicyConfig, biscuitExpiry time.Time) ([]byte, []string, error) {
+// MintBiscuitToken generates a signed Biscuit token for a peer with policy rules based on JWT claims.
+//
+// Role Authorization Rationale:
+// The system has two distinct kinds of roles:
+//  1. Capability Roles (prefixed with "sam:role:"): These authorize the client's binary startup role
+//     (e.g., sam:role:node, sam:role:router, sam:role:sambox) under Zero Trust.
+//  2. Custom Access Roles (all other roles): These define authorization permissions for custom
+//     services and targets (e.g., restricted-role).
+//
+// When enrolling:
+//   - The client binary must explicitly request a single capability role (requestedRole).
+//   - We verify if the client's OIDC identity is authorized to claim that requested capability role:
+//   - If the user has explicitly mapped capability roles (from policy/claims), they must only request one of those.
+//   - If the user has no capability roles mapped, they are allowed to request the standard fallback role ("sam:role:node").
+//   - Once authorized, the generated Biscuit is minted with:
+//   - The requested capability role (enforcing least privilege).
+//   - All other custom access roles mapped to the identity (so they preserve their resource permissions).
+func MintBiscuitToken(signingKey ed25519.PrivateKey, claims jwt.MapClaims, token *oidc.IDToken, remotePeer peer.ID, policy *api.PolicyConfig, biscuitExpiry time.Time, requestedRole string) ([]byte, []string, error) {
 	if claims == nil {
 		return nil, nil, fmt.Errorf("claims cannot be nil")
+	}
+	if requestedRole == "" {
+		return nil, nil, fmt.Errorf("requested_role must be specified")
 	}
 
 	oidcRoles := toStringSlice(claims["roles"])
@@ -42,6 +61,7 @@ func MintBiscuitToken(signingKey ed25519.PrivateKey, claims jwt.MapClaims, token
 	oidcSub, _ := claims["sub"].(string)
 	oidcEmail, _ := claims["email"].(string)
 
+	// Resolve all roles assigned to this identity by policy bindings or direct OIDC roles.
 	resolvedRoles := make(map[string]bool)
 	if policy != nil {
 		for _, b := range policy.Bindings {
@@ -55,8 +75,7 @@ func MintBiscuitToken(signingKey ed25519.PrivateKey, claims jwt.MapClaims, token
 				if len(parts) != 2 {
 					continue
 				}
-				prefix := parts[0]
-				value := parts[1]
+				prefix, value := parts[0], parts[1]
 
 				switch prefix {
 				case api.FactGroup:
@@ -88,29 +107,40 @@ func MintBiscuitToken(signingKey ed25519.PrivateKey, claims jwt.MapClaims, token
 		}
 	}
 
-	roles := make([]string, 0, len(resolvedRoles))
-	for role := range resolvedRoles {
-		roles = append(roles, role)
-	}
+	// Categorize resolved roles into Capability roles (sam:role:*) and Custom Access roles.
+	var hasCapabilityRoles bool
+	var customAccessRoles []string
 
-	// Ensure all tokens have a defined sam:role. If no custom role is resolved,
-	// assign the default node role: sam:role:node.
-	hasSamRole := false
-	for _, r := range roles {
+	for r := range resolvedRoles {
 		if strings.HasPrefix(r, "sam:role:") {
-			hasSamRole = true
-			break
+			hasCapabilityRoles = true
+		} else if r != requestedRole {
+			customAccessRoles = append(customAccessRoles, r)
 		}
 	}
-	if !hasSamRole {
-		roles = append(roles, api.RoleNode)
+
+	// Verify that the requested capability role is authorized.
+	isAuthorized := false
+	if resolvedRoles[requestedRole] {
+		isAuthorized = true
+	} else if requestedRole == api.RoleNode && !hasCapabilityRoles {
+		// Default fallback capability if no capability roles are explicitly assigned.
+		isAuthorized = true
 	}
 
-	biscuitBytes, err := mintBiscuit(signingKey, remotePeer, roles, biscuitExpiry, policy, claims)
+	if !isAuthorized {
+		return nil, nil, fmt.Errorf("requested role %q is not authorized for this identity", requestedRole)
+	}
+
+	// Assemble final roles: the single requested capability role + all custom access roles.
+	finalRoles := []string{requestedRole}
+	finalRoles = append(finalRoles, customAccessRoles...)
+
+	biscuitBytes, err := mintBiscuit(signingKey, remotePeer, finalRoles, biscuitExpiry, policy, claims)
 	if err != nil {
 		return nil, nil, err
 	}
-	return biscuitBytes, roles, nil
+	return biscuitBytes, finalRoles, nil
 }
 
 func mintBiscuit(signingKey ed25519.PrivateKey, remotePeer peer.ID, roles []string, expiration time.Time, policy *api.PolicyConfig, claims jwt.MapClaims) ([]byte, error) {
@@ -343,9 +373,14 @@ func mintBiscuit(signingKey ed25519.PrivateKey, remotePeer peer.ID, roles []stri
 // 2. The token is not expired.
 // 3. The token is securely bound to the expected remotePeer.
 func VerifyBiscuit(biscuitData []byte, expectedPeer peer.ID, trustedPublicKeys []ed25519.PublicKey, timeout time.Duration) (*biscuit.Biscuit, error) {
+	b, _, err := VerifyBiscuitAndGetKey(biscuitData, expectedPeer, trustedPublicKeys, timeout)
+	return b, err
+}
+
+func VerifyBiscuitAndGetKey(biscuitData []byte, expectedPeer peer.ID, trustedPublicKeys []ed25519.PublicKey, timeout time.Duration) (*biscuit.Biscuit, ed25519.PublicKey, error) {
 	b, err := biscuit.Unmarshal(biscuitData)
 	if err != nil {
-		return nil, fmt.Errorf("malformed biscuit: %w", err)
+		return nil, nil, fmt.Errorf("malformed biscuit: %w", err)
 	}
 
 	var authOpts []biscuit.AuthorizerOption
@@ -355,6 +390,7 @@ func VerifyBiscuit(biscuitData []byte, expectedPeer peer.ID, trustedPublicKeys [
 
 	var lastErr error
 	var authorized bool
+	var verifyingKey ed25519.PublicKey
 	for _, pubKey := range trustedPublicKeys {
 		authorizer, err := b.Authorizer(pubKey, authOpts...)
 		if err != nil {
@@ -374,6 +410,7 @@ func VerifyBiscuit(biscuitData []byte, expectedPeer peer.ID, trustedPublicKeys [
 
 		if err := authorizer.Authorize(); err == nil {
 			authorized = true
+			verifyingKey = pubKey
 			break
 		} else {
 			lastErr = err
@@ -381,7 +418,7 @@ func VerifyBiscuit(biscuitData []byte, expectedPeer peer.ID, trustedPublicKeys [
 	}
 
 	if !authorized {
-		return nil, fmt.Errorf("no valid key found for verification: %v", lastErr)
+		return nil, nil, fmt.Errorf("no valid key found for verification: %v", lastErr)
 	}
 
 	// Enforce hardware binding
@@ -390,10 +427,10 @@ func VerifyBiscuit(biscuitData []byte, expectedPeer peer.ID, trustedPublicKeys [
 		IDs:  []biscuit.Term{biscuit.String(expectedPeer.String())},
 	}}
 	if _, err := b.GetBlockID(boundFact); err != nil {
-		return nil, fmt.Errorf("token is not bound to peer %s: %w", expectedPeer, err)
+		return nil, nil, fmt.Errorf("token is not bound to peer %s: %w", expectedPeer, err)
 	}
 
-	return b, nil
+	return b, verifyingKey, nil
 }
 
 func translateClaimsToFacts(addFact func(biscuit.Fact) error, claims map[string]any) error {
@@ -530,4 +567,32 @@ func VerifyAndExtractPeerID(trustedPublicKeys []ed25519.PublicKey, biscuitData [
 	}
 
 	return pID, nil
+}
+
+// VerifyBiscuitRole checks that the biscuit is signed by the hub's public key
+// and contains the specified role fact.
+func VerifyBiscuitRole(biscuitData []byte, hubPubKey ed25519.PublicKey, expectedRole string) error {
+	b, err := biscuit.Unmarshal(biscuitData)
+	if err != nil {
+		return fmt.Errorf("malformed biscuit: %w", err)
+	}
+
+	authorizer, err := b.Authorizer(hubPubKey)
+	if err != nil {
+		return fmt.Errorf("failed to create authorizer: %w", err)
+	}
+
+	authorizer.AddCheck(biscuit.Check{Queries: []biscuit.Rule{
+		{
+			Body: []biscuit.Predicate{
+				{Name: api.FactRole, IDs: []biscuit.Term{biscuit.String(expectedRole)}},
+			},
+		},
+	}})
+	authorizer.AddPolicy(api.AllowIfTruePolicy)
+
+	if err := authorizer.Authorize(); err != nil {
+		return fmt.Errorf("biscuit lacks expected role %q: %w", expectedRole, err)
+	}
+	return nil
 }

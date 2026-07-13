@@ -47,6 +47,7 @@ message EnrollRequest {
   string jwt = 1;
   string peer_id = 2;
   bytes public_key = 3;
+  string requested_role = 4;
 }
 
 message EnrollResponse {
@@ -55,6 +56,10 @@ message EnrollResponse {
   bytes hub_public_key = 3;
   repeated string hub_addresses = 4;
   int64 expiration = 5;
+}
+
+message EnrollmentStatusRequest {
+  string peer_id = 1;
 }
 
 enum EnrollmentStatus {
@@ -68,6 +73,7 @@ message BootstrapEnrollRequest {
   string bootstrap_token = 1;
   string peer_id = 2;
   bytes public_key = 3;
+  string requested_role = 4;
 }
 
 message BootstrapEnrollResponse {
@@ -80,9 +86,7 @@ message BootstrapEnrollResponse {
   int64 expiration = 7;             // Populated only if APPROVED
 }
 
-message EnrollmentStatusRequest {
-  string peer_id = 1;
-}
+
 
 enum ServiceType {
   SERVICE_TYPE_UNSPECIFIED = 0;

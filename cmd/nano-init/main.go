@@ -35,13 +35,48 @@ import (
 )
 
 func main() {
-	if len(os.Args) < 3 {
-		log.Fatalf("Usage: %s <uds-path> <cmd> [args...]", os.Args[0])
+	if len(os.Args) < 2 {
+		printUsageAndExit()
 	}
-	udsPath := os.Args[1]
-	cmdName := os.Args[2]
-	cmdArgs := os.Args[3:]
 
+	subCmd := os.Args[1]
+	switch subCmd {
+	case "copy":
+		if len(os.Args) != 3 {
+			log.Fatalf("Usage: %s copy <dest>", os.Args[0])
+		}
+		src, err := os.Executable()
+		if err != nil {
+			src = "/nano-init"
+		}
+		dest := os.Args[2]
+		log.Printf("Copying %s to %s...", src, dest)
+		if err := copyFile(src, dest); err != nil {
+			log.Fatalf("Failed to copy binary: %v", err)
+		}
+		log.Println("Copy complete.")
+		return
+
+	case "run":
+		if len(os.Args) < 4 {
+			log.Fatalf("Usage: %s run <uds-path> <cmd> [args...]", os.Args[0])
+		}
+		udsPath := os.Args[2]
+		cmdName := os.Args[3]
+		cmdArgs := os.Args[4:]
+
+		runProxy(udsPath, cmdName, cmdArgs)
+
+	default:
+		printUsageAndExit()
+	}
+}
+
+func printUsageAndExit() {
+	log.Fatalf("Usage:\n  %s copy <dest>\n  %s run <uds-path> <cmd> [args...]", os.Args[0], os.Args[0])
+}
+
+func runProxy(udsPath, cmdName string, cmdArgs []string) {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 	defer cancel()
 
@@ -448,4 +483,21 @@ func buildAgentEnv(assignedPort int, caPath string, interceptorPath string) []st
 	}
 
 	return result
+}
+
+func copyFile(src, dest string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close() //nolint:errcheck
+	out, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
+	if err != nil {
+		return err
+	}
+	if _, err = io.Copy(out, in); err != nil {
+		out.Close() //nolint:errcheck
+		return err
+	}
+	return out.Close()
 }

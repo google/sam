@@ -17,6 +17,8 @@ package router
 import (
 	"fmt"
 	"time"
+
+	"github.com/google/sam/api"
 )
 
 // Options holds configuration details for the sam-router.
@@ -37,6 +39,8 @@ type Options struct {
 	LogVerbose         bool
 	DHTProviderAddrTTL time.Duration
 	DHTMaxRecordAge    time.Duration
+	// RequiredRole restricts enrollment and startup to only accept tokens containing this role.
+	RequiredRole string
 }
 
 // Default sets default values for options.
@@ -58,6 +62,9 @@ func (o *Options) Default() {
 	}
 	if o.BiscuitTimeout <= 0 {
 		o.BiscuitTimeout = 100 * time.Millisecond
+	}
+	if o.RequiredRole == "" {
+		o.RequiredRole = api.RoleRouter
 	}
 }
 

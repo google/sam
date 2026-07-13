@@ -15,11 +15,16 @@
 package main
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/json"
 	"log"
 	"os"
 	"path/filepath"
+	"time"
 
+	"github.com/biscuit-auth/biscuit-go/v2"
+	"github.com/google/sam/api"
 	"go.etcd.io/bbolt"
 )
 
@@ -40,18 +45,42 @@ func main() {
 	}
 	defer func() { _ = db.Close() }()
 
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	builder := biscuit.NewBuilder(priv)
+	_ = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+		Name: api.FactNode,
+		IDs:  []biscuit.Term{biscuit.String("12D3KooWHUTskEt6EwWk8sgzxHS9CH5dU5XHdPonVCKEdHoKCTtD")},
+	}})
+	_ = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+		Name: api.FactRole,
+		IDs:  []biscuit.Term{biscuit.String(api.RoleNode)},
+	}})
+	_ = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+		Name: api.FactExpiration,
+		IDs:  []biscuit.Term{biscuit.Date(time.Now().Add(24 * time.Hour))},
+	}})
+	tok, err := builder.Build()
+	if err != nil {
+		log.Fatal(err)
+	}
+	biscuitBytes, err := tok.Serialize()
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	err = db.Update(func(tx *bbolt.Tx) error {
 		b, err := tx.CreateBucketIfNotExists([]byte("identity"))
 		if err != nil {
 			return err
 		}
-		// The following constants are mock values used for testing.
-		// 'mock-biscuit-token' is a dummy token string.
-		// The hub public key is a dummy 32-byte hex string (all zeros).
-		if err := b.Put([]byte("identity_biscuit"), []byte("mock-biscuit-token")); err != nil {
+		if err := b.Put([]byte("identity_biscuit"), biscuitBytes); err != nil {
 			return err
 		}
-		if err := b.Put([]byte("hub_public_key"), []byte("0000000000000000000000000000000000000000000000000000000000000000")); err != nil {
+		if err := b.Put([]byte("hub_public_key"), pub); err != nil {
 			return err
 		}
 		addrsData, _ := json.Marshal([]string{"/ip4/127.0.0.1/tcp/4002/p2p/QmYyQSo1sn1GjUuQwca9AdvV8Zeyvmxrww8dDnewPrfJs9"})

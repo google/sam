@@ -265,6 +265,15 @@ func NewSamNode(cfg Options) (*SamNode, error) {
 
 // Start initializes the libp2p host, DHT, connects to the hub, and starts runtime components.
 func (n *SamNode) Start(ctx context.Context) error {
+	if biscuitBytes := n.GetIdentity(); len(biscuitBytes) > 0 {
+		hubPubKeyBytes, _, err := n.Store.LoadHubConfig()
+		if err == nil && len(hubPubKeyBytes) > 0 {
+			if err := identity.VerifyBiscuitRole(biscuitBytes, ed25519.PublicKey(hubPubKeyBytes), n.config.RequiredRole); err != nil {
+				return fmt.Errorf("loaded identity fails role requirement %q: %w", n.config.RequiredRole, err)
+			}
+		}
+	}
+
 	// Layer 2: Attach the Bouncer (Gater)
 	gater := &nodeConnGate{node: n}
 

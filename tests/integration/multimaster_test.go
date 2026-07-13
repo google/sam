@@ -279,9 +279,10 @@ func enrollClientOnControlPlane(t *testing.T, cpPort int, clientID peer.ID, pubB
 	t.Helper()
 
 	req := &api.EnrollRequest{
-		Jwt:       jwtToken,
-		PeerId:    clientID.String(),
-		PublicKey: pubBytes,
+		Jwt:           jwtToken,
+		PeerId:        clientID.String(),
+		PublicKey:     pubBytes,
+		RequestedRole: api.RoleNode,
 	}
 	reqBytes, err := proto.Marshal(req)
 	if err != nil {

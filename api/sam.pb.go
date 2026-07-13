@@ -375,6 +375,7 @@ type EnrollRequest struct {
 	Jwt           string                 `protobuf:"bytes,1,opt,name=jwt,proto3" json:"jwt,omitempty"`
 	PeerId        string                 `protobuf:"bytes,2,opt,name=peer_id,json=peerId,proto3" json:"peer_id,omitempty"`
 	PublicKey     []byte                 `protobuf:"bytes,3,opt,name=public_key,json=publicKey,proto3" json:"public_key,omitempty"`
+	RequestedRole string                 `protobuf:"bytes,4,opt,name=requested_role,json=requestedRole,proto3" json:"requested_role,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -428,6 +429,13 @@ func (x *EnrollRequest) GetPublicKey() []byte {
 		return x.PublicKey
 	}
 	return nil
+}
+
+func (x *EnrollRequest) GetRequestedRole() string {
+	if x != nil {
+		return x.RequestedRole
+	}
+	return ""
 }
 
 type EnrollResponse struct {
@@ -506,18 +514,63 @@ func (x *EnrollResponse) GetExpiration() int64 {
 	return 0
 }
 
+type EnrollmentStatusRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	PeerId        string                 `protobuf:"bytes,1,opt,name=peer_id,json=peerId,proto3" json:"peer_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EnrollmentStatusRequest) Reset() {
+	*x = EnrollmentStatusRequest{}
+	mi := &file_api_sam_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EnrollmentStatusRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EnrollmentStatusRequest) ProtoMessage() {}
+
+func (x *EnrollmentStatusRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_api_sam_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EnrollmentStatusRequest.ProtoReflect.Descriptor instead.
+func (*EnrollmentStatusRequest) Descriptor() ([]byte, []int) {
+	return file_api_sam_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *EnrollmentStatusRequest) GetPeerId() string {
+	if x != nil {
+		return x.PeerId
+	}
+	return ""
+}
+
 type BootstrapEnrollRequest struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	BootstrapToken string                 `protobuf:"bytes,1,opt,name=bootstrap_token,json=bootstrapToken,proto3" json:"bootstrap_token,omitempty"`
 	PeerId         string                 `protobuf:"bytes,2,opt,name=peer_id,json=peerId,proto3" json:"peer_id,omitempty"`
 	PublicKey      []byte                 `protobuf:"bytes,3,opt,name=public_key,json=publicKey,proto3" json:"public_key,omitempty"`
+	RequestedRole  string                 `protobuf:"bytes,4,opt,name=requested_role,json=requestedRole,proto3" json:"requested_role,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
 
 func (x *BootstrapEnrollRequest) Reset() {
 	*x = BootstrapEnrollRequest{}
-	mi := &file_api_sam_proto_msgTypes[5]
+	mi := &file_api_sam_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -529,7 +582,7 @@ func (x *BootstrapEnrollRequest) String() string {
 func (*BootstrapEnrollRequest) ProtoMessage() {}
 
 func (x *BootstrapEnrollRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[5]
+	mi := &file_api_sam_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -542,7 +595,7 @@ func (x *BootstrapEnrollRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BootstrapEnrollRequest.ProtoReflect.Descriptor instead.
 func (*BootstrapEnrollRequest) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{5}
+	return file_api_sam_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *BootstrapEnrollRequest) GetBootstrapToken() string {
@@ -566,6 +619,13 @@ func (x *BootstrapEnrollRequest) GetPublicKey() []byte {
 	return nil
 }
 
+func (x *BootstrapEnrollRequest) GetRequestedRole() string {
+	if x != nil {
+		return x.RequestedRole
+	}
+	return ""
+}
+
 type BootstrapEnrollResponse struct {
 	state               protoimpl.MessageState `protogen:"open.v1"`
 	Status              EnrollmentStatus       `protobuf:"varint,1,opt,name=status,proto3,enum=sam.v1.EnrollmentStatus" json:"status,omitempty"`
@@ -581,7 +641,7 @@ type BootstrapEnrollResponse struct {
 
 func (x *BootstrapEnrollResponse) Reset() {
 	*x = BootstrapEnrollResponse{}
-	mi := &file_api_sam_proto_msgTypes[6]
+	mi := &file_api_sam_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -593,7 +653,7 @@ func (x *BootstrapEnrollResponse) String() string {
 func (*BootstrapEnrollResponse) ProtoMessage() {}
 
 func (x *BootstrapEnrollResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[6]
+	mi := &file_api_sam_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -606,7 +666,7 @@ func (x *BootstrapEnrollResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BootstrapEnrollResponse.ProtoReflect.Descriptor instead.
 func (*BootstrapEnrollResponse) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{6}
+	return file_api_sam_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *BootstrapEnrollResponse) GetStatus() EnrollmentStatus {
@@ -656,50 +716,6 @@ func (x *BootstrapEnrollResponse) GetExpiration() int64 {
 		return x.Expiration
 	}
 	return 0
-}
-
-type EnrollmentStatusRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	PeerId        string                 `protobuf:"bytes,1,opt,name=peer_id,json=peerId,proto3" json:"peer_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *EnrollmentStatusRequest) Reset() {
-	*x = EnrollmentStatusRequest{}
-	mi := &file_api_sam_proto_msgTypes[7]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *EnrollmentStatusRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*EnrollmentStatusRequest) ProtoMessage() {}
-
-func (x *EnrollmentStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_sam_proto_msgTypes[7]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use EnrollmentStatusRequest.ProtoReflect.Descriptor instead.
-func (*EnrollmentStatusRequest) Descriptor() ([]byte, []int) {
-	return file_api_sam_proto_rawDescGZIP(), []int{7}
-}
-
-func (x *EnrollmentStatusRequest) GetPeerId() string {
-	if x != nil {
-		return x.PeerId
-	}
-	return ""
 }
 
 type ServiceInfo struct {
@@ -1625,12 +1641,13 @@ const file_api_sam_proto_rawDesc = "" +
 	"\x04Type\x12\n" +
 	"\n" +
 	"\x06BANNED\x10\x00\x12\x10\n" +
-	"\fKEY_ROTATION\x10\x01\"Y\n" +
+	"\fKEY_ROTATION\x10\x01\"\x80\x01\n" +
 	"\rEnrollRequest\x12\x10\n" +
 	"\x03jwt\x18\x01 \x01(\tR\x03jwt\x12\x17\n" +
 	"\apeer_id\x18\x02 \x01(\tR\x06peerId\x12\x1d\n" +
 	"\n" +
-	"public_key\x18\x03 \x01(\fR\tpublicKey\"\xc5\x01\n" +
+	"public_key\x18\x03 \x01(\fR\tpublicKey\x12%\n" +
+	"\x0erequested_role\x18\x04 \x01(\tR\rrequestedRole\"\xc5\x01\n" +
 	"\x0eEnrollResponse\x12#\n" +
 	"\rbiscuit_token\x18\x01 \x01(\fR\fbiscuitToken\x12#\n" +
 	"\rerror_message\x18\x02 \x01(\tR\ferrorMessage\x12$\n" +
@@ -1638,12 +1655,15 @@ const file_api_sam_proto_rawDesc = "" +
 	"\rhub_addresses\x18\x04 \x03(\tR\fhubAddresses\x12\x1e\n" +
 	"\n" +
 	"expiration\x18\x05 \x01(\x03R\n" +
-	"expiration\"y\n" +
+	"expiration\"2\n" +
+	"\x17EnrollmentStatusRequest\x12\x17\n" +
+	"\apeer_id\x18\x01 \x01(\tR\x06peerId\"\xa0\x01\n" +
 	"\x16BootstrapEnrollRequest\x12'\n" +
 	"\x0fbootstrap_token\x18\x01 \x01(\tR\x0ebootstrapToken\x12\x17\n" +
 	"\apeer_id\x18\x02 \x01(\tR\x06peerId\x12\x1d\n" +
 	"\n" +
-	"public_key\x18\x03 \x01(\fR\tpublicKey\"\xb4\x02\n" +
+	"public_key\x18\x03 \x01(\fR\tpublicKey\x12%\n" +
+	"\x0erequested_role\x18\x04 \x01(\tR\rrequestedRole\"\xb4\x02\n" +
 	"\x17BootstrapEnrollResponse\x120\n" +
 	"\x06status\x18\x01 \x01(\x0e2\x18.sam.v1.EnrollmentStatusR\x06status\x12#\n" +
 	"\rbiscuit_token\x18\x02 \x01(\fR\fbiscuitToken\x122\n" +
@@ -1653,9 +1673,7 @@ const file_api_sam_proto_rawDesc = "" +
 	"\rhub_addresses\x18\x06 \x03(\tR\fhubAddresses\x12\x1e\n" +
 	"\n" +
 	"expiration\x18\a \x01(\x03R\n" +
-	"expiration\"2\n" +
-	"\x17EnrollmentStatusRequest\x12\x17\n" +
-	"\apeer_id\x18\x01 \x01(\tR\x06peerId\"l\n" +
+	"expiration\"l\n" +
 	"\vServiceInfo\x12'\n" +
 	"\x04type\x18\x01 \x01(\x0e2\x13.sam.v1.ServiceTypeR\x04type\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12 \n" +
@@ -1751,9 +1769,9 @@ var file_api_sam_proto_goTypes = []any{
 	(*MeshEvent)(nil),                  // 5: sam.v1.MeshEvent
 	(*EnrollRequest)(nil),              // 6: sam.v1.EnrollRequest
 	(*EnrollResponse)(nil),             // 7: sam.v1.EnrollResponse
-	(*BootstrapEnrollRequest)(nil),     // 8: sam.v1.BootstrapEnrollRequest
-	(*BootstrapEnrollResponse)(nil),    // 9: sam.v1.BootstrapEnrollResponse
-	(*EnrollmentStatusRequest)(nil),    // 10: sam.v1.EnrollmentStatusRequest
+	(*EnrollmentStatusRequest)(nil),    // 8: sam.v1.EnrollmentStatusRequest
+	(*BootstrapEnrollRequest)(nil),     // 9: sam.v1.BootstrapEnrollRequest
+	(*BootstrapEnrollResponse)(nil),    // 10: sam.v1.BootstrapEnrollResponse
 	(*ServiceInfo)(nil),                // 11: sam.v1.ServiceInfo
 	(*CommandBackend)(nil),             // 12: sam.v1.CommandBackend
 	(*RegisterServiceRequest)(nil),     // 13: sam.v1.RegisterServiceRequest

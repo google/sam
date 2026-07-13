@@ -219,6 +219,7 @@ func main() {
 					AutoRelayBootDelay:   autoRelayBootDelayFlag,
 					AutoRelayBackoff:     autoRelayBackoffFlag,
 					HubConnectTimeout:    hubConnectTimeoutFlag,
+					RequiredRole:         api.RoleSamBox,
 				})
 				if err != nil {
 					logger.Fatalf("Failed to initialize mesh node: %v", err)
@@ -272,6 +273,7 @@ func main() {
 					AutoRelayBootDelay:   autoRelayBootDelayFlag,
 					AutoRelayBackoff:     autoRelayBackoffFlag,
 					HubConnectTimeout:    hubConnectTimeoutFlag,
+					RequiredRole:         api.RoleSamBox,
 				})
 				if err != nil {
 					logger.Fatalf("Failed to initialize node for enrollment: %v", err)
@@ -447,6 +449,7 @@ func main() {
 				AutoRelayBootDelay:   0 * time.Second,
 				AutoRelayBackoff:     3 * time.Second,
 				HubConnectTimeout:    hubConnectTimeoutFlag,
+				RequiredRole:         api.RoleSamBox,
 			})
 			if err != nil {
 				logger.Fatalf("Failed to initialize node for enrollment: %v", err)

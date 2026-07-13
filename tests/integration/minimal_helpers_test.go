@@ -232,7 +232,7 @@ func startMockLibp2pHub(t *testing.T) (peer.ID, string) {
 		writer := msgio.NewVarintWriter(s)
 		resp := &api.AuthResponse{
 			Success: true,
-			Biscuit: createMockBiscuitToken(t, h.ID().String(), priv),
+			Biscuit: createMockBiscuitToken(t, h.ID().String(), priv, api.RoleRouter),
 		}
 		respBytes, _ := proto.Marshal(resp)
 		_ = writer.WriteMsg(respBytes)
@@ -263,7 +263,7 @@ func startMockLibp2pHub(t *testing.T) (peer.ID, string) {
 		}
 
 		resp := &api.EnrollResponse{
-			BiscuitToken: createMockBiscuitToken(t, req.PeerId, priv),
+			BiscuitToken: createMockBiscuitToken(t, req.PeerId, priv, api.RoleNode),
 			HubPublicKey: pub,
 			HubAddresses: []string{h.Addrs()[0].String() + "/p2p/" + h.ID().String()},
 		}
@@ -313,7 +313,7 @@ func startMockLibp2pHubWithOIDC(t *testing.T, oidcIssuerURL string) (peer.ID, st
 		writer := msgio.NewVarintWriter(s)
 		resp := &api.AuthResponse{
 			Success: true,
-			Biscuit: createMockBiscuitToken(t, h.ID().String(), priv),
+			Biscuit: createMockBiscuitToken(t, h.ID().String(), priv, api.RoleRouter),
 		}
 		respBytes, _ := proto.Marshal(resp)
 		_ = writer.WriteMsg(respBytes)
@@ -363,7 +363,7 @@ func startMockLibp2pHubWithOIDC(t *testing.T, oidcIssuerURL string) (peer.ID, st
 		}
 
 		resp := &api.EnrollResponse{
-			BiscuitToken: createMockBiscuitToken(t, req.PeerId, priv),
+			BiscuitToken: createMockBiscuitToken(t, req.PeerId, priv, api.RoleNode),
 			HubPublicKey: pub,
 			HubAddresses: []string{h.Addrs()[0].String() + "/p2p/" + h.ID().String()},
 		}
@@ -388,7 +388,7 @@ func startMockLibp2pHubWithOIDC(t *testing.T, oidcIssuerURL string) (peer.ID, st
 	return h.ID(), httpServer.URL
 }
 
-func createMockBiscuitToken(t *testing.T, peerID string, priv ed25519.PrivateKey) []byte {
+func createMockBiscuitToken(t *testing.T, peerID string, priv ed25519.PrivateKey, role string) []byte {
 	builder := biscuit.NewBuilder(priv)
 	err := builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{Name: "target_unrestricted"}})
 	if err != nil {
@@ -403,9 +403,12 @@ func createMockBiscuitToken(t *testing.T, peerID string, priv ed25519.PrivateKey
 		t.Fatalf("failed to add FactExpiration fact: %v", err)
 	}
 
+	if role == "" {
+		role = api.RoleRouter
+	}
 	err = builder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
 		Name: api.FactRole,
-		IDs:  []biscuit.Term{biscuit.String(api.RoleRouter)},
+		IDs:  []biscuit.Term{biscuit.String(role)},
 	}})
 	if err != nil {
 		t.Fatalf("failed to add role fact: %v", err)

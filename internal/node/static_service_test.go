@@ -99,8 +99,32 @@ func startMockLibp2pHub(t *testing.T) (peer.ID, string) {
 			return
 		}
 
+		bBuilder := biscuit.NewBuilder(cpPriv)
+		_ = bBuilder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+			Name: api.FactNode,
+			IDs:  []biscuit.Term{biscuit.String(req.PeerId)},
+		}})
+		_ = bBuilder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+			Name: api.FactRole,
+			IDs:  []biscuit.Term{biscuit.String(api.RoleNode)},
+		}})
+		_ = bBuilder.AddAuthorityFact(biscuit.Fact{Predicate: biscuit.Predicate{
+			Name: api.FactExpiration,
+			IDs:  []biscuit.Term{biscuit.Date(time.Now().Add(24 * time.Hour))},
+		}})
+		bTok, err := bBuilder.Build()
+		if err != nil {
+			http.Error(w, "Failed to build biscuit", http.StatusInternalServerError)
+			return
+		}
+		biscuitBytes, err := bTok.Serialize()
+		if err != nil {
+			http.Error(w, "Failed to serialize biscuit", http.StatusInternalServerError)
+			return
+		}
+
 		resp := &api.EnrollResponse{
-			BiscuitToken: []byte("mock-biscuit-token"),
+			BiscuitToken: biscuitBytes,
 			HubPublicKey: cpPub,
 			HubAddresses: []string{h.Addrs()[0].String() + "/p2p/" + h.ID().String()},
 		}

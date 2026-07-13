@@ -227,6 +227,7 @@ func main() {
 					AutoRelayBootDelay:   autoRelayBootDelayFlag,
 					AutoRelayBackoff:     autoRelayBackoffFlag,
 					HubConnectTimeout:    hubConnectTimeoutFlag,
+					RequiredRole:         api.RoleNode,
 					DHTProviderAddrTTL:   dhtProviderAddrTTLFlag,
 					DHTMaxRecordAge:      dhtMaxRecordAgeFlag,
 					DHTLookupLimit:       dhtLookupLimitFlag,
@@ -290,6 +291,7 @@ func main() {
 					AutoRelayBootDelay:   autoRelayBootDelayFlag,
 					AutoRelayBackoff:     autoRelayBackoffFlag,
 					HubConnectTimeout:    hubConnectTimeoutFlag,
+					RequiredRole:         api.RoleNode,
 					DHTProviderAddrTTL:   dhtProviderAddrTTLFlag,
 					DHTMaxRecordAge:      dhtMaxRecordAgeFlag,
 					DHTLookupLimit:       dhtLookupLimitFlag,
@@ -350,6 +352,7 @@ func main() {
 					AutoRelayBootDelay:   autoRelayBootDelayFlag,
 					AutoRelayBackoff:     autoRelayBackoffFlag,
 					HubConnectTimeout:    hubConnectTimeoutFlag,
+					RequiredRole:         api.RoleNode,
 				})
 				if err != nil {
 					logger.Fatalf("Failed to initialize node after enrollment: %v", err)
@@ -508,6 +511,7 @@ func main() {
 				AutoRelayBootDelay:   0 * time.Second,
 				AutoRelayBackoff:     3 * time.Second,
 				HubConnectTimeout:    hubConnectTimeoutFlag,
+				RequiredRole:         api.RoleNode,
 			})
 			if err != nil {
 				logger.Fatalf("Failed to initialize node for enrollment: %v", err)

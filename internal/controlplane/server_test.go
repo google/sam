@@ -253,9 +253,10 @@ func TestNodeAndRouterRegistrationFlow(t *testing.T) {
 
 	nodePubKeyBytes, _ := crypto.MarshalPublicKey(privNode.GetPublic())
 	enrollNodeReq := &api.EnrollRequest{
-		Jwt:       nodeJWT,
-		PeerId:    nodePeer.String(),
-		PublicKey: nodePubKeyBytes,
+		Jwt:           nodeJWT,
+		PeerId:        nodePeer.String(),
+		PublicKey:     nodePubKeyBytes,
+		RequestedRole: api.RoleNode,
 	}
 	reqData, _ := proto.Marshal(enrollNodeReq)
 
@@ -295,9 +296,10 @@ func TestNodeAndRouterRegistrationFlow(t *testing.T) {
 
 	routerPubKeyBytes, _ := crypto.MarshalPublicKey(privRouter.GetPublic())
 	enrollRouterReq := &api.EnrollRequest{
-		Jwt:       routerJWT,
-		PeerId:    routerPeer.String(),
-		PublicKey: routerPubKeyBytes,
+		Jwt:           routerJWT,
+		PeerId:        routerPeer.String(),
+		PublicKey:     routerPubKeyBytes,
+		RequestedRole: api.RoleRouter,
 	}
 	reqData, _ = proto.Marshal(enrollRouterReq)
 
@@ -535,6 +537,7 @@ func TestEnrollmentWorkflow(t *testing.T) {
 		BootstrapToken: tokenDetails.Token,
 		PeerId:         pID.String(),
 		PublicKey:      pubBytes,
+		RequestedRole:  api.RoleRouter,
 	}
 	enrollReqData, _ := proto.Marshal(enrollReq)
 
@@ -662,6 +665,7 @@ func TestEnrollmentWorkflow(t *testing.T) {
 		BootstrapToken: tokenDetails.Token, // use remaining usage
 		PeerId:         pID2.String(),
 		PublicKey:      pubBytes2,
+		RequestedRole:  api.RoleRouter,
 	}
 	enrollReqData2, _ := proto.Marshal(enrollReq2)
 
@@ -721,9 +725,10 @@ func TestTokenRefreshAndRevocation(t *testing.T) {
 
 	nodePubKeyBytes, _ := crypto.MarshalPublicKey(pubNode)
 	enrollNodeReq := &api.EnrollRequest{
-		Jwt:       nodeJWT,
-		PeerId:    nodePeer.String(),
-		PublicKey: nodePubKeyBytes,
+		Jwt:           nodeJWT,
+		PeerId:        nodePeer.String(),
+		PublicKey:     nodePubKeyBytes,
+		RequestedRole: api.RoleNode,
 	}
 	reqData, _ := proto.Marshal(enrollNodeReq)
 
@@ -858,9 +863,10 @@ func TestNodeProactiveTokenRefresh(t *testing.T) {
 	// Enroll via registration endpoint
 	nodePubKeyBytes, _ := crypto.MarshalPublicKey(pubNode)
 	enrollNodeReq := &api.EnrollRequest{
-		Jwt:       nodeJWT,
-		PeerId:    nodePeer.String(),
-		PublicKey: nodePubKeyBytes,
+		Jwt:           nodeJWT,
+		PeerId:        nodePeer.String(),
+		PublicKey:     nodePubKeyBytes,
+		RequestedRole: api.RoleNode,
 	}
 	reqData, _ := proto.Marshal(enrollNodeReq)
 

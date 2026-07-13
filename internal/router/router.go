@@ -288,9 +288,10 @@ func (r *Router) enroll(peerID peer.ID) error {
 	}
 
 	req := &api.EnrollRequest{
-		Jwt:       r.config.OIDCToken,
-		PeerId:    peerID.String(),
-		PublicKey: pubBytes,
+		Jwt:           r.config.OIDCToken,
+		PeerId:        peerID.String(),
+		PublicKey:     pubBytes,
+		RequestedRole: r.config.RequiredRole,
 	}
 	data, err := proto.Marshal(req)
 	if err != nil {
@@ -325,6 +326,10 @@ func (r *Router) enroll(peerID peer.ID) error {
 	r.trustedPublicKeys = []ed25519.PublicKey{enrollResp.HubPublicKey}
 	r.keysMu.Unlock()
 
+	if err := identity.VerifyBiscuitRole(enrollResp.BiscuitToken, enrollResp.HubPublicKey, r.config.RequiredRole); err != nil {
+		return fmt.Errorf("enrolled biscuit token lacks required role %q: %w", r.config.RequiredRole, err)
+	}
+
 	return nil
 }
 
@@ -339,6 +344,7 @@ func (r *Router) enrollBootstrap(peerID peer.ID) error {
 		BootstrapToken: r.config.BootstrapToken,
 		PeerId:         peerID.String(),
 		PublicKey:      pubBytes,
+		RequestedRole:  r.config.RequiredRole,
 	}
 	data, err := proto.Marshal(req)
 	if err != nil {
@@ -441,6 +447,10 @@ func (r *Router) enrollBootstrap(peerID peer.ID) error {
 	r.keysMu.Lock()
 	r.trustedPublicKeys = []ed25519.PublicKey{enrollResp.HubPublicKey}
 	r.keysMu.Unlock()
+
+	if err := identity.VerifyBiscuitRole(enrollResp.BiscuitToken, enrollResp.HubPublicKey, r.config.RequiredRole); err != nil {
+		return fmt.Errorf("enrolled biscuit token lacks required role %q: %w", r.config.RequiredRole, err)
+	}
 
 	logger.Infof("Router bootstrap enrollment approved! Biscuit received.")
 	return nil
@@ -760,7 +770,7 @@ func (r *Router) performMutualAuth(s network.Stream) error {
 		return fmt.Errorf("failed to verify peer router biscuit: %w", err)
 	}
 
-	// Enforce role("router"), role("router-role") or role("bootstrap") inside the biscuit
+	// Enforce required role inside the biscuit
 	authorizer, err := b.Authorizer(trustedKeys[0])
 	if err != nil {
 		return fmt.Errorf("authorizer instantiation failed: %w", err)
@@ -769,7 +779,7 @@ func (r *Router) performMutualAuth(s network.Stream) error {
 	authorizer.AddCheck(biscuit.Check{Queries: []biscuit.Rule{
 		{
 			Body: []biscuit.Predicate{
-				{Name: api.FactRole, IDs: []biscuit.Term{biscuit.String(api.RoleRouter)}},
+				{Name: api.FactRole, IDs: []biscuit.Term{biscuit.String(r.config.RequiredRole)}},
 			},
 		},
 	}})

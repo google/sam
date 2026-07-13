@@ -346,26 +346,23 @@ func (s *Server) HandleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.RequestedRole == "" {
+		http.Error(w, "requested_role must be specified", http.StatusBadRequest)
+		return
+	}
+
 	// Mint token
 	biscuitExpiry := time.Now().Add(api.BiscuitTokenTTL)
-	biscuitData, resolvedRoles, err := identity.MintBiscuitToken(privKey, claims, token, pID, policy, biscuitExpiry)
+	biscuitData, _, err := identity.MintBiscuitToken(privKey, claims, token, pID, policy, biscuitExpiry, req.RequestedRole)
 	if err != nil {
 		logger.Errorw("Biscuit minting failed", "peer_id", req.PeerId, "error", err)
-		http.Error(w, "Failed to mint biscuit: "+err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Failed to mint biscuit: "+err.Error(), http.StatusForbidden)
 		return
 	}
 
 	// Session TTL is 90 days for OIDC interactive enrollment
 	sessionExpiresAt := time.Now().Add(api.OIDCSessionTTL)
-
-	// Determine primary role from resolved roles
-	primaryRole := api.RoleNode
-	for _, r := range resolvedRoles {
-		if strings.HasPrefix(r, "sam:role:") {
-			primaryRole = r
-			break
-		}
-	}
+	primaryRole := req.RequestedRole
 
 	claimsBytes, err := json.Marshal(claims)
 	if err != nil {
@@ -542,7 +539,7 @@ func (s *Server) HandleRefresh(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 			return
 		}
-		bBytes, _, err := identity.MintBiscuitToken(privKey, claims, nil, pID, policy, biscuitExpiry)
+		bBytes, _, err := identity.MintBiscuitToken(privKey, claims, nil, pID, policy, biscuitExpiry, nodeRecord.Role)
 		if err != nil {
 			logger.Errorf("Failed to mint refreshed token for node %s: %v", nodeRecord.PeerID, err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -660,7 +657,7 @@ func (s *Server) HandleRouterLease(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Verify Biscuit and enforce expected remote peer id
-	b, err := identity.VerifyBiscuit(req.Biscuit, pID, cpPubKeys, s.config.BiscuitTimeout)
+	b, verifyingKey, err := identity.VerifyBiscuitAndGetKey(req.Biscuit, pID, cpPubKeys, s.config.BiscuitTimeout)
 	if err != nil {
 		logger.Warnf("Router %s failed biscuit verification: %v", req.PeerId, err)
 		http.Error(w, "Biscuit verification failed: "+err.Error(), http.StatusUnauthorized)
@@ -668,7 +665,7 @@ func (s *Server) HandleRouterLease(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Enforce role("router") or role("bootstrap") inside the biscuit
-	authorizer, err := b.Authorizer(cpPubKeys[0]) // First public key is generally the current one, but biscuit-go handles matches internally
+	authorizer, err := b.Authorizer(verifyingKey)
 	if err != nil {
 		http.Error(w, "Internal authorizer error", http.StatusInternalServerError)
 		return
@@ -684,7 +681,7 @@ func (s *Server) HandleRouterLease(w http.ResponseWriter, r *http.Request) {
 	authorizer.AddPolicy(api.AllowIfTruePolicy)
 
 	if err := authorizer.Authorize(); err != nil {
-		logger.Warnf("Router %s lacks router role in its biscuit: %v", req.PeerId, err)
+		logger.Warnf("Router %s lacks router role in its biscuit: %v\nWorld state:\n%s", req.PeerId, err, authorizer.PrintWorld())
 		http.Error(w, "Unauthorized: entity is not a router", http.StatusForbidden)
 		return
 	}
@@ -897,6 +894,17 @@ func (s *Server) HandleEnroll(w http.ResponseWriter, r *http.Request) {
 	if tokenRecord.UsagesCount >= tokenRecord.MaxUsages {
 		logger.Warnw("Max usages exceeded for bootstrap token", "peer_id", req.PeerId, "token_id", tokenRecord.ID)
 		s.writeEnrollError(w, api.EnrollmentStatus_ENROLLMENT_STATUS_REJECTED, "Bootstrap token max usages exceeded")
+		return
+	}
+
+	if req.RequestedRole == "" {
+		s.writeEnrollError(w, api.EnrollmentStatus_ENROLLMENT_STATUS_REJECTED, "requested_role must be specified")
+		return
+	}
+
+	if req.RequestedRole != tokenRecord.Role {
+		logger.Warnw("Requested role does not match bootstrap token role", "peer_id", req.PeerId, "requested", req.RequestedRole, "token_role", tokenRecord.Role)
+		s.writeEnrollError(w, api.EnrollmentStatus_ENROLLMENT_STATUS_REJECTED, fmt.Sprintf("requested role %q does not match bootstrap token role %q", req.RequestedRole, tokenRecord.Role))
 		return
 	}
 

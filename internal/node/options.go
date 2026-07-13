@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/sam/api"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/multiformats/go-multiaddr"
 )
@@ -55,6 +56,8 @@ type Options struct {
 	DHTMaxRecordAge      time.Duration
 	DHTLookupLimit       int
 	DiscoveryConcurrency int
+	// RequiredRole restricts enrollment and startup to only accept tokens containing this role.
+	RequiredRole string
 }
 
 // Default applies default values to Options if they are not specified.
@@ -92,6 +95,9 @@ func (o *Options) Default() {
 	if len(o.ListenAddrs) == 0 {
 		o.ListenAddrs = []string{"/ip4/0.0.0.0/udp/5001/quic-v1", "/ip4/0.0.0.0/tcp/5002"}
 	}
+	if o.RequiredRole == "" {
+		o.RequiredRole = api.RoleNode
+	}
 }
 
 // Validate verifies that the required options are provided and valid.
@@ -101,6 +107,9 @@ func (o *Options) Validate() error {
 	}
 	if o.Store == nil {
 		return fmt.Errorf("store is required")
+	}
+	if o.RequiredRole == "" {
+		return fmt.Errorf("RequiredRole must be specified")
 	}
 	return nil
 }

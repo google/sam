@@ -58,45 +58,7 @@ func TestMobileFFILifecycle(t *testing.T) {
 		println("--- MOCK HUB: received auth stream connection")
 		defer func() { _ = s.Close() }()
 
-		// Mint a valid Biscuit token signed by CP key and bound to mock hub's Peer ID
-		builder := biscuit.NewBuilder(cpPrivKey)
-		if err := builder.AddAuthorityFact(biscuit.Fact{
-			Predicate: biscuit.Predicate{
-				Name: "node",
-				IDs:  []biscuit.Term{biscuit.String(hubHost.ID().String())},
-			},
-		}); err != nil {
-			println("--- MOCK HUB: failed to add node fact:", err.Error())
-			return
-		}
-		if err := builder.AddAuthorityFact(biscuit.Fact{
-			Predicate: biscuit.Predicate{
-				Name: api.FactRole,
-				IDs:  []biscuit.Term{biscuit.String(api.RoleRouter)},
-			},
-		}); err != nil {
-			println("--- MOCK HUB: failed to add role fact:", err.Error())
-			return
-		}
-		if err := builder.AddAuthorityFact(biscuit.Fact{
-			Predicate: biscuit.Predicate{
-				Name: api.FactExpiration,
-				IDs:  []biscuit.Term{biscuit.Date(time.Now().Add(time.Hour))},
-			},
-		}); err != nil {
-			println("--- MOCK HUB: failed to add expiration fact:", err.Error())
-			return
-		}
-		b, err := builder.Build()
-		if err != nil {
-			println("--- MOCK HUB: failed to build biscuit:", err.Error())
-			return
-		}
-		biscuitBytes, err := b.Serialize()
-		if err != nil {
-			println("--- MOCK HUB: failed to serialize biscuit:", err.Error())
-			return
-		}
+		biscuitBytes := mintMockBiscuit(t, hubHost.ID().String(), cpPrivKey, api.RoleRouter)
 
 		resp := &api.AuthResponse{
 			Success: true,
@@ -117,8 +79,9 @@ func TestMobileFFILifecycle(t *testing.T) {
 		var req api.EnrollRequest
 		_ = proto.Unmarshal(body, &req)
 
+		biscuitBytes := mintMockBiscuit(t, req.PeerId, cpPrivKey, api.RoleNode)
 		resp := &api.EnrollResponse{
-			BiscuitToken: []byte("mock-biscuit-token"),
+			BiscuitToken: biscuitBytes,
 			HubPublicKey: cpPubKey,
 			HubAddresses: []string{hubHost.Addrs()[0].String() + "/p2p/" + hubHost.ID().String()},
 		}
@@ -172,4 +135,41 @@ func TestMobileFFILifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StopNode failed: %v", err)
 	}
+}
+
+func mintMockBiscuit(t *testing.T, peerID string, priv ed25519.PrivateKey, role string) []byte {
+	builder := biscuit.NewBuilder(priv)
+	if err := builder.AddAuthorityFact(biscuit.Fact{
+		Predicate: biscuit.Predicate{
+			Name: "node",
+			IDs:  []biscuit.Term{biscuit.String(peerID)},
+		},
+	}); err != nil {
+		t.Fatalf("failed to add node fact: %v", err)
+	}
+	if err := builder.AddAuthorityFact(biscuit.Fact{
+		Predicate: biscuit.Predicate{
+			Name: api.FactRole,
+			IDs:  []biscuit.Term{biscuit.String(role)},
+		},
+	}); err != nil {
+		t.Fatalf("failed to add role fact: %v", err)
+	}
+	if err := builder.AddAuthorityFact(biscuit.Fact{
+		Predicate: biscuit.Predicate{
+			Name: api.FactExpiration,
+			IDs:  []biscuit.Term{biscuit.Date(time.Now().Add(time.Hour))},
+		},
+	}); err != nil {
+		t.Fatalf("failed to add expiration fact: %v", err)
+	}
+	b, err := builder.Build()
+	if err != nil {
+		t.Fatalf("failed to build biscuit: %v", err)
+	}
+	biscuitBytes, err := b.Serialize()
+	if err != nil {
+		t.Fatalf("failed to serialize biscuit: %v", err)
+	}
+	return biscuitBytes
 }
