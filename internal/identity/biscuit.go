@@ -373,9 +373,14 @@ func mintBiscuit(signingKey ed25519.PrivateKey, remotePeer peer.ID, roles []stri
 // 2. The token is not expired.
 // 3. The token is securely bound to the expected remotePeer.
 func VerifyBiscuit(biscuitData []byte, expectedPeer peer.ID, trustedPublicKeys []ed25519.PublicKey, timeout time.Duration) (*biscuit.Biscuit, error) {
+	b, _, err := VerifyBiscuitAndGetKey(biscuitData, expectedPeer, trustedPublicKeys, timeout)
+	return b, err
+}
+
+func VerifyBiscuitAndGetKey(biscuitData []byte, expectedPeer peer.ID, trustedPublicKeys []ed25519.PublicKey, timeout time.Duration) (*biscuit.Biscuit, ed25519.PublicKey, error) {
 	b, err := biscuit.Unmarshal(biscuitData)
 	if err != nil {
-		return nil, fmt.Errorf("malformed biscuit: %w", err)
+		return nil, nil, fmt.Errorf("malformed biscuit: %w", err)
 	}
 
 	var authOpts []biscuit.AuthorizerOption
@@ -385,6 +390,7 @@ func VerifyBiscuit(biscuitData []byte, expectedPeer peer.ID, trustedPublicKeys [
 
 	var lastErr error
 	var authorized bool
+	var verifyingKey ed25519.PublicKey
 	for _, pubKey := range trustedPublicKeys {
 		authorizer, err := b.Authorizer(pubKey, authOpts...)
 		if err != nil {
@@ -404,6 +410,7 @@ func VerifyBiscuit(biscuitData []byte, expectedPeer peer.ID, trustedPublicKeys [
 
 		if err := authorizer.Authorize(); err == nil {
 			authorized = true
+			verifyingKey = pubKey
 			break
 		} else {
 			lastErr = err
@@ -411,7 +418,7 @@ func VerifyBiscuit(biscuitData []byte, expectedPeer peer.ID, trustedPublicKeys [
 	}
 
 	if !authorized {
-		return nil, fmt.Errorf("no valid key found for verification: %v", lastErr)
+		return nil, nil, fmt.Errorf("no valid key found for verification: %v", lastErr)
 	}
 
 	// Enforce hardware binding
@@ -420,10 +427,10 @@ func VerifyBiscuit(biscuitData []byte, expectedPeer peer.ID, trustedPublicKeys [
 		IDs:  []biscuit.Term{biscuit.String(expectedPeer.String())},
 	}}
 	if _, err := b.GetBlockID(boundFact); err != nil {
-		return nil, fmt.Errorf("token is not bound to peer %s: %w", expectedPeer, err)
+		return nil, nil, fmt.Errorf("token is not bound to peer %s: %w", expectedPeer, err)
 	}
 
-	return b, nil
+	return b, verifyingKey, nil
 }
 
 func translateClaimsToFacts(addFact func(biscuit.Fact) error, claims map[string]any) error {

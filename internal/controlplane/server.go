@@ -657,7 +657,7 @@ func (s *Server) HandleRouterLease(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Verify Biscuit and enforce expected remote peer id
-	b, err := identity.VerifyBiscuit(req.Biscuit, pID, cpPubKeys, s.config.BiscuitTimeout)
+	b, verifyingKey, err := identity.VerifyBiscuitAndGetKey(req.Biscuit, pID, cpPubKeys, s.config.BiscuitTimeout)
 	if err != nil {
 		logger.Warnf("Router %s failed biscuit verification: %v", req.PeerId, err)
 		http.Error(w, "Biscuit verification failed: "+err.Error(), http.StatusUnauthorized)
@@ -665,7 +665,7 @@ func (s *Server) HandleRouterLease(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Enforce role("router") or role("bootstrap") inside the biscuit
-	authorizer, err := b.Authorizer(cpPubKeys[0]) // First public key is generally the current one, but biscuit-go handles matches internally
+	authorizer, err := b.Authorizer(verifyingKey)
 	if err != nil {
 		http.Error(w, "Internal authorizer error", http.StatusInternalServerError)
 		return
@@ -681,7 +681,7 @@ func (s *Server) HandleRouterLease(w http.ResponseWriter, r *http.Request) {
 	authorizer.AddPolicy(api.AllowIfTruePolicy)
 
 	if err := authorizer.Authorize(); err != nil {
-		logger.Warnf("Router %s lacks router role in its biscuit: %v", req.PeerId, err)
+		logger.Warnf("Router %s lacks router role in its biscuit: %v\nWorld state:\n%s", req.PeerId, err, authorizer.PrintWorld())
 		http.Error(w, "Unauthorized: entity is not a router", http.StatusForbidden)
 		return
 	}
