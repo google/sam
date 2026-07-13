@@ -80,30 +80,44 @@ func main() {
 	}
 
 	// 3. TCP Forwarding
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	listener4, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		log.Fatalf("Failed to bind random TCP port: %v", err)
 	}
-	defer func() { _ = listener.Close() }()
-	assignedProxyPort := listener.Addr().(*net.TCPAddr).Port
-	log.Printf("Blind UDS-forwarder listening on random port 127.0.0.1:%d", assignedProxyPort)
+	defer func() { _ = listener4.Close() }()
+	assignedProxyPort := listener4.Addr().(*net.TCPAddr).Port
+	log.Printf("Blind UDS-forwarder listening on 127.0.0.1:%d", assignedProxyPort)
 
-	go func() {
+	var listener6 net.Listener
+	if l6, err := net.Listen("tcp", fmt.Sprintf("[::1]:%d", assignedProxyPort)); err == nil {
+		listener6 = l6
+		defer func() { _ = listener6.Close() }()
+		log.Printf("Blind UDS-forwarder listening on [::1]:%d", assignedProxyPort)
+	} else {
+		log.Printf("Warning: failed to bind TCP port on IPv6 loopback: %v. Running IPv4-only forwarder.", err)
+	}
+
+	serveListener := func(l net.Listener) {
 		for {
-			conn, err := listener.Accept()
+			conn, err := l.Accept()
 			if err != nil {
 				select {
 				case <-ctx.Done():
 					return
 				default:
-					log.Printf("TCP Accept error: %v", err)
+					log.Printf("TCP Accept error on %s: %v", l.Addr(), err)
 					time.Sleep(50 * time.Millisecond)
 					continue
 				}
 			}
 			go handleConnection(conn, udsPath)
 		}
-	}()
+	}
+
+	go serveListener(listener4)
+	if listener6 != nil {
+		go serveListener(listener6)
+	}
 
 	// 4. Execution of the target process
 	cmd := exec.CommandContext(ctx, cmdName, cmdArgs...)
