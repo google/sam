@@ -162,3 +162,37 @@ func TestNewSamNode_Validation(t *testing.T) {
 		}
 	})
 }
+
+func TestNewSamNode_DHTOptions(t *testing.T) {
+	priv, _, _ := crypto.GenerateKeyPair(crypto.Ed25519, -1)
+	store, _ := NewStore(t.TempDir())
+	defer func() { _ = store.Close() }()
+
+	opts := Options{
+		PrivKey:              priv,
+		Store:                store,
+		ListenAddrs:          []string{"/ip4/127.0.0.1/tcp/0"},
+		DHTProviderAddrTTL:   10 * time.Second,
+		DHTMaxRecordAge:      15 * time.Second,
+		DHTLookupLimit:       50,
+		DiscoveryConcurrency: 5,
+	}
+
+	node, err := NewSamNode(opts)
+	if err != nil {
+		t.Fatalf("failed to create node with DHT options: %v", err)
+	}
+
+	if node.config.DHTProviderAddrTTL != 10*time.Second {
+		t.Errorf("expected DHTProviderAddrTTL to be 10s, got %v", node.config.DHTProviderAddrTTL)
+	}
+	if node.config.DHTMaxRecordAge != 15*time.Second {
+		t.Errorf("expected DHTMaxRecordAge to be 15s, got %v", node.config.DHTMaxRecordAge)
+	}
+	if node.config.DHTLookupLimit != 50 {
+		t.Errorf("expected DHTLookupLimit to be 50, got %d", node.config.DHTLookupLimit)
+	}
+	if node.config.DiscoveryConcurrency != 5 {
+		t.Errorf("expected DiscoveryConcurrency to be 5, got %d", node.config.DiscoveryConcurrency)
+	}
+}

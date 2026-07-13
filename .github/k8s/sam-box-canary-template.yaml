@@ -1,0 +1,90 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sam-canary-box-config-${ENV_NAME}
+  namespace: sam-canary-${ENV_NAME}
+data:
+  sam-node.yaml: |
+    version: "v1alpha1"
+    attenuation:
+      policies: []
+      checks: []
+      rules: []
+    services: []
+  secrets.yaml: |
+    example.com:
+      kind: Bearer
+      value: real-upstream-secret-123
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: box-canary-${ENV_NAME}
+  namespace: sam-canary-${ENV_NAME}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: box-canary-${ENV_NAME}
+  template:
+    metadata:
+      labels:
+        app: box-canary-${ENV_NAME}
+    spec:
+      serviceAccountName: sam-node-sa
+      initContainers:
+      - name: init-nano-init
+        image: ghcr.io/google/sam-nano-init:${IMAGE_TAG}
+        command: ["cp", "/nano-init", "/shared-bin/nano-init"]
+        volumeMounts:
+        - name: shared-bin
+          mountPath: /shared-bin
+      containers:
+      - name: agent
+        image: alpine/curl:8.12.1
+        command:
+          - "/shared-bin/nano-init"
+          - "/var/run/sam/sam-box.sock"
+          - "sh"
+          - "-c"
+          - "while true; do curl -v -H 'Authorization: Bearer dummy-token' http://example.com/test; sleep 10; done"
+        volumeMounts:
+        - name: shared-bin
+          mountPath: /shared-bin
+        - name: sam-uds
+          mountPath: /var/run/sam
+      - name: sam-box
+        image: ghcr.io/google/sam-box:${IMAGE_TAG}
+        args:
+          - "run"
+          - "--uds-path=/var/run/sam/sam-box.sock"
+          - "--config=/etc/sam/sam-node.yaml"
+          - "--secrets-file=/etc/sam/secrets.yaml"
+          - "--hub=http://sam-control-plane-${ENV_NAME}.${NAMESPACE}.svc.cluster.local:8080"
+          - "--jwt-path=/var/run/secrets/tokens/sam-token"
+          - "--api-token=secret-token"
+          - "--allow-loopback"
+          - "--log-level=debug"
+        volumeMounts:
+        - name: config-volume
+          mountPath: /etc/sam
+        - name: sam-token
+          mountPath: /var/run/secrets/tokens
+          readOnly: true
+        - name: sam-uds
+          mountPath: /var/run/sam
+      volumes:
+      - name: shared-bin
+        emptyDir: {}
+      - name: sam-uds
+        emptyDir: {}
+      - name: config-volume
+        configMap:
+          name: sam-canary-box-config-${ENV_NAME}
+      - name: sam-token
+        projected:
+          sources:
+          - serviceAccountToken:
+              path: sam-token
+              expirationSeconds: 3600
+              audience: "sam-hub-audience"

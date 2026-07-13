@@ -37,6 +37,7 @@ import (
 	golog "github.com/ipfs/go-log/v2"
 	"github.com/libp2p/go-libp2p"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
+	records "github.com/libp2p/go-libp2p-kad-dht/records"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/host"
@@ -205,7 +206,22 @@ func (r *Router) Start() error {
 	r.Host = hostNode
 
 	// Setup DHT
-	kadDHT, err := dht.New(r.ctx, hostNode, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/sam"))
+	dhtOpts := []dht.Option{
+		dht.Mode(dht.ModeServer),
+		dht.ProtocolPrefix("/sam"),
+	}
+	var pmOpts []records.Option
+	if r.config.DHTProviderAddrTTL > 0 {
+		pmOpts = append(pmOpts, records.ProviderAddrTTL(r.config.DHTProviderAddrTTL))
+		pmOpts = append(pmOpts, records.ProvideValidity(r.config.DHTProviderAddrTTL))
+	}
+	if len(pmOpts) > 0 {
+		dhtOpts = append(dhtOpts, dht.ProviderManagerOpts(pmOpts...))
+	}
+	if r.config.DHTMaxRecordAge > 0 {
+		dhtOpts = append(dhtOpts, dht.MaxRecordAge(r.config.DHTMaxRecordAge))
+	}
+	kadDHT, err := dht.New(r.ctx, hostNode, dhtOpts...)
 	if err != nil {
 		_ = hostNode.Close()
 		return err

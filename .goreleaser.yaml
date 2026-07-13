@@ -57,6 +57,34 @@ builds:
       - arm64
     ldflags:
       - -s -w
+  - id: sam-box
+    main: ./cmd/sam-box
+    binary: sam-box
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - windows
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+  - id: nano-init
+    main: ./cmd/nano-init
+    binary: nano-init
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - windows
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
 archives:
   - format: tar.gz
     name_template: >-

@@ -103,6 +103,50 @@ jobs:
         tags: ${{ steps.meta-node.outputs.tags }}
         labels: ${{ steps.meta-node.outputs.labels }}
 
+    - name: Extract metadata for nano-init
+      id: meta-nano-init
+      uses: docker/metadata-action@v6
+      with:
+        images: ${{ env.REGISTRY }}/google/sam-nano-init
+        tags: |
+          type=ref,event=branch
+          type=ref,event=tag
+          type=raw,value=${{ github.sha }}
+          type=raw,value=latest,enable={{is_default_branch}}
+          type=raw,value=stable,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+
+    - name: Build and push nano-init image
+      uses: docker/build-push-action@v7
+      with:
+        context: .
+        file: Dockerfile.nano-init
+        platforms: ${{ github.ref_type == 'tag' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
+        push: true
+        tags: ${{ steps.meta-nano-init.outputs.tags }}
+        labels: ${{ steps.meta-nano-init.outputs.labels }}
+
+    - name: Extract metadata for sam-box
+      id: meta-sambox
+      uses: docker/metadata-action@v6
+      with:
+        images: ${{ env.REGISTRY }}/google/sam-box
+        tags: |
+          type=ref,event=branch
+          type=ref,event=tag
+          type=raw,value=${{ github.sha }}
+          type=raw,value=latest,enable={{is_default_branch}}
+          type=raw,value=stable,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+
+    - name: Build and push sam-box image
+      uses: docker/build-push-action@v7
+      with:
+        context: .
+        file: Dockerfile.sam-box
+        platforms: ${{ github.ref_type == 'tag' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
+        push: true
+        tags: ${{ steps.meta-sambox.outputs.tags }}
+        labels: ${{ steps.meta-sambox.outputs.labels }}
+
   deploy:
     name: Deploy to GKE
     runs-on: ubuntu-latest
@@ -432,10 +476,17 @@ jobs:
           envsubst < .github/k8s/sam-node-vllm-template.yaml | kubectl apply -f -
           envsubst < .github/k8s/sam-node-everything-template.yaml | kubectl apply -f -
           envsubst < .github/k8s/sam-node-cop-template.yaml | kubectl apply -f -
+          envsubst < .github/k8s/sam-box-canary-template.yaml | kubectl apply -f -
 
           kubectl rollout status deployment/cop-canary-${ENV_NAME} -n ${CANARY_NAMESPACE} --timeout=120s || {
             echo "Cop Canary Deployment failed!"
             print_rollout_diagnostics "${CANARY_NAMESPACE}" "cop-canary-${ENV_NAME}" "app=cop-canary-${ENV_NAME}"
+            exit 1
+          }
+
+          kubectl rollout status deployment/box-canary-${ENV_NAME} -n ${CANARY_NAMESPACE} --timeout=120s || {
+            echo "sam-box Canary Deployment failed!"
+            print_rollout_diagnostics "${CANARY_NAMESPACE}" "box-canary-${ENV_NAME}" "app=box-canary-${ENV_NAME}"
             exit 1
           }
 

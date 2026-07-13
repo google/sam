@@ -37,6 +37,8 @@ var (
 	keysPath           string
 	allowLoopback      bool
 	logLevel           string
+	dhtProviderAddrTTL time.Duration
+	dhtMaxRecordAge    time.Duration
 )
 
 var logger = golog.Logger("sam-router-cli")
@@ -70,6 +72,8 @@ func main() {
 				JWTPath:            jwtPath,
 				KeysDBPath:         keysPath,
 				AllowLoopback:      allowLoopback,
+				DHTProviderAddrTTL: dhtProviderAddrTTL,
+				DHTMaxRecordAge:    dhtMaxRecordAge,
 			}
 
 			r, err := router.NewRouter(cmd.Context(), opts)
@@ -102,6 +106,8 @@ func main() {
 	rootCmd.Flags().StringVar(&keysPath, "keys-path", "router.key", "Path to save/load persistent private key")
 	rootCmd.Flags().BoolVar(&allowLoopback, "allow-loopback", false, "Allow loopback and link-local addresses for discovery")
 	rootCmd.Flags().StringVar(&logLevel, "log-level", "info", "Log level (debug, info, warn, error)")
+	rootCmd.Flags().DurationVar(&dhtProviderAddrTTL, "dht-provider-addr-ttl", 0, "Time-To-Live for DHT provider addresses (0s uses library default)")
+	rootCmd.Flags().DurationVar(&dhtMaxRecordAge, "dht-max-record-age", 0, "Maximum age for DHT records (0s uses library default)")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

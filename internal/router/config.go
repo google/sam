@@ -35,6 +35,8 @@ type Options struct {
 	AllowLoopback      bool
 	BiscuitTimeout     time.Duration
 	LogVerbose         bool
+	DHTProviderAddrTTL time.Duration
+	DHTMaxRecordAge    time.Duration
 }
 
 // Default sets default values for options.

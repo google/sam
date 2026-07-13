@@ -45,6 +45,7 @@ import (
 	"github.com/libp2p/go-libp2p"
 	gostream "github.com/libp2p/go-libp2p-gostream"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
+	records "github.com/libp2p/go-libp2p-kad-dht/records"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/discovery"
@@ -395,7 +396,22 @@ func (n *SamNode) Start(ctx context.Context) error {
 	}
 
 	// Initialize Rendezvous (DHT Client)
-	kdht, err := dht.New(ctx, h, dht.Mode(dht.ModeAuto), dht.ProtocolPrefix("/sam"))
+	dhtOpts := []dht.Option{
+		dht.Mode(dht.ModeAuto),
+		dht.ProtocolPrefix("/sam"),
+	}
+	var pmOpts []records.Option
+	if n.config.DHTProviderAddrTTL > 0 {
+		pmOpts = append(pmOpts, records.ProviderAddrTTL(n.config.DHTProviderAddrTTL))
+		pmOpts = append(pmOpts, records.ProvideValidity(n.config.DHTProviderAddrTTL))
+	}
+	if len(pmOpts) > 0 {
+		dhtOpts = append(dhtOpts, dht.ProviderManagerOpts(pmOpts...))
+	}
+	if n.config.DHTMaxRecordAge > 0 {
+		dhtOpts = append(dhtOpts, dht.MaxRecordAge(n.config.DHTMaxRecordAge))
+	}
+	kdht, err := dht.New(ctx, h, dhtOpts...)
 	if err != nil {
 		return err
 	}
@@ -1443,7 +1459,11 @@ func (n *SamNode) findProvidersByCID(ctx context.Context, c cid.Cid) ([]peer.Add
 	// DHT walk converges from different paths; dedupe so downstream
 	// fan-out (e.g. discoverServicesByType) doesn't double-fetch.
 	providersMap := make(map[peer.ID]peer.AddrInfo)
-	for p := range n.DHT.FindProvidersAsync(lookupCtx, c, 20) {
+	limit := n.config.DHTLookupLimit
+	if limit <= 0 {
+		limit = 20
+	}
+	for p := range n.DHT.FindProvidersAsync(lookupCtx, c, limit) {
 		providersMap[p.ID] = p
 	}
 	providers := make([]peer.AddrInfo, 0, len(providersMap))
@@ -1549,6 +1569,11 @@ func (n *SamNode) DiscoverRemoteServicesStream(ctx context.Context, serviceType 
 		fanoutCtx, cancel := context.WithTimeout(ctx, discoveryFanoutTimeout)
 		defer cancel()
 
+		concurrency := n.config.DiscoveryConcurrency
+		if concurrency <= 0 {
+			concurrency = 10
+		}
+		sem := make(chan struct{}, concurrency)
 		var wg sync.WaitGroup
 		for _, p := range peers {
 			if p.ID == n.Host.ID() {
@@ -1557,6 +1582,12 @@ func (n *SamNode) DiscoverRemoteServicesStream(ctx context.Context, serviceType 
 			wg.Add(1)
 			go func(peerID peer.ID) {
 				defer wg.Done()
+				select {
+				case sem <- struct{}{}:
+					defer func() { <-sem }()
+				case <-fanoutCtx.Done():
+					return
+				}
 				services, err := n.fetchRemoteServiceCatalog(fanoutCtx, peerID, typeStr)
 				if err != nil {
 					logger.Warnf("[Discovery] catalog fetch from %s failed: %v", peerID, err)
@@ -1620,6 +1651,11 @@ func (n *SamNode) discoverServicesByType(ctx context.Context, serviceType api.Se
 		services []*api.ServiceInfo
 	}
 	results := make(chan peerCatalog, len(peers))
+	concurrency := n.config.DiscoveryConcurrency
+	if concurrency <= 0 {
+		concurrency = 10
+	}
+	sem := make(chan struct{}, concurrency)
 	var wg sync.WaitGroup
 	for _, p := range peers {
 		if p.ID == n.Host.ID() {
@@ -1628,6 +1664,12 @@ func (n *SamNode) discoverServicesByType(ctx context.Context, serviceType api.Se
 		wg.Add(1)
 		go func(peerID peer.ID) {
 			defer wg.Done()
+			select {
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
+			case <-fanoutCtx.Done():
+				return
+			}
 			services, err := n.fetchRemoteServiceCatalog(fanoutCtx, peerID, typeStr)
 			if err != nil {
 				logger.Warnf("[Discovery] catalog fetch from %s failed: %v", peerID, err)

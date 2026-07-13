@@ -50,6 +50,11 @@ type Options struct {
 	AutoRelayBackoff     time.Duration
 	// HubConnectTimeout bounds each hub address's dial (connect + stream open).
 	HubConnectTimeout time.Duration
+	// DHT Options
+	DHTProviderAddrTTL   time.Duration
+	DHTMaxRecordAge      time.Duration
+	DHTLookupLimit       int
+	DiscoveryConcurrency int
 }
 
 // Default applies default values to Options if they are not specified.
@@ -77,6 +82,12 @@ func (o *Options) Default() {
 	}
 	if o.HubConnectTimeout == 0 {
 		o.HubConnectTimeout = DefaultHubConnectTimeout
+	}
+	if o.DHTLookupLimit <= 0 {
+		o.DHTLookupLimit = 20
+	}
+	if o.DiscoveryConcurrency <= 0 {
+		o.DiscoveryConcurrency = 10
 	}
 	if len(o.ListenAddrs) == 0 {
 		o.ListenAddrs = []string{"/ip4/0.0.0.0/udp/5001/quic-v1", "/ip4/0.0.0.0/tcp/5002"}

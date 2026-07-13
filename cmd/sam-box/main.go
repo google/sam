@@ -15,7 +15,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"crypto/ed25519"
 	"encoding/hex"
@@ -29,10 +28,12 @@ import (
 
 	"github.com/google/sam/api"
 	"github.com/google/sam/internal/node"
+	"github.com/google/sam/internal/sambox"
 	golog "github.com/ipfs/go-log/v2"
 	"github.com/multiformats/go-multiaddr"
 	madns "github.com/multiformats/go-multiaddr-dns"
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v2"
 )
 
 func init() {
@@ -57,7 +58,6 @@ var (
 	clientIDFlag             string
 	clientSecretFlag         string
 	hubPublicKeyFlag         string
-	bindAddrFlag             string
 	meshFlag                 string
 	discoveryIntervalFlag    string
 	listenAddrs              []string
@@ -78,36 +78,26 @@ var (
 	autoRelayBootDelayFlag   time.Duration
 	autoRelayBackoffFlag     time.Duration
 	hubConnectTimeoutFlag    time.Duration
-	apiTokenFlag             string
-	tlsCertFlag              string
-	tlsKeyFlag               string
-	tlsCAFlag                string
-	dhtProviderAddrTTLFlag   time.Duration
-	dhtMaxRecordAgeFlag      time.Duration
-	dhtLookupLimitFlag       int
-	discoveryConcurrencyFlag int
+
+	// sam-box specific flags
+	udsPathFlag         string
+	secretsFileFlag     string
+	interceptorsDirFlag string
 )
 
-var logger = golog.Logger("sam-node-cli")
+var logger = golog.Logger("sam-box-cli")
 
 func main() {
 	rootCmd := &cobra.Command{
-		Use:   "sam-node",
-		Short: "Sovereign Agent Mesh Node",
+		Use:   "sam-box",
+		Short: "Sovereign Agent Mesh Secure Gateway Node",
 	}
 
-	// RUN COMMAND: Start the Mesh
 	runCmd := &cobra.Command{
 		Use:   "run",
-		Short: "Start the sovereign mesh node",
+		Short: "Start the secure gateway node",
 		Run: func(cmd *cobra.Command, args []string) {
 			ctx := cmd.Context()
-			// Configure logging to duplicate to ring buffer
-			cfg := golog.GetConfig()
-			cfg.URL = "ringbuffer://"
-			golog.SetupLogging(cfg)
-
-			// Initialize logging
 			golog.SetAllLoggers(golog.LevelInfo)
 			if logLevelFlag != "" {
 				lvl, err := golog.LevelFromString(logLevelFlag)
@@ -120,11 +110,14 @@ func main() {
 			_ = golog.SetLogLevel("dht", "fatal")
 			_ = golog.SetLogLevel("dht/RtRefreshManager", "fatal")
 
+			if udsPathFlag == "" {
+				logger.Fatal("missing required flag: --uds-path")
+			}
+
 			store, err := node.NewStore(resolveDataDir())
 			if err != nil {
 				logger.Fatalf("Failed to open store: %v", err)
 			}
-
 			nodeConfig, err := node.LoadNodeConfig(configFile)
 			if err != nil {
 				logger.Fatalf("Failed to load node config: %v", err)
@@ -138,7 +131,7 @@ func main() {
 			var hubPubKey ed25519.PublicKey
 			var hubAddrs []multiaddr.Multiaddr
 
-			storedPubKey, syncedAddrs, err := node.SyncHubConfig(context.Background(), store)
+			storedPubKey, syncedAddrs, err := node.SyncHubConfig(ctx, store)
 			if err != nil {
 				logger.Warnf("Failed to sync hub config: %v", err)
 			}
@@ -156,7 +149,6 @@ func main() {
 			}
 
 			var meshNode *node.SamNode
-
 			var jwtStr string
 
 			if jwtFlag != "" {
@@ -170,12 +162,12 @@ func main() {
 			} else if oidcIssuerFlag != "" {
 				logger.Info("Discovering OIDC endpoints...")
 				dummyNode := &node.SamNode{}
-				tokenURL, err := dummyNode.DiscoverTokenURL(context.Background(), oidcIssuerFlag)
+				tokenURL, err := dummyNode.DiscoverTokenURL(ctx, oidcIssuerFlag)
 				if err != nil {
 					logger.Fatalf("Failed to discover OIDC endpoints: %v", err)
 				}
 				logger.Info("Fetching JWT via OIDC Client Credentials...")
-				jwtStr, err = dummyNode.FetchJWT(context.Background(), tokenURL, clientIDFlag, clientSecretFlag)
+				jwtStr, err = dummyNode.FetchJWT(ctx, tokenURL, clientIDFlag, clientSecretFlag)
 				if err != nil {
 					logger.Fatalf("Failed to fetch JWT: %v", err)
 				}
@@ -193,7 +185,7 @@ func main() {
 						}
 					}
 					logger.Infof("No identity found. Starting unauthenticated sidecar for enrollment over MCP...")
-					unauthSrv, err := node.StartUnauthSidecarServer(displayHub, bindAddrFlag, tlsCertFlag, tlsKeyFlag)
+					unauthSrv, err := node.StartUnauthSidecarServer(displayHub, "127.0.0.1:8080", "", "")
 					if err != nil {
 						logger.Fatalf("Failed to start unauthenticated sidecar: %v", err)
 					}
@@ -227,10 +219,6 @@ func main() {
 					AutoRelayBootDelay:   autoRelayBootDelayFlag,
 					AutoRelayBackoff:     autoRelayBackoffFlag,
 					HubConnectTimeout:    hubConnectTimeoutFlag,
-					DHTProviderAddrTTL:   dhtProviderAddrTTLFlag,
-					DHTMaxRecordAge:      dhtMaxRecordAgeFlag,
-					DHTLookupLimit:       dhtLookupLimitFlag,
-					DiscoveryConcurrency: discoveryConcurrencyFlag,
 				})
 				if err != nil {
 					logger.Fatalf("Failed to initialize mesh node: %v", err)
@@ -246,7 +234,6 @@ func main() {
 					if err == nil {
 						initHubAddrs = []multiaddr.Multiaddr{ma}
 					} else {
-						// Try parsing as host:port
 						host, port, err := net.SplitHostPort(hubAddr)
 						if err == nil {
 							ip := net.ParseIP(host)
@@ -262,17 +249,12 @@ func main() {
 							}
 							initHubAddrs = []multiaddr.Multiaddr{maddr}
 						} else {
-							if len(hubAddrs) > 0 {
-								initHubAddrs = hubAddrs
-							} else {
-								logger.Fatalf("Invalid hub address and no stored config: %v. You can use community maintained meshes like hub.sam-mesh.dev (Production) or bananas.sam-mesh.dev (Testnet)", err)
-							}
+							logger.Fatalf("Invalid hub address: %v", err)
 						}
 					}
 				}
 
 				priv := node.GetOrGenerateKey(store)
-				enrollCtx, enrollCancel := context.WithCancel(context.Background())
 				meshNode, err = node.NewSamNode(node.Options{
 					PrivKey:              priv,
 					HubAddrs:             initHubAddrs,
@@ -290,131 +272,93 @@ func main() {
 					AutoRelayBootDelay:   autoRelayBootDelayFlag,
 					AutoRelayBackoff:     autoRelayBackoffFlag,
 					HubConnectTimeout:    hubConnectTimeoutFlag,
-					DHTProviderAddrTTL:   dhtProviderAddrTTLFlag,
-					DHTMaxRecordAge:      dhtMaxRecordAgeFlag,
-					DHTLookupLimit:       dhtLookupLimitFlag,
-					DiscoveryConcurrency: discoveryConcurrencyFlag,
 				})
 				if err != nil {
-					enrollCancel()
 					logger.Fatalf("Failed to initialize node for enrollment: %v", err)
 				}
-				if err := meshNode.Start(enrollCtx); err != nil {
-					enrollCancel()
+				if err := meshNode.Start(ctx); err != nil {
 					logger.Fatalf("Failed to start node for enrollment: %v", err)
 				}
 
 				if bootstrapTokenFlag != "" {
-					err = meshNode.EnrollBootstrap(enrollCtx, hubAddr, bootstrapTokenFlag)
+					err = meshNode.EnrollBootstrap(ctx, hubAddr, bootstrapTokenFlag)
 				} else {
-					err = meshNode.Enroll(enrollCtx, hubAddr, jwtStr)
+					err = meshNode.Enroll(ctx, hubAddr, jwtStr)
 				}
 				if err != nil {
-					if teardownErr := meshNode.Teardown(); teardownErr != nil {
-						logger.Errorf("Teardown failed during enrollment error cleanup: %v", teardownErr)
-					}
-					enrollCancel()
 					logger.Fatalf("Enrollment failed: %v", err)
 				}
 				if err := store.SaveHubURL(hubAddr); err != nil {
 					logger.Warnf("Failed to save hub URL: %v", err)
 				}
+				logger.Infoln("Successfully enrolled with hub!")
 
-				if teardownErr := meshNode.Teardown(); teardownErr != nil {
-					logger.Errorf("Failed to teardown enrollment node: %v", teardownErr)
-				}
-				enrollCancel()
-
-				storedPubKey, newHubAddrs, err := node.SyncHubConfig(context.Background(), store)
-				if err != nil {
-					logger.Warnf("Failed to sync hub config post-enrollment: %v", err)
-				}
-				hubPubKey = storedPubKey
-
-				logger.Debugf("listenAddrs: %v, allowLoopback: %v", listenAddrs, allowLoopbackFlag)
-				meshNode, err = node.NewSamNode(node.Options{
-					PrivKey:              priv,
-					HubPubKey:            hubPubKey,
-					HubAddrs:             newHubAddrs,
-					Store:                store,
-					MeshID:               meshFlag,
-					DiscoveryInterval:    discoveryIntervalFlag,
-					ListenAddrs:          listenAddrs,
-					EnableRelay:          enableRelayFlag,
-					NodeConfig:           nodeConfig,
-					KeyGracePeriod:       keyGracePeriodFlag,
-					AllowLoopback:        allowLoopbackFlag,
-					MonitorBootstrap:     monitorBootstrapFlag,
-					MonitorInterval:      monitorCheckIntervalFlag,
-					AutoRelayMinInterval: autoRelayMinIntervalFlag,
-					AutoRelayBootDelay:   autoRelayBootDelayFlag,
-					AutoRelayBackoff:     autoRelayBackoffFlag,
-					HubConnectTimeout:    hubConnectTimeoutFlag,
-				})
-				if err != nil {
-					logger.Fatalf("Failed to initialize node after enrollment: %v", err)
-				}
-				if err := meshNode.Start(ctx); err != nil {
-					logger.Fatalf("Failed to start node after enrollment: %v", err)
+				if len(hubPubKey) == 0 {
+					if syncPubKey, _, err := node.SyncHubConfig(ctx, store); err != nil || len(syncPubKey) == 0 {
+						logger.Fatal("Hub public key not found in store after enrollment.")
+					}
 				}
 			}
 
-			// Register static services from config
-			if nodeConfig != nil && len(nodeConfig.Services) > 0 {
-				if err := meshNode.RegisterStaticServices(context.Background(), nodeConfig.Services); err != nil {
-					logger.Fatalf("Failed to register static services: %v", err)
+			// Load secrets config if provided
+			secretStore := make(map[string]sambox.SecretConfig)
+			if secretsFileFlag != "" {
+				s, err := loadSecrets(secretsFileFlag)
+				if err != nil {
+					logger.Fatalf("Failed to load secrets config: %v", err)
 				}
+				secretStore = s
+				logger.Infof("Loaded %d secrets from %s", len(secretStore), secretsFileFlag)
 			}
 
-			// Start renewal loop
-			meshNode.StartRenewalLoop(ctx, oidcIssuerFlag, clientIDFlag, clientSecretFlag, jwtPathFlag)
-
-			meshNode.Host.SetStreamHandler(api.AuthProtocolID, meshNode.HandleAuthHandshake)
-
-			// Start Sidecar API Server (multiplexed with MCP)
-			sidecarSrv, err := node.StartSidecarServer(meshNode, bindAddrFlag, apiTokenFlag, tlsCertFlag, tlsKeyFlag, tlsCAFlag)
+			// Listen on UDS for Secure Outbound Gateway
+			if err := os.Remove(udsPathFlag); err != nil && !os.IsNotExist(err) {
+				logger.Fatalf("Failed to remove existing UDS file: %v", err)
+			}
+			listener, err := net.Listen("unix", udsPathFlag)
 			if err != nil {
-				logger.Fatalf("Failed to start sidecar server: %v", err)
+				logger.Fatalf("Failed to listen on UDS socket: %v", err)
+			}
+			if err := os.Chmod(udsPathFlag, 0600); err != nil {
+				logger.Fatalf("Failed to set permissions on UDS socket: %v", err)
 			}
 			defer func() {
-				_ = sidecarSrv.Close()
+				_ = listener.Close()
+				_ = os.Remove(udsPathFlag)
 			}()
 
-			fmt.Printf("SAM Node Online.\nPeerID: %s\nListening on: %v\n", meshNode.Host.ID(), meshNode.Host.Addrs())
+			logger.Infof("Secure Gateway listening on UDS %s", udsPathFlag)
+			gateway, err := sambox.NewGateway(secretStore, nil, interceptorsDirFlag)
+			if err != nil {
+				logger.Fatalf("Failed to initialize gateway: %v", err)
+			}
 
-			// Block forever
-			<-ctx.Done()
-			fmt.Println("Shutting down...")
+			serverErrChan := make(chan error, 1)
+			go func() {
+				if err := gateway.Serve(listener); err != nil {
+					serverErrChan <- err
+				}
+			}()
+
+			select {
+			case <-ctx.Done():
+				logger.Info("Shutting down Secure Outbound Gateway...")
+				_ = listener.Close()
+			case err := <-serverErrChan:
+				logger.Fatalf("Secure Outbound Gateway server error: %v", err)
+			}
 		},
 	}
 
 	joinCmd := &cobra.Command{
-		Use:   "join [hub_url]",
-		Short: "Join the Sovereign Agent Mesh hub",
-		Args:  cobra.MaximumNArgs(1),
+		Use:   "join",
+		Short: "Join the mesh interactively",
 		Run: func(cmd *cobra.Command, args []string) {
 			ctx := cmd.Context()
-			targetHub := ""
-			if len(args) > 0 {
-				targetHub = args[0]
-			}
-
+			targetHub := hubAddr
 			if targetHub == "" {
-				fmt.Print("No hub URL provided. Do you want to join the default community testing network (https://bananas.sam-mesh.dev)? [y/N]: ")
-				reader := bufio.NewReader(os.Stdin)
-				response, err := reader.ReadString('\n')
-				if err != nil {
-					fmt.Println("\nAborting: failed to read input.")
-					return
-				}
-				response = strings.ToLower(strings.TrimSpace(response))
-				if response != "y" && response != "yes" {
-					fmt.Println("Aborting join operation.")
-					return
-				}
 				targetHub = "https://bananas.sam-mesh.dev"
 			}
-
 			if !strings.HasPrefix(targetHub, "http://") && !strings.HasPrefix(targetHub, "https://") {
 				targetHub = "https://" + targetHub
 			}
@@ -424,7 +368,6 @@ func main() {
 			if err != nil {
 				logger.Fatalf("Failed to open store: %v", err)
 			}
-
 			nodeConfig, err := node.LoadNodeConfig(configFile)
 			if err != nil {
 				logger.Fatalf("Failed to load node config: %v", err)
@@ -436,7 +379,6 @@ func main() {
 			}()
 
 			dummyNode := &node.SamNode{Store: store}
-
 			fmt.Printf("Discovering hub info from %s...\n", targetHub)
 			hubInfo, err := node.FetchHubInfo(ctx, targetHub)
 			if err != nil {
@@ -460,10 +402,7 @@ func main() {
 				}
 			}
 
-			// Override global hubAddr with targetHub for enrollment
 			hubAddr = targetHub
-
-			// Connect to Hub and Enroll
 			var initHubAddrs []multiaddr.Multiaddr
 			if !strings.HasPrefix(hubAddr, "http://") && !strings.HasPrefix(hubAddr, "https://") {
 				ma, err := multiaddr.NewMultiaddr(hubAddr)
@@ -537,7 +476,7 @@ func main() {
 		},
 	}
 
-	// Configure Flags
+	// Register flags
 	runCmd.Flags().StringSliceVar(&listenAddrs, "listen", []string{"/ip4/0.0.0.0/udp/5001/quic-v1", "/ip4/0.0.0.0/tcp/5002"}, "libp2p Listen Addrs")
 	runCmd.Flags().StringVar(&jwtFlag, "jwt", "", "Pre-fetched JWT token")
 	runCmd.Flags().StringVar(&jwtPathFlag, "jwt-path", "", "Path to file containing JWT token")
@@ -545,7 +484,6 @@ func main() {
 	runCmd.Flags().StringVar(&clientIDFlag, "client-id", "", "OIDC Client ID for M2M")
 	runCmd.Flags().StringVar(&clientSecretFlag, "client-secret", "", "OIDC Client Secret for M2M")
 	runCmd.Flags().StringVar(&hubPublicKeyFlag, "hub-public-key", "", "Hub Public Key (32-byte Hex)")
-	runCmd.Flags().StringVar(&bindAddrFlag, "bind-addr", "127.0.0.1:8080", "Local TCP address for the HTTP server (MCP and Sidecar API)")
 	runCmd.Flags().StringVar(&meshFlag, "mesh", node.DefaultMeshName, "Mesh federation name")
 	runCmd.Flags().StringVar(&discoveryIntervalFlag, "discovery-interval", node.DefaultDiscoveryInterval, "Polling interval for DHT discovery")
 	runCmd.Flags().DurationVar(&monitorBootstrapFlag, "monitor-bootstrap", 2*time.Minute, "Initial wait before monitoring hub connection")
@@ -558,18 +496,17 @@ func main() {
 	runCmd.Flags().StringVar(&logLevelFlag, "log-level", "info", "Log level (debug, info, warn, error)")
 	runCmd.Flags().DurationVar(&keyGracePeriodFlag, "key-grace-period", 24*time.Hour, "Key grace period for old keys (e.g. 24h)")
 	runCmd.Flags().BoolVar(&allowLoopbackFlag, "allow-loopback", false, "Allow publishing and connecting to loopback/link-local addresses")
+
+	// sam-box specific flags
+	runCmd.Flags().StringVarP(&udsPathFlag, "uds-path", "u", "", "Path to the Unix Domain Socket to listen on")
+	runCmd.Flags().StringVarP(&secretsFileFlag, "secrets-file", "s", "", "Path to the YAML file containing secrets configuration")
+	runCmd.Flags().StringVar(&interceptorsDirFlag, "interceptors-dir", "", "Path to the directory containing precompiled libinterceptor.so binaries")
+
 	joinCmd.Flags().BoolVar(&allowLoopbackFlag, "allow-loopback", false, "Allow publishing and connecting to loopback/link-local addresses")
 	joinCmd.Flags().DurationVar(&hubConnectTimeoutFlag, "hub-connect-timeout", node.DefaultHubConnectTimeout, "Timeout for dialing each hub address")
 	joinCmd.Flags().BoolVar(&offlineAccessFlag, "offline-access", false, "Request OIDC offline access/refresh token for automatic renewal")
 	joinCmd.Flags().StringVar(&bootstrapTokenFlag, "bootstrap-token", "", "Pre-shared bootstrap token for enrollment")
-	runCmd.Flags().StringVar(&apiTokenFlag, "api-token", "", "Static Bearer token for API authorization")
-	runCmd.Flags().StringVar(&tlsCertFlag, "tls-cert", "", "Path to TLS certificate for sidecar API")
-	runCmd.Flags().StringVar(&tlsKeyFlag, "tls-key", "", "Path to TLS key for sidecar API")
-	runCmd.Flags().StringVar(&tlsCAFlag, "tls-ca", "", "Path to TLS CA for sidecar API mTLS")
-	runCmd.Flags().DurationVar(&dhtProviderAddrTTLFlag, "dht-provider-addr-ttl", 0, "Time-To-Live for DHT provider addresses (0s uses library default)")
-	runCmd.Flags().DurationVar(&dhtMaxRecordAgeFlag, "dht-max-record-age", 0, "Maximum age for DHT records (0s uses library default)")
-	runCmd.Flags().IntVar(&dhtLookupLimitFlag, "dht-lookup-limit", 0, "Maximum number of providers to query from the DHT (0 uses default 20)")
-	runCmd.Flags().IntVar(&discoveryConcurrencyFlag, "discovery-concurrency", 0, "Max concurrent catalog fetches during discovery (0 uses default 10)")
+
 	rootCmd.PersistentFlags().StringVar(&hubAddr, "hub", "", "Hub URL")
 	rootCmd.PersistentFlags().StringVar(&configFile, "config", node.DefaultConfigFile, "Path to sam-node.yaml configuration file")
 	rootCmd.PersistentFlags().StringVar(&oidcIssuerFlag, "oidc-issuer", "", "OIDC Issuer URL")
@@ -598,7 +535,6 @@ func main() {
 	}
 }
 
-// resolveDataDir honors --data-dir / $SAM_DATA_DIR if set, else falls back to GetDefaultDataDir().
 func resolveDataDir() string {
 	var dir string
 	if dataDirFlag != "" {
@@ -614,4 +550,16 @@ func resolveDataDir() string {
 		logger.Fatalf("Failed to create data directory: %v", err)
 	}
 	return dir
+}
+
+func loadSecrets(path string) (map[string]sambox.SecretConfig, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var store map[string]sambox.SecretConfig
+	if err := yaml.Unmarshal(data, &store); err != nil {
+		return nil, err
+	}
+	return store, nil
 }

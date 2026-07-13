@@ -20,11 +20,18 @@ ANDROID_CC_ARM64=$(ANDROID_NDK_TOOLCHAIN)/aarch64-linux-android30-clang
 ANDROID_CC_X86_64=$(ANDROID_NDK_TOOLCHAIN)/x86_64-linux-android30-clang
 
 
-build:
+$(OUT_DIR)/libinterceptor.so: cmd/nano-init/interceptor/interceptor.c
+	mkdir -p "$(OUT_DIR)"
+	gcc -shared -fPIC -ldl -o "$(OUT_DIR)/libinterceptor.so" cmd/nano-init/interceptor/interceptor.c
+
+build: $(OUT_DIR)/libinterceptor.so
 	go build -v -o "$(OUT_DIR)/sam-node" ./cmd/sam-node
 	go build -v -o "$(OUT_DIR)/sam-control-plane" ./cmd/sam-control-plane
 	go build -v -o "$(OUT_DIR)/sam-router" ./cmd/sam-router
 	go build -v -o "$(OUT_DIR)/mcp-client" ./cmd/mcp-client
+	go build -v -o "$(OUT_DIR)/nano-init" ./cmd/nano-init
+	go build -v -o "$(OUT_DIR)/sam-box" ./cmd/sam-box
+
 
 .PHONY: mobile-ffi-host mobile-ffi-android mobile-ffi-android-x86_64 mobile-ffi-ios mobile-ffi mobile-app-apk mobile-app-apk-emulator
 mobile-ffi-host:
@@ -169,6 +176,12 @@ docker-build-mock-oidc:
 docker-build-e2e-runtime:
 	docker build --load -t sam-e2e-runtime:local -f tests/e2e/docker/Dockerfile.sam-runtime .
 
-docker-build: docker-build-control-plane docker-build-router docker-build-node docker-build-mock-oidc docker-build-e2e-runtime
+docker-build-nano-init:
+	docker build --load -t sam-nano-init:local -f Dockerfile.nano-init .
 
-.PHONY: docker-build-control-plane docker-build-router docker-build-node docker-build-mock-oidc docker-build-e2e-runtime docker-build
+docker-build-sam-box:
+	docker build --load -t sam-box:local -f Dockerfile.sam-box .
+
+docker-build: docker-build-control-plane docker-build-router docker-build-node docker-build-mock-oidc docker-build-e2e-runtime docker-build-nano-init docker-build-sam-box
+
+.PHONY: docker-build-control-plane docker-build-router docker-build-node docker-build-mock-oidc docker-build-e2e-runtime docker-build-nano-init docker-build-sam-box docker-build
