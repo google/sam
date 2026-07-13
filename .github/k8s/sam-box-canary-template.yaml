@@ -16,6 +16,12 @@ data:
       kind: Bearer
       value: real-upstream-secret-123
 ---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: sam-box-sa
+  namespace: sam-canary-${ENV_NAME}
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -31,7 +37,7 @@ spec:
       labels:
         app: box-canary-${ENV_NAME}
     spec:
-      serviceAccountName: sam-node-sa
+      serviceAccountName: sam-box-sa
       initContainers:
       - name: init-nano-init
         image: ghcr.io/google/sam-nano-init:${IMAGE_TAG}

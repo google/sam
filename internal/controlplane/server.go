@@ -344,26 +344,23 @@ func (s *Server) HandleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.RequestedRole == "" {
+		http.Error(w, "requested_role must be specified", http.StatusBadRequest)
+		return
+	}
+
 	// Mint token
 	biscuitExpiry := time.Now().Add(api.BiscuitTokenTTL)
-	biscuitData, resolvedRoles, err := identity.MintBiscuitToken(privKey, claims, token, pID, policy, biscuitExpiry)
+	biscuitData, _, err := identity.MintBiscuitToken(privKey, claims, token, pID, policy, biscuitExpiry, req.RequestedRole)
 	if err != nil {
 		logger.Errorw("Biscuit minting failed", "peer_id", req.PeerId, "error", err)
-		http.Error(w, "Failed to mint biscuit: "+err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Failed to mint biscuit: "+err.Error(), http.StatusForbidden)
 		return
 	}
 
 	// Session TTL is 90 days for OIDC interactive enrollment
 	sessionExpiresAt := time.Now().Add(api.OIDCSessionTTL)
-
-	// Determine primary role from resolved roles
-	primaryRole := api.RoleNode
-	for _, r := range resolvedRoles {
-		if strings.HasPrefix(r, "sam:role:") {
-			primaryRole = r
-			break
-		}
-	}
+	primaryRole := req.RequestedRole
 
 	claimsBytes, err := json.Marshal(claims)
 	if err != nil {
@@ -540,7 +537,7 @@ func (s *Server) HandleRefresh(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 			return
 		}
-		bBytes, _, err := identity.MintBiscuitToken(privKey, claims, nil, pID, policy, biscuitExpiry)
+		bBytes, _, err := identity.MintBiscuitToken(privKey, claims, nil, pID, policy, biscuitExpiry, nodeRecord.Role)
 		if err != nil {
 			logger.Errorf("Failed to mint refreshed token for node %s: %v", nodeRecord.PeerID, err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -890,6 +887,17 @@ func (s *Server) HandleEnroll(w http.ResponseWriter, r *http.Request) {
 	if tokenRecord.UsagesCount >= tokenRecord.MaxUsages {
 		logger.Warnw("Max usages exceeded for bootstrap token", "peer_id", req.PeerId, "token_id", tokenRecord.ID)
 		s.writeEnrollError(w, api.EnrollmentStatus_ENROLLMENT_STATUS_REJECTED, "Bootstrap token max usages exceeded")
+		return
+	}
+
+	if req.RequestedRole == "" {
+		s.writeEnrollError(w, api.EnrollmentStatus_ENROLLMENT_STATUS_REJECTED, "requested_role must be specified")
+		return
+	}
+
+	if req.RequestedRole != tokenRecord.Role {
+		logger.Warnw("Requested role does not match bootstrap token role", "peer_id", req.PeerId, "requested", req.RequestedRole, "token_role", tokenRecord.Role)
+		s.writeEnrollError(w, api.EnrollmentStatus_ENROLLMENT_STATUS_REJECTED, fmt.Sprintf("requested role %q does not match bootstrap token role %q", req.RequestedRole, tokenRecord.Role))
 		return
 	}
 

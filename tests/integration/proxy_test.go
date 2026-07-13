@@ -16,6 +16,8 @@ package integration_test
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -47,13 +49,15 @@ func TestSamNodeRunWithStoredIdentity(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		// The following constants are mock values used for testing.
-		// 'mock-biscuit-token' is a dummy token string.
-		// 'mock-hub-pub-key' is a dummy public key string.
-		if err := b.Put([]byte("identity_biscuit"), []byte("mock-biscuit-token")); err != nil {
+		pub, priv, err := ed25519.GenerateKey(rand.Reader)
+		if err != nil {
 			return err
 		}
-		if err := b.Put([]byte("hub_public_key"), []byte("mock-hub-pub-key")); err != nil {
+		biscuitBytes := createMockBiscuitToken(t, "12D3KooWRHDt3Ajd1t7YikBXyK2Uw1wrJwEX88XbwJhHh1XtBNkx", priv, "sam:role:node")
+		if err := b.Put([]byte("identity_biscuit"), biscuitBytes); err != nil {
+			return err
+		}
+		if err := b.Put([]byte("hub_public_key"), pub); err != nil {
 			return err
 		}
 		addrsData, _ := json.Marshal([]string{"/ip4/127.0.0.1/tcp/4002/p2p/Qm..."})

@@ -94,6 +94,7 @@ const (
 	// Standard role values
 	RoleRouter = "sam:role:router"
 	RoleNode   = "sam:role:node"
+	RoleSamBox = "sam:role:sambox"
 
 	// FactUser defines the subject (username/userID) claim extracted from the OIDC token.
 	// Contains: biscuit.String(username)

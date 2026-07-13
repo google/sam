@@ -70,7 +70,7 @@ func TestMintBiscuitToken(t *testing.T) {
 	claims1 := jwt.MapClaims{
 		"roles": []any{"admin"},
 	}
-	biscuitData1, _, err := MintBiscuitToken(priv, claims1, token, dummyPeer, policy, token.Expiry)
+	biscuitData1, _, err := MintBiscuitToken(priv, claims1, token, dummyPeer, policy, token.Expiry, "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +104,7 @@ func TestMintBiscuitToken(t *testing.T) {
 	claims2 := jwt.MapClaims{
 		"groups": []any{"system:serviceaccounts:sam-canary"},
 	}
-	biscuitData2, _, err := MintBiscuitToken(priv, claims2, token, dummyPeer, policy, token.Expiry)
+	biscuitData2, _, err := MintBiscuitToken(priv, claims2, token, dummyPeer, policy, token.Expiry, "canary-role")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +135,7 @@ func TestMintBiscuitToken(t *testing.T) {
 		"groups": []any{"unknown-group"},
 		"roles":  []any{"undefined-role"},
 	}
-	biscuitData3, _, err := MintBiscuitToken(priv, claims3, token, dummyPeer, policy, token.Expiry)
+	biscuitData3, _, err := MintBiscuitToken(priv, claims3, token, dummyPeer, policy, token.Expiry, api.RoleNode)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +164,7 @@ func TestMintBiscuitToken(t *testing.T) {
 	claims4 := jwt.MapClaims{
 		"sub": "system:serviceaccount:sam-canary:sam-node-sa",
 	}
-	biscuitData4, _, err := MintBiscuitToken(priv, claims4, token, dummyPeer, policy, token.Expiry)
+	biscuitData4, _, err := MintBiscuitToken(priv, claims4, token, dummyPeer, policy, token.Expiry, "canary-role")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,7 +231,7 @@ func TestVerifyBiscuit_Expiration(t *testing.T) {
 				"roles": []any{"admin"},
 			}
 
-			biscuitData, _, err := MintBiscuitToken(priv, claims, token, dummyPeer, &api.PolicyConfig{}, token.Expiry)
+			biscuitData, _, err := MintBiscuitToken(priv, claims, token, dummyPeer, &api.PolicyConfig{}, token.Expiry, api.RoleNode)
 			if err != nil {
 				t.Fatalf("MintBiscuitToken failed: %v", err)
 			}
@@ -283,7 +283,7 @@ func TestMintBiscuitToken_ClaimsTranslation(t *testing.T) {
 		"groups": []any{"beta-testers", "engineering"},
 	}
 
-	biscuitData, _, err := MintBiscuitToken(priv, claims, token, dummyPeer, policy, token.Expiry)
+	biscuitData, _, err := MintBiscuitToken(priv, claims, token, dummyPeer, policy, token.Expiry, "developer-role")
 	if err != nil {
 		t.Fatalf("Failed to mint biscuit: %v", err)
 	}
@@ -426,22 +426,27 @@ func TestMintBiscuitToken_VariousClaimsTypes(t *testing.T) {
 				claims["groups"] = tt.groupsClaim
 			}
 
-			biscuitData, _, err := MintBiscuitToken(priv, claims, token, dummyPeer, policy, token.Expiry)
-			if err != nil {
-				t.Fatalf("MintBiscuitToken failed: %v", err)
+			rolesToTest := tt.expectedRoles
+			if len(rolesToTest) == 0 {
+				rolesToTest = []string{api.RoleNode}
 			}
 
-			b, err := biscuit.Unmarshal(biscuitData)
-			if err != nil {
-				t.Fatalf("Unmarshal biscuit failed: %v", err)
-			}
+			for _, r := range rolesToTest {
+				biscuitData, _, err := MintBiscuitToken(priv, claims, token, dummyPeer, policy, token.Expiry, r)
+				if err != nil {
+					t.Fatalf("MintBiscuitToken failed for role %s: %v", r, err)
+				}
 
-			authorizer, err := b.Authorizer(pub, biscuit.WithWorldOptions(datalog.WithMaxDuration(500*time.Millisecond)))
-			if err != nil {
-				t.Fatalf("Authorizer failed: %v", err)
-			}
+				b, err := biscuit.Unmarshal(biscuitData)
+				if err != nil {
+					t.Fatalf("Unmarshal biscuit failed: %v", err)
+				}
 
-			for _, r := range tt.expectedRoles {
+				authorizer, err := b.Authorizer(pub, biscuit.WithWorldOptions(datalog.WithMaxDuration(500*time.Millisecond)))
+				if err != nil {
+					t.Fatalf("Authorizer failed: %v", err)
+				}
+
 				authorizer.AddCheck(biscuit.Check{Queries: []biscuit.Rule{
 					{
 						Body: []biscuit.Predicate{
@@ -449,27 +454,27 @@ func TestMintBiscuitToken_VariousClaimsTypes(t *testing.T) {
 						},
 					},
 				}})
-			}
 
-			for _, g := range tt.expectedGroups {
-				authorizer.AddCheck(biscuit.Check{Queries: []biscuit.Rule{
-					{
-						Body: []biscuit.Predicate{
-							{Name: "group", IDs: []biscuit.Term{biscuit.String(g)}},
+				for _, g := range tt.expectedGroups {
+					authorizer.AddCheck(biscuit.Check{Queries: []biscuit.Rule{
+						{
+							Body: []biscuit.Predicate{
+								{Name: "group", IDs: []biscuit.Term{biscuit.String(g)}},
+							},
 						},
+					}})
+				}
+
+				authorizer.AddPolicy(biscuit.Policy{Queries: []biscuit.Rule{
+					{
+						Head: biscuit.Predicate{Name: "allow", IDs: []biscuit.Term{}},
+						Body: []biscuit.Predicate{},
 					},
-				}})
-			}
+				}, Kind: biscuit.PolicyKindAllow})
 
-			authorizer.AddPolicy(biscuit.Policy{Queries: []biscuit.Rule{
-				{
-					Head: biscuit.Predicate{Name: "allow", IDs: []biscuit.Term{}},
-					Body: []biscuit.Predicate{},
-				},
-			}, Kind: biscuit.PolicyKindAllow})
-
-			if err := authorizer.Authorize(); err != nil {
-				t.Errorf("Verification failed for case: %v\nWorld:\n%s", err, authorizer.PrintWorld())
+				if err := authorizer.Authorize(); err != nil {
+					t.Errorf("Verification failed for case %s, role %s: %v\nWorld:\n%s", tt.name, r, err, authorizer.PrintWorld())
+				}
 			}
 		})
 	}
@@ -498,7 +503,7 @@ func TestVerifyBiscuit_Concurrent(t *testing.T) {
 		"roles": []any{"admin"},
 	}
 
-	biscuitData, _, err := MintBiscuitToken(priv, claims, token, dummyPeer, &api.PolicyConfig{}, token.Expiry)
+	biscuitData, _, err := MintBiscuitToken(priv, claims, token, dummyPeer, &api.PolicyConfig{}, token.Expiry, api.RoleNode)
 	if err != nil {
 		t.Fatalf("MintBiscuitToken failed: %v", err)
 	}
@@ -556,7 +561,7 @@ func TestMintBiscuitToken_ErrorAggregation(t *testing.T) {
 		"roles": []any{"admin"},
 	}
 
-	_, _, err = MintBiscuitToken(priv, claims, token, dummyPeer, policy, token.Expiry)
+	_, _, err = MintBiscuitToken(priv, claims, token, dummyPeer, policy, token.Expiry, "admin")
 	if err == nil {
 		t.Fatal("Expected MintBiscuitToken to fail on custom datalog syntax errors, got nil error")
 	}
@@ -608,7 +613,7 @@ func TestMintBiscuitToken_FactDeduplication(t *testing.T) {
 		"sub": "user-1",
 	}
 
-	biscuitData, _, err := MintBiscuitToken(priv, claims, token, dummyPeer, policy, token.Expiry)
+	biscuitData, _, err := MintBiscuitToken(priv, claims, token, dummyPeer, policy, token.Expiry, "role-a")
 	if err != nil {
 		t.Fatalf("MintBiscuitToken failed with duplicate facts: %v", err)
 	}
@@ -721,5 +726,79 @@ func TestMintBootstrapBiscuitToken(t *testing.T) {
 
 	if err := authorizer2.Authorize(); err != nil {
 		t.Errorf("Expected custom node role service checks to succeed: %v", err)
+	}
+}
+
+func TestMintBiscuitToken_RoleAuthorizationValidation(t *testing.T) {
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	privNode, _, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dummyPeer, _ := peer.IDFromPrivateKey(privNode)
+
+	token := &oidc.IDToken{
+		Expiry: time.Now().Add(1 * time.Hour),
+	}
+
+	// Policy defining bindings for custom capability roles
+	policy := &api.PolicyConfig{
+		Bindings: []api.Binding{
+			{Role: "sam:role:sambox", Members: []string{"user:sambox-user"}},
+			{Role: "custom-access-role", Members: []string{"user:sambox-user"}},
+		},
+		Roles: map[string]api.RolePolicy{
+			"sam:role:sambox":    {},
+			"custom-access-role": {},
+		},
+	}
+
+	// 1. User has no mapped capability roles.
+	// Can request default "sam:role:node", but not "sam:role:router".
+	claimsUnmapped := jwt.MapClaims{"sub": "unmapped-user"}
+	_, _, err = MintBiscuitToken(priv, claimsUnmapped, token, dummyPeer, policy, token.Expiry, api.RoleNode)
+	if err != nil {
+		t.Errorf("expected unmapped user allowed to request default role %q, got: %v", api.RoleNode, err)
+	}
+	_, _, err = MintBiscuitToken(priv, claimsUnmapped, token, dummyPeer, policy, token.Expiry, api.RoleRouter)
+	if err == nil {
+		t.Errorf("expected unmapped user NOT allowed to request unauthorized role %q", api.RoleRouter)
+	}
+
+	// 2. User has mapped capability role "sam:role:sambox" and custom access role "custom-access-role".
+	// Can request "sam:role:sambox", but cannot request default "sam:role:node" or "sam:role:router".
+	claimsMapped := jwt.MapClaims{"sub": "sambox-user"}
+	_, finalRoles, err := MintBiscuitToken(priv, claimsMapped, token, dummyPeer, policy, token.Expiry, api.RoleSamBox)
+	if err != nil {
+		t.Errorf("expected mapped user allowed to request authorized role %q, got: %v", api.RoleSamBox, err)
+	}
+	// Check that custom access role is also preserved in final roles
+	hasCustomRole := false
+	for _, r := range finalRoles {
+		if r == "custom-access-role" {
+			hasCustomRole = true
+		}
+	}
+	if !hasCustomRole {
+		t.Errorf("expected custom access role to be preserved in final roles, got: %v", finalRoles)
+	}
+
+	_, _, err = MintBiscuitToken(priv, claimsMapped, token, dummyPeer, policy, token.Expiry, api.RoleNode)
+	if err == nil {
+		t.Errorf("expected mapped user NOT allowed to bypass map by requesting default role %q", api.RoleNode)
+	}
+	_, _, err = MintBiscuitToken(priv, claimsMapped, token, dummyPeer, policy, token.Expiry, api.RoleRouter)
+	if err == nil {
+		t.Errorf("expected mapped user NOT allowed to request unauthorized role %q", api.RoleRouter)
+	}
+
+	// 3. Requested role cannot be empty
+	_, _, err = MintBiscuitToken(priv, claimsMapped, token, dummyPeer, policy, token.Expiry, "")
+	if err == nil {
+		t.Error("expected MintBiscuitToken to reject empty requested_role")
 	}
 }

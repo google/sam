@@ -139,10 +139,17 @@ data:
         role: "sam-admin"
       - members: ["user:system:serviceaccount:${NAMESPACE}:local-node-sa"]
         role: "sam-admin"
+      - members: ["user:system:serviceaccount:${NAMESPACE}:sam-box-sa"]
+        role: "sam:role:sambox"
       - members: ["group:routers", "user:system:serviceaccount:${NAMESPACE}:sam-router-sa"]
         role: "sam:role:router"
     roles:
       sam-admin:
+        allowed_services:
+          - "*"
+        allowed_targets:
+          - "*"
+      "sam:role:sambox":
         allowed_services:
           - "*"
         allowed_targets:

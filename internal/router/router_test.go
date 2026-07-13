@@ -229,9 +229,10 @@ func TestRouterIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	enrollNodeReq := &api.EnrollRequest{
-		Jwt:       nodeJWT,
-		PeerId:    nodePeerID.String(),
-		PublicKey: nodePubKeyBytes,
+		Jwt:           nodeJWT,
+		PeerId:        nodePeerID.String(),
+		PublicKey:     nodePubKeyBytes,
+		RequestedRole: api.RoleNode,
 	}
 	reqData, _ := proto.Marshal(enrollNodeReq)
 	resp, err := client.Post(cpURL+"/register", "application/x-protobuf", bytes.NewReader(reqData))
