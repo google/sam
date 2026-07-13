@@ -22,6 +22,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -107,7 +109,13 @@ func TestGatewayPlaintextAndTerminatingProxy(t *testing.T) {
 	}
 
 	// 2. Gateway setup
-	gateway, err := NewGateway(nil, transport, "")
+	secretStore := map[string]SecretConfig{
+		"example.com": {
+			Kind:  SecretKindBearer,
+			Value: "mock-token",
+		},
+	}
+	gateway, err := NewGateway(secretStore, transport, "")
 	if err != nil {
 		t.Fatalf("NewGateway failed: %v", err)
 	}
@@ -138,6 +146,16 @@ func TestGatewayPlaintextAndTerminatingProxy(t *testing.T) {
 	certBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Fatalf("Failed to read CA cert response body: %v", err)
+	}
+
+	// Verify that a second download attempt is blocked (one-shot protection)
+	respSecond, err := http.Get("http://" + addr + "/internal/bootstrap/ca.crt")
+	if err != nil {
+		t.Fatalf("Second download request failed: %v", err)
+	}
+	defer func() { _ = respSecond.Body.Close() }()
+	if respSecond.StatusCode != http.StatusForbidden {
+		t.Errorf("Expected second download to be forbidden (403), got status: %d", respSecond.StatusCode)
 	}
 
 	// Verify downloaded cert matches gateway cert
@@ -179,5 +197,97 @@ func TestGatewayPlaintextAndTerminatingProxy(t *testing.T) {
 
 	if string(body2) != "mock upstream response" {
 		t.Errorf("Expected 'mock upstream response', got %q", string(body2))
+	}
+}
+
+func TestGatewayOneShotAndSanitization(t *testing.T) {
+	// Create a temporary directory containing mock interceptor files
+	tempInterceptorsDir := t.TempDir()
+	mockLibData := []byte("mock-so-binary-content")
+	if err := os.WriteFile(filepath.Join(tempInterceptorsDir, "libinterceptor-amd64-glibc.so"), mockLibData, 0644); err != nil {
+		t.Fatalf("Failed to create mock interceptor file: %v", err)
+	}
+
+	gateway, err := NewGateway(nil, nil, tempInterceptorsDir)
+	if err != nil {
+		t.Fatalf("NewGateway failed: %v", err)
+	}
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Failed to listen: %v", err)
+	}
+	defer func() { _ = listener.Close() }()
+
+	go func() {
+		_ = gateway.Serve(listener)
+	}()
+
+	addr := listener.Addr().String()
+	client := &http.Client{Timeout: 2 * time.Second}
+
+	// 1. First download of ca.crt should succeed
+	resp1, err := client.Get("http://" + addr + "/internal/bootstrap/ca.crt")
+	if err != nil {
+		t.Fatalf("First ca.crt request failed: %v", err)
+	}
+	_ = resp1.Body.Close()
+	if resp1.StatusCode != http.StatusOK {
+		t.Errorf("Expected 200 for first ca.crt request, got %d", resp1.StatusCode)
+	}
+
+	// 2. Second download of ca.crt should be forbidden (one-shot)
+	resp2, err := client.Get("http://" + addr + "/internal/bootstrap/ca.crt")
+	if err != nil {
+		t.Fatalf("Second ca.crt request failed: %v", err)
+	}
+	_ = resp2.Body.Close()
+	if resp2.StatusCode != http.StatusForbidden {
+		t.Errorf("Expected 403 for second ca.crt request, got %d", resp2.StatusCode)
+	}
+
+	// 3. First download of valid interceptor should succeed
+	resp3, err := client.Get("http://" + addr + "/internal/bootstrap/libinterceptor.so?arch=amd64&libc=glibc")
+	if err != nil {
+		t.Fatalf("First interceptor request failed: %v", err)
+	}
+	_ = resp3.Body.Close()
+	if resp3.StatusCode != http.StatusOK {
+		t.Errorf("Expected 200 for first interceptor request, got %d", resp3.StatusCode)
+	}
+
+	// 4. Second download of interceptor should be forbidden (one-shot)
+	resp4, err := client.Get("http://" + addr + "/internal/bootstrap/libinterceptor.so?arch=amd64&libc=glibc")
+	if err != nil {
+		t.Fatalf("Second interceptor request failed: %v", err)
+	}
+	_ = resp4.Body.Close()
+	if resp4.StatusCode != http.StatusForbidden {
+		t.Errorf("Expected 403 for second interceptor request, got %d", resp4.StatusCode)
+	}
+
+	// 5. Test path traversal and input sanitization (using a fresh Gateway to bypass the one-shot check for interceptor)
+	gateway2, _ := NewGateway(nil, nil, tempInterceptorsDir)
+	listener5, _ := net.Listen("tcp", "127.0.0.1:0")
+	defer func() { _ = listener5.Close() }()
+	go func() { _ = gateway2.Serve(listener5) }()
+	addr2 := listener5.Addr().String()
+
+	traversalURLs := []string{
+		"http://" + addr2 + "/internal/bootstrap/libinterceptor.so?arch=../&libc=glibc",
+		"http://" + addr2 + "/internal/bootstrap/libinterceptor.so?arch=amd64&libc=..\\",
+		"http://" + addr2 + "/internal/bootstrap/libinterceptor.so?arch=amd64.so&libc=glibc",
+		"http://" + addr2 + "/internal/bootstrap/libinterceptor.so?arch=amd64&libc=glibc;invalid",
+	}
+
+	for _, u := range traversalURLs {
+		resp, err := client.Get(u)
+		if err != nil {
+			t.Fatalf("Request to %q failed: %v", u, err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("Expected 404 for invalid identifier URL %q, got %d", u, resp.StatusCode)
+		}
 	}
 }

@@ -35,6 +35,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -194,6 +195,9 @@ type Gateway struct {
 	SecretStore     map[string]SecretConfig
 	Transport       http.RoundTripper
 	InterceptorsDir string
+
+	caBootstrapped          atomic.Bool
+	interceptorBootstrapped atomic.Bool
 }
 
 func NewGateway(secretStore map[string]SecretConfig, transport http.RoundTripper, interceptorsDir string) (*Gateway, error) {
@@ -341,6 +345,11 @@ func (g *Gateway) handleHTTPConnection(conn *bufferedConn, tlsListener *channelL
 	defer func() { _ = conn.Close() }()
 
 	if req.Method == "GET" && req.URL.Path == "/internal/bootstrap/ca.crt" {
+		if !g.caBootstrapped.CompareAndSwap(false, true) {
+			write403(conn)
+			return
+		}
+
 		resp := &http.Response{
 			StatusCode:    http.StatusOK,
 			ProtoMajor:    1,
@@ -359,8 +368,13 @@ func (g *Gateway) handleHTTPConnection(conn *bufferedConn, tlsListener *channelL
 
 		arch := req.URL.Query().Get("arch")
 		libc := req.URL.Query().Get("libc")
-		if strings.ContainsAny(arch, "/\\.") || strings.ContainsAny(libc, "/\\.") {
+		if !isValidIdentifier(arch) || !isValidIdentifier(libc) {
 			write404(conn)
+			return
+		}
+
+		if !g.interceptorBootstrapped.CompareAndSwap(false, true) {
+			write403(conn)
 			return
 		}
 
@@ -404,6 +418,17 @@ func write404(conn net.Conn) {
 		ProtoMajor: 1,
 		ProtoMinor: 1,
 		Body:       io.NopCloser(strings.NewReader("Not Found")),
+		Header:     make(http.Header),
+	}
+	_ = resp.Write(conn)
+}
+
+func write403(conn net.Conn) {
+	resp := &http.Response{
+		StatusCode: http.StatusForbidden,
+		ProtoMajor: 1,
+		ProtoMinor: 1,
+		Body:       io.NopCloser(strings.NewReader("Forbidden")),
 		Header:     make(http.Header),
 	}
 	_ = resp.Write(conn)
@@ -468,4 +493,16 @@ func (l *channelListener) Close() error {
 
 func (l *channelListener) Addr() net.Addr {
 	return &net.UnixAddr{Name: "internal-tls-multiplexer", Net: "unix"}
+}
+
+func isValidIdentifier(s string) bool {
+	if s == "" {
+		return true
+	}
+	for _, r := range s {
+		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != '_' && r != '-' {
+			return false
+		}
+	}
+	return true
 }
