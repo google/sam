@@ -11,14 +11,16 @@
 // Function pointer to the original connect syscall
 static int (*original_connect)(int sockfd, const struct sockaddr *addr, socklen_t addrlen) = NULL;
 
+static void init(void) __attribute__((constructor));
+static void init(void) {
+    original_connect = dlsym(RTLD_NEXT, "connect");
+}
+
 int connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
     if (!original_connect) {
-        original_connect = dlsym(RTLD_NEXT, "connect");
-        if (!original_connect) {
-            fprintf(stderr, "[interceptor] Error: failed to locate original connect: %s\n", dlerror());
-            errno = EFAULT;
-            return -1;
-        }
+        fprintf(stderr, "[interceptor] Error: original connect not initialized\n");
+        errno = EFAULT;
+        return -1;
     }
 
     struct sockaddr_storage modified_addr;

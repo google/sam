@@ -17,6 +17,7 @@ package integration_test
 import (
 	"context"
 	"crypto/tls"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -26,7 +27,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/google/sam/internal/sambox"
 )
@@ -44,11 +44,40 @@ import (
 // Creating those namespaces (and the bind mount) requires root/CAP_SYS_ADMIN, so
 // the test skips when it cannot isolate itself (e.g. a non-root local run).
 func TestSamBoxNanoInitIntegration(t *testing.T) {
-	if os.Geteuid() != 0 {
-		t.Skip("requires root to create mount/network namespaces and bind-mount /etc/resolv.conf")
+	if os.Getenv("SAM_TEST_IS_ISOLATED") != "1" {
+		if _, err := exec.LookPath("unshare"); err != nil {
+			t.Skip("requires the `unshare` binary to isolate nano-init from the host")
+		}
+
+		self, err := os.Executable()
+		if err != nil {
+			t.Fatalf("Failed to get self executable: %v", err)
+		}
+
+		tempFile := filepath.Join(t.TempDir(), "resolv.conf")
+		if err := os.WriteFile(tempFile, []byte(""), 0644); err != nil {
+			t.Fatalf("Failed to create temp resolv.conf: %v", err)
+		}
+
+		bashCmd := fmt.Sprintf(
+			"ip link set lo up && mount --bind %s /etc/resolv.conf && %s %s",
+			tempFile,
+			self,
+			strings.Join(os.Args[1:], " "),
+		)
+
+		cmd := exec.Command("unshare", "-m", "-n", "-r", "bash", "-c", bashCmd)
+		cmd.Env = append(os.Environ(), "SAM_TEST_IS_ISOLATED=1")
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			t.Fatalf("Re-execution under unshare failed: %v", err)
+		}
+		return
 	}
-	if _, err := exec.LookPath("unshare"); err != nil {
-		t.Skip("requires the `unshare` binary to isolate nano-init from the host")
+
+	if os.Geteuid() != 0 {
+		t.Skip("requires root (or mapped root namespace) to create mount/network namespaces and bind-mount /etc/resolv.conf")
 	}
 
 	// Build binaries (specifically we want to verify nano-init builds and runs)
@@ -68,30 +97,9 @@ func TestSamBoxNanoInitIntegration(t *testing.T) {
 		t.Fatalf("Failed to parse mock server URL: %v", err)
 	}
 
-	// 2. Start sam-box in-process on a UDS. The UDS and the bind-mount source for
-	// /etc/resolv.conf live outside /tmp so they stay visible after nano-init
-	// overlays a fresh tmpfs on /tmp inside its namespace. runDir lives under the
-	// test package dir and is removed on cleanup.
-	wd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Failed to get working directory: %v", err)
-	}
-	runDir, err := os.MkdirTemp(wd, "sambox-ns-")
-	if err != nil {
-		t.Fatalf("Failed to create run directory: %v", err)
-	}
-	defer func() { _ = os.RemoveAll(runDir) }()
-
-	// Copy nano-init into runDir. buildBinary places it under /tmp (t.TempDir),
-	// which nano-init's fresh tmpfs-on-/tmp would otherwise hide from exec.
-	nanoInitLocal := filepath.Join(runDir, "nano-init")
-	if data, err := os.ReadFile(nanoInitBin); err != nil {
-		t.Fatalf("Failed to read nano-init binary: %v", err)
-	} else if err := os.WriteFile(nanoInitLocal, data, 0755); err != nil {
-		t.Fatalf("Failed to stage nano-init binary: %v", err)
-	}
-
-	udsPath := filepath.Join(runDir, "sam-box-test.sock")
+	// 2. Start sam-box in-process on a temporary UDS path
+	tempDir := t.TempDir()
+	udsPath := filepath.Join(tempDir, "sam-box-test.sock")
 
 	udsListener, err := net.Listen("unix", udsPath)
 	if err != nil {
@@ -115,7 +123,17 @@ func TestSamBoxNanoInitIntegration(t *testing.T) {
 		},
 	}
 
-	gateway, err := sambox.NewGateway(nil, gatewayTransport, "")
+	interceptorsDir, err := filepath.Abs("../../bin")
+	if err != nil {
+		t.Fatalf("Failed to resolve interceptor dir: %v", err)
+	}
+	secretStore := map[string]sambox.SecretConfig{
+		"api.github.com": {
+			Kind:  sambox.SecretKindBearer,
+			Value: "my-github-token-123",
+		},
+	}
+	gateway, err := sambox.NewGateway(secretStore, gatewayTransport, interceptorsDir)
 	if err != nil {
 		t.Fatalf("Failed to initialize gateway: %v", err)
 	}
@@ -124,49 +142,30 @@ func TestSamBoxNanoInitIntegration(t *testing.T) {
 		_ = gateway.Serve(udsListener)
 	}()
 
-	// The bind-mount source for /etc/resolv.conf. nano-init overwrites
-	// /etc/resolv.conf inside its mount namespace; the write lands here instead of
-	// on the host's resolv.conf.
-	resolvSrc := filepath.Join(runDir, "resolv.conf")
-	if err := os.WriteFile(resolvSrc, []byte("nameserver 127.0.0.1\n"), 0644); err != nil {
-		t.Fatalf("Failed to seed resolv.conf source: %v", err)
-	}
-
-	// 3. Run nano-init (which spawns curl) inside an isolated namespace.
+	// 3. Start nano-init routines as a separate process (the target process will be a simple script/agent)
+	// We'll configure unprivileged ports for the test
 	dnsPort := "10053"
 
-	// Resolve the dynamic C interceptor path (optional; the gateway 404s the
-	// bootstrap so nano-init just runs without transparent interception).
+	// Resolve the dynamic C interceptor path
 	interceptorPath, err := filepath.Abs("../../bin/libinterceptor.so")
 	if err != nil {
 		t.Fatalf("Failed to resolve interceptor path: %v", err)
 	}
 
-	// A hard timeout guarantees the test can never hang the suite waiting on the
-	// nano-init/curl subprocess.
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
+	// Run nano-init wrapper pointing to UDS, spawning curl
+	nanoInitCtx, nanoInitCancel := context.WithCancel(context.Background())
+	defer nanoInitCancel()
 
-	// Wrapper executed as the namespace's first process: overlay tmpfs on /tmp so
-	// nano-init's cert/interceptor writes stay isolated, bind our resolv.conf over
-	// /etc/resolv.conf, bring loopback up (a fresh net namespace starts with lo
-	// down), then exec nano-init with its arguments.
-	const nsSetup = `set -e
-mount -t tmpfs tmpfs /tmp
-mount --bind "$RESOLV_SRC" /etc/resolv.conf
-ip link set lo up
-exec "$@"`
+	// Clean up /tmp/ephemeral_ca.pem before running
+	_ = os.Remove("/tmp/ephemeral_ca.pem")
+	defer func() { _ = os.Remove("/tmp/ephemeral_ca.pem") }()
 
-	nanoInitCmd := exec.CommandContext(ctx, "unshare",
-		"--mount", "--uts", "--net", "--propagation", "private", "--",
-		"/bin/sh", "-c", nsSetup, "sh",
-		nanoInitLocal, udsPath,
+	nanoInitCmd := exec.CommandContext(nanoInitCtx, nanoInitBin, udsPath,
 		"curl", "--cacert", "/tmp/ephemeral_ca.pem", "-s", "https://api.github.com/",
 	)
 	nanoInitCmd.Env = append(os.Environ(),
 		"SAM_DNS_PORT="+dnsPort,
 		"SAM_INTERCEPTOR_PATH="+interceptorPath,
-		"RESOLV_SRC="+resolvSrc,
 	)
 
 	out, err := nanoInitCmd.CombinedOutput()
@@ -179,11 +178,15 @@ exec "$@"`
 
 	// 4. Assert that the request reached the mock server and received correct response
 	expectedAgentOutput := "mock-github-response-content"
-	if !strings.Contains(outStr, expectedAgentOutput) {
+	if !containsString(outStr, expectedAgentOutput) {
 		t.Errorf("Expected agent to output %q, got output:\n%s", expectedAgentOutput, outStr)
 	}
 
-	if mockServerReceivedAuth != "Bearer mock-token" {
+	if mockServerReceivedAuth != "Bearer my-github-token-123" {
 		t.Errorf("Mock server did not receive the expected token: %q", mockServerReceivedAuth)
 	}
+}
+
+func containsString(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) && (s[:len(substr)] == substr || containsString(s[1:], substr)))
 }

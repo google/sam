@@ -220,7 +220,18 @@ func (g *Gateway) Serve(listener net.Listener) error {
 	director := func(req *http.Request) {
 		req.URL.Scheme = "https"
 		req.URL.Host = req.Host
-		req.Header.Set("Authorization", "Bearer mock-token")
+		if config, ok := g.SecretStore[req.Host]; ok {
+			switch config.Kind {
+			case SecretKindBearer:
+				req.Header.Set("Authorization", "Bearer "+config.Value)
+			case SecretKindBasicAuth:
+				req.Header.Set("Authorization", "Basic "+config.Value)
+			case SecretKindCustomHeader:
+				if config.HeaderName != "" {
+					req.Header.Set(config.HeaderName, config.Value)
+				}
+			}
+		}
 	}
 
 	proxy := &httputil.ReverseProxy{
@@ -232,16 +243,28 @@ func (g *Gateway) Serve(listener net.Listener) error {
 		Handler: proxy,
 	}
 
-	serverErrChan := make(chan error, 1)
+	var serverErr error
+	var errMu sync.Mutex
+
 	go func() {
 		if err := server.Serve(tlsListener); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			serverErrChan <- err
+			errMu.Lock()
+			serverErr = err
+			errMu.Unlock()
+			_ = listener.Close()
 		}
 	}()
 
 	for {
 		rawConn, err := listener.Accept()
 		if err != nil {
+			errMu.Lock()
+			sErr := serverErr
+			errMu.Unlock()
+			if sErr != nil {
+				return sErr
+			}
+
 			select {
 			case <-tlsListener.closed:
 				return nil
@@ -333,8 +356,13 @@ func (g *Gateway) handleHTTPConnection(conn *bufferedConn, tlsListener *channelL
 			write404(conn)
 			return
 		}
+
 		arch := req.URL.Query().Get("arch")
 		libc := req.URL.Query().Get("libc")
+		if strings.ContainsAny(arch, "/\\.") || strings.ContainsAny(libc, "/\\.") {
+			write404(conn)
+			return
+		}
 
 		var filename string
 		if arch != "" && libc != "" {
