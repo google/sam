@@ -69,7 +69,6 @@ spec:
           - "--secrets-file=/etc/sam/secrets.yaml"
           - "--hub=http://sam-control-plane-${ENV_NAME}.${NAMESPACE}.svc.cluster.local:8080"
           - "--jwt-path=/var/run/secrets/tokens/sam-token"
-          - "--api-token=secret-token"
           - "--allow-loopback"
           - "--log-level=debug"
         volumeMounts:
