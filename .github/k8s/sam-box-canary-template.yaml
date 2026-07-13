@@ -35,7 +35,7 @@ spec:
       initContainers:
       - name: init-nano-init
         image: ghcr.io/google/sam-nano-init:${IMAGE_TAG}
-        command: ["cp", "/nano-init", "/shared-bin/nano-init"]
+        command: ["/nano-init", "copy", "/shared-bin/nano-init"]
         volumeMounts:
         - name: shared-bin
           mountPath: /shared-bin
@@ -44,6 +44,7 @@ spec:
         image: alpine/curl:8.12.1
         command:
           - "/shared-bin/nano-init"
+          - "run"
           - "/var/run/sam/sam-box.sock"
           - "sh"
           - "-c"

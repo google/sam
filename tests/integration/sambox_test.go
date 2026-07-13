@@ -166,7 +166,7 @@ func TestSamBoxNanoInitIntegration(t *testing.T) {
 	_ = os.Remove("/tmp/ephemeral_ca.pem")
 	defer func() { _ = os.Remove("/tmp/ephemeral_ca.pem") }()
 
-	nanoInitCmd := exec.CommandContext(nanoInitCtx, nanoInitBin, udsPath,
+	nanoInitCmd := exec.CommandContext(nanoInitCtx, nanoInitBin, "run", udsPath,
 		"curl", "--cacert", "/tmp/ephemeral_ca.pem", "-s", "https://api.github.com/",
 	)
 	nanoInitCmd.Env = append(os.Environ(),

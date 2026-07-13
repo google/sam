@@ -129,7 +129,7 @@ spec:
       initContainers:
       - name: init-nano-init
         image: ghcr.io/google/sam-nano-init:latest
-        command: ["cp", "/nano-init", "/shared-bin/nano-init"]
+        command: ["/nano-init", "copy", "/shared-bin/nano-init"]
         volumeMounts:
         - name: shared-bin
           mountPath: /shared-bin
@@ -138,6 +138,7 @@ spec:
         image: python:3.11-alpine
         command:
           - "/shared-bin/nano-init"
+          - "run"
           - "/var/run/sam/sam-box.sock"
           - "python3"
           - "agent.py"

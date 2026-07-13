@@ -292,6 +292,40 @@ func TestBuildAgentEnv(t *testing.T) {
 	}
 }
 
+func TestCopyFile(t *testing.T) {
+	tempDir := t.TempDir()
+	src := filepath.Join(tempDir, "source-file")
+	dest := filepath.Join(tempDir, "dest-file")
+
+	content := []byte("hello copy world")
+	if err := os.WriteFile(src, content, 0755); err != nil {
+		t.Fatalf("Failed to write source file: %v", err)
+	}
+
+	if err := copyFile(src, dest); err != nil {
+		t.Fatalf("copyFile failed: %v", err)
+	}
+
+	data, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatalf("Failed to read dest file: %v", err)
+	}
+
+	if string(data) != string(content) {
+		t.Errorf("Expected content %q, got %q", string(content), string(data))
+	}
+
+	fi, err := os.Stat(dest)
+	if err != nil {
+		t.Fatalf("Stat dest failed: %v", err)
+	}
+
+	expectedMode := os.FileMode(0755)
+	if fi.Mode().Perm() != expectedMode {
+		t.Errorf("Expected permissions %v, got %v", expectedMode, fi.Mode().Perm())
+	}
+}
+
 func TestBootstrapInterceptor(t *testing.T) {
 	tempDir := t.TempDir()
 	udsPath := filepath.Join(tempDir, "mock-sam-box-interceptor.sock")
