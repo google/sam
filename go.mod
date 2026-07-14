@@ -7,7 +7,7 @@ require (
 	github.com/coreos/go-oidc/v3 v3.19.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/hashicorp/golang-lru/v2 v2.0.7
-	github.com/ipfs/go-cid v0.6.1
+	github.com/ipfs/go-cid v0.6.2
 	github.com/ipfs/go-log/v2 v2.9.2
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/libp2p/go-libp2p v0.48.1-0.20260603104142-e6309a296286
