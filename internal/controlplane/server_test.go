@@ -992,20 +992,15 @@ func TestAdminPanelAndUI(t *testing.T) {
 		t.Error("status response missing bootstrap_tokens")
 	}
 
-	// 3. Query /admin/ UI page -> should succeed and serve the index.html without auth header
+	// 3. Query /admin/ UI page -> should fail with 404 as it is removed
 	resp, err = client.Get(baseURL + "/admin/")
 	if err != nil {
 		t.Fatalf("GET /admin/ failed: %v", err)
 	}
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("expected 200 status for /admin/ UI page, got: %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("expected 404 status for /admin/ UI page, got: %d", resp.StatusCode)
 	}
-	body, _ := io.ReadAll(resp.Body)
 	_ = resp.Body.Close()
-
-	if !strings.Contains(string(body), "<title>SAM Control Plane Admin</title>") {
-		t.Error("UI page does not contain expected HTML title")
-	}
 
 	// 4. Query /policies without token -> should fail with 401
 	resp, err = client.Get(baseURL + "/policies")
@@ -1016,4 +1011,117 @@ func TestAdminPanelAndUI(t *testing.T) {
 		t.Errorf("expected 401 status for unauthenticated GET /policies, got: %d", resp.StatusCode)
 	}
 	_ = resp.Body.Close()
+}
+
+func TestUserStatusAndTenancy(t *testing.T) {
+	issuer, mintToken := startCustomMockOIDC(t)
+	s, store, _ := setupTestServer(t, issuer)
+	defer func() { _ = s.Close() }()
+
+	baseURL := "http://" + s.Addr()
+	client := &http.Client{}
+
+	userA := &storage.User{
+		ID:        "user-a-sub",
+		Email:     "user-a@example.com",
+		Role:      "user",
+		CreatedAt: time.Now(),
+	}
+	userB := &storage.User{
+		ID:        "user-b-sub",
+		Email:     "user-b@example.com",
+		Role:      "user",
+		CreatedAt: time.Now(),
+	}
+	errUserA := store.SaveUser(context.Background(), userA)
+	if errUserA != nil {
+		t.Fatalf("SaveUser A failed: %v", errUserA)
+	}
+	errUserB := store.SaveUser(context.Background(), userB)
+	if errUserB != nil {
+		t.Fatalf("SaveUser B failed: %v", errUserB)
+	}
+
+	nodeA := &storage.EnrolledNode{
+		PeerID:    "peer-node-a",
+		PublicKey: []byte("pubkey-a"),
+		Biscuit:   []byte("dummy-biscuit-a"),
+		Role:      "sam:role:node",
+		OwnerID:   userA.ID,
+	}
+	nodeB := &storage.EnrolledNode{
+		PeerID:    "peer-node-b",
+		PublicKey: []byte("pubkey-b"),
+		Biscuit:   []byte("dummy-biscuit-b"),
+		Role:      "sam:role:node",
+		OwnerID:   userB.ID,
+	}
+	errNodeA := store.EnrollNode(context.Background(), nodeA)
+	if errNodeA != nil {
+		t.Fatalf("EnrollNode A failed: %v", errNodeA)
+	}
+	errNodeB := store.EnrollNode(context.Background(), nodeB)
+	if errNodeB != nil {
+		t.Fatalf("EnrollNode B failed: %v", errNodeB)
+	}
+
+	tokenA := mintToken(map[string]interface{}{
+		"iss":   issuer,
+		"sub":   userA.ID,
+		"email": userA.Email,
+		"aud":   "sam-mesh-audience",
+	})
+
+	req, _ := http.NewRequest("GET", baseURL+"/user/status", nil)
+	req.Header.Set("Authorization", "Bearer "+tokenA)
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("GET /user/status failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got: %d", resp.StatusCode)
+	}
+
+	var data map[string]interface{}
+	_ = json.NewDecoder(resp.Body).Decode(&data)
+	_ = resp.Body.Close()
+
+	enrolledNodes, ok := data["enrolled_nodes"].([]interface{})
+	if !ok {
+		t.Fatal("enrolled_nodes is not an array")
+	}
+	if len(enrolledNodes) != 1 {
+		t.Fatalf("expected 1 node for User A, got: %d", len(enrolledNodes))
+	}
+	nodeMap := enrolledNodes[0].(map[string]interface{})
+	if nodeMap["PeerID"] != "peer-node-a" {
+		t.Errorf("expected node 'peer-node-a', got: %s", nodeMap["PeerID"])
+	}
+
+	reqRevoke, _ := http.NewRequest("POST", baseURL+"/user/revoke?id=peer-node-b", nil)
+	reqRevoke.Header.Set("Authorization", "Bearer "+tokenA)
+	respRevoke, err := client.Do(reqRevoke)
+	if err != nil {
+		t.Fatalf("POST /user/revoke failed: %v", err)
+	}
+	if respRevoke.StatusCode != http.StatusForbidden {
+		t.Errorf("expected 403 Forbidden for revoking someone else's node, got: %d", respRevoke.StatusCode)
+	}
+	_ = respRevoke.Body.Close()
+
+	reqRevokeSelf, _ := http.NewRequest("POST", baseURL+"/user/revoke?id=peer-node-a", nil)
+	reqRevokeSelf.Header.Set("Authorization", "Bearer "+tokenA)
+	respRevokeSelf, err := client.Do(reqRevokeSelf)
+	if err != nil {
+		t.Fatalf("POST /user/revoke self failed: %v", err)
+	}
+	if respRevokeSelf.StatusCode != http.StatusOK {
+		t.Errorf("expected 200 OK for revoking own node, got: %d", respRevokeSelf.StatusCode)
+	}
+	_ = respRevokeSelf.Body.Close()
+
+	nodeAUpdated, _ := store.GetNode(context.Background(), "peer-node-a")
+	if !nodeAUpdated.Banned {
+		t.Error("expected node A to be banned/revoked in DB")
+	}
 }

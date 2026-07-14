@@ -88,10 +88,11 @@ spec:
         - "--bind-address=0.0.0.0:8080"
         - "--db-driver=postgres"
         - "--db-dsn=postgres://sam:sam-secret-password@sam-db:5432/sam_mesh?sslmode=disable"
-        - "--issuer=${ISSUER}"
-        - "--allowed-audiences=sam-mesh-audience,sam-hub-audience"
+        - "--issuer=${CONTROL_PLANE_ISSUERS}"
+        - "--allowed-audiences=${ALLOWED_AUDIENCES}"
         - "--policy-file=/etc/sam/policies/policies.yaml"
         - "--insecure-skip-tls-verify"
+        - "--admin-token=super-secret-admin-token"
         ports:
         - { containerPort: 8080, name: http, protocol: TCP }
         readinessProbe:

@@ -31,6 +31,7 @@ build: $(OUT_DIR)/libinterceptor.so
 	go build -v -o "$(OUT_DIR)/mcp-client" ./cmd/mcp-client
 	go build -v -o "$(OUT_DIR)/nano-init" ./cmd/nano-init
 	go build -v -o "$(OUT_DIR)/sam-box" ./cmd/sam-box
+	go build -v -o "$(OUT_DIR)/sam-console" ./cmd/sam-console
 
 
 .PHONY: mobile-ffi-host mobile-ffi-android mobile-ffi-android-x86_64 mobile-ffi-ios mobile-ffi mobile-app-apk mobile-app-apk-emulator
@@ -182,6 +183,9 @@ docker-build-nano-init:
 docker-build-sam-box:
 	docker build --load -t sam-box:local -f Dockerfile.sam-box .
 
-docker-build: docker-build-control-plane docker-build-router docker-build-node docker-build-mock-oidc docker-build-e2e-runtime docker-build-nano-init docker-build-sam-box
+docker-build-sam-console:
+	docker build --load -t sam-console:local -f Dockerfile.sam-console .
 
-.PHONY: docker-build-control-plane docker-build-router docker-build-node docker-build-mock-oidc docker-build-e2e-runtime docker-build-nano-init docker-build-sam-box docker-build
+docker-build: docker-build-control-plane docker-build-router docker-build-node docker-build-mock-oidc docker-build-e2e-runtime docker-build-nano-init docker-build-sam-box docker-build-sam-console
+
+.PHONY: docker-build-control-plane docker-build-router docker-build-node docker-build-mock-oidc docker-build-e2e-runtime docker-build-nano-init docker-build-sam-box docker-build-sam-console docker-build

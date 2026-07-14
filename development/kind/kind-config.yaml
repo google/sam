@@ -11,6 +11,12 @@ nodes:
       - containerPort: 30401
         hostPort: 4001
         protocol: TCP
+      - containerPort: 30081
+        hostPort: 9092
+        protocol: TCP
+      - containerPort: 30556
+        hostPort: 5556
+        protocol: TCP
   - role: worker
     labels:
       sam-role: hub

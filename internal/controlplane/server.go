@@ -149,7 +149,9 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/admin/enrollments/", s.HandleAdminEnrollmentAction)
 	mux.HandleFunc("/admin/revoke", s.HandleAdminRevoke)
 	mux.HandleFunc("/admin/status", s.HandleAdminStatus)
-	mux.HandleFunc("/admin/", s.HandleAdminUI)
+	mux.HandleFunc("/user/status", s.HandleUserStatus)
+	mux.HandleFunc("/user/bootstrap-tokens", s.HandleUserBootstrapTokens)
+	mux.HandleFunc("/user/revoke", s.HandleUserRevoke)
 
 	s.httpServer = &http.Server{
 		Handler: mux,
@@ -1074,19 +1076,67 @@ func (s *Server) HandleEnrollStatus(w http.ResponseWriter, r *http.Request) {
 	s.writeEnrollResponse(w, resp)
 }
 
-func (s *Server) checkAdminAuth(w http.ResponseWriter, r *http.Request) bool {
-	if s.config.AdminToken == "" {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return false
-	}
+func (s *Server) authenticateUser(r *http.Request) (*storage.User, error) {
 	authHeader := r.Header.Get("Authorization")
 	if !strings.HasPrefix(authHeader, "Bearer ") {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return nil, errors.New("missing or invalid authorization header")
+	}
+	tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
+	if tokenStr == "" {
+		return nil, errors.New("empty authorization token")
+	}
+
+	// 1. Check root admin token backdoor
+	if s.config.AdminToken != "" && tokenStr == s.config.AdminToken {
+		return &storage.User{
+			ID:        "root-admin",
+			Email:     "admin@sam-mesh.local",
+			Role:      "admin",
+			CreatedAt: time.Now(),
+		}, nil
+	}
+
+	// 2. Validate OIDC token
+	ctx := r.Context()
+	claims, _, err := identity.VerifyJWT(ctx, tokenStr, s.config.AllowedAudiences, s.getProviders())
+	if err != nil {
+		return nil, fmt.Errorf("failed to verify OIDC token: %w", err)
+	}
+
+	sub, _ := claims["sub"].(string)
+	if sub == "" {
+		return nil, errors.New("token subject (sub) claim is empty")
+	}
+	email, _ := claims["email"].(string)
+
+	// Fetch or auto-register user
+	user, err := s.store.GetUser(ctx, sub)
+	if err == storage.ErrNotFound {
+		user = &storage.User{
+			ID:        sub,
+			Email:     email,
+			Role:      "user",
+			CreatedAt: time.Now(),
+		}
+		if err := s.store.SaveUser(ctx, user); err != nil {
+			return nil, fmt.Errorf("failed to register user: %w", err)
+		}
+		logger.Infow("Auto-registered new OIDC user", "id", sub, "email", email)
+	} else if err != nil {
+		return nil, fmt.Errorf("failed to get user: %w", err)
+	}
+
+	return user, nil
+}
+
+func (s *Server) checkAdminAuth(w http.ResponseWriter, r *http.Request) bool {
+	user, err := s.authenticateUser(r)
+	if err != nil {
+		http.Error(w, "Unauthorized: "+err.Error(), http.StatusUnauthorized)
 		return false
 	}
-	token := strings.TrimPrefix(authHeader, "Bearer ")
-	if token == "" || token != s.config.AdminToken {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+	if user.Role != "admin" {
+		http.Error(w, "Forbidden: Admin role required", http.StatusForbidden)
 		return false
 	}
 	return true
@@ -1392,4 +1442,205 @@ func (s *Server) buildApprovedBootstrapEnrollResponse(ctx context.Context, biscu
 		HubAddresses: routerAddrs,
 		Expiration:   expiration,
 	}, nil
+}
+
+func (s *Server) HandleUserStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	user, err := s.authenticateUser(r)
+	if err != nil {
+		http.Error(w, "Unauthorized: "+err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	ctx := r.Context()
+	routers, err := s.store.GetActiveRouters(ctx)
+	if err != nil {
+		logger.Errorf("Failed to get active routers: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	nodes := []storage.EnrolledNode{}
+	if user.Role == "admin" {
+		nodes, err = s.store.ListNodes(ctx)
+	} else {
+		allNodes, err := s.store.ListNodes(ctx)
+		if err == nil {
+			for _, n := range allNodes {
+				if n.OwnerID == user.ID {
+					nodes = append(nodes, n)
+				}
+			}
+		}
+	}
+	if err != nil {
+		logger.Errorf("Failed to list nodes: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	tokens := []storage.BootstrapToken{}
+	allTokens, err := s.store.ListBootstrapTokens(ctx)
+	if err == nil {
+		for _, t := range allTokens {
+			if t.OwnerID == user.ID || user.Role == "admin" {
+				tokens = append(tokens, t)
+			}
+		}
+	}
+	if err != nil {
+		logger.Errorf("Failed to list bootstrap tokens: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	var policyYAML string
+	policy, err := s.store.GetPolicy(ctx)
+	if err == nil {
+		yamlData, err := yaml.Marshal(policy)
+		if err == nil {
+			policyYAML = string(yamlData)
+		}
+	}
+
+	resp := map[string]any{
+		"user": map[string]any{
+			"id":    user.ID,
+			"email": user.Email,
+			"role":  user.Role,
+		},
+		"active_routers":   routers,
+		"enrolled_nodes":   nodes,
+		"bootstrap_tokens": tokens,
+		"policy_yaml":      policyYAML,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func (s *Server) HandleUserBootstrapTokens(w http.ResponseWriter, r *http.Request) {
+	user, err := s.authenticateUser(r)
+	if err != nil {
+		http.Error(w, "Unauthorized: "+err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Role        string `json:"role"`
+		TTLHours    int    `json:"ttl_hours"`
+		MaxUsages   int    `json:"max_usages"`
+		Description string `json:"description"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON body", http.StatusBadRequest)
+		return
+	}
+	defer func() { _ = r.Body.Close() }()
+
+	if req.Role == "" {
+		req.Role = api.RoleNode
+	}
+
+	if user.Role != "admin" && req.Role != api.RoleNode && req.Role != api.RoleSamBox {
+		http.Error(w, "Forbidden: Standard users can only generate tokens for node or box roles", http.StatusForbidden)
+		return
+	}
+
+	if req.TTLHours <= 0 {
+		req.TTLHours = 24
+	}
+	if req.MaxUsages <= 0 {
+		req.MaxUsages = 1
+	}
+
+	randBytes := make([]byte, 16)
+	if _, err := rand.Read(randBytes); err != nil {
+		http.Error(w, "Internal keygen error", http.StatusInternalServerError)
+		return
+	}
+	tokenVal := fmt.Sprintf("sam-bt-%x", randBytes)
+	tokenID := fmt.Sprintf("%x", sha256.Sum256([]byte(tokenVal)))
+
+	tokenRecord := &storage.BootstrapToken{
+		ID:          tokenID,
+		TokenHash:   tokenID,
+		Role:        req.Role,
+		OwnerID:     user.ID,
+		MaxUsages:   req.MaxUsages,
+		UsagesCount: 0,
+		Description: req.Description,
+		CreatedAt:   time.Now(),
+		ExpiresAt:   time.Now().Add(time.Duration(req.TTLHours) * time.Hour),
+	}
+
+	if err := s.store.SaveBootstrapToken(r.Context(), tokenRecord); err != nil {
+		logger.Errorf("Failed to save bootstrap token: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"id":         tokenRecord.ID,
+		"token":      tokenVal,
+		"role":       tokenRecord.Role,
+		"expires_at": tokenRecord.ExpiresAt.Format(time.RFC3339),
+	})
+}
+
+func (s *Server) HandleUserRevoke(w http.ResponseWriter, r *http.Request) {
+	user, err := s.authenticateUser(r)
+	if err != nil {
+		http.Error(w, "Unauthorized: "+err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	peerID := r.URL.Query().Get("id")
+	if peerID == "" {
+		http.Error(w, "Missing id parameter", http.StatusBadRequest)
+		return
+	}
+
+	ctx := r.Context()
+	node, err := s.store.GetNode(ctx, peerID)
+	if err == storage.ErrNotFound {
+		http.Error(w, "Node not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		logger.Errorf("Failed to check node owner: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	if node.OwnerID != user.ID && user.Role != "admin" {
+		http.Error(w, "Forbidden: You do not own this node", http.StatusForbidden)
+		return
+	}
+
+	if err := s.store.SetNodeBanned(ctx, peerID, true); err != nil {
+		logger.Errorf("Failed to revoke node: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("Node revoked successfully"))
 }
