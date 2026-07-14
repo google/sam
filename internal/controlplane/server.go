@@ -1100,6 +1100,7 @@ func (s *Server) authenticateUser(r *http.Request) (*storage.User, error) {
 	ctx := r.Context()
 	claims, _, err := identity.VerifyJWT(ctx, tokenStr, s.config.AllowedAudiences, s.getProviders())
 	if err != nil {
+		logger.Errorf("OIDC token verification failed: %v", err)
 		return nil, fmt.Errorf("failed to verify OIDC token: %w", err)
 	}
 

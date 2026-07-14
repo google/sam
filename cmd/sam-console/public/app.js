@@ -77,9 +77,8 @@ window.saveAdminToken = function() {
 }
 
 function getAuthHeaders() {
-    return {
-        'Authorization': 'Bearer ' + getAdminToken()
-    };
+    const token = getAdminToken();
+    return token ? { 'Authorization': 'Bearer ' + token } : {};
 }
 
 async function loadData() {
@@ -166,10 +165,10 @@ function renderUsersTable(users) {
     
     tbody.innerHTML = users.map(user => `
         <tr>
-            <td><code>${user.ID || '-'}</code></td>
-            <td>${user.Role || '-'}</td>
-            <td>${user.Name || '-'}</td>
-            <td>${user.Email || '-'}</td>
+            <td><code>${escapeHTML(user.ID)}</code></td>
+            <td>${escapeHTML(user.Role)}</td>
+            <td>${escapeHTML(user.Name)}</td>
+            <td>${escapeHTML(user.Email)}</td>
         </tr>
     `).join('');
 }
@@ -183,12 +182,12 @@ function renderNodesTable(nodes) {
     
     tbody.innerHTML = nodes.map(node => `
         <tr>
-            <td><code>${node.PeerID || '-'}</code></td>
-            <td>${node.Role || '-'}</td>
-            <td>${node.OwnerID || '-'}</td>
+            <td><code>${escapeHTML(node.PeerID)}</code></td>
+            <td>${escapeHTML(node.Role)}</td>
+            <td>${escapeHTML(node.OwnerID)}</td>
             <td>
                 <div class="actions-cell">
-                    <button class="btn btn-sm btn-danger" onclick="revokeDevice('${node.PeerID}')">Revoke</button>
+                    <button class="btn btn-sm btn-danger" onclick="revokeDevice('${escapeHTML(node.PeerID)}')">Revoke</button>
                 </div>
             </td>
         </tr>
@@ -219,16 +218,16 @@ function renderEnrollmentsTable(reqs) {
         if (isPending) {
             actions = `
                 <div class="actions-cell">
-                    <button class="btn btn-sm btn-success" onclick="approveEnrollment('${req.ID}')">Approve</button>
-                    <button class="btn btn-sm btn-danger" onclick="rejectEnrollment('${req.ID}')">Reject</button>
+                    <button class="btn btn-sm btn-success" onclick="approveEnrollment('${escapeHTML(req.ID)}')">Approve</button>
+                    <button class="btn btn-sm btn-danger" onclick="rejectEnrollment('${escapeHTML(req.ID)}')">Reject</button>
                 </div>
             `;
         }
         return `
         <tr>
-            <td><code>${req.ID || '-'}</code></td>
+            <td><code>${escapeHTML(req.ID)}</code></td>
             <td>${getStatusBadge(req.Status)}</td>
-            <td>${req.CreatedAt || '-'}</td>
+            <td>${escapeHTML(req.CreatedAt)}</td>
             <td>${actions}</td>
         </tr>
         `;
@@ -244,9 +243,9 @@ function renderRoutersTable(routers) {
     
     tbody.innerHTML = routers.map(router => `
         <tr>
-            <td><code>${router.PeerID || '-'}</code></td>
-            <td>${router.Addresses ? router.Addresses.join('<br>') : '-'}</td>
-            <td>${router.ExpiresAt || '-'}</td>
+            <td><code>${escapeHTML(router.PeerID)}</code></td>
+            <td>${router.Addresses ? router.Addresses.map(addr => escapeHTML(addr)).join('<br>') : '-'}</td>
+            <td>${escapeHTML(router.ExpiresAt)}</td>
         </tr>
     `).join('');
 }
@@ -514,3 +513,10 @@ window.savePolicy = async function() {
         alert('Network error: ' + err.message);
     }
 };
+
+function escapeHTML(str) {
+    if (!str) return '-';
+    return String(str).replace(/[&<>'"]/g, 
+        tag => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[tag] || tag)
+    );
+}

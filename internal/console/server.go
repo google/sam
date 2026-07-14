@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/google/sam/api"
@@ -46,7 +47,8 @@ func NewServer(cfg Config) (*Server, error) {
 	var provider *oidc.Provider
 	var clientID string
 
-	resp, err := http.Get(cfg.HubURL + "/info")
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(cfg.HubURL + "/info")
 	if err != nil {
 		return nil, fmt.Errorf("failed to query control-plane info for OIDC discovery: %w", err)
 	}
