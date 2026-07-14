@@ -81,7 +81,7 @@ jobs:
           cp mobile/sam-node-app/android/app/google-services.json.tmpl mobile/sam-node-app/android/app/google-services.json
         fi
     - name: Run E2E Integration Test in Android Emulator
-      uses: ReactiveCircus/android-emulator-runner@eaf4c246b5ce90db0e68560f6443978a636797aa # v2.30.0
+      uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
       with:
         api-level: 30
         target: google_apis
