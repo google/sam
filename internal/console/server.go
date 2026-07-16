@@ -166,7 +166,7 @@ func (s *Server) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		MaxAge:   300,
 		HttpOnly: true,
-		Secure:   false,
+		Secure:   scheme == "https",
 		SameSite: http.SameSiteLaxMode,
 	})
 
@@ -176,7 +176,7 @@ func (s *Server) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		MaxAge:   300,
 		HttpOnly: true,
-		Secure:   false,
+		Secure:   scheme == "https",
 		SameSite: http.SameSiteLaxMode,
 	})
 
@@ -250,7 +250,7 @@ func (s *Server) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		MaxAge:   24 * 3600,
 		HttpOnly: true,
-		Secure:   false,
+		Secure:   scheme == "https",
 		SameSite: http.SameSiteLaxMode,
 	})
 

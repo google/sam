@@ -40,7 +40,7 @@ teardown() {
   [[ "$output" == *"<title>SAM Console</title>"* ]]
 
   # Test proxy to control plane /admin/status (mapped under /api/)
-  run docker run --rm --network "${MESH_NETWORK}" curlimages/curl -s -f "http://${console_name}:8081/api/admin/status"
+  run docker run --rm --network "${MESH_NETWORK}" curlimages/curl -s -f -H "Authorization: Bearer super-secret-admin-token" "http://${console_name}:8081/api/admin/status"
   [[ "$status" -eq 0 ]]
   [[ "$output" == *"active_routers"* ]]
 }

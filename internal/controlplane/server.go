@@ -19,6 +19,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/hex"
@@ -1087,13 +1088,17 @@ func (s *Server) authenticateUser(r *http.Request) (*storage.User, error) {
 	}
 
 	// 1. Check root admin token backdoor
-	if s.config.AdminToken != "" && tokenStr == s.config.AdminToken {
-		return &storage.User{
-			ID:        "root-admin",
-			Email:     "admin@sam-mesh.local",
-			Role:      "admin",
-			CreatedAt: time.Now(),
-		}, nil
+	if s.config.AdminToken != "" {
+		tokenHash := sha256.Sum256([]byte(tokenStr))
+		adminHash := sha256.Sum256([]byte(s.config.AdminToken))
+		if subtle.ConstantTimeCompare(tokenHash[:], adminHash[:]) == 1 {
+			return &storage.User{
+				ID:        "root-admin",
+				Email:     "admin@sam-mesh.local",
+				Role:      "admin",
+				CreatedAt: time.Now(),
+			}, nil
+		}
 	}
 
 	// 2. Validate OIDC token
