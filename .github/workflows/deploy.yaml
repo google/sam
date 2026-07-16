@@ -147,6 +147,28 @@ jobs:
         tags: ${{ steps.meta-sambox.outputs.tags }}
         labels: ${{ steps.meta-sambox.outputs.labels }}
 
+    - name: Extract metadata for sam-console
+      id: meta-console
+      uses: docker/metadata-action@v6
+      with:
+        images: ${{ env.REGISTRY }}/google/sam-console
+        tags: |
+          type=ref,event=branch
+          type=ref,event=tag
+          type=raw,value=${{ github.sha }}
+          type=raw,value=latest,enable={{is_default_branch}}
+          type=raw,value=stable,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+
+    - name: Build and push sam-console image
+      uses: docker/build-push-action@v7
+      with:
+        context: .
+        file: Dockerfile.sam-console
+        platforms: ${{ github.ref_type == 'tag' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
+        push: true
+        tags: ${{ steps.meta-console.outputs.tags }}
+        labels: ${{ steps.meta-console.outputs.labels }}
+
   deploy:
     name: Deploy to GKE
     runs-on: ubuntu-latest
@@ -316,11 +338,18 @@ jobs:
 
           envsubst '${ENV_NAME} ${NAMESPACE} ${GCP_PROJECT_ID} ${CLUSTER_NAME} ${CLUSTER_REGION} ${IMAGE_TAG}' < .github/k8s/sam-control-plane-template.yaml | kubectl apply -f -
           envsubst '${ENV_NAME} ${NAMESPACE} ${GCP_PROJECT_ID} ${CLUSTER_NAME} ${CLUSTER_REGION} ${IMAGE_TAG}' < .github/k8s/sam-router-template.yaml | kubectl apply -f -
+          envsubst '${ENV_NAME} ${NAMESPACE} ${GCP_PROJECT_ID} ${CLUSTER_NAME} ${CLUSTER_REGION} ${IMAGE_TAG}' < .github/k8s/sam-console-template.yaml | kubectl apply -f -
           envsubst '${ENV_NAME} ${NAMESPACE} ${GCP_PROJECT_ID}' < .github/k8s/dns-sync-cronjob-template.yaml | kubectl apply -f -
           
           kubectl rollout status deployment/sam-control-plane-${ENV_NAME} -n ${NAMESPACE} --timeout=120s || {
             echo "Control Plane Deployment failed!"
             print_rollout_diagnostics "${NAMESPACE}" "deployment/sam-control-plane-${ENV_NAME}" "app=sam-control-plane-${ENV_NAME}"
+            exit 1
+          }
+
+          kubectl rollout status deployment/sam-console-${ENV_NAME} -n ${NAMESPACE} --timeout=120s || {
+            echo "Console Deployment failed!"
+            print_rollout_diagnostics "${NAMESPACE}" "deployment/sam-console-${ENV_NAME}" "app=sam-console-${ENV_NAME}"
             exit 1
           }
 

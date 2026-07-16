@@ -29,7 +29,7 @@ spec:
     spec:
       containers:
       - name: sam-console
-        image: ${IMAGE_PREFIX}sam-console:${TAG}
+        image: ghcr.io/google/sam-console:${IMAGE_TAG}
         imagePullPolicy: IfNotPresent
         args:
         - "--hub=http://sam-control-plane-${ENV_NAME}:8080"
@@ -40,8 +40,8 @@ spec:
         - name: SAM_ADMIN_TOKEN
           valueFrom:
             secretKeyRef:
-              name: sam-admin-token
-              key: token
+              name: sam-control-plane-secret-${ENV_NAME}
+              key: admin-token
         ports:
         - containerPort: 8081
         resources:
