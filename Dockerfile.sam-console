@@ -1,0 +1,17 @@
+FROM golang:1.26.4-alpine AS builder
+
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+RUN CGO_ENABLED=0 go build -o /bin/sam-console ./cmd/sam-console
+
+FROM gcr.io/distroless/static-debian12
+
+WORKDIR /app
+COPY --from=builder /bin/sam-console /usr/local/bin/sam-console
+COPY cmd/sam-console/public /app/public
+
+EXPOSE 8081
+ENTRYPOINT ["/usr/local/bin/sam-console"]

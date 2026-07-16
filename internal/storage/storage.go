@@ -44,6 +44,14 @@ type RouterLease struct {
 	DHTSize        int
 }
 
+// User represents a human identity in the mesh.
+type User struct {
+	ID        string
+	Email     string
+	Role      string
+	CreatedAt time.Time
+}
+
 // EnrolledNode represents a node enrolled in the mesh.
 type EnrolledNode struct {
 	PeerID         string
@@ -52,6 +60,7 @@ type EnrolledNode struct {
 	Role           string
 	EnrollmentType string
 	ClaimsJSON     string
+	OwnerID        string
 	EnrolledAt     time.Time
 	ExpiresAt      time.Time
 	Banned         bool
@@ -62,6 +71,7 @@ type BootstrapToken struct {
 	ID          string
 	TokenHash   string
 	Role        string
+	OwnerID     string
 	MaxUsages   int
 	UsagesCount int
 	Description string
@@ -95,6 +105,15 @@ type Store interface {
 
 	// SaveInitialKey sets the initial key pair if no keys exist yet.
 	SaveInitialKey(ctx context.Context, priv ed25519.PrivateKey, pub ed25519.PublicKey) error
+
+	// SaveUser creates or updates a User.
+	SaveUser(ctx context.Context, user *User) error
+
+	// GetUser retrieves a User by ID.
+	GetUser(ctx context.Context, id string) (*User, error)
+
+	// ListUsers retrieves all registered users.
+	ListUsers(ctx context.Context) ([]User, error)
 
 	// EnrollNode registers or updates a node enrollment.
 	EnrollNode(ctx context.Context, node *EnrolledNode) error

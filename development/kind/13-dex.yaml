@@ -1,0 +1,76 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dex-config
+  namespace: ${NAMESPACE}
+data:
+  config.yaml: |
+    issuer: http://dex:5556/dex
+    storage:
+      type: memory
+    web:
+      http: 0.0.0.0:5556
+    oauth2:
+      skipApprovalScreen: true
+    staticClients:
+    - id: sam-console
+      redirectURIs:
+      - http://localhost:9092/auth/callback
+      - http://127.0.0.1:9092/auth/callback
+      name: 'SAM Console'
+      public: true
+    enablePasswordDB: true
+    staticPasswords:
+    - email: admin@example.com
+      # bcrypt hash for 'password'
+      hash: "$2a$10$TUOgJVdtu0AL6Y6TcNBQXOSjRWRKhIkC0kXDzN9kOkPB4hg2aFPE2"
+      username: admin
+      userID: "0898fa90-3453-4311-8566-020953250212"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dex
+  namespace: ${NAMESPACE}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dex
+  template:
+    metadata:
+      labels:
+        app: dex
+    spec:
+      containers:
+      - name: dex
+        image: ghcr.io/dexidp/dex:v2.41.1
+        args:
+        - dex
+        - serve
+        - /etc/dex/cfg/config.yaml
+        ports:
+        - containerPort: 5556
+          name: http
+        volumeMounts:
+        - name: config
+          mountPath: /etc/dex/cfg
+      volumes:
+      - name: config
+        configMap:
+          name: dex-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dex
+  namespace: ${NAMESPACE}
+spec:
+  type: NodePort
+  selector:
+    app: dex
+  ports:
+  - name: http
+    port: 5556
+    targetPort: 5556
+    nodePort: 30556

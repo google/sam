@@ -107,20 +107,36 @@ echo "== Creating kind cluster '${CLUSTER}' =="
 kind create cluster --name "${CLUSTER}" --config "${SCRIPT_DIR}/kind-config.yaml"
 
 echo "== Building sam images =="
-make docker-build-control-plane docker-build-router docker-build-node
+make docker-build-control-plane docker-build-router docker-build-node docker-build-sam-console
 echo "== Loading sam images into kind =="
-kind load docker-image --name "${CLUSTER}" "sam-control-plane:${IMAGE_TAG}" "sam-router:${IMAGE_TAG}" "sam-node:${IMAGE_TAG}"
+kind load docker-image --name "${CLUSTER}" "sam-control-plane:${IMAGE_TAG}" "sam-router:${IMAGE_TAG}" "sam-node:${IMAGE_TAG}" "sam-console:${IMAGE_TAG}"
 
 read_mesh_nodes
 
 # Apply the control plane and router, and wait until they accept connections
 ISSUER="$(kubectl --context "${KCTX}" get --raw /.well-known/openid-configuration | jq -r .issuer)"
 [[ -n "$ISSUER" ]] || { echo "could not determine cluster OIDC issuer" >&2; exit 1; }
-export NAMESPACE ISSUER IMAGE_TAG
 
-echo "== Applying control plane and router (issuer: ${ISSUER}) =="
-for f in "${SCRIPT_DIR}"/00-*.yaml "${SCRIPT_DIR}"/10-*.yaml "${SCRIPT_DIR}"/11-*.yaml; do
-  envsubst '${NAMESPACE} ${ISSUER} ${IMAGE_TAG}' < "$f" | kubectl --context "${KCTX}" apply -f -
+OIDC_ISSUER="${OIDC_ISSUER:-http://dex:5556/dex}"
+OIDC_CLIENT_ID="${OIDC_CLIENT_ID:-sam-console}"
+OIDC_CLIENT_SECRET="${OIDC_CLIENT_SECRET:-}"
+OIDC_REDIRECT_URL="${OIDC_REDIRECT_URL:-}"
+
+CONTROL_PLANE_ISSUERS="${ISSUER}"
+if [[ -n "${OIDC_ISSUER}" ]]; then
+  CONTROL_PLANE_ISSUERS="${OIDC_ISSUER},${ISSUER}"
+fi
+
+ALLOWED_AUDIENCES="sam-mesh-audience,sam-hub-audience"
+if [[ -n "${OIDC_CLIENT_ID}" ]]; then
+  ALLOWED_AUDIENCES="${OIDC_CLIENT_ID},${ALLOWED_AUDIENCES}"
+fi
+
+export NAMESPACE ISSUER IMAGE_TAG OIDC_ISSUER OIDC_CLIENT_ID OIDC_CLIENT_SECRET OIDC_REDIRECT_URL CONTROL_PLANE_ISSUERS ALLOWED_AUDIENCES
+
+echo "== Applying control plane and router (issuer: ${CONTROL_PLANE_ISSUERS}) =="
+for f in "${SCRIPT_DIR}"/00-*.yaml "${SCRIPT_DIR}"/10-*.yaml "${SCRIPT_DIR}"/11-*.yaml "${SCRIPT_DIR}"/12-*.yaml "${SCRIPT_DIR}"/13-*.yaml; do
+  envsubst '${NAMESPACE} ${ISSUER} ${IMAGE_TAG} ${OIDC_ISSUER} ${OIDC_CLIENT_ID} ${OIDC_CLIENT_SECRET} ${OIDC_REDIRECT_URL} ${CONTROL_PLANE_ISSUERS} ${ALLOWED_AUDIENCES}' < "$f" | kubectl --context "${KCTX}" apply -f -
 done
 
 echo "== Waiting for database to be ready =="
@@ -129,6 +145,10 @@ echo "== Waiting for control plane to be ready =="
 kubectl --context "${KCTX}" -n "${NAMESPACE}" wait --for=condition=available --timeout=180s deployment/sam-control-plane
 echo "== Waiting for router to be ready =="
 kubectl --context "${KCTX}" -n "${NAMESPACE}" wait --for=condition=ready --timeout=180s pod -l app=sam-router
+echo "== Waiting for console to be ready =="
+kubectl --context "${KCTX}" -n "${NAMESPACE}" wait --for=condition=available --timeout=180s deployment/sam-console
+echo "== Waiting for Dex to be ready =="
+kubectl --context "${KCTX}" -n "${NAMESPACE}" wait --for=condition=available --timeout=180s deployment/dex
 
 echo "== Applying sam-nodes =="
 for line in "${NODE_LINES[@]}"; do
@@ -146,6 +166,9 @@ echo "Mesh up. To call a node's MCP API, port-forward it in another shell, e.g.:
 echo "  kubectl --context ${KCTX} -n ${NAMESPACE} port-forward deploy/node-a 9091:8080"
 echo "then:"
 echo "  ./bin/mcp-client -url http://127.0.0.1:9091/mcp -token devtoken -tool find_remote_tools -args '{}'"
+echo ""
+echo "You can access the SAM Web Console at:"
+echo "  http://localhost:9092/"
 
 if [[ "${1:-}" != "-s" ]]; then
   show_cluster_logs

@@ -1,0 +1,53 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: sam-console-${ENV_NAME}
+  namespace: ${NAMESPACE}
+spec:
+  ports:
+    - port: 8081
+      targetPort: 8081
+      protocol: TCP
+      name: http
+  selector:
+    app: sam-console-${ENV_NAME}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sam-console-${ENV_NAME}
+  namespace: ${NAMESPACE}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sam-console-${ENV_NAME}
+  template:
+    metadata:
+      labels:
+        app: sam-console-${ENV_NAME}
+    spec:
+      containers:
+      - name: sam-console
+        image: ${IMAGE_PREFIX}sam-console:${TAG}
+        imagePullPolicy: IfNotPresent
+        args:
+        - "--hub=http://sam-control-plane-${ENV_NAME}:8080"
+        - "--bind-addr=:8081"
+        - "--static-dir=/app/public"
+        - "--admin-token=$(SAM_ADMIN_TOKEN)"
+        env:
+        - name: SAM_ADMIN_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: sam-admin-token
+              key: token
+        ports:
+        - containerPort: 8081
+        resources:
+          requests:
+            cpu: 10m
+            memory: 32Mi
+          limits:
+            cpu: 100m
+            memory: 128Mi

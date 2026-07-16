@@ -1,0 +1,50 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: sam-console
+  namespace: ${NAMESPACE}
+spec:
+  type: ClusterIP
+  selector:
+    app: sam-console
+  ports:
+  - { name: http, port: 80, targetPort: 8081, protocol: TCP }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sam-console-nodeport
+  namespace: ${NAMESPACE}
+spec:
+  type: NodePort
+  selector:
+    app: sam-console
+  ports:
+  - { name: http, port: 8081, targetPort: 8081, nodePort: 30081, protocol: TCP }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sam-console
+  namespace: ${NAMESPACE}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sam-console
+  template:
+    metadata:
+      labels:
+        app: sam-console
+    spec:
+      containers:
+      - name: sam-console
+        image: sam-console:${IMAGE_TAG}
+        imagePullPolicy: IfNotPresent
+        args:
+        - "--hub=http://sam-control-plane:8080"
+        - "--bind-addr=:8081"
+        - "--static-dir=/app/public"
+        - "--admin-token=super-secret-admin-token"
+        ports:
+        - { containerPort: 8081, name: http, protocol: TCP }

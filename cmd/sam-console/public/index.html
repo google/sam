@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SAM Console</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Landing Page Overlay -->
+    <div id="landing-page" class="landing-overlay active">
+        <div class="landing-content glass-panel">
+            <div class="logo">
+                <div class="logo-icon"></div>
+                <h2>SAM Mesh</h2>
+            </div>
+            <p class="subtitle">Securely manage your global mesh network.</p>
+            
+            <div class="auth-buttons" id="sso-login-group" style="display: none; margin-bottom: 24px;">
+                <p style="text-align: left; font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 8px;">Interactive Single Sign-On</p>
+                <button class="btn btn-primary" onclick="redirectToSSO()" style="width: 100%;">
+                    Log In with OIDC (Redirect)
+                </button>
+                <div class="divider" style="margin: 1.5rem 0;"><span>or use manual tokens</span></div>
+            </div>
+
+            <div class="auth-buttons">
+                <p style="text-align: left; font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 8px;">Sign In via OIDC Token</p>
+                <div class="input-group">
+                    <input type="password" id="oidc-token-input" placeholder="OIDC JWT Token">
+                </div>
+                <button class="btn btn-primary" onclick="loginOIDC()" style="width: 100%; margin-top: 12px; margin-bottom: 24px;">
+                    Sign In with Token
+                </button>
+            </div>
+            
+            <div class="divider">
+                <span>Admin</span>
+            </div>
+            
+            <div class="admin-login-section">
+                <p>Root Access via Token</p>
+                <div class="input-group">
+                    <input type="password" id="admin-token-input" placeholder="Bearer Token">
+                </div>
+                <button class="btn btn-primary" onclick="saveAdminToken()" style="width: 100%; margin-top: 16px;">
+                    Login as Admin
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Dashboard Application -->
+    <div class="app-container" id="app-container" style="display: none;">
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo"></div>
+                <h2>SAM Console</h2>
+            </div>
+            <nav class="sidebar-nav">
+                <a href="#" class="nav-item active" data-target="overview">
+                    <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+                    Overview
+                </a>
+                <a href="#" class="nav-item" data-target="users">
+                    <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+                    Users
+                </a>
+                <a href="#" class="nav-item" data-target="nodes">
+                    <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+                    Nodes
+                </a>
+                <a href="#" class="nav-item" data-target="enrollments">
+                    <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+                    Enrollments
+                </a>
+                <a href="#" class="nav-item" data-target="routers">
+                    <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none"><path d="M2 12h20"></path><path d="M12 2v20"></path><rect x="2" y="2" width="20" height="20" rx="2" ry="2"></rect></svg>
+                    Routers
+                </a>
+                <a href="#" class="nav-item" data-target="bootstrap">
+                    <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+                    Bootstrap Tokens
+                </a>
+                <a href="#" class="nav-item" data-target="policy">
+                    <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+                    Mesh Policy
+                </a>
+            </nav>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="main-content">
+            <header class="topbar">
+                <div class="search-bar">
+                    <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                    <input type="text" placeholder="Search resources...">
+                </div>
+                <div class="user-profile">
+                    <div class="avatar">A</div>
+                    <span>Admin</span>
+                    <button class="btn btn-sm btn-secondary" onclick="logout()" style="margin-left: 12px; padding: 4px 8px; font-size: 0.8rem; background: var(--border-color); border: 1px solid var(--border-color);">Logout</button>
+                </div>
+            </header>
+
+            <div class="content-scroll">
+                <!-- Overview View -->
+                <section id="view-overview" class="view-section active">
+                    <div class="header-banner">
+                        <h1>Network Overview</h1>
+                        <p>Real-time statistics for your zero-trust mesh.</p>
+                        <button class="btn btn-primary" onclick="loadData()">
+                            <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+                            Refresh
+                        </button>
+                    </div>
+
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-title">Active Users</div>
+                            <div class="stat-value" id="stat-users">0</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-title">Enrolled Nodes</div>
+                            <div class="stat-value" id="stat-nodes">0</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-title">Active Routers</div>
+                            <div class="stat-value" id="stat-routers">0</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-title">Pending Enrollments</div>
+                            <div class="stat-value" id="stat-pending">0</div>
+                        </div>
+                    </div>
+
+                    <div class="section-header" style="margin-top: 2rem;">
+                        <h2>Network Topography</h2>
+                    </div>
+                    <div id="router-topography-list" class="router-cards-grid">
+                        <div class="text-center" style="grid-column: 1/-1; padding: 2rem; color: var(--text-secondary);">Loading topography...</div>
+                    </div>
+                </section>
+
+                <!-- Users View -->
+                <section id="view-users" class="view-section">
+                    <div class="section-header">
+                        <h2>Users</h2>
+                    </div>
+                    <div class="card">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Subject (OIDC)</th>
+                                    <th>Name</th>
+                                    <th>Email</th>
+                                </tr>
+                            </thead>
+                            <tbody id="table-users">
+                                <tr><td colspan="4" class="text-center">Loading...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <!-- Nodes View -->
+                <section id="view-nodes" class="view-section">
+                    <div class="section-header">
+                        <h2>Enrolled Nodes</h2>
+                    </div>
+                    <div class="card">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Node ID</th>
+                                    <th>Type</th>
+                                    <th>Owner</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="table-nodes">
+                                <tr><td colspan="4" class="text-center">Loading...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <!-- Enrollments View -->
+                <section id="view-enrollments" class="view-section">
+                    <div class="section-header">
+                        <h2>Enrollment Requests</h2>
+                    </div>
+                    <div class="card">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Request ID</th>
+                                    <th>Status</th>
+                                    <th>Created At</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="table-enrollments">
+                                <tr><td colspan="4" class="text-center">Loading...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <!-- Routers View -->
+                <section id="view-routers" class="view-section">
+                    <div class="section-header">
+                        <h2>Active Routers (Leases)</h2>
+                    </div>
+                    <div class="card">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Router ID</th>
+                                    <th>Endpoint</th>
+                                    <th>Lease Expires</th>
+                                </tr>
+                            </thead>
+                            <tbody id="table-routers">
+                                <tr><td colspan="3" class="text-center">Loading...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <!-- Bootstrap Tokens View -->
+                <section id="view-bootstrap" class="view-section">
+                    <div class="section-header">
+                        <h2>Bootstrap Tokens</h2>
+                    </div>
+                    <div class="card" style="margin-bottom: 2rem; padding: 2rem;">
+                        <h3>Generate Bootstrap Token</h3>
+                        <form id="form-generate-token" onsubmit="event.preventDefault(); generateBootstrapToken();" style="display: grid; gap: 1rem; max-width: 500px; margin-top: 1rem;">
+                            <div class="input-group" style="display: flex; flex-direction: column; gap: 4px;">
+                                <label for="token-role" style="font-size: 0.85rem; color: var(--text-secondary);">Role</label>
+                                <select id="token-role" class="form-control" style="background: rgba(0,0,0,0.2); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 4px; padding: 8px;">
+                                    <option value="sam:role:node">Node (sam:role:node)</option>
+                                    <option value="sam:role:router">Router (sam:role:router)</option>
+                                    <option value="sam:role:sambox">Box (sam:role:sambox)</option>
+                                </select>
+                            </div>
+                            <div class="input-group" style="display: flex; flex-direction: column; gap: 4px;">
+                                <label for="token-owner" style="font-size: 0.85rem; color: var(--text-secondary);">Owner ID</label>
+                                <input type="text" id="token-owner" placeholder="e.g. system:serviceaccount:sam-kind:node-a-sa" style="background: rgba(0,0,0,0.2); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 4px; padding: 8px;" required>
+                            </div>
+                            <div class="input-group" style="display: flex; flex-direction: column; gap: 4px;">
+                                <label for="token-usages" style="font-size: 0.85rem; color: var(--text-secondary);">Max Usages</label>
+                                <input type="number" id="token-usages" value="1" min="1" style="background: rgba(0,0,0,0.2); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 4px; padding: 8px;" required>
+                            </div>
+                            <div class="input-group" style="display: flex; flex-direction: column; gap: 4px;">
+                                <label for="token-desc" style="font-size: 0.85rem; color: var(--text-secondary);">Description</label>
+                                <input type="text" id="token-desc" placeholder="Token purpose" style="background: rgba(0,0,0,0.2); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 4px; padding: 8px;">
+                            </div>
+                            <button type="submit" class="btn btn-primary" style="margin-top: 12px; max-width: 200px;">Generate Token</button>
+                        </form>
+                    </div>
+                    <div class="card">
+                        <h3>Active Tokens</h3>
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Role</th>
+                                    <th>Owner</th>
+                                    <th>Usages</th>
+                                    <th>Expires</th>
+                                </tr>
+                            </thead>
+                            <tbody id="table-bootstrap">
+                                <tr><td colspan="5" class="text-center">Loading...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <!-- Mesh Policy View -->
+                <section id="view-policy" class="view-section">
+                    <div class="section-header">
+                        <h2>Mesh Security Policies</h2>
+                    </div>
+                    <div class="card" style="padding: 2rem;">
+                        <textarea id="policy-yaml" style="width: 100%; height: 450px; font-family: monospace; background: rgba(0,0,0,0.2); color: #a5a1b8; border: 1px solid var(--border-color); border-radius: 0.5rem; padding: 1rem; margin-bottom: 1.5rem;" placeholder="# Loading policies..."></textarea>
+                        <button class="btn btn-primary" onclick="savePolicy()">Save & Apply Policy</button>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+    <script src="app.js"></script>
+</body>
+</html>
