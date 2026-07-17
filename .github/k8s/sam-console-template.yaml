@@ -36,6 +36,7 @@ spec:
         - "--bind-addr=:8081"
         - "--static-dir=/app/public"
         - "--admin-token=$(SAM_ADMIN_TOKEN)"
+        - "--base-path=/console"
         env:
         - name: SAM_ADMIN_TOKEN
           valueFrom:

@@ -260,3 +260,27 @@ spec:
     backendRefs:
     - name: sam-control-plane-${ENV_NAME}
       port: 8080
+  - matches:
+    - path:
+        type: Exact
+        value: /console
+    filters:
+    - type: RequestRedirect
+      requestRedirect:
+        path:
+          type: ReplaceFullPath
+          replaceFullPath: /console/
+        statusCode: 302
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /console/
+    filters:
+    - type: URLRewrite
+      urlRewrite:
+        path:
+          type: ReplacePrefixMatch
+          replacePrefixMatch: /
+    backendRefs:
+    - name: sam-console-${ENV_NAME}
+      port: 8081

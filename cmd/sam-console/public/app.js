@@ -26,7 +26,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 async function checkAuthAndLoad() {
     try {
-        const infoResp = await fetch('/console/info');
+        const infoResp = await fetch('info');
         if (infoResp.ok) {
             const info = await infoResp.json();
             const ssoGroup = document.getElementById('sso-login-group');
@@ -49,7 +49,7 @@ async function checkAuthAndLoad() {
 }
 
 window.redirectToSSO = function() {
-    window.location.href = '/auth/login';
+    window.location.href = 'auth/login';
 };
 
 window.loginOIDC = function() {
@@ -84,7 +84,7 @@ function getAuthHeaders() {
 async function loadData() {
     try {
         // 1. Fetch user-scoped status
-        const response = await fetch('/api/user/status', {
+        const response = await fetch('api/user/status', {
             headers: getAuthHeaders()
         });
         if (response.status === 401 || response.status === 403) {
@@ -106,7 +106,7 @@ async function loadData() {
 
         // 2. If user is admin, fetch full unfiltered admin status
         if (role === 'admin') {
-            const adminResp = await fetch('/api/admin/status', {
+            const adminResp = await fetch('api/admin/status', {
                 headers: getAuthHeaders()
             });
             if (adminResp.ok) {
@@ -289,25 +289,25 @@ async function actionRequest(url, method = 'POST', body = null) {
 
 function approveEnrollment(id) {
     if (confirm('Are you sure you want to approve this enrollment?')) {
-        actionRequest(`/api/admin/enrollments/${id}/approve`);
+        actionRequest(`api/admin/enrollments/${id}/approve`);
     }
 }
 
 function rejectEnrollment(id) {
     if (confirm('Are you sure you want to reject this enrollment?')) {
-        actionRequest(`/api/admin/enrollments/${id}/reject`);
+        actionRequest(`api/admin/enrollments/${id}/reject`);
     }
 }
 
 function revokeDevice(id) {
     if (confirm('Are you sure you want to revoke this device? This will terminate its connection.')) {
-        actionRequest(`/api/user/revoke?id=${id}`);
+        actionRequest(`api/user/revoke?id=${id}`);
     }
 }
 
 window.logout = function() {
     localStorage.removeItem('sam_admin_token');
-    window.location.href = '/auth/logout';
+    window.location.href = 'auth/logout';
 };
 
 function updateUIForRole(role, userId) {
@@ -461,7 +461,7 @@ window.generateBootstrapToken = async function() {
     };
 
     try {
-        const res = await actionRequest('/api/user/bootstrap-tokens', 'POST', payload);
+        const res = await actionRequest('api/user/bootstrap-tokens', 'POST', payload);
         if (res && res.token) {
             alert('Bootstrap Token Generated Successfully!\n\nToken: ' + res.token + '\n\nCopy this token now. It will not be shown again.');
             document.getElementById('form-generate-token').reset();
@@ -497,7 +497,7 @@ window.savePolicy = async function() {
     headers['Content-Type'] = 'application/x-protobuf';
 
     try {
-        const response = await fetch('/api/policies', {
+        const response = await fetch('api/policies', {
             method: 'POST',
             headers: headers,
             body: pbBytes
