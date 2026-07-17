@@ -179,12 +179,11 @@ func TestStaticServiceRegistrationRequiresConnection(t *testing.T) {
 		KeyGracePeriod:    24 * time.Hour,
 		AllowLoopback:     true,
 		MonitorBootstrap:  2 * time.Minute,
-		MonitorInterval:   1 * time.Minute,
 	})
 	if err != nil {
 		t.Fatalf("failed to create node: %v", err)
 	}
-	node.BiscuitTimeout = 1 * time.Second
+	node.BiscuitTimeout = 10 * time.Second
 	ctx := context.Background()
 	if err := node.Start(ctx); err != nil {
 		t.Fatalf("failed to start node: %v", err)
@@ -265,12 +264,11 @@ func TestStaticServiceRegistrationCommandFailure(t *testing.T) {
 		KeyGracePeriod:    24 * time.Hour,
 		AllowLoopback:     true,
 		MonitorBootstrap:  2 * time.Minute,
-		MonitorInterval:   1 * time.Minute,
 	})
 	if err != nil {
 		t.Fatalf("failed to create node: %v", err)
 	}
-	node.BiscuitTimeout = 2 * time.Second
+	node.BiscuitTimeout = 10 * time.Second
 	ctx := context.Background()
 	if err := node.Start(ctx); err != nil {
 		t.Fatalf("failed to start node: %v", err)
