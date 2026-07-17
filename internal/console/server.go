@@ -121,7 +121,7 @@ func NewServer(cfg Config) (*Server, error) {
 		s.mux.HandleFunc("/auth/session", s.HandleSession)
 	}
 	s.mux.HandleFunc("/auth/logout", s.HandleLogout)
-	s.mux.HandleFunc("/console/info", s.HandleInfo)
+	s.mux.HandleFunc("/info", s.HandleInfo)
 
 	return s, nil
 }

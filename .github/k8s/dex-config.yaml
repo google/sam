@@ -52,6 +52,8 @@ data:
       - 'http://127.0.0.1:13002/callback'
       - 'http://127.0.0.1/callback'
       - 'http://localhost/callback'
+      - 'https://bananas.sam-mesh.dev/console/auth/callback'
+      - 'https://hub.sam-mesh.dev/console/auth/callback'
       - 'https://auth.sam-mesh.dev/device/callback'
       - 'urn:ietf:wg:oauth:2.0:oob'
       - '/device/callback'
