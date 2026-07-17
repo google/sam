@@ -63,7 +63,12 @@ window.loginOIDC = function() {
 };
 
 function getAdminToken() {
-    return localStorage.getItem('sam_admin_token') || '';
+    let token = localStorage.getItem('sam_admin_token') || '';
+    token = token.trim();
+    if (token.toLowerCase().startsWith('bearer ')) {
+        token = token.substring(7).trim();
+    }
+    return token;
 }
 
 window.saveAdminToken = function() {
