@@ -25,6 +25,7 @@ type Config struct {
 	HubURL     string
 	AdminToken string
 	StaticDir  string
+	BasePath   string
 }
 
 type Server struct {
@@ -134,10 +135,10 @@ func (s *Server) HandleLogout(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{
 		Name:   "sam_session",
 		Value:  "",
-		Path:   "/",
+		Path:   s.cfg.BasePath + "/",
 		MaxAge: -1,
 	})
-	http.Redirect(w, r, "/", http.StatusFound)
+	http.Redirect(w, r, s.cfg.BasePath+"/", http.StatusFound)
 }
 
 func (s *Server) HandleLogin(w http.ResponseWriter, r *http.Request) {
@@ -145,7 +146,7 @@ func (s *Server) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
 		scheme = "https"
 	}
-	redirectURI := fmt.Sprintf("%s://%s/auth/callback", scheme, r.Host)
+	redirectURI := fmt.Sprintf("%s://%s%s/auth/callback", scheme, r.Host, s.cfg.BasePath)
 
 	verifier, challenge, err := generatePKCE()
 	if err != nil {
@@ -163,7 +164,7 @@ func (s *Server) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     "sam_oidc_state",
 		Value:    state,
-		Path:     "/",
+		Path:     s.cfg.BasePath + "/",
 		MaxAge:   300,
 		HttpOnly: true,
 		Secure:   scheme == "https",
@@ -173,7 +174,7 @@ func (s *Server) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     "sam_oidc_verifier",
 		Value:    verifier,
-		Path:     "/",
+		Path:     s.cfg.BasePath + "/",
 		MaxAge:   300,
 		HttpOnly: true,
 		Secure:   scheme == "https",
@@ -208,8 +209,8 @@ func (s *Server) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	http.SetCookie(w, &http.Cookie{Name: "sam_oidc_state", Value: "", Path: "/", MaxAge: -1})
-	http.SetCookie(w, &http.Cookie{Name: "sam_oidc_verifier", Value: "", Path: "/", MaxAge: -1})
+	http.SetCookie(w, &http.Cookie{Name: "sam_oidc_state", Value: "", Path: s.cfg.BasePath + "/", MaxAge: -1})
+	http.SetCookie(w, &http.Cookie{Name: "sam_oidc_verifier", Value: "", Path: s.cfg.BasePath + "/", MaxAge: -1})
 
 	code := r.URL.Query().Get("code")
 	if code == "" {
@@ -221,7 +222,7 @@ func (s *Server) HandleCallback(w http.ResponseWriter, r *http.Request) {
 	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
 		scheme = "https"
 	}
-	redirectURI := fmt.Sprintf("%s://%s/auth/callback", scheme, r.Host)
+	redirectURI := fmt.Sprintf("%s://%s%s/auth/callback", scheme, r.Host, s.cfg.BasePath)
 
 	oauth2Config := &oauth2.Config{
 		ClientID:    s.clientID,
@@ -247,14 +248,14 @@ func (s *Server) HandleCallback(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     "sam_session",
 		Value:    rawIDToken,
-		Path:     "/",
+		Path:     s.cfg.BasePath + "/",
 		MaxAge:   24 * 3600,
 		HttpOnly: true,
 		Secure:   scheme == "https",
 		SameSite: http.SameSiteLaxMode,
 	})
 
-	http.Redirect(w, r, "/", http.StatusFound)
+	http.Redirect(w, r, s.cfg.BasePath+"/", http.StatusFound)
 }
 
 func (s *Server) HandleSession(w http.ResponseWriter, r *http.Request) {

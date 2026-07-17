@@ -262,6 +262,17 @@ spec:
       port: 8080
   - matches:
     - path:
+        type: Exact
+        value: /console
+    filters:
+    - type: RequestRedirect
+      requestRedirect:
+        path:
+          type: ReplaceFullPath
+          replaceFullPath: /console/
+        statusCode: 302
+  - matches:
+    - path:
         type: PathPrefix
         value: /console/
     filters:
