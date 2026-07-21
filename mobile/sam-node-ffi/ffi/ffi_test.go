@@ -42,7 +42,7 @@ func TestMobileFFILifecycle(t *testing.T) {
 	}
 	defer func() { _ = hubHost.Close() }()
 
-	hubDHT, err := dht.New(context.Background(), hubHost, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/sam"))
+	hubDHT, err := dht.New(hubHost, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/sam"))
 	if err != nil {
 		t.Fatal(err)
 	}

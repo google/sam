@@ -85,7 +85,7 @@ func TestResolveRelayAddresses(t *testing.T) {
 	}
 
 	// Create a real DHT bound to the mock host
-	kdht, err := dht.New(ctx, localHost, dht.Mode(dht.ModeServer))
+	kdht, err := dht.New(localHost, dht.Mode(dht.ModeServer))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +110,7 @@ func TestResolveRelayAddresses(t *testing.T) {
 	relayHost.Peerstore().AddAddr(relayID, relayDirectAddr, peerstore.PermanentAddrTTL)
 
 	// Create DHT for relay
-	relayDHT, err := dht.New(ctx, relayHost, dht.Mode(dht.ModeServer))
+	relayDHT, err := dht.New(relayHost, dht.Mode(dht.ModeServer))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -420,7 +420,7 @@ func (n *SamNode) Start(ctx context.Context) error {
 	if n.config.DHTMaxRecordAge > 0 {
 		dhtOpts = append(dhtOpts, dht.MaxRecordAge(n.config.DHTMaxRecordAge))
 	}
-	kdht, err := dht.New(ctx, h, dhtOpts...)
+	kdht, err := dht.New(h, dhtOpts...)
 	if err != nil {
 		return err
 	}
