@@ -40,19 +40,18 @@ type RequestContext struct {
 // trackingStream wraps a network.Stream to count bytes read and written.
 type trackingStream struct {
 	network.Stream
-	bytesRead    int64
-	bytesWritten int64
+	bytesRead    atomic.Int64
+	bytesWritten atomic.Int64
 }
 
 func (t *trackingStream) Read(p []byte) (n int, err error) {
 	n, err = t.Stream.Read(p)
-	atomic.AddInt64(&t.bytesRead, int64(n))
+	t.bytesRead.Add(int64(n))
 	return n, err
 }
-
 func (t *trackingStream) Write(p []byte) (n int, err error) {
 	n, err = t.Stream.Write(p)
-	atomic.AddInt64(&t.bytesWritten, int64(n))
+	t.bytesWritten.Add(int64(n))
 	return n, err
 }
 
@@ -72,8 +71,8 @@ func (n *SamNode) WithBiscuitAuth(next func(network.Stream, RequestContext)) net
 				"peer_id", remotePeer.String(),
 				"target", target,
 				"protocol", reqCtx.Protocol,
-				"bytes_read", atomic.LoadInt64(&ts.bytesRead),
-				"bytes_written", atomic.LoadInt64(&ts.bytesWritten),
+				"bytes_read", ts.bytesRead.Load(),
+				"bytes_written", ts.bytesWritten.Load(),
 			)
 			if err := ts.Close(); err != nil {
 				logger.Debugf("[Auth] Failed to close stream: %v", err)

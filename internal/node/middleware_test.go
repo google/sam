@@ -709,8 +709,8 @@ func TestTrackingStream(t *testing.T) {
 	if err != nil || n != len(writeData) {
 		t.Fatalf("Write failed: %v", err)
 	}
-	if ts.bytesWritten != int64(len(writeData)) {
-		t.Errorf("Expected bytesWritten to be %d, got %d", len(writeData), ts.bytesWritten)
+	if ts.bytesWritten.Load() != int64(len(writeData)) {
+		t.Errorf("Expected bytesWritten to be %d, got %d", len(writeData), ts.bytesWritten.Load())
 	}
 
 	// Read data
@@ -720,7 +720,7 @@ func TestTrackingStream(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Read failed: %v", err)
 	}
-	if ts.bytesRead != int64(n) {
-		t.Errorf("Expected bytesRead to be %d, got %d", n, ts.bytesRead)
+	if ts.bytesRead.Load() != int64(n) {
+		t.Errorf("Expected bytesRead to be %d, got %d", n, ts.bytesRead.Load())
 	}
 }

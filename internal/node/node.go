@@ -1714,24 +1714,24 @@ func (n *SamNode) ListLocalServices(typeFilter api.ServiceType) []*api.ServiceIn
 
 type readCloserWithCount struct {
 	io.ReadCloser
-	bytesRead int64
+	bytesRead atomic.Int64
 }
 
 func (rc *readCloserWithCount) Read(p []byte) (int, error) {
 	n, err := rc.ReadCloser.Read(p)
-	atomic.AddInt64(&rc.bytesRead, int64(n))
+	rc.bytesRead.Add(int64(n))
 	return n, err
 }
 
 type responseWriterWithCount struct {
 	http.ResponseWriter
-	bytesWritten int64
+	bytesWritten atomic.Int64
 	statusCode   int
 }
 
 func (w *responseWriterWithCount) Write(p []byte) (int, error) {
 	n, err := w.ResponseWriter.Write(p)
-	atomic.AddInt64(&w.bytesWritten, int64(n))
+	w.bytesWritten.Add(int64(n))
 	return n, err
 }
 
@@ -1775,8 +1775,8 @@ func (n *SamNode) StartIngressServer(ctx context.Context) error {
 					"peer_id", peerIDStr,
 					"target", finalTarget,
 					"protocol", "/libp2p-http",
-					"bytes_read", atomic.LoadInt64(&rc.bytesRead),
-					"bytes_written", atomic.LoadInt64(&wc.bytesWritten),
+					"bytes_read", rc.bytesRead.Load(),
+					"bytes_written", wc.bytesWritten.Load(),
 				)
 			}()
 
@@ -1858,8 +1858,6 @@ func (n *SamNode) StartIngressServer(ctx context.Context) error {
 			} else {
 				r.URL.Path = "/" + upstreamPath
 			}
-			r.URL.RawPath = ""
-
 			r.URL.RawPath = ""
 
 			svc.Handler().ServeHTTP(w, r)
