@@ -15,7 +15,6 @@
 package ffi
 
 import (
-	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/json"
