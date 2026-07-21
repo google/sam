@@ -1712,6 +1712,34 @@ func (n *SamNode) ListLocalServices(typeFilter api.ServiceType) []*api.ServiceIn
 	return n.services.List(typeFilter)
 }
 
+type readCloserWithCount struct {
+	io.ReadCloser
+	bytesRead int64
+}
+
+func (rc *readCloserWithCount) Read(p []byte) (int, error) {
+	n, err := rc.ReadCloser.Read(p)
+	rc.bytesRead += int64(n)
+	return n, err
+}
+
+type responseWriterWithCount struct {
+	http.ResponseWriter
+	bytesWritten int64
+	statusCode   int
+}
+
+func (w *responseWriterWithCount) Write(p []byte) (int, error) {
+	n, err := w.ResponseWriter.Write(p)
+	w.bytesWritten += int64(n)
+	return n, err
+}
+
+func (w *responseWriterWithCount) WriteHeader(statusCode int) {
+	w.statusCode = statusCode
+	w.ResponseWriter.WriteHeader(statusCode)
+}
+
 func (n *SamNode) StartIngressServer(ctx context.Context) error {
 	listener, err := gostream.Listen(n.Host, "/libp2p-http")
 	if err != nil {
@@ -1798,7 +1826,23 @@ func (n *SamNode) StartIngressServer(ctx context.Context) error {
 				r.URL.Path = "/" + upstreamPath
 			}
 			r.URL.RawPath = ""
-			svc.Handler().ServeHTTP(w, r)
+
+			// Wrap for accounting
+			rc := &readCloserWithCount{ReadCloser: r.Body}
+			r.Body = rc
+			wc := &responseWriterWithCount{ResponseWriter: w, statusCode: http.StatusOK}
+
+			defer func() {
+				logger.Infow("Stream Accounting",
+					"peer_id", remotePeer.String(),
+					"target", reqCtx.Target,
+					"protocol", "/libp2p-http",
+					"bytes_read", rc.bytesRead,
+					"bytes_written", wc.bytesWritten,
+				)
+			}()
+
+			svc.Handler().ServeHTTP(wc, r)
 		}),
 	}
 

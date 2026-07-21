@@ -36,24 +36,55 @@ type RequestContext struct {
 	Target   string
 }
 
+// trackingStream wraps a network.Stream to count bytes read and written.
+type trackingStream struct {
+	network.Stream
+	bytesRead    int64
+	bytesWritten int64
+}
+
+func (t *trackingStream) Read(p []byte) (n int, err error) {
+	n, err = t.Stream.Read(p)
+	t.bytesRead += int64(n)
+	return n, err
+}
+
+func (t *trackingStream) Write(p []byte) (n int, err error) {
+	n, err = t.Stream.Write(p)
+	t.bytesWritten += int64(n)
+	return n, err
+}
+
 // WithBiscuitAuth enforces a Protobuf handshake on a stream before calling the next handler.
 func (n *SamNode) WithBiscuitAuth(next func(network.Stream, RequestContext)) network.StreamHandler {
 	return func(s network.Stream) {
+		ts := &trackingStream{Stream: s}
+		remotePeer := s.Conn().RemotePeer()
+		var reqCtx RequestContext
+
 		defer func() {
-			if err := s.Close(); err != nil {
+			if reqCtx.Target != "" { // Only log if we successfully got a request context
+				logger.Infow("Stream Accounting",
+					"peer_id", remotePeer.String(),
+					"target", reqCtx.Target,
+					"protocol", reqCtx.Protocol,
+					"bytes_read", ts.bytesRead,
+					"bytes_written", ts.bytesWritten,
+				)
+			}
+			if err := ts.Close(); err != nil {
 				logger.Debugf("[Auth] Failed to close stream: %v", err)
 			}
 		}()
-		remotePeer := s.Conn().RemotePeer()
 
 		if !n.rateLimiter.Allow(remotePeer.String()) {
 			logger.Warnf("[Auth] Rate limit exceeded for %s, dropping connection", remotePeer)
-			_ = s.Reset()
+			_ = ts.Reset()
 			return
 		}
 
 		// Read AuthFrame
-		reader := msgio.NewVarintReaderSize(s, 1024*64)
+		reader := msgio.NewVarintReaderSize(ts, 1024*64)
 		msg, err := reader.ReadMsg()
 		if err != nil {
 			logger.Errorf("[Auth] Failed to read auth frame from %s: %v", remotePeer, err)
@@ -66,14 +97,15 @@ func (n *SamNode) WithBiscuitAuth(next func(network.Stream, RequestContext)) net
 			logger.Warnf("[Auth] Invalid auth frame from %s", remotePeer)
 			return
 		}
-		reqCtx := RequestContext{
+
+		reqCtx = RequestContext{
 			PeerID:   remotePeer,
 			User:     "", // Not used in Authorize
-			Protocol: string(s.Protocol()),
+			Protocol: string(ts.Protocol()),
 			Target:   authFrame.TargetService,
 		}
 
-		writer := msgio.NewVarintWriter(s)
+		writer := msgio.NewVarintWriter(ts)
 
 		err = n.VerifyBiscuitToken(authFrame.Biscuit, reqCtx)
 		if err != nil {
@@ -92,7 +124,7 @@ func (n *SamNode) WithBiscuitAuth(next func(network.Stream, RequestContext)) net
 			return
 		}
 
-		next(s, reqCtx)
+		next(ts, reqCtx)
 	}
 }
 
@@ -219,8 +251,48 @@ func (n *SamNode) Authorize(rawToken []byte, req RequestContext, pubKey ed25519.
 	if err != nil {
 		logger.Errorf("Authorizer failure: %v, token: %s", err, b.String())
 		logger.Debugf("Authorizer state: %s", authorizer.PrintWorld())
+		return err
 	}
-	return err
+
+	var userStr, emailStr, roleStr string
+
+	if facts, _ := authorizer.Query(biscuit.Rule{
+		Head: biscuit.Predicate{Name: "get_user", IDs: []biscuit.Term{biscuit.Variable("u")}},
+		Body: []biscuit.Predicate{{Name: api.FactUser, IDs: []biscuit.Term{biscuit.Variable("u")}}},
+	}); len(facts) > 0 {
+		if s, ok := facts[0].Predicate.IDs[0].(biscuit.String); ok {
+			userStr = string(s)
+		}
+	}
+
+	if facts, _ := authorizer.Query(biscuit.Rule{
+		Head: biscuit.Predicate{Name: "get_email", IDs: []biscuit.Term{biscuit.Variable("e")}},
+		Body: []biscuit.Predicate{{Name: api.FactEmail, IDs: []biscuit.Term{biscuit.Variable("e")}}},
+	}); len(facts) > 0 {
+		if s, ok := facts[0].Predicate.IDs[0].(biscuit.String); ok {
+			emailStr = string(s)
+		}
+	}
+
+	if facts, _ := authorizer.Query(biscuit.Rule{
+		Head: biscuit.Predicate{Name: "get_role", IDs: []biscuit.Term{biscuit.Variable("r")}},
+		Body: []biscuit.Predicate{{Name: api.FactRole, IDs: []biscuit.Term{biscuit.Variable("r")}}},
+	}); len(facts) > 0 {
+		if s, ok := facts[0].Predicate.IDs[0].(biscuit.String); ok {
+			roleStr = string(s)
+		}
+	}
+
+	logger.Infow("Audit Traceability",
+		"peer_id", req.PeerID.String(),
+		"user", userStr,
+		"email", emailStr,
+		"role", roleStr,
+		"target", req.Target,
+		"protocol", req.Protocol,
+	)
+
+	return nil
 }
 
 func (n *SamNode) injectIdentityFacts(authorizer biscuit.Authorizer, pubKey ed25519.PublicKey) error {

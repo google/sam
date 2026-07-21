@@ -15,6 +15,7 @@
 package node
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"fmt"
@@ -691,5 +692,35 @@ func TestMiddlewareTargetChecks(t *testing.T) {
 				t.Errorf("expected failure, got success")
 			}
 		})
+	}
+}
+
+func TestTrackingStream(t *testing.T) {
+	var pr1 bytes.Buffer
+	var pw1 bytes.Buffer
+
+	// Create mock underlying stream
+	mock := &mockStream{r: &pr1, w: &pw1, protocol: protocol.ID("/test")}
+	ts := &trackingStream{Stream: mock}
+
+	// Write data
+	writeData := []byte("hello world")
+	n, err := ts.Write(writeData)
+	if err != nil || n != len(writeData) {
+		t.Fatalf("Write failed: %v", err)
+	}
+	if ts.bytesWritten != int64(len(writeData)) {
+		t.Errorf("Expected bytesWritten to be %d, got %d", len(writeData), ts.bytesWritten)
+	}
+
+	// Read data
+	pr1.Write([]byte("response")) // Pre-load the read buffer
+	readBuf := make([]byte, 10)
+	n, err = ts.Read(readBuf)
+	if err != nil {
+		t.Fatalf("Read failed: %v", err)
+	}
+	if ts.bytesRead != int64(n) {
+		t.Errorf("Expected bytesRead to be %d, got %d", n, ts.bytesRead)
 	}
 }
