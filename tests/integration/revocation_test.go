@@ -322,8 +322,29 @@ func publishGossipEvent(t *testing.T, routerAddrStr string, event *api.MeshEvent
 		t.Fatalf("failed to connect to router: %v", err)
 	}
 
-	// Wait for connection to settle in mesh
-	time.Sleep(3 * time.Second)
+	// Wait for connection to settle in mesh (wait for peer to join the topic)
+	peerID := targetInfo.ID
+	checkCtx, checkCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer checkCancel()
+
+	found := false
+	for !found {
+		select {
+		case <-checkCtx.Done():
+			found = true
+		default:
+			peers := ps.ListPeers(api.GossipEvents)
+			for _, p := range peers {
+				if p == peerID {
+					found = true
+					break
+				}
+			}
+			if !found {
+				time.Sleep(50 * time.Millisecond)
+			}
+		}
+	}
 
 	data, err := proto.Marshal(event)
 	if err != nil {
