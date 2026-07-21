@@ -420,7 +420,7 @@ func (n *SamNode) Start(ctx context.Context) error {
 	if n.config.DHTMaxRecordAge > 0 {
 		dhtOpts = append(dhtOpts, dht.MaxRecordAge(n.config.DHTMaxRecordAge))
 	}
-	kdht, err := dht.New(ctx, h, dhtOpts...)
+	kdht, err := dht.New(h, dhtOpts...)
 	if err != nil {
 		return err
 	}
@@ -1712,6 +1712,40 @@ func (n *SamNode) ListLocalServices(typeFilter api.ServiceType) []*api.ServiceIn
 	return n.services.List(typeFilter)
 }
 
+type readCloserWithCount struct {
+	io.ReadCloser
+	bytesRead atomic.Int64
+}
+
+func (rc *readCloserWithCount) Read(p []byte) (int, error) {
+	n, err := rc.ReadCloser.Read(p)
+	rc.bytesRead.Add(int64(n))
+	return n, err
+}
+
+type responseWriterWithCount struct {
+	http.ResponseWriter
+	bytesWritten atomic.Int64
+	statusCode   int
+}
+
+func (w *responseWriterWithCount) Write(p []byte) (int, error) {
+	n, err := w.ResponseWriter.Write(p)
+	w.bytesWritten.Add(int64(n))
+	return n, err
+}
+
+func (w *responseWriterWithCount) WriteHeader(statusCode int) {
+	w.statusCode = statusCode
+	w.ResponseWriter.WriteHeader(statusCode)
+}
+
+func (w *responseWriterWithCount) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
 func (n *SamNode) StartIngressServer(ctx context.Context) error {
 	listener, err := gostream.Listen(n.Host, "/libp2p-http")
 	if err != nil {
@@ -1720,6 +1754,32 @@ func (n *SamNode) StartIngressServer(ctx context.Context) error {
 
 	server := &http.Server{
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			rc := &readCloserWithCount{ReadCloser: r.Body}
+			r.Body = rc
+			wc := &responseWriterWithCount{ResponseWriter: w, statusCode: http.StatusOK}
+			w = wc
+
+			var remotePeer peer.ID
+			var target string
+
+			defer func() {
+				peerIDStr := ""
+				if remotePeer != "" {
+					peerIDStr = remotePeer.String()
+				}
+				finalTarget := target
+				if finalTarget == "" {
+					finalTarget = "unauthenticated_or_failed"
+				}
+				logger.Infow("Stream Accounting",
+					"peer_id", peerIDStr,
+					"target", finalTarget,
+					"protocol", "/libp2p-http",
+					"bytes_read", rc.bytesRead.Load(),
+					"bytes_written", wc.bytesWritten.Load(),
+				)
+			}()
+
 			logger.Infof("[Ingress] Received request: %s %s", r.Method, r.URL.Path)
 			path := r.URL.Path
 			parts := strings.SplitN(strings.TrimPrefix(path, "/"), "/", 3)
@@ -1753,17 +1813,18 @@ func (n *SamNode) StartIngressServer(ctx context.Context) error {
 			}
 
 			// Parse remote peer from RemoteAddr
-			remotePeer, err := peer.Decode(r.RemoteAddr)
+			remotePeer, err = peer.Decode(r.RemoteAddr)
 			if err != nil {
 				http.Error(w, "Invalid remote peer", http.StatusBadRequest)
 				return
 			}
 
+			target = strings.ToLower(serviceTypeStr) + "://" + serviceName
 			reqCtx := RequestContext{
 				PeerID:   remotePeer,
 				User:     "", // Extracted implicitly if needed, or left empty
 				Protocol: "/libp2p-http",
-				Target:   strings.ToLower(serviceTypeStr) + "://" + serviceName,
+				Target:   target,
 			}
 
 			// Verify authorization
@@ -1798,6 +1859,7 @@ func (n *SamNode) StartIngressServer(ctx context.Context) error {
 				r.URL.Path = "/" + upstreamPath
 			}
 			r.URL.RawPath = ""
+
 			svc.Handler().ServeHTTP(w, r)
 		}),
 	}

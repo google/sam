@@ -185,7 +185,7 @@ func TestHandleRegisterService(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = h.Close() }()
-	d, err := dht.New(context.Background(), h, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/sam"))
+	d, err := dht.New(h, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/sam"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,7 +197,7 @@ func TestHandleRegisterService(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = h2.Close() }()
-	d2, err := dht.New(context.Background(), h2, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/sam"))
+	d2, err := dht.New(h2, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/sam"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -281,7 +281,7 @@ func TestHandleDiscoverService(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = h.Close() }()
-	d, err := dht.New(context.Background(), h, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/sam"))
+	d, err := dht.New(h, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/sam"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -300,7 +300,7 @@ func TestHandleDiscoverService(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = h2.Close() }()
-	d2, err := dht.New(context.Background(), h2, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/sam"))
+	d2, err := dht.New(h2, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/sam"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -551,7 +551,7 @@ func TestDiscoverService_Pagination(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = h.Close() }()
-	d, err := dht.New(context.Background(), h, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/sam"))
+	d, err := dht.New(h, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/sam"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -589,7 +589,7 @@ func TestDiscoverService_Pagination(t *testing.T) {
 		}
 		hosts = append(hosts, h2)
 
-		d2, err := dht.New(context.Background(), h2, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/sam"))
+		d2, err := dht.New(h2, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/sam"))
 		if err != nil {
 			t.Fatal(err)
 		}

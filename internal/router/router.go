@@ -221,7 +221,7 @@ func (r *Router) Start() error {
 	if r.config.DHTMaxRecordAge > 0 {
 		dhtOpts = append(dhtOpts, dht.MaxRecordAge(r.config.DHTMaxRecordAge))
 	}
-	kadDHT, err := dht.New(r.ctx, hostNode, dhtOpts...)
+	kadDHT, err := dht.New(hostNode, dhtOpts...)
 	if err != nil {
 		_ = hostNode.Close()
 		return err

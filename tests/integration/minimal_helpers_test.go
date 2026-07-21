@@ -238,7 +238,7 @@ func startMockLibp2pHub(t *testing.T) (peer.ID, string) {
 		_ = writer.WriteMsg(respBytes)
 	})
 
-	kdht, err := dht.New(context.Background(), h, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/sam"))
+	kdht, err := dht.New(h, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/sam"))
 	if err != nil {
 		t.Fatalf("failed to create DHT on mock hub: %v", err)
 	}
@@ -319,7 +319,7 @@ func startMockLibp2pHubWithOIDC(t *testing.T, oidcIssuerURL string) (peer.ID, st
 		_ = writer.WriteMsg(respBytes)
 	})
 
-	kdht, err := dht.New(context.Background(), h, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/sam"))
+	kdht, err := dht.New(h, dht.Mode(dht.ModeServer), dht.ProtocolPrefix("/sam"))
 	if err != nil {
 		t.Fatalf("failed to create DHT on mock hub: %v", err)
 	}

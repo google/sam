@@ -20,6 +20,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -245,6 +246,7 @@ func TestIntegrationHTTPDatapath(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		req, _ := http.NewRequest("GET", url, nil)
 		req.Header.Set("Authorization", "Bearer "+apiToken)
+		req.Close = true // Force close the connection so the libp2p stream terminates and flushed accounting logs
 		httpResp, err = client.Do(req)
 		if err == nil && httpResp.StatusCode == http.StatusOK {
 			break
@@ -265,8 +267,32 @@ func TestIntegrationHTTPDatapath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	client.CloseIdleConnections()
 
 	if string(bodyBytes) != expectedBody {
 		t.Fatalf("Expected body %s, got %s", expectedBody, string(bodyBytes))
 	}
+
+	// Verify Audit Traceability and Stream Accounting logs were emitted
+	assertLogInFile(t, filepath.Join(homeA, "node.log"), "Audit Traceability")
+	assertLogInFile(t, filepath.Join(homeA, "node.log"), "Stream Accounting")
+	assertLogInFile(t, filepath.Join(homeA, "node.log"), "bytes_read")
+	assertLogInFile(t, filepath.Join(homeA, "node.log"), "bytes_written")
+}
+
+func assertLogInFile(t *testing.T, logFile, expectedMsg string) {
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		b, err := os.ReadFile(logFile)
+		if err == nil && strings.Contains(string(b), expectedMsg) {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	b, _ := os.ReadFile(logFile)
+	logEnd := string(b)
+	if len(b) > 1000 {
+		logEnd = string(b[len(b)-1000:])
+	}
+	t.Errorf("Expected log file %s to contain %q, but it didn't.\nLog end:\n%s", logFile, expectedMsg, logEnd)
 }
