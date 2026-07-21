@@ -17,6 +17,7 @@ package node
 import (
 	"crypto/ed25519"
 	"fmt"
+	"sync/atomic"
 
 	"github.com/biscuit-auth/biscuit-go/v2"
 	"github.com/biscuit-auth/biscuit-go/v2/datalog"
@@ -45,13 +46,13 @@ type trackingStream struct {
 
 func (t *trackingStream) Read(p []byte) (n int, err error) {
 	n, err = t.Stream.Read(p)
-	t.bytesRead += int64(n)
+	atomic.AddInt64(&t.bytesRead, int64(n))
 	return n, err
 }
 
 func (t *trackingStream) Write(p []byte) (n int, err error) {
 	n, err = t.Stream.Write(p)
-	t.bytesWritten += int64(n)
+	atomic.AddInt64(&t.bytesWritten, int64(n))
 	return n, err
 }
 
@@ -63,15 +64,17 @@ func (n *SamNode) WithBiscuitAuth(next func(network.Stream, RequestContext)) net
 		var reqCtx RequestContext
 
 		defer func() {
-			if reqCtx.Target != "" { // Only log if we successfully got a request context
-				logger.Infow("Stream Accounting",
-					"peer_id", remotePeer.String(),
-					"target", reqCtx.Target,
-					"protocol", reqCtx.Protocol,
-					"bytes_read", ts.bytesRead,
-					"bytes_written", ts.bytesWritten,
-				)
+			target := reqCtx.Target
+			if target == "" {
+				target = "unauthenticated_or_failed"
 			}
+			logger.Infow("Stream Accounting",
+				"peer_id", remotePeer.String(),
+				"target", target,
+				"protocol", reqCtx.Protocol,
+				"bytes_read", atomic.LoadInt64(&ts.bytesRead),
+				"bytes_written", atomic.LoadInt64(&ts.bytesWritten),
+			)
 			if err := ts.Close(); err != nil {
 				logger.Debugf("[Auth] Failed to close stream: %v", err)
 			}
@@ -259,8 +262,8 @@ func (n *SamNode) Authorize(rawToken []byte, req RequestContext, pubKey ed25519.
 	if facts, _ := authorizer.Query(biscuit.Rule{
 		Head: biscuit.Predicate{Name: "get_user", IDs: []biscuit.Term{biscuit.Variable("u")}},
 		Body: []biscuit.Predicate{{Name: api.FactUser, IDs: []biscuit.Term{biscuit.Variable("u")}}},
-	}); len(facts) > 0 {
-		if s, ok := facts[0].Predicate.IDs[0].(biscuit.String); ok {
+	}); len(facts) > 0 && len(facts[0].IDs) > 0 {
+		if s, ok := facts[0].IDs[0].(biscuit.String); ok {
 			userStr = string(s)
 		}
 	}
@@ -268,8 +271,8 @@ func (n *SamNode) Authorize(rawToken []byte, req RequestContext, pubKey ed25519.
 	if facts, _ := authorizer.Query(biscuit.Rule{
 		Head: biscuit.Predicate{Name: "get_email", IDs: []biscuit.Term{biscuit.Variable("e")}},
 		Body: []biscuit.Predicate{{Name: api.FactEmail, IDs: []biscuit.Term{biscuit.Variable("e")}}},
-	}); len(facts) > 0 {
-		if s, ok := facts[0].Predicate.IDs[0].(biscuit.String); ok {
+	}); len(facts) > 0 && len(facts[0].IDs) > 0 {
+		if s, ok := facts[0].IDs[0].(biscuit.String); ok {
 			emailStr = string(s)
 		}
 	}
@@ -277,8 +280,8 @@ func (n *SamNode) Authorize(rawToken []byte, req RequestContext, pubKey ed25519.
 	if facts, _ := authorizer.Query(biscuit.Rule{
 		Head: biscuit.Predicate{Name: "get_role", IDs: []biscuit.Term{biscuit.Variable("r")}},
 		Body: []biscuit.Predicate{{Name: api.FactRole, IDs: []biscuit.Term{biscuit.Variable("r")}}},
-	}); len(facts) > 0 {
-		if s, ok := facts[0].Predicate.IDs[0].(biscuit.String); ok {
+	}); len(facts) > 0 && len(facts[0].IDs) > 0 {
+		if s, ok := facts[0].IDs[0].(biscuit.String); ok {
 			roleStr = string(s)
 		}
 	}

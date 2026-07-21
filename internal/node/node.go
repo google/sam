@@ -1719,7 +1719,7 @@ type readCloserWithCount struct {
 
 func (rc *readCloserWithCount) Read(p []byte) (int, error) {
 	n, err := rc.ReadCloser.Read(p)
-	rc.bytesRead += int64(n)
+	atomic.AddInt64(&rc.bytesRead, int64(n))
 	return n, err
 }
 
@@ -1731,13 +1731,19 @@ type responseWriterWithCount struct {
 
 func (w *responseWriterWithCount) Write(p []byte) (int, error) {
 	n, err := w.ResponseWriter.Write(p)
-	w.bytesWritten += int64(n)
+	atomic.AddInt64(&w.bytesWritten, int64(n))
 	return n, err
 }
 
 func (w *responseWriterWithCount) WriteHeader(statusCode int) {
 	w.statusCode = statusCode
 	w.ResponseWriter.WriteHeader(statusCode)
+}
+
+func (w *responseWriterWithCount) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
 }
 
 func (n *SamNode) StartIngressServer(ctx context.Context) error {
@@ -1748,6 +1754,32 @@ func (n *SamNode) StartIngressServer(ctx context.Context) error {
 
 	server := &http.Server{
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			rc := &readCloserWithCount{ReadCloser: r.Body}
+			r.Body = rc
+			wc := &responseWriterWithCount{ResponseWriter: w, statusCode: http.StatusOK}
+			w = wc
+
+			var remotePeer peer.ID
+			var target string
+
+			defer func() {
+				peerIDStr := ""
+				if remotePeer != "" {
+					peerIDStr = remotePeer.String()
+				}
+				finalTarget := target
+				if finalTarget == "" {
+					finalTarget = "unauthenticated_or_failed"
+				}
+				logger.Infow("Stream Accounting",
+					"peer_id", peerIDStr,
+					"target", finalTarget,
+					"protocol", "/libp2p-http",
+					"bytes_read", atomic.LoadInt64(&rc.bytesRead),
+					"bytes_written", atomic.LoadInt64(&wc.bytesWritten),
+				)
+			}()
+
 			logger.Infof("[Ingress] Received request: %s %s", r.Method, r.URL.Path)
 			path := r.URL.Path
 			parts := strings.SplitN(strings.TrimPrefix(path, "/"), "/", 3)
@@ -1781,17 +1813,18 @@ func (n *SamNode) StartIngressServer(ctx context.Context) error {
 			}
 
 			// Parse remote peer from RemoteAddr
-			remotePeer, err := peer.Decode(r.RemoteAddr)
+			remotePeer, err = peer.Decode(r.RemoteAddr)
 			if err != nil {
 				http.Error(w, "Invalid remote peer", http.StatusBadRequest)
 				return
 			}
 
+			target = strings.ToLower(serviceTypeStr) + "://" + serviceName
 			reqCtx := RequestContext{
 				PeerID:   remotePeer,
 				User:     "", // Extracted implicitly if needed, or left empty
 				Protocol: "/libp2p-http",
-				Target:   strings.ToLower(serviceTypeStr) + "://" + serviceName,
+				Target:   target,
 			}
 
 			// Verify authorization
@@ -1827,22 +1860,9 @@ func (n *SamNode) StartIngressServer(ctx context.Context) error {
 			}
 			r.URL.RawPath = ""
 
-			// Wrap for accounting
-			rc := &readCloserWithCount{ReadCloser: r.Body}
-			r.Body = rc
-			wc := &responseWriterWithCount{ResponseWriter: w, statusCode: http.StatusOK}
+			r.URL.RawPath = ""
 
-			defer func() {
-				logger.Infow("Stream Accounting",
-					"peer_id", remotePeer.String(),
-					"target", reqCtx.Target,
-					"protocol", "/libp2p-http",
-					"bytes_read", rc.bytesRead,
-					"bytes_written", wc.bytesWritten,
-				)
-			}()
-
-			svc.Handler().ServeHTTP(wc, r)
+			svc.Handler().ServeHTTP(w, r)
 		}),
 	}
 

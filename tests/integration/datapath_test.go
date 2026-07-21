@@ -290,5 +290,9 @@ func assertLogInFile(t *testing.T, logFile, expectedMsg string) {
 		time.Sleep(100 * time.Millisecond)
 	}
 	b, _ := os.ReadFile(logFile)
-	t.Errorf("Expected log file %s to contain %q, but it didn't.\nLog end:\n%s", logFile, expectedMsg, string(b[len(b)-1000:])) // print last 1000 bytes
+	logEnd := string(b)
+	if len(b) > 1000 {
+		logEnd = string(b[len(b)-1000:])
+	}
+	t.Errorf("Expected log file %s to contain %q, but it didn't.\nLog end:\n%s", logFile, expectedMsg, logEnd)
 }
