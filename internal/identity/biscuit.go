@@ -195,7 +195,6 @@ func VerifyBiscuitAndGetKey(biscuitData []byte, expectedPeer peer.ID, trustedPub
 			break
 		} else {
 			lastErr = err
-			break // Signature is valid, but authorization failed. No need to try other keys.
 		}
 	}
 

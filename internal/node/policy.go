@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/biscuit-auth/biscuit-go/v2"
+	"github.com/biscuit-auth/biscuit-go/v2/parser"
 	"github.com/google/sam/api"
 )
 
@@ -15,6 +16,16 @@ func BuildPolicyRules(roles []*api.PolicyRole, bindings []*api.PolicyBinding) []
 			continue
 		}
 		for _, m := range b.Members {
+			if m == api.SystemAuthenticated {
+				rules = append(rules, biscuit.Rule{
+					Head: biscuit.Predicate{
+						Name: api.FactRole,
+						IDs:  []biscuit.Term{biscuit.String(b.Role)},
+					},
+					Body: []biscuit.Predicate{},
+				})
+				continue
+			}
 			parts := strings.SplitN(m, ":", 2)
 			if len(parts) == 2 {
 				memberType := parts[0]
@@ -96,17 +107,42 @@ func BuildPolicyRules(roles []*api.PolicyRole, bindings []*api.PolicyBinding) []
 			}
 		}
 
+		hasUnrestricted := false
+		hasSpecificTargets := false
 		for _, t := range role.AllowedTargets {
 			if t == "*" {
-				rules = append(rules, biscuit.Rule{
-					Head: biscuit.Predicate{
-						Name: api.FactTargetUnrestricted,
-						IDs:  []biscuit.Term{},
-					},
-					Body: []biscuit.Predicate{
-						{Name: api.FactRole, IDs: []biscuit.Term{biscuit.String(roleName)}},
-					},
-				})
+				hasUnrestricted = true
+			} else {
+				hasSpecificTargets = true
+			}
+		}
+
+		if hasUnrestricted {
+			rules = append(rules, biscuit.Rule{
+				Head: biscuit.Predicate{
+					Name: api.FactTargetUnrestricted,
+					IDs:  []biscuit.Term{},
+				},
+				Body: []biscuit.Predicate{
+					{Name: api.FactRole, IDs: []biscuit.Term{biscuit.String(roleName)}},
+				},
+			})
+		}
+
+		if hasSpecificTargets {
+			rules = append(rules, biscuit.Rule{
+				Head: biscuit.Predicate{
+					Name: api.FactTargetRestricted,
+					IDs:  []biscuit.Term{},
+				},
+				Body: []biscuit.Predicate{
+					{Name: api.FactRole, IDs: []biscuit.Term{biscuit.String(roleName)}},
+				},
+			})
+		}
+
+		for _, t := range role.AllowedTargets {
+			if t == "*" {
 				continue
 			}
 
@@ -138,6 +174,25 @@ func BuildPolicyRules(roles []*api.PolicyRole, bindings []*api.PolicyBinding) []
 						{Name: api.FactRole, IDs: []biscuit.Term{biscuit.String(roleName)}},
 					},
 				})
+			}
+		}
+
+		for _, dl := range role.CustomDatalog {
+			trimmed := strings.TrimRight(strings.TrimSpace(dl), ";")
+			if trimmed == "" {
+				continue
+			}
+			r, err := parser.FromStringRule(trimmed)
+			if err == nil {
+				rules = append(rules, r)
+			} else {
+				f, err := parser.FromStringFact(trimmed)
+				if err == nil {
+					rules = append(rules, biscuit.Rule{
+						Head: f.Predicate,
+						Body: []biscuit.Predicate{},
+					})
+				}
 			}
 		}
 	}

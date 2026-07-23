@@ -529,7 +529,7 @@ func (s *Server) HandleRefresh(w http.ResponseWriter, r *http.Request) {
 		// Bootstrap node
 		bBytes, err := identity.MintBootstrapBiscuitToken(privKey, pID, nodeRecord.Role, biscuitExpiry)
 		if err != nil {
-			logger.Errorf("Failed to mint refreshed token for node %s: %v")
+			logger.Errorf("Failed to mint refreshed token for node %s: %v", nodeRecord.PeerID, err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 			return
 		}
@@ -960,7 +960,7 @@ func (s *Server) HandleEnroll(w http.ResponseWriter, r *http.Request) {
 		// Mode A: Auto-Approve
 		biscuitBytes, err := identity.MintBootstrapBiscuitToken(privKey, pID, tokenRecord.Role, time.Now().Add(api.BiscuitTokenTTL))
 		if err != nil {
-			logger.Errorf("Failed to mint bootstrap biscuit: %v")
+			logger.Errorf("Failed to mint bootstrap biscuit: %v", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 			return
 		}
@@ -1302,7 +1302,7 @@ func (s *Server) HandleAdminEnrollmentAction(w http.ResponseWriter, r *http.Requ
 
 		biscuitBytes, err := identity.MintBootstrapBiscuitToken(privKey, pID, tokenRecord.Role, time.Now().Add(api.BiscuitTokenTTL))
 		if err != nil {
-			logger.Errorf("Failed to mint bootstrap biscuit: %v")
+			logger.Errorf("Failed to mint bootstrap biscuit: %v", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 			return
 		}
