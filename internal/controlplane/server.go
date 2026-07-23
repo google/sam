@@ -335,9 +335,44 @@ func (s *Server) HandleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	_, bindings, err := s.store.GetMeshPolicy(ctx)
+	if err != nil && err != storage.ErrNotFound {
+		logger.Errorf("Failed to load policy for role resolution: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	resolvedRoles := resolveRoles(claims, bindings)
+	var hasCapabilityRoles bool
+	var customAccessRoles []string
+	resolvedMap := make(map[string]bool)
+	for _, r := range resolvedRoles {
+		resolvedMap[r] = true
+		if strings.HasPrefix(r, "sam:role:") {
+			hasCapabilityRoles = true
+		} else {
+			customAccessRoles = append(customAccessRoles, r)
+		}
+	}
+
+	isAuthorized := false
+	if resolvedMap[req.RequestedRole] {
+		isAuthorized = true
+	} else if req.RequestedRole == api.RoleNode && !hasCapabilityRoles {
+		isAuthorized = true
+	}
+
+	if !isAuthorized {
+		http.Error(w, fmt.Sprintf("requested role %q is not authorized for this identity", req.RequestedRole), http.StatusForbidden)
+		return
+	}
+
+	finalRoles := []string{req.RequestedRole}
+	finalRoles = append(finalRoles, customAccessRoles...)
+
 	// Mint token
 	biscuitExpiry := time.Now().Add(api.BiscuitTokenTTL)
-	biscuitData, _, err := identity.MintBiscuitToken(privKey, claims, token, pID, biscuitExpiry)
+	biscuitData, _, err := identity.MintBiscuitToken(privKey, claims, token, pID, biscuitExpiry, finalRoles)
 	if err != nil {
 		logger.Errorw("Biscuit minting failed", "peer_id", req.PeerId, "error", err)
 		http.Error(w, "Failed to mint biscuit: "+err.Error(), http.StatusForbidden)
@@ -518,7 +553,41 @@ func (s *Server) HandleRefresh(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 			return
 		}
-		bBytes, _, err := identity.MintBiscuitToken(privKey, claims, nil, pID, biscuitExpiry)
+		_, bindings, err := s.store.GetMeshPolicy(ctx)
+		if err != nil && err != storage.ErrNotFound {
+			logger.Errorf("Failed to load policy for role resolution: %v", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+		resolvedRoles := resolveRoles(claims, bindings)
+		var hasCapabilityRoles bool
+		var customAccessRoles []string
+		resolvedMap := make(map[string]bool)
+		for _, r := range resolvedRoles {
+			resolvedMap[r] = true
+			if strings.HasPrefix(r, "sam:role:") {
+				hasCapabilityRoles = true
+			} else {
+				customAccessRoles = append(customAccessRoles, r)
+			}
+		}
+
+		isAuthorized := false
+		if resolvedMap[nodeRecord.Role] {
+			isAuthorized = true
+		} else if nodeRecord.Role == api.RoleNode && !hasCapabilityRoles {
+			isAuthorized = true
+		}
+
+		if !isAuthorized {
+			http.Error(w, fmt.Sprintf("role %q is no longer authorized for this identity", nodeRecord.Role), http.StatusForbidden)
+			return
+		}
+
+		finalRoles := []string{nodeRecord.Role}
+		finalRoles = append(finalRoles, customAccessRoles...)
+
+		bBytes, _, err := identity.MintBiscuitToken(privKey, claims, nil, pID, biscuitExpiry, finalRoles)
 		if err != nil {
 			logger.Errorf("Failed to mint refreshed token for node %s: %v", nodeRecord.PeerID, err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -1624,4 +1693,73 @@ func (s *Server) HandleUserRevoke(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte("Node revoked successfully"))
+}
+
+func resolveRoles(claims jwt.MapClaims, bindings []*api.PolicyBinding) []string {
+	oidcRoles := toStringSlice(claims["roles"])
+	oidcGroups := toStringSlice(claims["groups"])
+	oidcSub, _ := claims["sub"].(string)
+	oidcEmail, _ := claims["email"].(string)
+
+	resolvedRoles := make(map[string]bool)
+	for _, b := range bindings {
+		if b == nil {
+			continue
+		}
+		for _, m := range b.Members {
+			if m == api.SystemAuthenticated {
+				resolvedRoles[b.Role] = true
+				continue
+			}
+			parts := strings.SplitN(m, ":", 2)
+			if len(parts) != 2 {
+				continue
+			}
+			prefix, value := parts[0], parts[1]
+			switch prefix {
+			case api.FactGroup:
+				for _, g := range oidcGroups {
+					if g == value {
+						resolvedRoles[b.Role] = true
+					}
+				}
+			case api.FactUser:
+				if oidcSub == value || oidcEmail == value {
+					resolvedRoles[b.Role] = true
+				}
+			}
+		}
+	}
+	for _, r := range oidcRoles {
+		resolvedRoles[r] = true
+	}
+
+	var res []string
+	for r := range resolvedRoles {
+		res = append(res, r)
+	}
+	return res
+}
+
+func toStringSlice(val any) []string {
+	if val == nil {
+		return nil
+	}
+	switch v := val.(type) {
+	case string:
+		if v != "" {
+			return []string{v}
+		}
+	case []string:
+		return v
+	case []any:
+		var res []string
+		for _, item := range v {
+			if str, ok := item.(string); ok && str != "" {
+				res = append(res, str)
+			}
+		}
+		return res
+	}
+	return nil
 }

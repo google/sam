@@ -47,18 +47,16 @@ import (
 //   - Once authorized, the generated Biscuit is minted with:
 //   - The requested capability role (enforcing least privilege).
 //   - All other custom access roles mapped to the identity (so they preserve their resource permissions).
-func MintBiscuitToken(signingKey ed25519.PrivateKey, claims jwt.MapClaims, token *oidc.IDToken, remotePeer peer.ID, biscuitExpiry time.Time) ([]byte, []string, error) {
+func MintBiscuitToken(signingKey ed25519.PrivateKey, claims jwt.MapClaims, token *oidc.IDToken, remotePeer peer.ID, biscuitExpiry time.Time, roles []string) ([]byte, []string, error) {
 	if claims == nil {
 		return nil, nil, fmt.Errorf("claims cannot be nil")
 	}
 
-	finalRoles := []string{}
-
-	biscuitBytes, err := mintBiscuit(signingKey, remotePeer, finalRoles, biscuitExpiry, claims)
+	biscuitBytes, err := mintBiscuit(signingKey, remotePeer, roles, biscuitExpiry, claims)
 	if err != nil {
 		return nil, nil, err
 	}
-	return biscuitBytes, finalRoles, nil
+	return biscuitBytes, roles, nil
 }
 
 func mintBiscuit(signingKey ed25519.PrivateKey, remotePeer peer.ID, roles []string, expiration time.Time, claims jwt.MapClaims) ([]byte, error) {
