@@ -1,0 +1,8 @@
+version: "v1alpha1"
+attenuation:
+  policies: []
+services:
+  - type: "mcp"
+    name: "gemini-buddy"
+    description: "A friendly, funny Gemini-backed buddy you can chat with over multiple turns"
+    target_url: "http://127.0.0.1:7780/mcp"
