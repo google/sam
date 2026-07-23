@@ -143,6 +143,37 @@ echo "== Waiting for database to be ready =="
 kubectl --context "${KCTX}" -n "${NAMESPACE}" wait --for=condition=ready --timeout=180s pod -l app=sam-db
 echo "== Waiting for control plane to be ready =="
 kubectl --context "${KCTX}" -n "${NAMESPACE}" wait --for=condition=available --timeout=180s deployment/sam-control-plane
+
+echo "== Seeding control plane policies =="
+for i in {1..30}; do
+  if curl -s http://127.0.0.1:9090/info >/dev/null; then
+    break
+  fi
+  sleep 1
+done
+
+curl -s -X POST \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer super-secret-admin-token" \
+  -d '{
+    "roles": [
+      {"name": "sam-admin", "allowed_services": ["*"], "allowed_targets": ["*"]},
+      {"name": "sam:role:sambox", "allowed_services": ["*"], "allowed_targets": ["*"]},
+      {"name": "sam:role:router", "allowed_services": ["*"], "allowed_targets": ["*"]}
+    ],
+    "bindings": [
+      {"role": "sam-admin", "members": [
+        "user:system:serviceaccount:'"${NAMESPACE}"':node-a-sa",
+        "user:system:serviceaccount:'"${NAMESPACE}"':node-b-sa",
+        "user:system:serviceaccount:'"${NAMESPACE}"':node-c-sa",
+        "user:system:serviceaccount:'"${NAMESPACE}"':local-node-sa"
+      ]},
+      {"role": "sam:role:sambox", "members": ["user:system:serviceaccount:'"${NAMESPACE}"':sam-box-sa"]},
+      {"role": "sam:role:router", "members": ["group:routers", "user:system:serviceaccount:'"${NAMESPACE}"':sam-router-sa"]}
+    ]
+  }' \
+  http://127.0.0.1:9090/policies >/dev/null
+
 echo "== Waiting for router to be ready =="
 kubectl --context "${KCTX}" -n "${NAMESPACE}" wait --for=condition=ready --timeout=180s pod -l app=sam-router
 echo "== Waiting for console to be ready =="

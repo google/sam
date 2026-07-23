@@ -25,7 +25,6 @@ import (
 
 	"github.com/google/sam/api"
 	log "github.com/ipfs/go-log/v2"
-	"gopkg.in/yaml.v2"
 
 	// Register PG and SQLite drivers
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -224,6 +223,47 @@ var migrations = []migration{
 			`ALTER TABLE bootstrap_tokens ADD COLUMN owner_id TEXT REFERENCES users(id)`,
 		},
 	},
+	{
+		version: 4,
+		postgres: []string{
+			`DROP TABLE IF EXISTS policies`,
+			`CREATE TABLE IF NOT EXISTS roles (
+				name VARCHAR(64) PRIMARY KEY,
+				description TEXT,
+				created_at BIGINT NOT NULL
+			)`,
+			`CREATE TABLE IF NOT EXISTS role_permissions (
+				id SERIAL PRIMARY KEY,
+				role_name VARCHAR(64) REFERENCES roles(name) ON DELETE CASCADE,
+				resource_type VARCHAR(64) NOT NULL,
+				resource_value TEXT NOT NULL
+			)`,
+			`CREATE TABLE IF NOT EXISTS role_bindings (
+				id SERIAL PRIMARY KEY,
+				role_name VARCHAR(64) REFERENCES roles(name) ON DELETE CASCADE,
+				member VARCHAR(255) NOT NULL
+			)`,
+		},
+		sqlite: []string{
+			`DROP TABLE IF EXISTS policies`,
+			`CREATE TABLE IF NOT EXISTS roles (
+				name TEXT PRIMARY KEY,
+				description TEXT,
+				created_at BIGINT NOT NULL
+			)`,
+			`CREATE TABLE IF NOT EXISTS role_permissions (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				role_name TEXT REFERENCES roles(name) ON DELETE CASCADE,
+				resource_type TEXT NOT NULL,
+				resource_value TEXT NOT NULL
+			)`,
+			`CREATE TABLE IF NOT EXISTS role_bindings (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				role_name TEXT REFERENCES roles(name) ON DELETE CASCADE,
+				member TEXT NOT NULL
+			)`,
+		},
+	},
 }
 
 func (s *SQLStore) initSchema() error {
@@ -335,9 +375,13 @@ func (s *SQLStore) GetAllValidKeys(ctx context.Context) ([]KeyPair, error) {
 		if exp.Valid {
 			expiration = time.UnixMilli(exp.Int64)
 		}
+		privCopy := make([]byte, len(priv))
+		copy(privCopy, priv)
+		pubCopy := make([]byte, len(pub))
+		copy(pubCopy, pub)
 		keys = append(keys, KeyPair{
-			Private:    ed25519.PrivateKey(priv),
-			Public:     ed25519.PublicKey(pub),
+			Private:    ed25519.PrivateKey(privCopy),
+			Public:     ed25519.PublicKey(pubCopy),
 			Expiration: expiration,
 		})
 	}
@@ -538,49 +582,121 @@ func (s *SQLStore) GetActiveRouters(ctx context.Context) ([]RouterLease, error) 
 	return leases, rows.Err()
 }
 
-// SavePolicy implements Store.
-func (s *SQLStore) SavePolicy(ctx context.Context, policy *api.PolicyConfig) error {
-	data, err := yaml.Marshal(policy)
+// SaveMeshPolicy replaces the entire mesh policy with the provided roles and bindings.
+func (s *SQLStore) SaveMeshPolicy(ctx context.Context, roles []*api.PolicyRole, bindings []*api.PolicyBinding) error {
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
+	defer func() { _ = tx.Rollback() }()
 
-	var query string
-	if s.isPostgres() {
-		query = s.rebind(`
-			INSERT INTO policies (id, content, updated_at) 
-			VALUES ('mesh-policy', ?, ?)
-			ON CONFLICT (id) 
-			DO UPDATE SET content = EXCLUDED.content, updated_at = EXCLUDED.updated_at`)
-	} else {
-		query = s.rebind(`
-			INSERT INTO policies (id, content, updated_at) 
-			VALUES ('mesh-policy', ?, ?)
-			ON CONFLICT (id) 
-			DO UPDATE SET content = excluded.content, updated_at = excluded.updated_at`)
+	// For simplicity in replacing policy, we clear all and insert new.
+	if _, err := tx.ExecContext(ctx, "DELETE FROM roles"); err != nil {
+		return err
 	}
 
-	_, err = s.db.ExecContext(ctx, query, string(data), time.Now().UnixMilli())
-	return err
+	for _, r := range roles {
+		if _, err := tx.ExecContext(ctx, s.rebind("INSERT INTO roles (name, description, created_at) VALUES (?, '', ?)"), r.Name, time.Now().UnixMilli()); err != nil {
+			return err
+		}
+		for _, target := range r.AllowedTargets {
+			if _, err := tx.ExecContext(ctx, s.rebind("INSERT INTO role_permissions (role_name, resource_type, resource_value) VALUES (?, 'target', ?)"), r.Name, target); err != nil {
+				return err
+			}
+		}
+		for _, svc := range r.AllowedServices {
+			if _, err := tx.ExecContext(ctx, s.rebind("INSERT INTO role_permissions (role_name, resource_type, resource_value) VALUES (?, 'service', ?)"), r.Name, svc); err != nil {
+				return err
+			}
+		}
+		for _, dl := range r.CustomDatalog {
+			if _, err := tx.ExecContext(ctx, s.rebind("INSERT INTO role_permissions (role_name, resource_type, resource_value) VALUES (?, 'custom_datalog', ?)"), r.Name, dl); err != nil {
+				return err
+			}
+		}
+	}
+
+	for _, b := range bindings {
+		for _, member := range b.Members {
+			if _, err := tx.ExecContext(ctx, s.rebind("INSERT INTO role_bindings (role_name, member) VALUES (?, ?)"), b.Role, member); err != nil {
+				return err
+			}
+		}
+	}
+
+	return tx.Commit()
 }
 
-// GetPolicy implements Store.
-func (s *SQLStore) GetPolicy(ctx context.Context) (*api.PolicyConfig, error) {
-	query := s.rebind(`SELECT content FROM policies WHERE id = 'mesh-policy'`)
-	var data string
-	err := s.db.QueryRowContext(ctx, query).Scan(&data)
-	if err == sql.ErrNoRows {
-		return nil, ErrNotFound
-	}
+// GetMeshPolicy retrieves the entire mesh policy as structured data.
+func (s *SQLStore) GetMeshPolicy(ctx context.Context) ([]*api.PolicyRole, []*api.PolicyBinding, error) {
+	rolesRows, err := s.db.QueryContext(ctx, s.rebind("SELECT name FROM roles"))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+	defer func() { _ = rolesRows.Close() }()
+
+	rolesMap := make(map[string]*api.PolicyRole)
+	var roles []*api.PolicyRole
+
+	for rolesRows.Next() {
+		var name string
+		if err := rolesRows.Scan(&name); err != nil {
+			return nil, nil, err
+		}
+		role := &api.PolicyRole{Name: name}
+		rolesMap[name] = role
+		roles = append(roles, role)
 	}
 
-	var policy api.PolicyConfig
-	if err := yaml.Unmarshal([]byte(data), &policy); err != nil {
-		return nil, err
+	permsRows, err := s.db.QueryContext(ctx, s.rebind("SELECT role_name, resource_type, resource_value FROM role_permissions"))
+	if err != nil {
+		return nil, nil, err
 	}
-	return &policy, nil
+	defer func() { _ = permsRows.Close() }()
+
+	for permsRows.Next() {
+		var roleName, resType, resValue string
+		if err := permsRows.Scan(&roleName, &resType, &resValue); err != nil {
+			return nil, nil, err
+		}
+		if r, ok := rolesMap[roleName]; ok {
+			switch resType {
+			case "target":
+				r.AllowedTargets = append(r.AllowedTargets, resValue)
+			case "service":
+				r.AllowedServices = append(r.AllowedServices, resValue)
+			case "custom_datalog":
+				r.CustomDatalog = append(r.CustomDatalog, resValue)
+			}
+		}
+	}
+
+	bindingsRows, err := s.db.QueryContext(ctx, s.rebind("SELECT role_name, member FROM role_bindings"))
+	if err != nil {
+		return nil, nil, err
+	}
+	defer func() { _ = bindingsRows.Close() }()
+
+	bindingsMap := make(map[string]*api.PolicyBinding)
+	for bindingsRows.Next() {
+		var roleName, member string
+		if err := bindingsRows.Scan(&roleName, &member); err != nil {
+			return nil, nil, err
+		}
+		b, ok := bindingsMap[roleName]
+		if !ok {
+			b = &api.PolicyBinding{Role: roleName}
+			bindingsMap[roleName] = b
+		}
+		b.Members = append(b.Members, member)
+	}
+
+	var bindings []*api.PolicyBinding
+	for _, b := range bindingsMap {
+		bindings = append(bindings, b)
+	}
+
+	return roles, bindings, nil
 }
 
 // SaveBootstrapToken persists a new bootstrap token.
@@ -725,6 +841,15 @@ func (s *SQLStore) scanEnrollmentRequest(row scannable) (*EnrollmentRequest, err
 		t := time.Unix(resAt.Int64, 0)
 		req.ResolvedAt = &t
 	}
+
+	pubCopy := make([]byte, len(req.PublicKey))
+	copy(pubCopy, req.PublicKey)
+	req.PublicKey = pubCopy
+
+	biscuitCopy := make([]byte, len(req.BiscuitToken))
+	copy(biscuitCopy, req.BiscuitToken)
+	req.BiscuitToken = biscuitCopy
+
 	return &req, nil
 }
 
@@ -805,6 +930,15 @@ func (s *SQLStore) ListNodes(ctx context.Context) ([]EnrolledNode, error) {
 		}
 		node.EnrolledAt = time.UnixMilli(enrolledAtUnix)
 		node.ExpiresAt = time.UnixMilli(expiresAtUnix)
+
+		pubCopy := make([]byte, len(node.PublicKey))
+		copy(pubCopy, node.PublicKey)
+		node.PublicKey = pubCopy
+
+		biscuitCopy := make([]byte, len(node.Biscuit))
+		copy(biscuitCopy, node.Biscuit)
+		node.Biscuit = biscuitCopy
+
 		nodes = append(nodes, node)
 	}
 	if err := rows.Err(); err != nil {

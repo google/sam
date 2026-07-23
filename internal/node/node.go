@@ -137,6 +137,8 @@ type SamNode struct {
 	authPeers         sync.Map
 	trustedKeys       []TrustedKey
 	keysMu            sync.RWMutex
+	MeshPolicyRules   []biscuit.Rule
+	MeshPolicyMu      sync.RWMutex
 	rateLimiter       *PeerRateLimiter
 	services          *ServiceRegistry
 	BoundHTTPAddr     string
@@ -532,6 +534,9 @@ func (n *SamNode) Start(ctx context.Context) error {
 
 	// Periodically and on-demand reprovide registered services to the DHT
 	n.startReprovideLoop(ctx, ReprovideInterval)
+
+	// Periodically sync mesh policy
+	n.startPolicySyncLoop(ctx, n.config.PolicySyncInterval)
 
 	return nil
 }
@@ -1125,6 +1130,13 @@ func (n *SamNode) listenForHubEvents(ctx context.Context) {
 			n.handleBannedEvent(&event)
 		case api.MeshEvent_KEY_ROTATION:
 			n.handleKeyRotationEvent(&event)
+		case api.MeshEvent_POLICY_UPDATE:
+			logger.Infof("[Mesh Event] Received POLICY_UPDATE event from %s, triggering sync", msg.ReceivedFrom)
+			go func() {
+				if err := n.syncMeshPolicy(context.Background()); err != nil {
+					logger.Warnf("Failed to sync mesh policy after event: %v", err)
+				}
+			}()
 		}
 	}
 }
@@ -1931,4 +1943,62 @@ func hasCircuit(addr multiaddr.Multiaddr) bool {
 		}
 	}
 	return false
+}
+
+func (n *SamNode) syncMeshPolicy(ctx context.Context) error {
+	hubURL, err := n.Store.LoadHubURL()
+	if err != nil || hubURL == "" {
+		return fmt.Errorf("hub URL not found in store")
+	}
+
+	token := n.GetIdentity()
+	if len(token) == 0 {
+		return fmt.Errorf("node has no identity token to fetch mesh policy")
+	}
+
+	policyResp, err := FetchMeshPolicy(ctx, hubURL, token)
+	if err != nil {
+		return fmt.Errorf("failed to fetch mesh policy: %w", err)
+	}
+
+	rules := BuildPolicyRules(policyResp.Roles, policyResp.Bindings)
+
+	n.MeshPolicyMu.Lock()
+	n.MeshPolicyRules = rules
+	n.MeshPolicyMu.Unlock()
+
+	logger.Infof("Successfully synchronized mesh policy (generated %d rules)", len(rules))
+	return nil
+}
+
+func (n *SamNode) startPolicySyncLoop(ctx context.Context, interval time.Duration) {
+	if interval <= 0 {
+		interval = 1 * time.Hour
+	}
+
+	go func() {
+		// Run initial sync after a short delay
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(2 * time.Second):
+			if err := n.syncMeshPolicy(ctx); err != nil {
+				logger.Warnf("Initial mesh policy sync failed: %v", err)
+			}
+		}
+
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := n.syncMeshPolicy(ctx); err != nil {
+					logger.Warnf("Periodic mesh policy sync failed: %v", err)
+				}
+			}
+		}
+	}()
 }

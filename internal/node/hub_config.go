@@ -16,6 +16,7 @@ package node
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"net/http"
@@ -137,4 +138,45 @@ func SyncHubConfig(ctx context.Context, s *Store) ([]byte, []multiaddr.Multiaddr
 	}
 
 	return pubKey, hubAddrs, nil
+}
+
+// FetchMeshPolicy retrieves the latest mesh policy from the Hub's /policies endpoint using a biscuit token.
+func FetchMeshPolicy(ctx context.Context, hubURL string, biscuitToken []byte) (*api.PolicyConfigGetResponse, error) {
+	if !strings.HasPrefix(hubURL, "http://") && !strings.HasPrefix(hubURL, "https://") {
+		hubURL = "https://" + hubURL
+	}
+	hubURL = strings.TrimSuffix(hubURL, "/")
+
+	urlStr := hubURL + "/policies"
+	req, err := http.NewRequestWithContext(ctx, "GET", urlStr, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
+	}
+
+	req.Header.Set("Authorization", "Bearer "+base64.StdEncoding.EncodeToString(biscuitToken))
+
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("HTTP request failed: %w", err)
+	}
+	defer resp.Body.Close() //nolint:errcheck
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("hub returned status %s: %s", resp.Status, string(body))
+	}
+
+	var policyResp api.PolicyConfigGetResponse
+	if err := proto.Unmarshal(body, &policyResp); err != nil {
+		return nil, fmt.Errorf("failed to decode /policies response: %w", err)
+	}
+
+	return &policyResp, nil
 }

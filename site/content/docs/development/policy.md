@@ -71,33 +71,40 @@ Because the OIDC claims were translated into Datalog, a node administrator can w
 allow if group("engineering");
 ```
 
-## 2. Hub Policy Schema (`policies.yaml`)
-Admins define central permissions by mapping OIDC roles to specific capabilities. 
+## 2. Hub Policy Configuration (REST API)
+Admins manage central permissions dynamically via the Control Plane REST API. The policy database defines a set of **Roles** and **Bindings**.
 
-* **`allowed_targets`**: Defines which logical groups or specific peers a user can route messages to, analogous to Active Directory security groups. Target definitions must be formatted as resolved facts (e.g., `group:<name>`, `user:<sub-id>`, `email:<email>`, `role:<role-name>`, or `node:<peer-id>`). *Note: These are evaluated dynamically at the destination node using its own identity (see Section 3.1).*
-* **`allowed_services`**: Defines the application-level tools or endpoints a user can access. Services use a strict `type://name` convention (e.g., `mcp://db-agent` or `inference://openrouter`).
-  * **Strict Namespaces**: There are no implicit fallbacks. `system://...` is used for internal services, `mcp://...` for node services, `inference://...` for AI models, etc. Service names must be valid domain labels (e.g. `value1.value2.value3`).
-  * **Wildcards**: SAM natively supports domain-level wildcards to build complex policies. The hub generates specific facts like `granted_service_exact($type, $name)`, `granted_service_prefix($type, $prefix)`, `granted_service_suffix($type, $suffix)`, `granted_service_all_in_type($type)`, or `granted_service_all_types()`. You can grant access to an entire type via `mcp://*`, allow prefix-based wildcard matching like `mcp://*.service.local` (which matches services ending in `.service.local`), suffix-based wildcard matching like `mcp://service.*` (which matches services starting with `service.`), or global access to everything via `*`. Note that arbitrary partial matches (e.g., `dev-*` or `*-prod`) are not supported because they do not align with domain boundaries and will fail DNS name validation.
-  * **MCP Namespace Convention**: The `mcp://` prefix (`api.MCPServicePrefix`) is the explicit convention for all Model Context Protocol targets. When remote nodes query local nodes for tool catalogs, if the local service is an MCP server, the proxy layer strictly enforces the authorization policy against the `mcp://` prefix.
-> [!NOTE]
-> The `*` global wildcard is a special case. It grants `granted_service_all_types()` fact, allowing the caller to invoke any tool regardless of its namespace or name.
+* **Roles**: Define specific capabilities (allowed destinations and services).
+  * `allowed_targets`: Defines which logical groups or specific peers a user can route messages to, analogous to Active Directory security groups. Target definitions must be formatted as resolved facts (e.g., `group:<name>`, `user:<sub-id>`, `email:<email>`, `role:<role-name>`, or `node:<peer-id>`). *Note: These are evaluated dynamically at the destination node using its own identity (see Section 3.1).*
+  * `allowed_services`: Defines the application-level tools or endpoints a user can access. Services use a strict `type://name` convention (e.g., `mcp://db-agent` or `inference://openrouter`).
+    * **Strict Namespaces**: There are no implicit fallbacks. `system://...` is used for internal services, `mcp://...` for node services, `inference://...` for AI models, etc. Service names must be valid domain labels (e.g. `value1.value2.value3`).
+    * **Wildcards**: SAM natively supports domain-level wildcards to build complex policies. The hub generates specific facts like `granted_service_exact($type, $name)`, `granted_service_prefix($type, $prefix)`, `granted_service_suffix($type, $suffix)`, `granted_service_all_in_type($type)`, or `granted_service_all_types()`. You can grant access to an entire type via `mcp://*`, allow prefix-based wildcard matching like `mcp://*.service.local` (which matches services ending in `.service.local`), suffix-based wildcard matching like `mcp://service.*` (which matches services starting with `service.`), or global access to everything via `*`.
+    * **MCP Namespace Convention**: The `mcp://` prefix (`api.MCPServicePrefix`) is the explicit convention for all Model Context Protocol targets.
+* **Bindings**: Map OIDC identities (sub/user, email, group) to specific Roles.
 
-```yaml
-version: "v1alpha1"
-roles:
-  data-scientist:
-    allowed_targets: 
-      - "node:12D3KooW..."        # Specific peer ID
-      - "group:backend-nodes"     # Logical group of peers
-      - "role:admin"              # Nodes possessing the admin role
-      - "user:auth0|123456"       # Node bound to a specific user sub
-      - "email:db@example.com"    # Node bound to a specific email
-    allowed_services: 
-      - "mcp://db-agent"            # Access to specific MCP server
-      - "inference://openrouter"    # Access to inference endpoints
-      - "mcp://*"                   # Wildcard access to all MCP servers
-    custom_datalog:
-      - 'department("analytics");' # Raw injected facts
+### 2.1 Updating Mesh Policy
+Admins POST policy JSON updates to the Control Plane `/policies` endpoint using the admin authorization token:
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer <your-admin-token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "roles": [
+      {
+        "name": "data-scientist-role",
+        "allowed_targets": ["group:backend-nodes", "node:12D3KooW..."],
+        "allowed_services": ["mcp://db-agent", "inference://openrouter", "mcp://*"]
+      }
+    ],
+    "bindings": [
+      {
+        "role": "data-scientist-role",
+        "members": ["group:data-science-team"]
+      }
+    ]
+  }' \
+  http://<control-plane-ip>:8080/policies
 ```
 
 ## 3. Node Local Policy Schema (`sam-node-config.yaml`)
@@ -210,68 +217,53 @@ graph TD
 
 Here is a representative configuration for an engineering mesh deployment. It shows how to use roles, target groups, service namespaces, wildcards, and local attenuation checks to build a zero-trust development network.
 
-### 6.1 Central Hub Policy (`policies.yaml`)
+### 6.1 Central Hub Policy API Update
 
-Deploy this file on `sam-control-plane` to define global roles and user/service-account mappings.
+Send this JSON payload via `POST /policies` to define global roles and user/service-account mappings.
 
-```yaml
-version: "v1alpha1"
-
-# Bindings map OIDC identities (sub/user, email, groups) to SAM Roles.
-# Note: Kubernetes projected service account tokens do not carry 'groups' claims,
-# so they must be bound explicitly using their 'user' claim format.
-bindings:
-  # 1. Global Admins (Infrastructure SAs, Lead Architects)
-  - members: ["user:system:serviceaccount:sam-mesh:admin-sa"]
-    role: "admin"
-  - members: ["group:infrastructure-leads"]
-    role: "admin"
-
-  # 2. Software Developers
-  - members: ["group:software-engineering-team"]
-    role: "developer"
-
-  # 3. Data Scientists & AI Engineers
-  - members: ["group:data-science-team"]
-    role: "data-scientist"
-
-  # 4. Contractors / Read-Only Audits
-  - members: ["email:audit-contractor@external.com"]
-    role: "auditor"
-
-# Roles define the allowed destinations (allowed_targets) and tools (allowed_services)
-roles:
-  # Admins have full, unrestricted access to the entire mesh
-  admin:
-    allowed_targets:
-      - "*"
-    allowed_services:
-      - "*"
-
-  # Developers can call development tools on dev nodes
-  developer:
-    allowed_targets:
-      - "group:dev-nodes"           # Can only call nodes in the 'dev-nodes' target group
-    allowed_services:
-      - "mcp://code-reviewer"       # Can call the code reviewer tool
-      - "mcp://git-helper"          # Can call git helper tools
-      - "mcp://build-runner.*"      # Wildcard: matches any build runner sub-service (e.g. build-runner.go)
-
-  # Data Scientists can call database tools and all AI inference endpoints
-  data-scientist:
-    allowed_targets:
-      - "group:data-nodes"          # Can call nodes in the 'data-nodes' target group
-      - "node:12D3KooWSpecialNode"  # Can call a specific high-compute node directly
-    allowed_services:
-      - "mcp://db-reader"           # Can query databases
-      - "inference://*"             # Wildcard: can access any LLM inference service
-
-  # Auditors can only query metadata catalogs and cannot call operational tools
-  auditor:
-    allowed_targets:
-      - "*"
-    allowed_services:
-      - "system://sam.catalog"      # Strictly limited to tool discovery/metadata
+```json
+{
+  "roles": [
+    {
+      "name": "admin",
+      "allowed_targets": ["*"],
+      "allowed_services": ["*"]
+    },
+    {
+      "name": "developer",
+      "allowed_targets": ["group:dev-nodes"],
+      "allowed_services": ["mcp://code-reviewer", "mcp://git-helper", "mcp://build-runner.*"]
+    },
+    {
+      "name": "data-scientist",
+      "allowed_targets": ["group:data-nodes", "node:12D3KooWSpecialNode"],
+      "allowed_services": ["mcp://db-reader", "inference://*"]
+    },
+    {
+      "name": "auditor",
+      "allowed_targets": ["*"],
+      "allowed_services": ["system://sam.catalog"]
+    }
+  ],
+  "bindings": [
+    {
+      "role": "admin",
+      "members": ["user:system:serviceaccount:sam-mesh:admin-sa", "group:infrastructure-leads"]
+    },
+    {
+      "role": "developer",
+      "members": ["group:software-engineering-team"]
+    },
+    {
+      "role": "data-scientist",
+      "members": ["group:data-science-team"]
+    },
+    {
+      "role": "auditor",
+      "members": ["email:audit-contractor@external.com"]
+    }
+  ]
+}
 ```
 
 ### 6.2 Node-Level Configuration (`sam-node-config.yaml`)

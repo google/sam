@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/google/sam/api"
 )
 
 func TestLocalPolicyCanGrantPermissions(t *testing.T) {
@@ -21,7 +23,7 @@ func TestLocalPolicyCanGrantPermissions(t *testing.T) {
 roles:
   none:
     allowed_services: []
-    allowed_targets: []
+    allowed_targets: ["*"]
 bindings:
   - role: none
     members: ["user:unprivileged-user"]
@@ -60,7 +62,8 @@ attenuation:
 		"--bind-addr", fmt.Sprintf("127.0.0.1:%d", apiPortB),
 		"--api-token", apiTokenB,
 		"--jwt", mintToken(map[string]interface{}{
-			"sub": "nodeB-user",
+			"sub":   "nodeB-user",
+			"roles": []string{api.RoleNode},
 		}),
 		"--listen", "/ip4/127.0.0.1/tcp/0",
 		"--listen", "/ip4/127.0.0.1/udp/0/quic-v1",
@@ -103,7 +106,8 @@ attenuation:
 		"--bind-addr", fmt.Sprintf("127.0.0.1:%d", apiPortA),
 		"--api-token", apiTokenA,
 		"--jwt", mintToken(map[string]interface{}{
-			"sub": "unprivileged-user",
+			"sub":   "unprivileged-user",
+			"roles": []string{api.RoleNode},
 		}),
 		"--listen", "/ip4/127.0.0.1/tcp/0",
 		"--listen", "/ip4/127.0.0.1/udp/0/quic-v1",
@@ -203,7 +207,8 @@ attenuation:
 		"--bind-addr", fmt.Sprintf("127.0.0.1:%d", apiPortB),
 		"--api-token", apiTokenB,
 		"--jwt", mintToken(map[string]interface{}{
-			"sub": "nodeB-user",
+			"sub":   "nodeB-user",
+			"roles": []string{api.RoleNode},
 		}),
 		"--listen", "/ip4/127.0.0.1/tcp/0",
 		"--listen", "/ip4/127.0.0.1/udp/0/quic-v1",
@@ -246,7 +251,8 @@ attenuation:
 		"--bind-addr", fmt.Sprintf("127.0.0.1:%d", apiPortA),
 		"--api-token", apiTokenA,
 		"--jwt", mintToken(map[string]interface{}{
-			"sub": "client-user",
+			"sub":   "client-user",
+			"roles": []string{api.RoleNode},
 		}),
 		"--listen", "/ip4/127.0.0.1/tcp/0",
 		"--listen", "/ip4/127.0.0.1/udp/0/quic-v1",

@@ -63,10 +63,12 @@ roles: {}
 	routerJWT := mintToken(map[string]interface{}{
 		"sub":    "router-integration-1",
 		"groups": []string{"routers"},
+		"roles":  []string{api.RoleRouter},
 	})
 
 	nodeJWT := mintToken(map[string]interface{}{
-		"sub": "mock-user",
+		"sub":   "mock-user",
+		"roles": []string{api.RoleNode},
 	})
 
 	jwtPath := filepath.Join(tmpDir, "jwt.txt")
@@ -102,7 +104,7 @@ roles: {}
 	// 1. Start Control Plane A temporarily to generate keyring
 	cmdCP_A_temp := exec.Command(cpBin,
 		"--bind-address", fmt.Sprintf("127.0.0.1:%d", httpPortCP_A),
-		"--policy-file", policyFile,
+		"--admin-token", "test-admin-token",
 		"--db-dsn", dsnA,
 		"--issuer", oidcURL,
 		"--insecure-skip-tls-verify",
@@ -111,6 +113,7 @@ roles: {}
 		t.Fatalf("failed to start temporary CP A: %v", err)
 	}
 	waitForControlPlane(t, httpPortCP_A)
+	injectPolicyYAML(t, httpPortCP_A, "test-admin-token", policyFile)
 	_ = cmdCP_A_temp.Process.Signal(os.Interrupt)
 	_ = cmdCP_A_temp.Wait()
 
@@ -126,7 +129,7 @@ roles: {}
 	// 3. Start CP A persistently
 	cmdCP_A := exec.Command(cpBin,
 		"--bind-address", fmt.Sprintf("127.0.0.1:%d", httpPortCP_A),
-		"--policy-file", policyFile,
+		"--admin-token", "test-admin-token",
 		"--db-dsn", dsnA,
 		"--issuer", oidcURL,
 		"--insecure-skip-tls-verify",
@@ -137,6 +140,7 @@ roles: {}
 	defer func() { _ = cmdCP_A.Process.Kill(); _ = cmdCP_A.Wait() }()
 
 	waitForControlPlane(t, httpPortCP_A)
+	injectPolicyYAML(t, httpPortCP_A, "test-admin-token", policyFile)
 
 	// 4. Start Router A
 	cmdRouterA := exec.Command(routerBin,
@@ -157,7 +161,7 @@ roles: {}
 	// 5. Start CP B
 	cmdCP_B := exec.Command(cpBin,
 		"--bind-address", fmt.Sprintf("127.0.0.1:%d", httpPortCP_B),
-		"--policy-file", policyFile,
+		"--admin-token", "test-admin-token",
 		"--db-dsn", dsnB,
 		"--issuer", oidcURL,
 		"--insecure-skip-tls-verify",
@@ -168,6 +172,7 @@ roles: {}
 	defer func() { _ = cmdCP_B.Process.Kill(); _ = cmdCP_B.Wait() }()
 
 	waitForControlPlane(t, httpPortCP_B)
+	injectPolicyYAML(t, httpPortCP_B, "test-admin-token", policyFile)
 
 	// Start Router B
 	cmdRouterB := exec.Command(routerBin,

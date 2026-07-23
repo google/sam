@@ -33,7 +33,6 @@ var (
 	dbDSN                 string
 	oidcIssuer            string
 	allowedAudiencesFlag  string
-	policyFile            string
 	keyRotationInterval   time.Duration
 	keyGracePeriod        time.Duration
 	leaseDuration         time.Duration
@@ -98,7 +97,6 @@ func main() {
 				KeyRotationInterval:   keyRotationInterval,
 				KeyGracePeriod:        keyGracePeriod,
 				InsecureSkipTLSVerify: insecureSkipTLSVerify,
-				PolicyPath:            policyFile,
 				BiscuitTimeout:        10 * time.Second,
 				AdminToken:            adminToken,
 				AutoApproveEnrollment: autoApproveEnrollment,
@@ -128,7 +126,6 @@ func main() {
 	rootCmd.PersistentFlags().StringVar(&dbDSN, "db-dsn", "control-plane.db", "Database DSN/Connection URL")
 	rootCmd.Flags().StringVar(&oidcIssuer, "issuer", "", "OIDC Issuer URL (comma-separated)")
 	rootCmd.Flags().StringVar(&allowedAudiencesFlag, "allowed-audiences", api.DefaultAudience, "Comma-separated list of allowed OIDC audiences")
-	rootCmd.Flags().StringVar(&policyFile, "policy-file", "policies.yaml", "Path to policies.yaml (bootstrapping only)")
 	rootCmd.Flags().DurationVar(&keyRotationInterval, "key-rotation-interval", 24*time.Hour, "Key rotation interval (e.g. 24h). 0 disables rotation.")
 	rootCmd.Flags().DurationVar(&keyGracePeriod, "key-grace-period", 1*time.Hour, "Key grace period for rotated keys.")
 	rootCmd.Flags().DurationVar(&leaseDuration, "lease-duration", 15*time.Minute, "Router lease registration TTL.")

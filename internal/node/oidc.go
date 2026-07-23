@@ -232,17 +232,17 @@ func (n *SamNode) InteractiveLogin(ctx context.Context, authURL, tokenURL, clien
 	select {
 	case <-ctx.Done():
 		if srv != nil {
-			_ = srv.Close()
+			_ = srv.Shutdown(context.Background())
 		}
 		return "", ctx.Err()
 	case err := <-errChan:
 		if srv != nil {
-			_ = srv.Close()
+			_ = srv.Shutdown(context.Background())
 		}
 		return "", err
 	case code = <-codeChan:
 		if srv != nil {
-			_ = srv.Close()
+			_ = srv.Shutdown(context.Background())
 		}
 	}
 

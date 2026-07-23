@@ -21,6 +21,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/google/sam/api"
 )
 
 func TestMCPLocalTools(t *testing.T) {
@@ -51,7 +53,8 @@ roles: {}
 	homeB := t.TempDir()
 
 	nodeJWT := mintToken(map[string]interface{}{
-		"sub": "mock-user",
+		"sub":   "mock-user",
+		"roles": []string{api.RoleNode},
 	})
 
 	// Start Node A

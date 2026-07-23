@@ -347,6 +347,41 @@ jobs:
             exit 1
           }
 
+          echo "Seeding Control Plane Policies..."
+          ADMIN_TOKEN=$(kubectl get secret sam-control-plane-secret-${ENV_NAME} -n ${NAMESPACE} -o jsonpath='{.data.admin-token}' | base64 -d)
+          
+          kubectl port-forward deployment/sam-control-plane-${ENV_NAME} -n ${NAMESPACE} 8080:8080 &
+          PF_PID=$!
+          
+          for i in {1..15}; do
+            if nc -z localhost 8080; then
+              break
+            fi
+            sleep 1
+          done
+          
+          curl -s -X POST \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+            -d '{
+              "roles": [
+                {"name": "sam-canary", "allowed_services": ["*"], "allowed_targets": ["*"]},
+                {"name": "sam:role:sambox", "allowed_services": ["*"], "allowed_targets": ["*"]},
+                {"name": "sam:role:router", "allowed_services": ["*"], "allowed_targets": ["*"]},
+                {"name": "public-mesh", "allowed_services": ["*"], "allowed_targets": ["*"]}
+              ],
+              "bindings": [
+                {"role": "sam-canary", "members": ["user:system:serviceaccount:sam-canary-'"${ENV_NAME}"':sam-node-sa"]},
+                {"role": "sam:role:sambox", "members": ["user:system:serviceaccount:sam-canary-'"${ENV_NAME}"':sam-box-sa"]},
+                {"role": "sam:role:router", "members": ["group:routers", "user:system:serviceaccount:'"${NAMESPACE}"':sam-router-sa"]},
+                {"role": "public-mesh", "members": ["sam:system:authenticated"]}
+              ]
+            }' \
+            http://localhost:8080/policies >/dev/null
+            
+          kill $PF_PID
+
+
           kubectl rollout status deployment/sam-console-${ENV_NAME} -n ${NAMESPACE} --timeout=120s || {
             echo "Console Deployment failed!"
             print_rollout_diagnostics "${NAMESPACE}" "deployment/sam-console-${ENV_NAME}" "app=sam-console-${ENV_NAME}"

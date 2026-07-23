@@ -18,7 +18,6 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
-	"google.golang.org/protobuf/encoding/protojson"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -26,6 +25,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/google/sam/api"
 	"github.com/libp2p/go-libp2p/core/peer"

@@ -133,11 +133,11 @@ type Store interface {
 	// GetActiveRouters retrieves all routers whose leases are still valid.
 	GetActiveRouters(ctx context.Context) ([]RouterLease, error)
 
-	// SavePolicy persists the mesh configurations.
-	SavePolicy(ctx context.Context, policy *api.PolicyConfig) error
+	// SaveMeshPolicy persists the mesh configurations.
+	SaveMeshPolicy(ctx context.Context, roles []*api.PolicyRole, bindings []*api.PolicyBinding) error
 
-	// GetPolicy loads the mesh configurations.
-	GetPolicy(ctx context.Context) (*api.PolicyConfig, error)
+	// GetMeshPolicy loads the mesh configurations.
+	GetMeshPolicy(ctx context.Context) ([]*api.PolicyRole, []*api.PolicyBinding, error)
 
 	// SaveBootstrapToken persists a new bootstrap token.
 	SaveBootstrapToken(ctx context.Context, token *BootstrapToken) error

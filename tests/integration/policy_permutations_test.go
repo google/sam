@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/sam/api"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -153,6 +154,7 @@ services:
 		"--api-token", apiTokenB,
 		"--jwt", mintToken(map[string]interface{}{
 			"sub":    "bob-subject",
+			"roles":  []string{api.RoleNode},
 			"email":  "nodeB@example.com",
 			"groups": []string{"compute", "backend"},
 		}),
@@ -232,6 +234,13 @@ services:
 			apiTokenA := "tokenA"
 			apiPortA := getFreePort(t)
 
+			if r, ok := tt.jwtClaims["roles"]; ok {
+				if stringSlice, ok := r.([]string); ok {
+					tt.jwtClaims["roles"] = append(stringSlice, api.RoleNode)
+				}
+			} else {
+				tt.jwtClaims["roles"] = []string{api.RoleNode}
+			}
 			jwtA := mintToken(tt.jwtClaims)
 
 			cmdA := exec.Command(nodeBin, "run",

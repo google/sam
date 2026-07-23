@@ -29,6 +29,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/sam/api"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
 )
@@ -52,6 +53,7 @@ roles:
     allowed_services: 
       - "mcp://*"
       - "system://sam.catalog"
+    allowed_targets: ["*"]
 `
 	writePolicyWithRouter(t, policyFile, policyContent)
 
@@ -109,13 +111,14 @@ roles:
 	routerJWT := mintToken(map[string]interface{}{
 		"sub":    "router-integration-1",
 		"groups": []string{"routers"},
+		"roles":  []string{api.RoleRouter},
 	})
 
 	// Start Control Plane. We use journal_mode(DELETE) and busy_timeout(5000)
 	// to ensure concurrent node enrollment writes do not trigger SQLITE_BUSY locking failures.
 	cmdCP := exec.Command(cpBin,
 		"--bind-address", fmt.Sprintf("127.0.0.1:%d", cpPort),
-		"--policy-file", policyFile,
+		"--admin-token", "test-admin-token",
 		"--db-dsn", filepath.Join(tmpDir, "cp-keys.db")+"?_pragma=journal_mode(DELETE)&_pragma=busy_timeout(5000)",
 		"--issuer", oidcURL,
 		"--insecure-skip-tls-verify",
@@ -128,6 +131,7 @@ roles:
 	defer func() { _ = cmdCP.Process.Kill(); _ = cmdCP.Wait() }()
 
 	waitForControlPlane(t, cpPort)
+	injectPolicyYAML(t, cpPort, "test-admin-token", policyFile)
 
 	// Start Router A
 	cmdRouterA := exec.Command(routerBin,
@@ -185,7 +189,8 @@ roles:
 	time.Sleep(2 * time.Second)
 
 	nodeJWT := mintToken(map[string]interface{}{
-		"sub": "mock-user",
+		"sub":   "mock-user",
+		"roles": []string{api.RoleNode},
 	})
 
 	// Node A connects to Router A (via shared CP)

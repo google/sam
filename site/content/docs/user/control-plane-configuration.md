@@ -21,7 +21,6 @@ The Control Plane is responsible for bridging user identities from trusted OIDC 
 | `--db-driver` | *None* | `sqlite` | Database driver (`sqlite` or `postgres`). |
 | `--db-dsn` | *None* | `control-plane.db` | Database DSN/Connection URL (e.g. `postgres://user:pass@host:5432/db`). |
 | `--allowed-audiences` | *None* | `sam-mesh-audience` | Comma-separated list of allowed JWT audiences. |
-| `--policy-file` | *None* | `policies.yaml` | Path to the YAML file defining authorization roles and bindings (bootstrapping only). |
 | `--admin-token` | *None* | *None* | Secret token string required in the HTTP Header `Authorization: Bearer <token>` for admin operations. |
 | `--insecure-skip-tls-verify` | *None* | `false` | Set to `true` to skip certificate validation for development/testing OIDC providers. |
 | `--key-rotation-interval` | *None* | `24h` | Key rotation interval (e.g. `24h`). `0s` disables rotation. |
@@ -50,50 +49,42 @@ The Router is a dedicated GossipSub helper that maintains stable network address
 
 ---
 
-## 3. Configuring Role-Based Policies (`policies.yaml`)
+## 3. Configuring Role-Based Policies (Dynamic API)
 
-The Control Plane dynamically issues permissions inside the Biscuit token based on identity claims (users or groups) mapped to specific roles in the policy file. 
+The Control Plane dynamically issues permissions inside the Biscuit token based on identity claims (users or groups) mapped to specific roles in the database.
 
 The policy defines what endpoints and services agents are permitted to use:
 * **`allowed_targets`**: Restricts which logical endpoints the agent can route connections to. Use resolved Biscuit facts: `group:<name>`, `user:<sub-id>`, `email:<email>`, `role:<role-name>`, or `node:<peer-id>`.
 * **`allowed_services`**: Restricts the application-level services the agent can invoke. Services are prefixed by their protocol type and URI scheme (e.g., `mcp://local-shell-tools` or `inference://openrouter`). Wildcards are supported (e.g., `mcp://*`).
 
-### Example Policy Mapping
-Create a `policies.yaml` file in the directory where you run `sam-control-plane`:
+### Seeding Policies via REST API
+Admins manage policies by sending a JSON payload to the `/policies` endpoint.
 
-```yaml
-version: v1alpha1
-
-# Define authorization roles and their specific network/tool permissions
-roles:
-  developer-role:
-    allowed_targets:
-      - "group:dev-nodes"
-      - "email:dev-lead@example.com"
-      - "user:auth0|123456"
-      - "node:12D3KooWSpecificDevNodeId"
-    allowed_services:
-      - "mcp://local-shell-tools"
-      - "mcp://git-helper"
-      - "inference://openrouter"
-  
-  admin-role:
-    allowed_targets:
-      - "group:all-nodes"
-      - "role:admin"
-    allowed_services:
-      - "mcp://*"
-      - "inference://*"
-      - "system://*"
-
-# Bind OIDC user subs, emails, or group claims to roles
-bindings:
-  - members: ["email:alice@example.com"]
-    role: "admin-role"
-  - members: ["user:auth0|123456"]
-    role: "admin-role"
-  - members: ["group:eng-team"]
-    role: "developer-role"
+```json
+{
+  "roles": [
+    {
+      "name": "developer-role",
+      "allowed_targets": ["group:dev-nodes", "email:dev-lead@example.com", "user:auth0|123456", "node:12D3KooWSpecificDevNodeId"],
+      "allowed_services": ["mcp://local-shell-tools", "mcp://git-helper", "inference://openrouter"]
+    },
+    {
+      "name": "admin-role",
+      "allowed_targets": ["group:all-nodes", "role:admin"],
+      "allowed_services": ["mcp://*", "inference://*", "system://*"]
+    }
+  ],
+  "bindings": [
+    {
+      "role": "admin-role",
+      "members": ["email:alice@example.com", "user:auth0|123456"]
+    },
+    {
+      "role": "developer-role",
+      "members": ["group:eng-team"]
+    }
+  ]
+}
 ```
 
 ### 3.1 Binary Capability Roles (Zero Trust)
@@ -104,14 +95,19 @@ To enforce the principle of least privilege, the Sovereign Agent Mesh implements
 
 The Hub control plane validates that the enrolling client is authorized for the requested role before issuing the Biscuit identity token:
 1. **Node Fallback**: By default, any successfully authenticated OIDC identity or generic bootstrap token can claim the `sam:role:node` role.
-2. **Explicit Bindings**: The higher-privilege capability roles `sam:role:router` and `sam:role:sambox` must be explicitly authorized to the user/service account by mapping the role name in `policies.yaml` bindings. For example:
+2. **Explicit Bindings**: The higher-privilege capability roles `sam:role:router` and `sam:role:sambox` must be explicitly authorized to the user/service account by mapping the role name in bindings. For example:
 
-```yaml
-bindings:
-  - members: ["group:mesh-routers"]
-    role: "sam:role:router"
-  - members: ["user:gateway-pod-sa"]
-    role: "sam:role:sambox"
+```json
+"bindings": [
+  {
+    "role": "sam:role:router",
+    "members": ["group:mesh-routers"]
+  },
+  {
+    "role": "sam:role:sambox",
+    "members": ["user:gateway-pod-sa"]
+  }
+]
 ```
 
 If a binary requests a capability role it is not authorized for, enrollment fails immediately. If a client attempts to start using a token that lacks its binary's required role, startup aborts.
@@ -123,15 +119,24 @@ If a binary requests a capability role it is not authorized for, enrollment fail
 Here is a script demonstrating how to boot both services in a secure development environment:
 
 ```bash
-# 1. Start the Control Plane (using SQLite and policies)
+# 1. Start the Control Plane (using SQLite)
 ./bin/sam-control-plane \
   --issuer "https://accounts.google.com" \
   --allowed-audiences "my-google-client-id.apps.googleusercontent.com" \
-  --policy-file "./policies.yaml" \
   --bind-address "0.0.0.0:8080" \
   --admin-token "super-secret-admin-token"
 
-# 2. In another shell, start the Router using a bootstrap JWT or token
+# 2. Seed baseline policy via REST API
+curl -X POST \
+  -H "Authorization: Bearer super-secret-admin-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "roles": [{"name": "sam:role:node", "allowed_services": ["mcp://*"], "allowed_targets": ["*"]}],
+    "bindings": [{"role": "sam:role:node", "members": ["group:developers"]}]
+  }' \
+  http://127.0.0.1:8080/policies
+
+# 3. In another shell, start the Router using a bootstrap JWT or token
 ./bin/sam-router \
   --control-plane "http://127.0.0.1:8080" \
   --listen "/ip4/0.0.0.0/tcp/5001" \

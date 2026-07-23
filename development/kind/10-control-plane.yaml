@@ -90,7 +90,6 @@ spec:
         - "--db-dsn=postgres://sam:sam-secret-password@sam-db:5432/sam_mesh?sslmode=disable"
         - "--issuer=${CONTROL_PLANE_ISSUERS}"
         - "--allowed-audiences=${ALLOWED_AUDIENCES}"
-        - "--policy-file=/etc/sam/policies/policies.yaml"
         - "--insecure-skip-tls-verify"
         - "--admin-token=super-secret-admin-token"
         ports:
@@ -100,14 +99,7 @@ spec:
             path: /info
             port: http
           periodSeconds: 2
-        volumeMounts:
-        - name: policies-volume
-          mountPath: /etc/sam/policies
-          readOnly: true
-      volumes:
-      - name: policies-volume
-        configMap:
-          name: sam-control-plane-policies
+
 ---
 # Host-facing access for a locally-built sam-node. Reachable on the host at
 # 127.0.0.1:9090 via the control-plane extraPortMappings.
@@ -122,41 +114,4 @@ spec:
     app: sam-control-plane
   ports:
   - { name: http, port: 8080, targetPort: 8080, nodePort: 30090, protocol: TCP }
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: sam-control-plane-policies
-  namespace: ${NAMESPACE}
-data:
-  policies.yaml: |
-    version: "v1alpha1"
-    bindings:
-      - members: ["user:system:serviceaccount:${NAMESPACE}:node-a-sa"]
-        role: "sam-admin"
-      - members: ["user:system:serviceaccount:${NAMESPACE}:node-b-sa"]
-        role: "sam-admin"
-      - members: ["user:system:serviceaccount:${NAMESPACE}:node-c-sa"]
-        role: "sam-admin"
-      - members: ["user:system:serviceaccount:${NAMESPACE}:local-node-sa"]
-        role: "sam-admin"
-      - members: ["user:system:serviceaccount:${NAMESPACE}:sam-box-sa"]
-        role: "sam:role:sambox"
-      - members: ["group:routers", "user:system:serviceaccount:${NAMESPACE}:sam-router-sa"]
-        role: "sam:role:router"
-    roles:
-      sam-admin:
-        allowed_services:
-          - "*"
-        allowed_targets:
-          - "*"
-      "sam:role:sambox":
-        allowed_services:
-          - "*"
-        allowed_targets:
-          - "*"
-      "sam:role:router":
-        allowed_services:
-          - "*"
-        allowed_targets:
-          - "*"
+

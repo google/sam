@@ -249,6 +249,15 @@ func (n *SamNode) Authorize(rawToken []byte, req RequestContext, pubKey ed25519.
 		authorizer.AddRule(r)
 	}
 
+	// Apply Dynamic Mesh Policy Rules
+	n.MeshPolicyMu.RLock()
+	meshRules := n.MeshPolicyRules
+	n.MeshPolicyMu.RUnlock()
+
+	for _, r := range meshRules {
+		authorizer.AddRule(r)
+	}
+
 	err = authorizer.Authorize()
 	if err != nil {
 		logger.Errorf("Authorizer failure: %v, token: %s", err, b.String())

@@ -123,7 +123,6 @@ spec:
         - "--db-dsn=postgres://sam:sam-secret-password@sam-db-${ENV_NAME}:5432/sam_mesh?sslmode=disable"
         - "--issuer=https://auth.sam-mesh.dev,https://container.googleapis.com/v1/projects/${GCP_PROJECT_ID}/locations/${CLUSTER_REGION}/clusters/${CLUSTER_NAME}"
         - "--allowed-audiences=sam-mesh-audience,sam-hub-audience"
-        - "--policy-file=/etc/sam/policies/policies.yaml"
         - "--admin-token=$(ADMIN_TOKEN)"
         - "--auto-approve-enrollment"
         resources:
@@ -133,53 +132,6 @@ spec:
           limits:
             cpu: 500m
             memory: 512Mi
-        volumeMounts:
-        - name: policies-volume
-          mountPath: /etc/sam/policies
-          readOnly: true
-      volumes:
-      - name: policies-volume
-        configMap:
-          name: sam-control-plane-policies-${ENV_NAME}
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: sam-control-plane-policies-${ENV_NAME}
-  namespace: ${NAMESPACE}
-data:
-  policies.yaml: |
-    version: "v1alpha1"
-    bindings:
-      - members: ["user:system:serviceaccount:sam-canary-${ENV_NAME}:sam-node-sa"]
-        role: "sam-canary"
-      - members: ["user:system:serviceaccount:sam-canary-${ENV_NAME}:sam-box-sa"]
-        role: "sam:role:sambox"
-      - members: ["group:routers", "user:system:serviceaccount:${NAMESPACE}:sam-router-sa"]
-        role: "sam:role:router"
-      - members: ["sam:system:authenticated"]
-        role: "public-mesh"
-    roles:
-      sam-canary:
-        allowed_services:
-          - "*"
-        allowed_targets:
-          - "*"
-      "sam:role:sambox":
-        allowed_services:
-          - "*"
-        allowed_targets:
-          - "*"
-      "sam:role:router":
-        allowed_services:
-          - "*"
-        allowed_targets:
-          - "*"
-      public-mesh:
-        allowed_services:
-          - "*"
-        allowed_targets:
-          - "*"
 ---
 apiVersion: networking.gke.io/v1
 kind: HealthCheckPolicy

@@ -62,13 +62,41 @@ func (s *Server) HandleAdminStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var policyYAML string
-	policy, err := s.store.GetPolicy(ctx)
-	if err == nil {
-		yamlData, err := yaml.Marshal(policy)
-		if err == nil {
-			policyYAML = string(yamlData)
+	roles, bindings, err := s.store.GetMeshPolicy(r.Context())
+	if err != nil {
+		logger.Errorf("Failed to list policy: %v", err)
+	}
+
+	type displayRole struct {
+		AllowedServices []string `yaml:"allowed_services"`
+		AllowedTargets  []string `yaml:"allowed_targets"`
+	}
+	type displayBinding struct {
+		Role    string   `yaml:"role"`
+		Members []string `yaml:"members"`
+	}
+	displayMap := map[string]interface{}{
+		"roles":    make(map[string]displayRole),
+		"bindings": make([]displayBinding, 0),
+	}
+
+	for _, role := range roles {
+		displayMap["roles"].(map[string]displayRole)[role.Name] = displayRole{
+			AllowedServices: role.AllowedServices,
+			AllowedTargets:  role.AllowedTargets,
 		}
+	}
+	for _, b := range bindings {
+		displayMap["bindings"] = append(displayMap["bindings"].([]displayBinding), displayBinding{
+			Role:    b.Role,
+			Members: b.Members,
+		})
+	}
+
+	var policyYAML string
+	yamlBytes, err := yaml.Marshal(displayMap)
+	if err == nil {
+		policyYAML = string(yamlBytes)
 	}
 
 	resp := map[string]any{

@@ -265,6 +265,51 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
     kubectl --context="${KUBECONTEXT}" rollout status deployment/sam-db --timeout=60s
     kubectl --context="${KUBECONTEXT}" rollout status deployment/sam-control-plane --timeout=60s
 
+    local policy_json='{
+      "roles": [
+        {
+          "name": "sam:role:node",
+          "allowed_services": [
+            "mcp://calculator",
+            "mcp://db-agent",
+            "mcp://http-tool",
+            "mcp://stdio-tool",
+            "system://sam.catalog"
+          ],
+          "allowed_targets": ["*"]
+        },
+        {
+          "name": "sam:role:router",
+          "allowed_services": ["*"],
+          "allowed_targets": ["*"]
+        }
+      ],
+      "bindings": [
+        {
+          "role": "sam:role:node",
+          "members": ["group:data-scientist", "group:users"]
+        },
+        {
+          "role": "sam:role:router",
+          "members": ["group:routers"]
+        }
+      ]
+    }'
+
+    kubectl --context="${KUBECONTEXT}" run seed-policy \
+      --image=curlimages/curl:8.6.0 \
+      --restart=Never \
+      --overrides="{\"spec\": {\"activeDeadlineSeconds\": 30}}" \
+      -- \
+      curl -s -X POST \
+        -H "Content-Type: application/json" \
+        -H "Authorization: Bearer super-secret-admin-token" \
+        -d "${policy_json}" \
+        http://sam-control-plane:8080/policies
+
+    kubectl --context="${KUBECONTEXT}" wait --for=jsonpath='{.status.phase}'=Succeeded pod/seed-policy --timeout=15s
+    kubectl --context="${KUBECONTEXT}" delete pod seed-policy --ignore-not-found
+
     # Create curl pod in background to request token
     kubectl --context="${KUBECONTEXT}" run curl-token-gen \
       --image=curlimages/curl:8.6.0 \

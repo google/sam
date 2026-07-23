@@ -86,6 +86,7 @@ var (
 	dhtMaxRecordAgeFlag      time.Duration
 	dhtLookupLimitFlag       int
 	discoveryConcurrencyFlag int
+	policySyncIntervalFlag   time.Duration
 )
 
 var logger = golog.Logger("sam-node-cli")
@@ -228,6 +229,7 @@ func main() {
 					AutoRelayBackoff:     autoRelayBackoffFlag,
 					HubConnectTimeout:    hubConnectTimeoutFlag,
 					RequiredRole:         api.RoleNode,
+					PolicySyncInterval:   policySyncIntervalFlag,
 					DHTProviderAddrTTL:   dhtProviderAddrTTLFlag,
 					DHTMaxRecordAge:      dhtMaxRecordAgeFlag,
 					DHTLookupLimit:       dhtLookupLimitFlag,
@@ -292,6 +294,7 @@ func main() {
 					AutoRelayBackoff:     autoRelayBackoffFlag,
 					HubConnectTimeout:    hubConnectTimeoutFlag,
 					RequiredRole:         api.RoleNode,
+					PolicySyncInterval:   policySyncIntervalFlag,
 					DHTProviderAddrTTL:   dhtProviderAddrTTLFlag,
 					DHTMaxRecordAge:      dhtMaxRecordAgeFlag,
 					DHTLookupLimit:       dhtLookupLimitFlag,
@@ -353,6 +356,7 @@ func main() {
 					AutoRelayBackoff:     autoRelayBackoffFlag,
 					HubConnectTimeout:    hubConnectTimeoutFlag,
 					RequiredRole:         api.RoleNode,
+					PolicySyncInterval:   policySyncIntervalFlag,
 				})
 				if err != nil {
 					logger.Fatalf("Failed to initialize node after enrollment: %v", err)
@@ -512,6 +516,7 @@ func main() {
 				AutoRelayBackoff:     3 * time.Second,
 				HubConnectTimeout:    hubConnectTimeoutFlag,
 				RequiredRole:         api.RoleNode,
+				PolicySyncInterval:   policySyncIntervalFlag,
 			})
 			if err != nil {
 				logger.Fatalf("Failed to initialize node for enrollment: %v", err)
@@ -574,6 +579,7 @@ func main() {
 	runCmd.Flags().DurationVar(&dhtMaxRecordAgeFlag, "dht-max-record-age", 0, "Maximum age for DHT records (0s uses library default)")
 	runCmd.Flags().IntVar(&dhtLookupLimitFlag, "dht-lookup-limit", 0, "Maximum number of providers to query from the DHT (0 uses default 20)")
 	runCmd.Flags().IntVar(&discoveryConcurrencyFlag, "discovery-concurrency", 0, "Max concurrent catalog fetches during discovery (0 uses default 10)")
+	runCmd.Flags().DurationVar(&policySyncIntervalFlag, "policy-sync-interval", 1*time.Hour, "Interval for syncing mesh policy from the Hub")
 	rootCmd.PersistentFlags().StringVar(&hubAddr, "hub", "", "Hub URL")
 	rootCmd.PersistentFlags().StringVar(&configFile, "config", node.DefaultConfigFile, "Path to sam-node.yaml configuration file")
 	rootCmd.PersistentFlags().StringVar(&oidcIssuerFlag, "oidc-issuer", "", "OIDC Issuer URL")

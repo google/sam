@@ -125,23 +125,23 @@ func setupControlPlane(t *testing.T, oidcIssuer string) (*controlplane.Server, s
 	}
 
 	// Bootstrap Policy granting 'router' role to group 'routers'
-	policy := &api.PolicyConfig{
-		Version: "v1alpha1",
-		Bindings: []api.Binding{
-			{Role: api.RoleRouter, Members: []string{"group:routers"}},
-			{Role: "user-role", Members: []string{"group:users"}},
+	roles := []*api.PolicyRole{
+		{
+			Name:            api.RoleRouter,
+			AllowedServices: []string{"*"},
+			AllowedTargets:  []string{"*"},
 		},
-		Roles: map[string]api.RolePolicy{
-			api.RoleRouter: {
-				AllowedServices: []string{"*"},
-				AllowedTargets:  []string{"*"},
-			},
-			"user-role": {
-				AllowedServices: []string{"mcp://read"},
-			},
+		{
+			Name:            "user-role",
+			AllowedServices: []string{"mcp://read"},
 		},
 	}
-	if err := store.SavePolicy(context.Background(), policy); err != nil {
+	bindings := []*api.PolicyBinding{
+		{Role: api.RoleRouter, Members: []string{"group:routers"}},
+		{Role: "user-role", Members: []string{"group:users"}},
+	}
+
+	if err := store.SaveMeshPolicy(context.Background(), roles, bindings); err != nil {
 		t.Fatalf("failed to save policy: %v", err)
 	}
 
@@ -171,6 +171,7 @@ func TestRouterIntegration(t *testing.T) {
 	routerJWT := mintToken(map[string]interface{}{
 		"sub":    "router-1",
 		"groups": []string{"routers"},
+		"roles":  []string{api.RoleRouter},
 	})
 
 	// 1. Create and Start Router
@@ -327,11 +328,13 @@ func TestRouterFederation(t *testing.T) {
 	router1JWT := mintToken(map[string]interface{}{
 		"sub":    "router-1",
 		"groups": []string{"routers"},
+		"roles":  []string{api.RoleRouter},
 	})
 	// Mint token for Router 2
 	router2JWT := mintToken(map[string]interface{}{
 		"sub":    "router-2",
 		"groups": []string{"routers"},
+		"roles":  []string{api.RoleRouter},
 	})
 
 	r1KeyPath := filepath.Join(tempDir, "router1.key")
@@ -412,6 +415,7 @@ func TestRouterProactiveTokenRefresh(t *testing.T) {
 	routerJWT := mintToken(map[string]interface{}{
 		"sub":    "router-refresh-test",
 		"groups": []string{"routers"},
+		"roles":  []string{api.RoleRouter},
 	})
 
 	rOpts := Options{

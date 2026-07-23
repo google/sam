@@ -351,6 +351,7 @@ func TestOIDCClaimToFact(t *testing.T) {
 		"sub":    FactUser,
 		"email":  FactEmail,
 		"groups": FactGroup,
+		"roles":  FactRole,
 	}
 
 	if !reflect.DeepEqual(facts, want) {

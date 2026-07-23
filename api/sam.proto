@@ -35,6 +35,7 @@ message MeshEvent {
   enum Type {
     BANNED = 0;
     KEY_ROTATION = 1;
+    POLICY_UPDATE = 2;
   }
   Type type = 1;
   string peer_id = 2;
@@ -141,14 +142,28 @@ message RouterLeaseResponse {
   int64 expires_at = 3;
 }
 
+message PolicyRole {
+  string name = 1;
+  repeated string allowed_targets = 2;
+  repeated string allowed_services = 3;
+  repeated string custom_datalog = 4;
+}
+
+message PolicyBinding {
+  string role = 1;
+  repeated string members = 2;
+}
+
 message PolicyConfigGetRequest {}
 
 message PolicyConfigGetResponse {
-  string yaml_content = 1;
+  repeated PolicyRole roles = 1;
+  repeated PolicyBinding bindings = 2;
 }
 
 message PolicyConfigUpdateRequest {
-  string yaml_content = 1;
+  repeated PolicyRole roles = 1;
+  repeated PolicyBinding bindings = 2;
 }
 
 message PolicyConfigUpdateResponse {

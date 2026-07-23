@@ -193,6 +193,7 @@ var oidcClaimToFact = map[string]string{
 	"sub":    FactUser,
 	"email":  FactEmail,
 	"groups": FactGroup,
+	"roles":  FactRole,
 }
 
 // OIDCClaimToFact returns a copy of the OIDC claims to Biscuit facts map.

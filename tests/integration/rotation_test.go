@@ -60,7 +60,7 @@ roles:
 	// 2. Start Control Plane with aggressive key rotation
 	cpCmd := exec.Command(cpBin,
 		"--bind-address", fmt.Sprintf("127.0.0.1:%d", cpPort),
-		"--policy-file", policyFile,
+		"--admin-token", "test-admin-token",
 		"--db-dsn", filepath.Join(tmpDir, "cp-keys.db"),
 		"--issuer", oidcURL,
 		"--key-rotation-interval", "4s",
@@ -78,11 +78,13 @@ roles:
 	}()
 
 	waitForControlPlane(t, cpPort)
+	injectPolicyYAML(t, cpPort, "test-admin-token", policyFile)
 
 	// 3. Start Router with aggressive key sync interval
 	routerJWT := mintToken(map[string]interface{}{
 		"sub":    "router-integration-1",
 		"groups": []string{"routers"},
+		"roles":  []string{api.RoleRouter},
 	})
 
 	routerCmd := exec.Command(routerBin,
@@ -108,7 +110,8 @@ roles:
 
 	// 4. Start Node
 	nodeJWT := mintToken(map[string]interface{}{
-		"sub": "mock-user",
+		"sub":   "mock-user",
+		"roles": []string{api.RoleNode},
 	})
 	nodeApiPort := getFreePort(t)
 	nodeHome := t.TempDir()
