@@ -1,0 +1,138 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "sam-mesh.fullname" . }}-bootstrap-sa
+  labels:
+    {{- include "sam-mesh.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "sam-mesh.fullname" . }}-bootstrap-role
+  labels:
+    {{- include "sam-mesh.labels" . | nindent 4 }}
+rules:
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get", "create", "delete", "patch", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "sam-mesh.fullname" . }}-bootstrap-rb
+  labels:
+    {{- include "sam-mesh.labels" . | nindent 4 }}
+subjects:
+- kind: ServiceAccount
+  name: {{ include "sam-mesh.fullname" . }}-bootstrap-sa
+  namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: Role
+  name: {{ include "sam-mesh.fullname" . }}-bootstrap-role
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "sam-mesh.fullname" . }}-bootstrap
+  labels:
+    {{- include "sam-mesh.labels" . | nindent 4 }}
+spec:
+  activeDeadlineSeconds: 120
+  template:
+    metadata:
+      labels:
+        app: {{ include "sam-mesh.fullname" . }}-bootstrap
+    spec:
+      serviceAccountName: {{ include "sam-mesh.fullname" . }}-bootstrap-sa
+      restartPolicy: OnFailure
+      containers:
+      - name: bootstrap
+        image: curlimages/curl:8.6.0
+        imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+        env:
+        - name: NAMESPACE
+          value: {{ .Release.Namespace | quote }}
+        - name: SECRET_NAME
+          value: "{{ include "sam-mesh.fullname" . }}-router-token"
+        - name: ADMIN_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "sam-mesh.fullname" . }}-secrets
+              key: admin-token
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          set -e
+          CACERT=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+          K8S_TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+          CP_URL="http://{{ include "sam-mesh.fullname" . }}-control-plane:8080"
+
+          echo "Waiting for Control Plane to be ready..."
+          until curl -s "${CP_URL}/info" > /dev/null; do
+            echo "Control plane not ready yet, sleeping..."
+            sleep 2
+          done
+
+          echo "Seeding default policies..."
+          {{- $bindings := .Values.bootstrap.bindings -}}
+          {{- if not $bindings -}}
+            {{- $defaultRouterSA := printf "user:system:serviceaccount:%s:%s-router-sa" .Release.Namespace (include "sam-mesh.fullname" .) -}}
+            {{- $bindings = list 
+              (dict "role" "sam:role:router" "members" (list "group:routers" $defaultRouterSA))
+              (dict "role" "sam-admin" "members" (list (printf "user:system:serviceaccount:%s:node-a-sa" .Release.Namespace) (printf "user:system:serviceaccount:%s:node-b-sa" .Release.Namespace) (printf "user:system:serviceaccount:%s:node-c-sa" .Release.Namespace) (printf "user:system:serviceaccount:%s:local-node-sa" .Release.Namespace)))
+              (dict "role" "sam:role:sambox" "members" (list (printf "user:system:serviceaccount:%s:sam-box-sa" .Release.Namespace)))
+            -}}
+          {{- end }}
+          curl -s -X POST \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+            -d '{
+              "roles": [
+                {"name": "sam-admin", "allowed_services": ["*"], "allowed_targets": ["*"]},
+                {"name": "sam:role:sambox", "allowed_services": ["*"], "allowed_targets": ["*"]},
+                {"name": "sam:role:router", "allowed_services": ["*"], "allowed_targets": ["*"]}
+              ],
+              "bindings": {{ toJson $bindings }}
+            }' \
+            "${CP_URL}/policies" >/dev/null
+
+
+          echo "Generating bootstrap token for sam-router..."
+          TOKEN_RESP=$(curl -s -X POST \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+            -d '{"role": "sam:role:router", "max_usages": 999999}' \
+            "${CP_URL}/admin/bootstrap-tokens")
+
+          ROUTER_TOKEN=$(echo "${TOKEN_RESP}" | grep -o '"token":"[^"]*' | cut -d'"' -f4)
+          if [ -z "${ROUTER_TOKEN}" ]; then
+            echo "Failed to extract router token from response: ${TOKEN_RESP}"
+            exit 1
+          fi
+
+          echo "Writing bootstrap token to Kubernetes secret ${SECRET_NAME}..."
+          
+          # Delete existing secret first (ignore error if doesn't exist)
+          curl -s --cacert $CACERT -X DELETE \
+            -H "Authorization: Bearer $K8S_TOKEN" \
+            "https://kubernetes.default.svc/api/v1/namespaces/${NAMESPACE}/secrets/${SECRET_NAME}" > /dev/null || true
+
+          # Create new secret
+          curl -s --cacert $CACERT -X POST \
+            -H "Authorization: Bearer $K8S_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "apiVersion": "v1",
+              "kind": "Secret",
+              "metadata": {
+                "name": "'"${SECRET_NAME}"'"
+              },
+              "type": "Opaque",
+              "stringData": {
+                "token": "'"${ROUTER_TOKEN}"'"
+              }
+            }' \
+            "https://kubernetes.default.svc/api/v1/namespaces/${NAMESPACE}/secrets" > /dev/null
+
+          echo "Bootstrap completed successfully!"

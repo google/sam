@@ -1,0 +1,68 @@
+global:
+  imageTag: local
+  imagePullPolicy: IfNotPresent
+
+controlPlane:
+  replicaCount: 2
+  image:
+    repository: sam-control-plane
+  logLevel: info
+  adminToken: super-secret-admin-token
+  autoApproveEnrollment: true
+  oidcIssuer: "http://dex:5556/dex"
+  allowedAudiences: "sam-mesh-audience,sam-hub-audience"
+  service:
+    type: ClusterIP
+    port: 8080
+    nodePort: null
+
+database:
+  type: postgres
+  postgres:
+    deployInternal: true
+    image:
+      repository: postgres
+      tag: 16-alpine
+    user: sam
+    password: sam-secret-password
+    database: sam_mesh
+    storageSize: 1Gi
+
+router:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: sam-router
+  useOidcToken: false
+  logLevel: info
+  service:
+    type: ClusterIP
+    port: 4501
+    nodePort: null
+
+console:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: sam-console
+  service:
+    type: ClusterIP
+    port: 8081
+    nodePort: null
+
+dex:
+  enabled: false
+  image:
+    repository: dexidp/dex
+    tag: v2.39.0
+  google:
+    clientId: ""
+    clientSecret: ""
+  github:
+    clientId: ""
+    clientSecret: ""
+  cliOAuthSecret: ""
+
+bootstrap:
+  bindings: []
+

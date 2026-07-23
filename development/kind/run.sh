@@ -8,6 +8,10 @@ NAMESPACE="sam-kind"
 SESSION="sam-kind"
 KCTX="kind-${CLUSTER}"
 IMAGE_TAG="local"
+HUB_URL="http://sam-mesh-control-plane:8080"
+HELM="helm"
+
+
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
@@ -19,6 +23,16 @@ check_prereqs() {
   for bin in "${bins[@]}"; do
     command -v "$bin" >/dev/null 2>&1 || { echo "missing prerequisite: $bin" >&2; exit 1; }
   done
+
+  if ! command -v helm >/dev/null 2>&1; then
+    if [[ -x "${PROJECT_ROOT}/bin/helm" ]]; then
+      HELM="${PROJECT_ROOT}/bin/helm"
+    else
+      echo "missing prerequisite: helm (install helm or run: curl -fsSL https://get.helm.sh/helm-v3.12.0-linux-amd64.tar.gz | tar -xz -C bin/ --strip-components=1 linux-amd64/helm)" >&2
+      exit 1
+    fi
+  fi
+
   if kind get clusters 2>/dev/null | grep -qx "${CLUSTER}"; then
     echo "kind cluster '${CLUSTER}' already exists; delete it first: make kind-down" >&2
     exit 1
@@ -43,9 +57,10 @@ render_and_apply() {
     SIDECAR=$'      - name: '"${svc}"$'\n        image: '"${svc}:${IMAGE_TAG}"$'\n        imagePullPolicy: IfNotPresent'
     CONFIG_VOLUME=$'      - name: config\n        configMap:\n          name: '"${node}-config"
   fi
-  NODE="$node" CONFIG_ARG="$CONFIG_ARG" CONFIG_MOUNT="$CONFIG_MOUNT" SIDECAR="$SIDECAR" CONFIG_VOLUME="$CONFIG_VOLUME" \
-    envsubst '${NODE} ${NAMESPACE} ${IMAGE_TAG} ${CONFIG_ARG} ${CONFIG_MOUNT} ${SIDECAR} ${CONFIG_VOLUME}' \
+  NODE="$node" HUB_URL="$HUB_URL" CONFIG_ARG="$CONFIG_ARG" CONFIG_MOUNT="$CONFIG_MOUNT" SIDECAR="$SIDECAR" CONFIG_VOLUME="$CONFIG_VOLUME" \
+    envsubst '${NODE} ${NAMESPACE} ${HUB_URL} ${IMAGE_TAG} ${CONFIG_ARG} ${CONFIG_MOUNT} ${SIDECAR} ${CONFIG_VOLUME}' \
     < "${SCRIPT_DIR}/node.template.yaml" | kubectl --context "${KCTX}" apply -f -
+
 }
 
 # logs: $1 = pane name (printed in-pane and set as the pane title); $2 = logs target.
@@ -57,8 +72,8 @@ tmuxs() { tmux -L samsocket -f /dev/null "$@"; }
 show_cluster_logs() {
   tmuxs kill-session -t "${SESSION}" 2>/dev/null || true
 
-  tmuxs new-session -d -s "${SESSION}" -n mesh "$(logs control-plane 'deploy/sam-control-plane')" \; set -t "${SESSION}" destroy-unattached off
-  tmuxs split-window -t "${SESSION}:0" "$(logs router 'statefulset/sam-router')"
+  tmuxs new-session -d -s "${SESSION}" -n mesh "$(logs control-plane 'deploy/sam-mesh-control-plane')" \; set -t "${SESSION}" destroy-unattached off
+  tmuxs split-window -t "${SESSION}:0" "$(logs router 'statefulset/sam-mesh-router')"
   for node in "${NODES[@]}"; do
     tmuxs split-window -t "${SESSION}:0" "$(logs "$node" "deploy/${node} -c sam-node")"
     tmuxs select-layout -t "${SESSION}:0" tiled
@@ -134,52 +149,40 @@ fi
 
 export NAMESPACE ISSUER IMAGE_TAG OIDC_ISSUER OIDC_CLIENT_ID OIDC_CLIENT_SECRET OIDC_REDIRECT_URL CONTROL_PLANE_ISSUERS ALLOWED_AUDIENCES
 
-echo "== Applying control plane and router (issuer: ${CONTROL_PLANE_ISSUERS}) =="
-for f in "${SCRIPT_DIR}"/00-*.yaml "${SCRIPT_DIR}"/10-*.yaml "${SCRIPT_DIR}"/11-*.yaml "${SCRIPT_DIR}"/12-*.yaml "${SCRIPT_DIR}"/13-*.yaml; do
-  envsubst '${NAMESPACE} ${ISSUER} ${IMAGE_TAG} ${OIDC_ISSUER} ${OIDC_CLIENT_ID} ${OIDC_CLIENT_SECRET} ${OIDC_REDIRECT_URL} ${CONTROL_PLANE_ISSUERS} ${ALLOWED_AUDIENCES}' < "$f" | kubectl --context "${KCTX}" apply -f -
-done
+echo "== Applying namespace and RBAC cluster rules =="
+envsubst '${NAMESPACE}' < "${SCRIPT_DIR}/00-namespace-rbac.yaml" | kubectl --context "${KCTX}" apply -f -
+
+echo "== Deploying SAM Mesh via Helm =="
+"${HELM}" --kube-context "${KCTX}" upgrade --install sam-mesh "${PROJECT_ROOT}/charts/sam-mesh" \
+  --namespace "${NAMESPACE}" \
+  --set global.imageTag="${IMAGE_TAG}" \
+  --set controlPlane.oidcIssuer="${CONTROL_PLANE_ISSUERS//,/\\,}" \
+  --set controlPlane.allowedAudiences="${ALLOWED_AUDIENCES//,/\\,}" \
+  --set controlPlane.service.type=NodePort \
+  --set controlPlane.service.nodePort=30090 \
+  --set router.service.type=NodePort \
+  --set router.service.nodePort=30401 \
+  --set router.useOidcToken=true \
+  --set console.service.type=NodePort \
+  --set console.service.nodePort=30081 \
+  --set dex.enabled=true
 
 echo "== Waiting for database to be ready =="
-kubectl --context "${KCTX}" -n "${NAMESPACE}" wait --for=condition=ready --timeout=180s pod -l app=sam-db
+kubectl --context "${KCTX}" -n "${NAMESPACE}" wait --for=condition=ready --timeout=180s pod -l app=sam-mesh-db
 echo "== Waiting for control plane to be ready =="
-kubectl --context "${KCTX}" -n "${NAMESPACE}" wait --for=condition=available --timeout=180s deployment/sam-control-plane
+kubectl --context "${KCTX}" -n "${NAMESPACE}" wait --for=condition=available --timeout=180s deployment/sam-mesh-control-plane
 
-echo "== Seeding control plane policies =="
-for i in {1..30}; do
-  if curl -s http://127.0.0.1:9090/info >/dev/null; then
-    break
-  fi
-  sleep 1
-done
-
-curl -s -X POST \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer super-secret-admin-token" \
-  -d '{
-    "roles": [
-      {"name": "sam-admin", "allowed_services": ["*"], "allowed_targets": ["*"]},
-      {"name": "sam:role:sambox", "allowed_services": ["*"], "allowed_targets": ["*"]},
-      {"name": "sam:role:router", "allowed_services": ["*"], "allowed_targets": ["*"]}
-    ],
-    "bindings": [
-      {"role": "sam-admin", "members": [
-        "user:system:serviceaccount:'"${NAMESPACE}"':node-a-sa",
-        "user:system:serviceaccount:'"${NAMESPACE}"':node-b-sa",
-        "user:system:serviceaccount:'"${NAMESPACE}"':node-c-sa",
-        "user:system:serviceaccount:'"${NAMESPACE}"':local-node-sa"
-      ]},
-      {"role": "sam:role:sambox", "members": ["user:system:serviceaccount:'"${NAMESPACE}"':sam-box-sa"]},
-      {"role": "sam:role:router", "members": ["group:routers", "user:system:serviceaccount:'"${NAMESPACE}"':sam-router-sa"]}
-    ]
-  }' \
-  http://127.0.0.1:9090/policies >/dev/null
+# Policy seeding is handled automatically by the Helm chart bootstrap job, we just wait for it to complete.
+echo "== Waiting for bootstrap job to complete =="
+kubectl --context "${KCTX}" -n "${NAMESPACE}" wait --for=condition=complete --timeout=120s job/sam-mesh-bootstrap
 
 echo "== Waiting for router to be ready =="
-kubectl --context "${KCTX}" -n "${NAMESPACE}" wait --for=condition=ready --timeout=180s pod -l app=sam-router
+kubectl --context "${KCTX}" -n "${NAMESPACE}" wait --for=condition=ready --timeout=180s pod -l app=sam-mesh-router
 echo "== Waiting for console to be ready =="
-kubectl --context "${KCTX}" -n "${NAMESPACE}" wait --for=condition=available --timeout=180s deployment/sam-console
+kubectl --context "${KCTX}" -n "${NAMESPACE}" wait --for=condition=available --timeout=180s deployment/sam-mesh-console
 echo "== Waiting for Dex to be ready =="
-kubectl --context "${KCTX}" -n "${NAMESPACE}" wait --for=condition=available --timeout=180s deployment/dex
+kubectl --context "${KCTX}" -n "${NAMESPACE}" wait --for=condition=available --timeout=180s deployment/sam-mesh-dex
+
 
 echo "== Applying sam-nodes =="
 for line in "${NODE_LINES[@]}"; do

@@ -1,8 +1,10 @@
+{{- if .Values.dex.enabled -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: dex-config
-  namespace: ${NAMESPACE}
+  name: {{ include "sam-mesh.fullname" . }}-dex-config
+  labels:
+    {{- include "sam-mesh.labels" . | nindent 4 }}
 data:
   config.yaml: |
     issuer: http://dex:5556/dex
@@ -30,21 +32,23 @@ data:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: dex
-  namespace: ${NAMESPACE}
+  name: {{ include "sam-mesh.fullname" . }}-dex
+  labels:
+    {{- include "sam-mesh.labels" . | nindent 4 }}
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: dex
+      app: {{ include "sam-mesh.fullname" . }}-dex
   template:
     metadata:
       labels:
-        app: dex
+        app: {{ include "sam-mesh.fullname" . }}-dex
     spec:
       containers:
       - name: dex
-        image: ghcr.io/dexidp/dex:v2.41.1
+        image: "{{ .Values.dex.image.repository }}:{{ .Values.dex.image.tag }}"
+        imagePullPolicy: {{ .Values.global.imagePullPolicy }}
         args:
         - dex
         - serve
@@ -58,19 +62,21 @@ spec:
       volumes:
       - name: config
         configMap:
-          name: dex-config
+          name: {{ include "sam-mesh.fullname" . }}-dex-config
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: dex
-  namespace: ${NAMESPACE}
+  labels:
+    {{- include "sam-mesh.labels" . | nindent 4 }}
 spec:
   type: NodePort
   selector:
-    app: dex
+    app: {{ include "sam-mesh.fullname" . }}-dex
   ports:
   - name: http
     port: 5556
     targetPort: 5556
     nodePort: 30556
+{{- end }}
