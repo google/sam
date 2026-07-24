@@ -39,6 +39,9 @@ spec:
         ports:
         - containerPort: 8080
           name: http
+          {{- if .Values.controlPlane.hostPort }}
+          hostPort: {{ .Values.controlPlane.hostPort }}
+          {{- end }}
           protocol: TCP
         readinessProbe:
           httpGet:

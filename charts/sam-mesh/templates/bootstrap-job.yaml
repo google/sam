@@ -82,6 +82,7 @@ spec:
               (dict "role" "sam:role:router" "members" (list "group:routers" $defaultRouterSA))
               (dict "role" "sam-admin" "members" (list (printf "user:system:serviceaccount:%s:node-a-sa" .Release.Namespace) (printf "user:system:serviceaccount:%s:node-b-sa" .Release.Namespace) (printf "user:system:serviceaccount:%s:node-c-sa" .Release.Namespace) (printf "user:system:serviceaccount:%s:local-node-sa" .Release.Namespace)))
               (dict "role" "sam:role:sambox" "members" (list (printf "user:system:serviceaccount:%s:sam-box-sa" .Release.Namespace)))
+              (dict "role" "sam:role:node" "members" (list "group:data-scientist" "group:users"))
             -}}
           {{- end }}
           curl -s -X POST \
@@ -91,7 +92,8 @@ spec:
               "roles": [
                 {"name": "sam-admin", "allowed_services": ["*"], "allowed_targets": ["*"]},
                 {"name": "sam:role:sambox", "allowed_services": ["*"], "allowed_targets": ["*"]},
-                {"name": "sam:role:router", "allowed_services": ["*"], "allowed_targets": ["*"]}
+                {"name": "sam:role:router", "allowed_services": ["*"], "allowed_targets": ["*"]},
+                {"name": "sam:role:node", "allowed_services": ["mcp://calculator", "mcp://db-agent", "mcp://http-tool", "mcp://stdio-tool", "system://sam.catalog"], "allowed_targets": ["*"]}
               ],
               "bindings": {{ toJson $bindings }}
             }' \

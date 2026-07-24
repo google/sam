@@ -261,86 +261,30 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
     local oidc_node_ip
     oidc_node_ip=$(docker inspect -f "{{(index .NetworkSettings.Networks \"${MESH_NETWORK:-kind}\").IPAddress}}" "${oidc_node}")
 
-    envsubst '$ISSUERS' < tests/e2e/fixtures/control-plane.yaml | kubectl --context="${KUBECONTEXT}" apply -f -
-    kubectl --context="${KUBECONTEXT}" rollout status deployment/sam-db --timeout=60s
-    kubectl --context="${KUBECONTEXT}" rollout status deployment/sam-control-plane --timeout=60s
-
-    local policy_json='{
-      "roles": [
-        {
-          "name": "sam:role:node",
-          "allowed_services": [
-            "mcp://calculator",
-            "mcp://db-agent",
-            "mcp://http-tool",
-            "mcp://stdio-tool",
-            "system://sam.catalog"
-          ],
-          "allowed_targets": ["*"]
-        },
-        {
-          "name": "sam:role:router",
-          "allowed_services": ["*"],
-          "allowed_targets": ["*"]
-        }
-      ],
-      "bindings": [
-        {
-          "role": "sam:role:node",
-          "members": ["group:data-scientist", "group:users"]
-        },
-        {
-          "role": "sam:role:router",
-          "members": ["group:routers"]
-        }
-      ]
-    }'
-
-    kubectl --context="${KUBECONTEXT}" run seed-policy \
-      --image=curlimages/curl:8.6.0 \
-      --restart=Never \
-      --overrides="{\"spec\": {\"activeDeadlineSeconds\": 30}}" \
-      -- \
-      curl -s -X POST \
-        -H "Content-Type: application/json" \
-        -H "Authorization: Bearer super-secret-admin-token" \
-        -d "${policy_json}" \
-        http://sam-control-plane:8080/policies
-
-    kubectl --context="${KUBECONTEXT}" wait --for=jsonpath='{.status.phase}'=Succeeded pod/seed-policy --timeout=15s
-    kubectl --context="${KUBECONTEXT}" delete pod seed-policy --ignore-not-found
-
-    # Create curl pod in background to request token
-    kubectl --context="${KUBECONTEXT}" run curl-token-gen \
-      --image=curlimages/curl:8.6.0 \
-      --restart=Never \
-      --overrides='{"spec": {"activeDeadlineSeconds": 30}}' \
-      -- \
-      curl -s -X POST \
-        -H "Content-Type: application/json" \
-        -H "Authorization: Bearer super-secret-admin-token" \
-        -d '{"role": "sam:role:router", "max_usages": 999999}' \
-        http://sam-control-plane:8080/admin/bootstrap-tokens
-
-    if ! kubectl --context="${KUBECONTEXT}" wait --for=jsonpath='{.status.phase}'=Succeeded pod/curl-token-gen --timeout=15s; then
-      echo "ERROR: Token generation pod failed! Diagnostics:"
-      kubectl --context="${KUBECONTEXT}" describe pod curl-token-gen || true
-      kubectl --context="${KUBECONTEXT}" logs pod/curl-token-gen || true
-      kubectl --context="${KUBECONTEXT}" delete pod curl-token-gen --ignore-not-found || true
-      exit 1
+    local helm_bin="helm"
+    if ! command -v helm >/dev/null 2>&1; then
+      if [[ -x "./bin/helm" ]]; then
+        helm_bin="./bin/helm"
+      else
+        echo "helm CLI not found; please install helm or place it in ./bin/helm" >&2
+        return 1
+      fi
     fi
 
-    local token_json
-    token_json=$(kubectl --context="${KUBECONTEXT}" logs pod/curl-token-gen)
-    kubectl --context="${KUBECONTEXT}" delete pod curl-token-gen --ignore-not-found
+    "${helm_bin}" --kube-context="${KUBECONTEXT}" upgrade --install sam ./charts/sam-mesh \
+      --namespace default \
+      --set fullnameOverride="sam" \
+      --set global.imageTag="local" \
+      --set controlPlane.oidcIssuer="${ISSUERS//,/\\,}" \
+      --set controlPlane.allowedAudiences="sam-mesh-audience\,sam-hub-audience" \
+      --set controlPlane.replicaCount=2 \
+      --set controlPlane.hostPort=8080 \
+      --set router.useOidcToken=false \
+      --set router.hostPort=4501
 
-    local router_token
-    router_token=$(echo "${token_json}" | jq -r .token)
-    [[ -n "${router_token}" && "${router_token}" != "null" ]]
-
-    kubectl --context="${KUBECONTEXT}" create secret generic sam-router-token --from-literal=token="${router_token}" --dry-run=client -o yaml | kubectl --context="${KUBECONTEXT}" apply -f -
-
-    kubectl --context="${KUBECONTEXT}" apply -f tests/e2e/fixtures/router.yaml
+    kubectl --context="${KUBECONTEXT}" rollout status statefulset/sam-db --timeout=60s
+    kubectl --context="${KUBECONTEXT}" rollout status deployment/sam-control-plane --timeout=60s
+    kubectl --context="${KUBECONTEXT}" wait --for=condition=complete --timeout=60s job/sam-bootstrap
     kubectl --context="${KUBECONTEXT}" rollout status statefulset/sam-router --timeout=60s
 
     local i

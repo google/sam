@@ -31,9 +31,15 @@ spec:
         ports:
         - containerPort: 4501
           name: p2p-tcp
+          {{- if .Values.router.hostPort }}
+          hostPort: {{ .Values.router.hostPort }}
+          {{- end }}
           protocol: TCP
         - containerPort: 4501
           name: p2p-udp
+          {{- if .Values.router.hostPort }}
+          hostPort: {{ .Values.router.hostPort }}
+          {{- end }}
           protocol: UDP
         env:
         {{- if not .Values.router.useOidcToken }}
