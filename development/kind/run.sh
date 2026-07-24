@@ -163,6 +163,8 @@ echo "== Deploying SAM Mesh via Helm =="
   --set router.service.type=NodePort \
   --set router.service.nodePort=30401 \
   --set router.useOidcToken=true \
+  --set router.externalAddrs[0]="/dns4/sam-mesh-router/tcp/4501" \
+  --set router.externalAddrs[1]="/ip4/127.0.0.1/tcp/4001" \
   --set console.service.type=NodePort \
   --set console.service.nodePort=30081 \
   --set dex.enabled=true

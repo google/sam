@@ -47,7 +47,13 @@ spec:
         - "--control-plane=http://{{ include "sam-mesh.fullname" . }}-control-plane:8080"
         - "--listen=/ip4/0.0.0.0/tcp/4501"
         - "--listen=/ip4/0.0.0.0/udp/4501/quic-v1"
+        {{- if .Values.router.externalAddrs }}
+        {{- range .Values.router.externalAddrs }}
+        - "--external-addr={{ . }}"
+        {{- end }}
+        {{- else }}
         - "--external-addr=/dns4/{{ include "sam-mesh.fullname" . }}-router/tcp/4501"
+        {{- end }}
         - "--keys-path=/data/router.key"
         - "--allow-loopback"
         - "--log-level={{ .Values.router.logLevel }}"

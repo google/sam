@@ -267,6 +267,16 @@ var migrations = []migration{
 }
 
 func (s *SQLStore) initSchema() error {
+	if s.isPostgres() {
+		// Acquire an advisory lock to serialize migrations across concurrent replicas
+		if _, err := s.db.Exec("SELECT pg_advisory_lock(7345892)"); err != nil {
+			return fmt.Errorf("failed to acquire migration advisory lock: %w", err)
+		}
+		defer func() {
+			_, _ = s.db.Exec("SELECT pg_advisory_unlock(7345892)")
+		}()
+	}
+
 	// Create schema_migrations table
 	createMigrationsTable := `CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY)`
 	if _, err := s.db.Exec(createMigrationsTable); err != nil {
