@@ -25,6 +25,7 @@ import (
 	"github.com/biscuit-auth/biscuit-go/v2/datalog"
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/sam/api"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
 )
@@ -70,7 +71,7 @@ func TestVerifyBiscuit_Expiration(t *testing.T) {
 				"roles": []any{"admin"},
 			}
 
-			biscuitData, _, err := MintBiscuitToken(priv, claims, token, dummyPeer, token.Expiry, []string{"admin"})
+			biscuitData, _, err := MintBiscuitToken(priv, claims, token, dummyPeer, token.Expiry, []string{"admin"}, nil)
 			if err != nil {
 				t.Fatalf("MintBiscuitToken failed: %v", err)
 			}
@@ -111,7 +112,7 @@ func TestMintBiscuitToken_ClaimsTranslation(t *testing.T) {
 		"groups": []any{"beta-testers", "engineering"},
 	}
 
-	biscuitData, _, err := MintBiscuitToken(priv, claims, token, dummyPeer, token.Expiry, nil)
+	biscuitData, _, err := MintBiscuitToken(priv, claims, token, dummyPeer, token.Expiry, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to mint biscuit: %v", err)
 	}
@@ -201,7 +202,7 @@ func TestVerifyBiscuit_Concurrent(t *testing.T) {
 		"roles": []any{"admin"},
 	}
 
-	biscuitData, _, err := MintBiscuitToken(priv, claims, token, dummyPeer, token.Expiry, []string{"admin"})
+	biscuitData, _, err := MintBiscuitToken(priv, claims, token, dummyPeer, token.Expiry, []string{"admin"}, nil)
 	if err != nil {
 		t.Fatalf("MintBiscuitToken failed: %v", err)
 	}
@@ -249,7 +250,7 @@ func TestMintBiscuitToken(t *testing.T) {
 		"groups": []any{"group1", "group2"},
 		"roles":  []any{"admin", "user"},
 	}
-	biscuitData, _, err := MintBiscuitToken(priv, claims, token, dummyPeer, token.Expiry, []string{"admin", "user"})
+	biscuitData, _, err := MintBiscuitToken(priv, claims, token, dummyPeer, token.Expiry, []string{"admin", "user"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -348,7 +349,7 @@ func TestMintBiscuitToken_VariousClaimsTypes(t *testing.T) {
 				claims["groups"] = tt.groupsClaim
 			}
 
-			biscuitData, _, err := MintBiscuitToken(priv, claims, token, dummyPeer, token.Expiry, tt.expectedRoles)
+			biscuitData, _, err := MintBiscuitToken(priv, claims, token, dummyPeer, token.Expiry, tt.expectedRoles, nil)
 			if err != nil {
 				t.Fatalf("MintBiscuitToken failed: %v", err)
 			}
@@ -395,4 +396,90 @@ func TestMintBiscuitToken_VariousClaimsTypes(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestMintBiscuitToken_WithPolicyRoles(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	privNode, _, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dummyPeer, err := peer.IDFromPrivateKey(privNode)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	token := &oidc.IDToken{
+		Expiry: time.Now().Add(1 * time.Hour),
+	}
+	claims := jwt.MapClaims{"sub": "alice"}
+
+	policyRoles := []*api.PolicyRole{
+		{
+			Name:            "data-scientist",
+			AllowedServices: []string{"mcp://calculator"},
+			AllowedTargets:  []string{"group:backend"},
+			CustomDatalog:   []string{"right(\"data:read\");"},
+		},
+	}
+
+	t.Run("Mint with matching policy role", func(t *testing.T) {
+		biscuitData, _, err := MintBiscuitToken(priv, claims, token, dummyPeer, token.Expiry, []string{"data-scientist"}, policyRoles)
+		if err != nil {
+			t.Fatalf("MintBiscuitToken failed: %v", err)
+		}
+
+		b, err := biscuit.Unmarshal(biscuitData)
+		if err != nil {
+			t.Fatalf("Unmarshal biscuit failed: %v", err)
+		}
+
+		authorizer, err := b.Authorizer(pub)
+		if err != nil {
+			t.Fatalf("Authorizer failed: %v", err)
+		}
+
+		// Verify granted_service_exact, granted_target_exact, and custom datalog right fact
+		authorizer.AddCheck(biscuit.Check{Queries: []biscuit.Rule{
+			{Body: []biscuit.Predicate{{Name: api.FactGrantedServiceExact, IDs: []biscuit.Term{biscuit.String("mcp"), biscuit.String("calculator")}}}},
+			{Body: []biscuit.Predicate{{Name: api.FactGrantedTargetExact, IDs: []biscuit.Term{biscuit.String("group"), biscuit.String("backend")}}}},
+			{Body: []biscuit.Predicate{{Name: api.FactRight, IDs: []biscuit.Term{biscuit.String("data:read")}}}},
+		}})
+		authorizer.AddPolicy(api.AllowIfTruePolicy)
+
+		if err := authorizer.Authorize(); err != nil {
+			t.Errorf("Expected policy facts to be present in Biscuit, got error: %v\nWorld:\n%s", err, authorizer.PrintWorld())
+		}
+	})
+
+	t.Run("Mint with unmapped role when policy exists", func(t *testing.T) {
+		biscuitData, _, err := MintBiscuitToken(priv, claims, token, dummyPeer, token.Expiry, []string{"unmapped-role"}, policyRoles)
+		if err != nil {
+			t.Fatalf("MintBiscuitToken failed: %v", err)
+		}
+
+		b, err := biscuit.Unmarshal(biscuitData)
+		if err != nil {
+			t.Fatalf("Unmarshal biscuit failed: %v", err)
+		}
+
+		authorizer, err := b.Authorizer(pub)
+		if err != nil {
+			t.Fatalf("Authorizer failed: %v", err)
+		}
+
+		// Verify target_unrestricted and granted_service_all_types are NOT present
+		authorizer.AddCheck(biscuit.Check{Queries: []biscuit.Rule{
+			{Body: []biscuit.Predicate{{Name: api.FactTargetUnrestricted, IDs: []biscuit.Term{}}}},
+		}})
+		authorizer.AddPolicy(api.AllowIfTruePolicy)
+
+		if err := authorizer.Authorize(); err == nil {
+			t.Errorf("Expected target_unrestricted check to fail for unmapped role, but it succeeded\nWorld:\n%s", authorizer.PrintWorld())
+		}
+	})
 }

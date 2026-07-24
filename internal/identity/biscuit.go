@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/biscuit-auth/biscuit-go/v2"
@@ -31,35 +32,19 @@ import (
 )
 
 // MintBiscuitToken generates a signed Biscuit token for a peer with policy rules based on JWT claims.
-//
-// Role Authorization Rationale:
-// The system has two distinct kinds of roles:
-//  1. Capability Roles (prefixed with "sam:role:"): These authorize the client's binary startup role
-//     (e.g., sam:role:node, sam:role:router, sam:role:sambox) under Zero Trust.
-//  2. Custom Access Roles (all other roles): These define authorization permissions for custom
-//     services and targets (e.g., restricted-role).
-//
-// When enrolling:
-//   - The client binary must explicitly request a single capability role (requestedRole).
-//   - We verify if the client's OIDC identity is authorized to claim that requested capability role:
-//   - If the user has explicitly mapped capability roles (from policy/claims), they must only request one of those.
-//   - If the user has no capability roles mapped, they are allowed to request the standard fallback role ("sam:role:node").
-//   - Once authorized, the generated Biscuit is minted with:
-//   - The requested capability role (enforcing least privilege).
-//   - All other custom access roles mapped to the identity (so they preserve their resource permissions).
-func MintBiscuitToken(signingKey ed25519.PrivateKey, claims jwt.MapClaims, token *oidc.IDToken, remotePeer peer.ID, biscuitExpiry time.Time, roles []string) ([]byte, []string, error) {
+func MintBiscuitToken(signingKey ed25519.PrivateKey, claims jwt.MapClaims, token *oidc.IDToken, remotePeer peer.ID, biscuitExpiry time.Time, roles []string, policyRoles []*api.PolicyRole) ([]byte, []string, error) {
 	if claims == nil {
 		return nil, nil, fmt.Errorf("claims cannot be nil")
 	}
 
-	biscuitBytes, err := mintBiscuit(signingKey, remotePeer, roles, biscuitExpiry, claims)
+	biscuitBytes, err := mintBiscuit(signingKey, remotePeer, roles, biscuitExpiry, claims, policyRoles)
 	if err != nil {
 		return nil, nil, err
 	}
 	return biscuitBytes, roles, nil
 }
 
-func mintBiscuit(signingKey ed25519.PrivateKey, remotePeer peer.ID, roles []string, expiration time.Time, claims jwt.MapClaims) ([]byte, error) {
+func mintBiscuit(signingKey ed25519.PrivateKey, remotePeer peer.ID, roles []string, expiration time.Time, claims jwt.MapClaims, policyRoles []*api.PolicyRole) ([]byte, error) {
 	builder := biscuit.NewBuilder(signingKey)
 	addedFacts := make(map[string]bool)
 	addFact := func(fact biscuit.Fact) error {
@@ -101,6 +86,15 @@ func mintBiscuit(signingKey ed25519.PrivateKey, remotePeer peer.ID, roles []stri
 		}
 	}
 
+	rolesMap := make(map[string]*api.PolicyRole)
+	for _, pr := range policyRoles {
+		if pr != nil {
+			rolesMap[pr.Name] = pr
+		}
+	}
+
+	hasTargets := false
+	hasServices := false
 	sort.Strings(roles)
 	var errs []error
 	for _, role := range roles {
@@ -125,8 +119,50 @@ func mintBiscuit(signingKey ed25519.PrivateKey, remotePeer peer.ID, roles []stri
 			}}); err != nil {
 				errs = append(errs, fmt.Errorf("failed to add target unrestricted: %w", err))
 			}
+			hasTargets = true
+			hasServices = true
 			continue
 		}
+
+		if pr, ok := rolesMap[role]; ok {
+			if len(pr.AllowedServices) > 0 {
+				hasServices = true
+				for _, svc := range pr.AllowedServices {
+					_ = addFact(api.BuildServiceDatalogFact(svc))
+				}
+			}
+
+			if len(pr.AllowedTargets) > 0 {
+				hasTargets = true
+				for _, target := range pr.AllowedTargets {
+					_ = addFact(api.BuildTargetDatalogFact(target))
+				}
+			}
+
+			for _, customFact := range pr.CustomDatalog {
+				trimmed := strings.TrimRight(strings.TrimSpace(customFact), ";")
+				if trimmed == "" {
+					continue
+				}
+				fact, err := parser.FromStringFact(trimmed)
+				if err == nil {
+					_ = addFact(fact)
+				}
+			}
+		}
+	}
+
+	if !hasServices && len(policyRoles) == 0 {
+		_ = addFact(biscuit.Fact{Predicate: biscuit.Predicate{
+			Name: api.FactGrantedServiceAllTypes,
+			IDs:  []biscuit.Term{},
+		}})
+	}
+	if !hasTargets && len(policyRoles) == 0 {
+		_ = addFact(biscuit.Fact{Predicate: biscuit.Predicate{
+			Name: api.FactTargetUnrestricted,
+			IDs:  []biscuit.Term{},
+		}})
 	}
 
 	if len(errs) > 0 {
@@ -280,8 +316,8 @@ func toStringSlice(val any) []string {
 }
 
 // MintBootstrapBiscuitToken generates a signed Biscuit token for a peer using a bootstrap role.
-func MintBootstrapBiscuitToken(signingKey ed25519.PrivateKey, remotePeer peer.ID, role string, expiration time.Time) ([]byte, error) {
-	return mintBiscuit(signingKey, remotePeer, []string{role}, expiration, nil)
+func MintBootstrapBiscuitToken(signingKey ed25519.PrivateKey, remotePeer peer.ID, role string, expiration time.Time, policyRoles []*api.PolicyRole) ([]byte, error) {
+	return mintBiscuit(signingKey, remotePeer, []string{role}, expiration, nil, policyRoles)
 }
 
 // VerifyAndExtractPeerID checks that the biscuit is signed by one of the trusted keys and returns the peer ID.

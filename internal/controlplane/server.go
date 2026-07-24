@@ -370,9 +370,16 @@ func (s *Server) HandleRegister(w http.ResponseWriter, r *http.Request) {
 	finalRoles := []string{req.RequestedRole}
 	finalRoles = append(finalRoles, customAccessRoles...)
 
+	policyRoles, _, err := s.store.GetMeshPolicy(ctx)
+	if err != nil {
+		logger.Errorf("Failed to retrieve mesh policy: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
 	// Mint token
 	biscuitExpiry := time.Now().Add(api.BiscuitTokenTTL)
-	biscuitData, _, err := identity.MintBiscuitToken(privKey, claims, token, pID, biscuitExpiry, finalRoles)
+	biscuitData, _, err := identity.MintBiscuitToken(privKey, claims, token, pID, biscuitExpiry, finalRoles, policyRoles)
 	if err != nil {
 		logger.Errorw("Biscuit minting failed", "peer_id", req.PeerId, "error", err)
 		http.Error(w, "Failed to mint biscuit: "+err.Error(), http.StatusForbidden)
@@ -587,7 +594,13 @@ func (s *Server) HandleRefresh(w http.ResponseWriter, r *http.Request) {
 		finalRoles := []string{nodeRecord.Role}
 		finalRoles = append(finalRoles, customAccessRoles...)
 
-		bBytes, _, err := identity.MintBiscuitToken(privKey, claims, nil, pID, biscuitExpiry, finalRoles)
+		policyRoles, _, err := s.store.GetMeshPolicy(ctx)
+		if err != nil {
+			logger.Errorf("Failed to retrieve mesh policy for node %s: %v", nodeRecord.PeerID, err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+		bBytes, _, err := identity.MintBiscuitToken(privKey, claims, nil, pID, biscuitExpiry, finalRoles, policyRoles)
 		if err != nil {
 			logger.Errorf("Failed to mint refreshed token for node %s: %v", nodeRecord.PeerID, err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -596,7 +609,13 @@ func (s *Server) HandleRefresh(w http.ResponseWriter, r *http.Request) {
 		biscuitBytes = bBytes
 	} else {
 		// Bootstrap node
-		bBytes, err := identity.MintBootstrapBiscuitToken(privKey, pID, nodeRecord.Role, biscuitExpiry)
+		policyRoles, _, err := s.store.GetMeshPolicy(ctx)
+		if err != nil {
+			logger.Errorf("Failed to retrieve mesh policy for node %s: %v", nodeRecord.PeerID, err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+		bBytes, err := identity.MintBootstrapBiscuitToken(privKey, pID, nodeRecord.Role, biscuitExpiry, policyRoles)
 		if err != nil {
 			logger.Errorf("Failed to mint refreshed token for node %s: %v", nodeRecord.PeerID, err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -1027,7 +1046,13 @@ func (s *Server) HandleEnroll(w http.ResponseWriter, r *http.Request) {
 
 	if s.config.AutoApproveEnrollment {
 		// Mode A: Auto-Approve
-		biscuitBytes, err := identity.MintBootstrapBiscuitToken(privKey, pID, tokenRecord.Role, time.Now().Add(api.BiscuitTokenTTL))
+		policyRoles, _, err := s.store.GetMeshPolicy(ctx)
+		if err != nil {
+			logger.Errorf("Failed to retrieve mesh policy: %v", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+		biscuitBytes, err := identity.MintBootstrapBiscuitToken(privKey, pID, tokenRecord.Role, time.Now().Add(api.BiscuitTokenTTL), policyRoles)
 		if err != nil {
 			logger.Errorf("Failed to mint bootstrap biscuit: %v", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -1369,7 +1394,13 @@ func (s *Server) HandleAdminEnrollmentAction(w http.ResponseWriter, r *http.Requ
 			return
 		}
 
-		biscuitBytes, err := identity.MintBootstrapBiscuitToken(privKey, pID, tokenRecord.Role, time.Now().Add(api.BiscuitTokenTTL))
+		policyRoles, _, err := s.store.GetMeshPolicy(ctx)
+		if err != nil {
+			logger.Errorf("Failed to retrieve mesh policy: %v", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+		biscuitBytes, err := identity.MintBootstrapBiscuitToken(privKey, pID, tokenRecord.Role, time.Now().Add(api.BiscuitTokenTTL), policyRoles)
 		if err != nil {
 			logger.Errorf("Failed to mint bootstrap biscuit: %v", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)

@@ -17,6 +17,7 @@ package api
 import (
 	"fmt"
 	"maps"
+	"strings"
 
 	"github.com/biscuit-auth/biscuit-go/v2"
 	"github.com/biscuit-auth/biscuit-go/v2/parser"
@@ -332,4 +333,64 @@ func init() {
 	if err != nil {
 		panic(fmt.Sprintf("failed to parse static allow policy: %v", err))
 	}
+}
+
+// BuildServiceDatalogFact translates a service pattern string into a Datalog Fact.
+func BuildServiceDatalogFact(serviceStr string) biscuit.Fact {
+	svcType, svcName := ParseServiceTarget(serviceStr)
+	if svcType == "*" && svcName == "*" {
+		return biscuit.Fact{Predicate: biscuit.Predicate{
+			Name: FactGrantedServiceAllTypes,
+			IDs:  []biscuit.Term{},
+		}}
+	} else if svcName == "*" {
+		return biscuit.Fact{Predicate: biscuit.Predicate{
+			Name: FactGrantedServiceAll,
+			IDs:  []biscuit.Term{biscuit.String(svcType)},
+		}}
+	} else if strings.HasPrefix(svcName, "*.") {
+		return biscuit.Fact{Predicate: biscuit.Predicate{
+			Name: FactGrantedServiceSuffix,
+			IDs:  []biscuit.Term{biscuit.String(svcType), biscuit.String(svcName[1:])},
+		}}
+	} else if strings.HasSuffix(svcName, ".*") {
+		return biscuit.Fact{Predicate: biscuit.Predicate{
+			Name: FactGrantedServicePrefix,
+			IDs:  []biscuit.Term{biscuit.String(svcType), biscuit.String(svcName[:len(svcName)-1])},
+		}}
+	}
+	return biscuit.Fact{Predicate: biscuit.Predicate{
+		Name: FactGrantedServiceExact,
+		IDs:  []biscuit.Term{biscuit.String(svcType), biscuit.String(svcName)},
+	}}
+}
+
+// BuildTargetDatalogFact translates a target pattern string into a Datalog Fact.
+func BuildTargetDatalogFact(targetStr string) biscuit.Fact {
+	tFact, tVal := ParseServiceTarget(targetStr)
+	if tFact == "*" && tVal == "*" {
+		return biscuit.Fact{Predicate: biscuit.Predicate{
+			Name: FactGrantedTargetAllFacts,
+			IDs:  []biscuit.Term{},
+		}}
+	} else if tVal == "*" {
+		return biscuit.Fact{Predicate: biscuit.Predicate{
+			Name: FactGrantedTargetAll,
+			IDs:  []biscuit.Term{biscuit.String(tFact)},
+		}}
+	} else if strings.HasPrefix(tVal, "*.") {
+		return biscuit.Fact{Predicate: biscuit.Predicate{
+			Name: FactGrantedTargetSuffix,
+			IDs:  []biscuit.Term{biscuit.String(tFact), biscuit.String(tVal[1:])},
+		}}
+	} else if strings.HasSuffix(tVal, ".*") {
+		return biscuit.Fact{Predicate: biscuit.Predicate{
+			Name: FactGrantedTargetPrefix,
+			IDs:  []biscuit.Term{biscuit.String(tFact), biscuit.String(tVal[:len(tVal)-1])},
+		}}
+	}
+	return biscuit.Fact{Predicate: biscuit.Predicate{
+		Name: FactGrantedTargetExact,
+		IDs:  []biscuit.Term{biscuit.String(tFact), biscuit.String(tVal)},
+	}}
 }
