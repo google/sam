@@ -1133,7 +1133,7 @@ func (n *SamNode) listenForHubEvents(ctx context.Context) {
 		case api.MeshEvent_POLICY_UPDATE:
 			logger.Infof("[Mesh Event] Received POLICY_UPDATE event from %s, triggering sync", msg.ReceivedFrom)
 			go func() {
-				if err := n.syncMeshPolicy(context.Background()); err != nil {
+				if err := n.syncMeshPolicy(ctx); err != nil {
 					logger.Warnf("Failed to sync mesh policy after event: %v", err)
 				}
 			}()

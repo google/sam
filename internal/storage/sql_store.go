@@ -267,16 +267,6 @@ var migrations = []migration{
 }
 
 func (s *SQLStore) initSchema() error {
-	if s.isPostgres() {
-		// Acquire an advisory lock to serialize migrations across concurrent replicas
-		if _, err := s.db.Exec("SELECT pg_advisory_lock(7345892)"); err != nil {
-			return fmt.Errorf("failed to acquire migration advisory lock: %w", err)
-		}
-		defer func() {
-			_, _ = s.db.Exec("SELECT pg_advisory_unlock(7345892)")
-		}()
-	}
-
 	// Create schema_migrations table
 	createMigrationsTable := `CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY)`
 	if _, err := s.db.Exec(createMigrationsTable); err != nil {
@@ -300,6 +290,12 @@ func (s *SQLStore) initSchema() error {
 				return err
 			}
 			defer func() { _ = tx.Rollback() }()
+
+			if s.isPostgres() {
+				if _, err := tx.Exec("SELECT pg_advisory_xact_lock(7345892)"); err != nil {
+					return fmt.Errorf("failed to acquire migration advisory lock: %w", err)
+				}
+			}
 
 			queries := m.sqlite
 			if s.isPostgres() {
@@ -601,6 +597,12 @@ func (s *SQLStore) SaveMeshPolicy(ctx context.Context, roles []*api.PolicyRole, 
 	defer func() { _ = tx.Rollback() }()
 
 	// For simplicity in replacing policy, we clear all and insert new.
+	if _, err := tx.ExecContext(ctx, "DELETE FROM role_permissions"); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, "DELETE FROM role_bindings"); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, "DELETE FROM roles"); err != nil {
 		return err
 	}
