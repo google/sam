@@ -15,3 +15,8 @@ roles:
       - "*"
     allowed_targets:
       - "*"
+  "sam:role:node":
+    allowed_services:
+      - "*"
+    allowed_targets:
+      - "*"
