@@ -114,16 +114,9 @@ spec:
           fi
 
           echo "Writing bootstrap token to Kubernetes secret ${SECRET_NAME}..."
-          
-          # Delete existing secret first (ignore error if doesn't exist)
-          curl -s --cacert $CACERT -X DELETE \
+          curl -s --cacert $CACERT -X PATCH \
             -H "Authorization: Bearer $K8S_TOKEN" \
-            "https://kubernetes.default.svc/api/v1/namespaces/${NAMESPACE}/secrets/${SECRET_NAME}" > /dev/null || true
-
-          # Create new secret
-          curl -s --cacert $CACERT -X POST \
-            -H "Authorization: Bearer $K8S_TOKEN" \
-            -H "Content-Type: application/json" \
+            -H "Content-Type: application/apply-patch+yaml" \
             -d '{
               "apiVersion": "v1",
               "kind": "Secret",
@@ -135,6 +128,6 @@ spec:
                 "token": "'"${ROUTER_TOKEN}"'"
               }
             }' \
-            "https://kubernetes.default.svc/api/v1/namespaces/${NAMESPACE}/secrets" > /dev/null
+            "https://kubernetes.default.svc/api/v1/namespaces/${NAMESPACE}/secrets/${SECRET_NAME}?fieldManager=sam-bootstrap&force=true" > /dev/null
 
           echo "Bootstrap completed successfully!"

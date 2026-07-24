@@ -228,22 +228,24 @@ func (n *SamNode) InteractiveLogin(ctx context.Context, authURL, tokenURL, clien
 		}
 	}()
 
+	shutdownSrv := func() {
+		if srv != nil {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			_ = srv.Shutdown(shutdownCtx)
+			cancel()
+		}
+	}
+
 	var code string
 	select {
 	case <-ctx.Done():
-		if srv != nil {
-			_ = srv.Shutdown(context.Background())
-		}
+		shutdownSrv()
 		return "", ctx.Err()
 	case err := <-errChan:
-		if srv != nil {
-			_ = srv.Shutdown(context.Background())
-		}
+		shutdownSrv()
 		return "", err
 	case code = <-codeChan:
-		if srv != nil {
-			_ = srv.Shutdown(context.Background())
-		}
+		shutdownSrv()
 	}
 
 	tokenData := url.Values{}

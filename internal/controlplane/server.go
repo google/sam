@@ -1755,8 +1755,18 @@ func resolveRoles(claims jwt.MapClaims, bindings []*api.PolicyBinding) []string 
 					}
 				}
 			case api.FactUser:
-				if oidcSub == value || oidcEmail == value {
+				if oidcSub == value {
 					resolvedRoles[b.Role] = true
+				}
+			case api.FactEmail:
+				if oidcEmail == value {
+					resolvedRoles[b.Role] = true
+				}
+			case api.FactRole:
+				for _, r := range oidcRoles {
+					if r == value {
+						resolvedRoles[b.Role] = true
+					}
 				}
 			}
 		}
