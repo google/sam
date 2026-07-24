@@ -351,6 +351,7 @@ func TestOIDCClaimToFact(t *testing.T) {
 		"sub":    FactUser,
 		"email":  FactEmail,
 		"groups": FactGroup,
+		"roles":  FactRole,
 	}
 
 	if !reflect.DeepEqual(facts, want) {
@@ -363,5 +364,75 @@ func TestOIDCClaimToFact(t *testing.T) {
 
 	if _, ok := facts2["new_claim"]; ok {
 		t.Errorf("OIDCClaimToFact() returned map is not a clone, modifications affect internal state")
+	}
+}
+
+func TestBuildServiceDatalogFact(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected biscuit.Fact
+	}{
+		{
+			input:    "*",
+			expected: biscuit.Fact{Predicate: biscuit.Predicate{Name: FactGrantedServiceAllTypes, IDs: []biscuit.Term{}}},
+		},
+		{
+			input:    "mcp://*",
+			expected: biscuit.Fact{Predicate: biscuit.Predicate{Name: FactGrantedServiceAll, IDs: []biscuit.Term{biscuit.String("mcp")}}},
+		},
+		{
+			input:    "mcp://*.local",
+			expected: biscuit.Fact{Predicate: biscuit.Predicate{Name: FactGrantedServiceSuffix, IDs: []biscuit.Term{biscuit.String("mcp"), biscuit.String(".local")}}},
+		},
+		{
+			input:    "mcp://calc.*",
+			expected: biscuit.Fact{Predicate: biscuit.Predicate{Name: FactGrantedServicePrefix, IDs: []biscuit.Term{biscuit.String("mcp"), biscuit.String("calc.")}}},
+		},
+		{
+			input:    "mcp://calculator",
+			expected: biscuit.Fact{Predicate: biscuit.Predicate{Name: FactGrantedServiceExact, IDs: []biscuit.Term{biscuit.String("mcp"), biscuit.String("calculator")}}},
+		},
+	}
+
+	for _, tt := range tests {
+		got := BuildServiceDatalogFact(tt.input)
+		if got.String() != tt.expected.String() {
+			t.Errorf("BuildServiceDatalogFact(%q) = %s, want %s", tt.input, got.String(), tt.expected.String())
+		}
+	}
+}
+
+func TestBuildTargetDatalogFact(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected biscuit.Fact
+	}{
+		{
+			input:    "*",
+			expected: biscuit.Fact{Predicate: biscuit.Predicate{Name: FactGrantedTargetAllFacts, IDs: []biscuit.Term{}}},
+		},
+		{
+			input:    "user:*",
+			expected: biscuit.Fact{Predicate: biscuit.Predicate{Name: FactGrantedTargetAll, IDs: []biscuit.Term{biscuit.String("user")}}},
+		},
+		{
+			input:    "group:*.internal",
+			expected: biscuit.Fact{Predicate: biscuit.Predicate{Name: FactGrantedTargetSuffix, IDs: []biscuit.Term{biscuit.String("group"), biscuit.String(".internal")}}},
+		},
+		{
+			input:    "group:backend.*",
+			expected: biscuit.Fact{Predicate: biscuit.Predicate{Name: FactGrantedTargetPrefix, IDs: []biscuit.Term{biscuit.String("group"), biscuit.String("backend.")}}},
+		},
+		{
+			input:    "group:backend",
+			expected: biscuit.Fact{Predicate: biscuit.Predicate{Name: FactGrantedTargetExact, IDs: []biscuit.Term{biscuit.String("group"), biscuit.String("backend")}}},
+		},
+	}
+
+	for _, tt := range tests {
+		got := BuildTargetDatalogFact(tt.input)
+		if got.String() != tt.expected.String() {
+			t.Errorf("BuildTargetDatalogFact(%q) = %s, want %s", tt.input, got.String(), tt.expected.String())
+		}
 	}
 }

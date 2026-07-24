@@ -1,0 +1,24 @@
+{{- if .Values.router.enabled -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "sam-mesh.fullname" . }}-router
+  labels:
+    {{- include "sam-mesh.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.router.service.type }}
+  ports:
+  - name: p2p-tcp
+    port: {{ .Values.router.service.port }}
+    targetPort: 4501
+    {{- if and (eq .Values.router.service.type "NodePort") .Values.router.service.nodePort }}
+    nodePort: {{ .Values.router.service.nodePort }}
+    {{- end }}
+    protocol: TCP
+  - name: p2p-udp
+    port: {{ .Values.router.service.port }}
+    targetPort: 4501
+    protocol: UDP
+  selector:
+    app: {{ include "sam-mesh.fullname" . }}-router
+{{- end }}

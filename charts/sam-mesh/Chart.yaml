@@ -1,0 +1,6 @@
+apiVersion: v2
+name: sam-mesh
+description: A Helm chart for deploying the Sovereign Agent Mesh (SAM) Control Plane, Router, and Console
+type: application
+version: 0.1.0
+appVersion: "1.0.0"

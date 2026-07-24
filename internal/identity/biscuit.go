@@ -32,118 +32,19 @@ import (
 )
 
 // MintBiscuitToken generates a signed Biscuit token for a peer with policy rules based on JWT claims.
-//
-// Role Authorization Rationale:
-// The system has two distinct kinds of roles:
-//  1. Capability Roles (prefixed with "sam:role:"): These authorize the client's binary startup role
-//     (e.g., sam:role:node, sam:role:router, sam:role:sambox) under Zero Trust.
-//  2. Custom Access Roles (all other roles): These define authorization permissions for custom
-//     services and targets (e.g., restricted-role).
-//
-// When enrolling:
-//   - The client binary must explicitly request a single capability role (requestedRole).
-//   - We verify if the client's OIDC identity is authorized to claim that requested capability role:
-//   - If the user has explicitly mapped capability roles (from policy/claims), they must only request one of those.
-//   - If the user has no capability roles mapped, they are allowed to request the standard fallback role ("sam:role:node").
-//   - Once authorized, the generated Biscuit is minted with:
-//   - The requested capability role (enforcing least privilege).
-//   - All other custom access roles mapped to the identity (so they preserve their resource permissions).
-func MintBiscuitToken(signingKey ed25519.PrivateKey, claims jwt.MapClaims, token *oidc.IDToken, remotePeer peer.ID, policy *api.PolicyConfig, biscuitExpiry time.Time, requestedRole string) ([]byte, []string, error) {
+func MintBiscuitToken(signingKey ed25519.PrivateKey, claims jwt.MapClaims, token *oidc.IDToken, remotePeer peer.ID, biscuitExpiry time.Time, roles []string, policyRoles []*api.PolicyRole) ([]byte, []string, error) {
 	if claims == nil {
 		return nil, nil, fmt.Errorf("claims cannot be nil")
 	}
-	if requestedRole == "" {
-		return nil, nil, fmt.Errorf("requested_role must be specified")
-	}
 
-	oidcRoles := toStringSlice(claims["roles"])
-	oidcGroups := toStringSlice(claims["groups"])
-	oidcSub, _ := claims["sub"].(string)
-	oidcEmail, _ := claims["email"].(string)
-
-	// Resolve all roles assigned to this identity by policy bindings or direct OIDC roles.
-	resolvedRoles := make(map[string]bool)
-	if policy != nil {
-		for _, b := range policy.Bindings {
-			for _, member := range b.Members {
-				if member == api.SystemAuthenticated {
-					resolvedRoles[b.Role] = true
-					break
-				}
-
-				parts := strings.SplitN(member, ":", 2)
-				if len(parts) != 2 {
-					continue
-				}
-				prefix, value := parts[0], parts[1]
-
-				switch prefix {
-				case api.FactGroup:
-					for _, cg := range oidcGroups {
-						if value == cg {
-							resolvedRoles[b.Role] = true
-						}
-					}
-				case api.FactUser:
-					if oidcSub != "" && value == oidcSub {
-						resolvedRoles[b.Role] = true
-					}
-				case api.FactEmail:
-					if oidcEmail != "" && value == oidcEmail {
-						resolvedRoles[b.Role] = true
-					}
-				case api.FactNode:
-					if value == remotePeer.String() {
-						resolvedRoles[b.Role] = true
-					}
-				}
-			}
-		}
-
-		for _, r := range oidcRoles {
-			if _, exists := policy.Roles[r]; exists {
-				resolvedRoles[r] = true
-			}
-		}
-	}
-
-	// Categorize resolved roles into Capability roles (sam:role:*) and Custom Access roles.
-	var hasCapabilityRoles bool
-	var customAccessRoles []string
-
-	for r := range resolvedRoles {
-		if strings.HasPrefix(r, "sam:role:") {
-			hasCapabilityRoles = true
-		} else if r != requestedRole {
-			customAccessRoles = append(customAccessRoles, r)
-		}
-	}
-
-	// Verify that the requested capability role is authorized.
-	isAuthorized := false
-	if resolvedRoles[requestedRole] {
-		isAuthorized = true
-	} else if requestedRole == api.RoleNode && !hasCapabilityRoles {
-		// Default fallback capability if no capability roles are explicitly assigned.
-		isAuthorized = true
-	}
-
-	if !isAuthorized {
-		return nil, nil, fmt.Errorf("requested role %q is not authorized for this identity", requestedRole)
-	}
-
-	// Assemble final roles: the single requested capability role + all custom access roles.
-	finalRoles := []string{requestedRole}
-	finalRoles = append(finalRoles, customAccessRoles...)
-
-	biscuitBytes, err := mintBiscuit(signingKey, remotePeer, finalRoles, biscuitExpiry, policy, claims)
+	biscuitBytes, err := mintBiscuit(signingKey, remotePeer, roles, biscuitExpiry, claims, policyRoles)
 	if err != nil {
 		return nil, nil, err
 	}
-	return biscuitBytes, finalRoles, nil
+	return biscuitBytes, roles, nil
 }
 
-func mintBiscuit(signingKey ed25519.PrivateKey, remotePeer peer.ID, roles []string, expiration time.Time, policy *api.PolicyConfig, claims jwt.MapClaims) ([]byte, error) {
+func mintBiscuit(signingKey ed25519.PrivateKey, remotePeer peer.ID, roles []string, expiration time.Time, claims jwt.MapClaims, policyRoles []*api.PolicyRole) ([]byte, error) {
 	builder := biscuit.NewBuilder(signingKey)
 	addedFacts := make(map[string]bool)
 	addFact := func(fact biscuit.Fact) error {
@@ -185,6 +86,15 @@ func mintBiscuit(signingKey ed25519.PrivateKey, remotePeer peer.ID, roles []stri
 		}
 	}
 
+	rolesMap := make(map[string]*api.PolicyRole)
+	for _, pr := range policyRoles {
+		if pr != nil {
+			rolesMap[pr.Name] = pr
+		}
+	}
+
+	hasTargets := false
+	hasServices := false
 	sort.Strings(roles)
 	var errs []error
 	for _, role := range roles {
@@ -209,145 +119,50 @@ func mintBiscuit(signingKey ed25519.PrivateKey, remotePeer peer.ID, roles []stri
 			}}); err != nil {
 				errs = append(errs, fmt.Errorf("failed to add target unrestricted: %w", err))
 			}
+			hasTargets = true
+			hasServices = true
 			continue
 		}
 
-		if policy != nil {
-			if rolePolicy, ok := policy.Roles[role]; ok {
-				for _, svc := range rolePolicy.AllowedServices {
-					svcType, svcName := api.ParseServiceTarget(svc)
-
-					if svcType == "*" && svcName == "*" {
-						if err := addFact(biscuit.Fact{Predicate: biscuit.Predicate{
-							Name: api.FactGrantedServiceAllTypes,
-							IDs:  []biscuit.Term{},
-						}}); err != nil {
-							errs = append(errs, fmt.Errorf("failed to add granted_service_all_types fact: %w", err))
-						}
-					} else if svcName == "*" {
-						if err := addFact(biscuit.Fact{Predicate: biscuit.Predicate{
-							Name: api.FactGrantedServiceAll,
-							IDs:  []biscuit.Term{biscuit.String(svcType)},
-						}}); err != nil {
-							errs = append(errs, fmt.Errorf("failed to add granted_service_all fact: %w", err))
-						}
-					} else if strings.HasPrefix(svcName, "*.") {
-						suffix := svcName[1:]
-						if err := addFact(biscuit.Fact{Predicate: biscuit.Predicate{
-							Name: api.FactGrantedServiceSuffix,
-							IDs:  []biscuit.Term{biscuit.String(svcType), biscuit.String(suffix)},
-						}}); err != nil {
-							errs = append(errs, fmt.Errorf("failed to add granted_service_suffix fact: %w", err))
-						}
-					} else if strings.HasSuffix(svcName, ".*") {
-						prefix := svcName[:len(svcName)-1]
-						if err := addFact(biscuit.Fact{Predicate: biscuit.Predicate{
-							Name: api.FactGrantedServicePrefix,
-							IDs:  []biscuit.Term{biscuit.String(svcType), biscuit.String(prefix)},
-						}}); err != nil {
-							errs = append(errs, fmt.Errorf("failed to add granted_service_prefix fact: %w", err))
-						}
-					} else {
-						if err := addFact(biscuit.Fact{Predicate: biscuit.Predicate{
-							Name: api.FactGrantedServiceExact,
-							IDs:  []biscuit.Term{biscuit.String(svcType), biscuit.String(svcName)},
-						}}); err != nil {
-							errs = append(errs, fmt.Errorf("failed to add granted_service_exact fact: %w", err))
-						}
-					}
+		if pr, ok := rolesMap[role]; ok {
+			if len(pr.AllowedServices) > 0 {
+				hasServices = true
+				for _, svc := range pr.AllowedServices {
+					_ = addFact(api.BuildServiceDatalogFact(svc))
 				}
+			}
 
-				for _, target := range rolePolicy.AllowedTargets {
-					targetFact, targetVal := api.ParseServiceTarget(target)
-
-					if targetFact == "*" && targetVal == "*" {
-						if err := addFact(biscuit.Fact{Predicate: biscuit.Predicate{
-							Name: api.FactGrantedTargetAllFacts,
-							IDs:  []biscuit.Term{},
-						}}); err != nil {
-							errs = append(errs, fmt.Errorf("failed to add granted_target_all_facts fact: %w", err))
-						}
-					} else if targetVal == "*" {
-						if err := addFact(biscuit.Fact{Predicate: biscuit.Predicate{
-							Name: api.FactGrantedTargetAll,
-							IDs:  []biscuit.Term{biscuit.String(targetFact)},
-						}}); err != nil {
-							errs = append(errs, fmt.Errorf("failed to add granted_target_all fact: %w", err))
-						}
-					} else if strings.HasPrefix(targetVal, "*.") {
-						suffix := targetVal[1:]
-						if err := addFact(biscuit.Fact{Predicate: biscuit.Predicate{
-							Name: api.FactGrantedTargetSuffix,
-							IDs:  []biscuit.Term{biscuit.String(targetFact), biscuit.String(suffix)},
-						}}); err != nil {
-							errs = append(errs, fmt.Errorf("failed to add granted_target_suffix fact: %w", err))
-						}
-					} else if strings.HasSuffix(targetVal, ".*") {
-						prefix := targetVal[:len(targetVal)-1]
-						if err := addFact(biscuit.Fact{Predicate: biscuit.Predicate{
-							Name: api.FactGrantedTargetPrefix,
-							IDs:  []biscuit.Term{biscuit.String(targetFact), biscuit.String(prefix)},
-						}}); err != nil {
-							errs = append(errs, fmt.Errorf("failed to add granted_target_prefix fact: %w", err))
-						}
-					} else {
-						if err := addFact(biscuit.Fact{Predicate: biscuit.Predicate{
-							Name: api.FactGrantedTargetExact,
-							IDs:  []biscuit.Term{biscuit.String(targetFact), biscuit.String(targetVal)},
-						}}); err != nil {
-							errs = append(errs, fmt.Errorf("failed to add granted_target_exact fact: %w", err))
-						}
-					}
+			if len(pr.AllowedTargets) > 0 {
+				hasTargets = true
+				for _, target := range pr.AllowedTargets {
+					_ = addFact(api.BuildTargetDatalogFact(target))
 				}
+			}
 
-				for _, customFact := range rolePolicy.CustomDatalog {
-					trimmed := strings.TrimRight(strings.TrimSpace(customFact), ";")
-					if trimmed == "" {
-						continue
-					}
-					var factErr error
-					func() {
-						defer func() {
-							if r := recover(); r != nil {
-								factErr = fmt.Errorf("panic parsing custom fact %q: %v", trimmed, r)
-							}
-						}()
-						fact, err := parser.FromStringFact(trimmed)
-						if err != nil {
-							factErr = fmt.Errorf("failed to parse custom fact %q: %w", trimmed, err)
-							return
-						}
-						if err := addFact(fact); err != nil {
-							factErr = fmt.Errorf("failed to add custom fact %q: %w", trimmed, err)
-						}
-					}()
-					if factErr != nil {
-						errs = append(errs, factErr)
-					}
+			for _, customFact := range pr.CustomDatalog {
+				trimmed := strings.TrimRight(strings.TrimSpace(customFact), ";")
+				if trimmed == "" {
+					continue
+				}
+				fact, err := parser.FromStringFact(trimmed)
+				if err == nil {
+					_ = addFact(fact)
 				}
 			}
 		}
 	}
 
-	hasTargets := false
-	for _, role := range roles {
-		if policy != nil {
-			if rolePolicy, ok := policy.Roles[role]; ok {
-				if len(rolePolicy.AllowedTargets) > 0 {
-					hasTargets = true
-					break
-				}
-			}
-		}
+	if !hasServices && len(policyRoles) == 0 {
+		_ = addFact(biscuit.Fact{Predicate: biscuit.Predicate{
+			Name: api.FactGrantedServiceAllTypes,
+			IDs:  []biscuit.Term{},
+		}})
 	}
-	if hasTargets {
-		if err := addFact(biscuit.Fact{Predicate: biscuit.Predicate{Name: api.FactTargetRestricted}}); err != nil {
-			errs = append(errs, err)
-		}
-	} else {
-		if err := addFact(biscuit.Fact{Predicate: biscuit.Predicate{Name: api.FactTargetUnrestricted}}); err != nil {
-			errs = append(errs, err)
-		}
+	if !hasTargets && len(policyRoles) == 0 {
+		_ = addFact(biscuit.Fact{Predicate: biscuit.Predicate{
+			Name: api.FactTargetUnrestricted,
+			IDs:  []biscuit.Term{},
+		}})
 	}
 
 	if len(errs) > 0 {
@@ -457,17 +272,17 @@ func translateClaimsToFacts(addFact func(biscuit.Fact) error, claims map[string]
 					return fmt.Errorf("failed to add %s fact: %w", factName, err)
 				}
 			}
-		case api.FactGroup:
-			groups := toStringSlice(val)
+		case api.FactGroup, api.FactRole:
+			items := toStringSlice(val)
 			seen := make(map[string]bool)
-			for _, g := range groups {
-				if seen[g] {
+			for _, item := range items {
+				if seen[item] {
 					continue
 				}
-				seen[g] = true
+				seen[item] = true
 				if err := addFact(biscuit.Fact{Predicate: biscuit.Predicate{
 					Name: factName,
-					IDs:  []biscuit.Term{biscuit.String(g)},
+					IDs:  []biscuit.Term{biscuit.String(item)},
 				}}); err != nil {
 					return fmt.Errorf("failed to add %s fact: %w", factName, err)
 				}
@@ -501,8 +316,8 @@ func toStringSlice(val any) []string {
 }
 
 // MintBootstrapBiscuitToken generates a signed Biscuit token for a peer using a bootstrap role.
-func MintBootstrapBiscuitToken(signingKey ed25519.PrivateKey, remotePeer peer.ID, role string, expiration time.Time, policy *api.PolicyConfig) ([]byte, error) {
-	return mintBiscuit(signingKey, remotePeer, []string{role}, expiration, policy, nil)
+func MintBootstrapBiscuitToken(signingKey ed25519.PrivateKey, remotePeer peer.ID, role string, expiration time.Time, policyRoles []*api.PolicyRole) ([]byte, error) {
+	return mintBiscuit(signingKey, remotePeer, []string{role}, expiration, nil, policyRoles)
 }
 
 // VerifyAndExtractPeerID checks that the biscuit is signed by one of the trusted keys and returns the peer ID.

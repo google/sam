@@ -1,0 +1,17 @@
+{{- if .Values.database.postgres.deployInternal -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "sam-mesh.fullname" . }}-db
+  labels:
+    {{- include "sam-mesh.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+  - name: postgres
+    port: 5432
+    targetPort: 5432
+    protocol: TCP
+  selector:
+    app: {{ include "sam-mesh.fullname" . }}-db
+{{- end }}

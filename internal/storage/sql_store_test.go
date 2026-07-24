@@ -285,37 +285,35 @@ func TestPolicyOps(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Policy should be empty
-	_, err := store.GetPolicy(ctx)
-	if err != ErrNotFound {
-		t.Fatalf("expected ErrNotFound, got %v", err)
+	// Policy should be empty initially
+	roles, bindings, err := store.GetMeshPolicy(ctx)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if len(roles) != 0 || len(bindings) != 0 {
+		t.Fatalf("expected empty policy initially, got %d roles and %d bindings", len(roles), len(bindings))
 	}
 
 	// Save policy
-	p := &api.PolicyConfig{
-		Version: "v1alpha1",
-		Bindings: []api.Binding{
-			{Role: "admin", Members: []string{"user:alice"}},
-		},
-		Roles: map[string]api.RolePolicy{
-			"admin": {
-				AllowedServices: []string{"*"},
-				AllowedTargets:  []string{"*"},
-			},
-		},
+	p := &api.PolicyRole{
+		Name:            "admin",
+		AllowedServices: []string{"*"},
+		AllowedTargets:  []string{"*"},
 	}
-	err = store.SavePolicy(ctx, p)
+	err = store.SaveMeshPolicy(ctx, []*api.PolicyRole{p}, []*api.PolicyBinding{
+		{Role: "admin", Members: []string{"user:alice"}},
+	})
 	if err != nil {
 		t.Fatalf("failed to save policy: %v", err)
 	}
 
 	// Get policy
-	retPolicy, err := store.GetPolicy(ctx)
+	retRoles, retBindings, err := store.GetMeshPolicy(ctx)
 	if err != nil {
 		t.Fatalf("failed to get policy: %v", err)
 	}
-	if retPolicy.Version != p.Version || len(retPolicy.Bindings) != 1 || retPolicy.Bindings[0].Role != "admin" {
-		t.Fatalf("policy contents mismatch: %+v", retPolicy)
+	if len(retRoles) != 1 || retRoles[0].Name != "admin" || len(retBindings) != 1 || retBindings[0].Role != "admin" {
+		t.Fatalf("policy contents mismatch")
 	}
 }
 

@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "sam-mesh.fullname" . }}-control-plane
+  labels:
+    {{- include "sam-mesh.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.controlPlane.service.type }}
+  ports:
+  - name: http
+    port: {{ .Values.controlPlane.service.port }}
+    targetPort: 8080
+    {{- if and (eq .Values.controlPlane.service.type "NodePort") .Values.controlPlane.service.nodePort }}
+    nodePort: {{ .Values.controlPlane.service.nodePort }}
+    {{- end }}
+    protocol: TCP
+  selector:
+    app: {{ include "sam-mesh.fullname" . }}-control-plane

@@ -1,0 +1,91 @@
+{{- if .Values.router.enabled -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "sam-mesh.fullname" . }}-router-sa
+  labels:
+    {{- include "sam-mesh.labels" . | nindent 4 }}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "sam-mesh.fullname" . }}-router
+  labels:
+    {{- include "sam-mesh.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ include "sam-mesh.fullname" . }}-router
+  replicas: {{ .Values.router.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ include "sam-mesh.fullname" . }}-router
+  template:
+    metadata:
+      labels:
+        app: {{ include "sam-mesh.fullname" . }}-router
+    spec:
+      serviceAccountName: {{ include "sam-mesh.fullname" . }}-router-sa
+      containers:
+      - name: sam-router
+        image: "{{ .Values.router.image.repository }}:{{ .Values.global.imageTag }}"
+        imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+        ports:
+        - containerPort: 4501
+          name: p2p-tcp
+          {{- if .Values.router.hostPort }}
+          hostPort: {{ .Values.router.hostPort }}
+          {{- end }}
+          protocol: TCP
+        - containerPort: 4501
+          name: p2p-udp
+          {{- if .Values.router.hostPort }}
+          hostPort: {{ .Values.router.hostPort }}
+          {{- end }}
+          protocol: UDP
+        env:
+        {{- if not .Values.router.useOidcToken }}
+        - name: BOOTSTRAP_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "sam-mesh.fullname" . }}-router-token
+              key: token
+        {{- end }}
+        args:
+        - "--control-plane=http://{{ include "sam-mesh.fullname" . }}-control-plane:8080"
+        - "--listen=/ip4/0.0.0.0/tcp/4501"
+        - "--listen=/ip4/0.0.0.0/udp/4501/quic-v1"
+        {{- if .Values.router.externalAddrs }}
+        {{- range .Values.router.externalAddrs }}
+        - "--external-addr={{ . }}"
+        {{- end }}
+        {{- else }}
+        - "--external-addr=/dns4/{{ include "sam-mesh.fullname" . }}-router/tcp/4501"
+        {{- end }}
+        - "--keys-path=/data/router.key"
+        - "--allow-loopback"
+        - "--log-level={{ .Values.router.logLevel }}"
+        {{- if .Values.router.useOidcToken }}
+        - "--jwt-path=/var/run/secrets/tokens/sam-token"
+        {{- else }}
+        - "--bootstrap-token=$(BOOTSTRAP_TOKEN)"
+        {{- end }}
+        volumeMounts:
+        - name: router-data
+          mountPath: /data
+        {{- if .Values.router.useOidcToken }}
+        - name: sam-token
+          mountPath: /var/run/secrets/tokens
+          readOnly: true
+        {{- end }}
+      volumes:
+      - name: router-data
+        emptyDir: {}
+      {{- if .Values.router.useOidcToken }}
+      - name: sam-token
+        projected:
+          sources:
+          - serviceAccountToken:
+              path: sam-token
+              expirationSeconds: 3600
+              audience: "sam-hub-audience"
+      {{- end }}
+{{- end }}

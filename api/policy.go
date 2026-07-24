@@ -29,42 +29,6 @@ var (
 	}
 )
 
-// PolicyConfig is the root authorization configuration for the SAM Hub.
-type PolicyConfig struct {
-	Version  string                `yaml:"version"`
-	Bindings []Binding             `yaml:"bindings"`
-	Roles    map[string]RolePolicy `yaml:"roles"`
-}
-
-type Binding struct {
-	Role    string   `yaml:"role"`
-	Members []string `yaml:"members"` // format: "type:value" e.g. "user:alice", "group:eng"
-}
-
-// RolePolicy defines the capabilities granted to a specific authorization role.
-//
-// AllowedTargets restricts the logical endpoints a peer can route connections to.
-// Targets act similarly to Active Directory network groups and must be specified
-// using the format of the resolved Biscuit facts. IP address ranges are NOT allowed.
-// Valid examples:
-//   - "group:backend-nodes"
-//   - "user:admin@example.com"
-//   - "role:developer"
-//   - "node:12D3KooW..."
-//
-// AllowedServices defines the application-level services a peer can invoke.
-// Services are prefixed by their protocol/type to permit fine-grained scoping.
-// Wildcards are supported (e.g., "mcp:*").
-// Valid examples:
-//   - "mcp:local-shell-tools"
-//   - "inference:openrouter"
-//   - "system:query_db"
-type RolePolicy struct {
-	AllowedTargets  []string `yaml:"allowed_targets,omitempty"`
-	AllowedServices []string `yaml:"allowed_services,omitempty"`
-	CustomDatalog   []string `yaml:"custom_datalog,omitempty"`
-}
-
 type ServiceConfig struct {
 	Type        string            `yaml:"type"` // e.g., "mcp", "inference"
 	Name        string            `yaml:"name"`

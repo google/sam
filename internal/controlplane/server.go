@@ -43,8 +43,8 @@ import (
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"golang.org/x/time/rate"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
-	"gopkg.in/yaml.v2"
 )
 
 var logger = golog.Logger("sam-control-plane")
@@ -109,20 +109,7 @@ func (s *Server) Start() error {
 		return fmt.Errorf("failed to query initial keyring status: %w", err)
 	}
 
-	// Bootstrap Policy from file if DB is empty and path is provided
-	if s.config.PolicyPath != "" {
-		_, err := s.store.GetPolicy(ctx)
-		if err == storage.ErrNotFound {
-			logger.Infof("Bootstrapping mesh policy from %s...", s.config.PolicyPath)
-			policy, err := loadPolicyFromFile(s.config.PolicyPath)
-			if err != nil {
-				return fmt.Errorf("failed to load boot policy file: %w", err)
-			}
-			if err := s.store.SavePolicy(ctx, policy); err != nil {
-				return fmt.Errorf("failed to save boot policy: %w", err)
-			}
-		}
-	}
+	// Bootstrap Policy is now disabled; starting default closed.
 
 	// Initialize OIDC Providers
 	if err := s.discoverProviders(); err != nil {
@@ -333,13 +320,7 @@ func (s *Server) HandleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Fetch mesh policy
-	policy, err := s.store.GetPolicy(ctx)
-	if err != nil && err != storage.ErrNotFound {
-		logger.Errorf("Failed to retrieve mesh policy: %v", err)
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
-	}
+	// Mesh policy is distributed dynamically to the target nodes, no need to inject into token.
 
 	// Fetch current signing private key
 	privKey, pubKey, err := s.store.GetCurrentKey(ctx)
@@ -354,9 +335,51 @@ func (s *Server) HandleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	_, bindings, err := s.store.GetMeshPolicy(ctx)
+	if err != nil && err != storage.ErrNotFound {
+		logger.Errorf("Failed to load policy for role resolution: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	resolvedRoles := resolveRoles(claims, bindings)
+	var hasCapabilityRoles bool
+	var customAccessRoles []string
+	resolvedMap := make(map[string]bool)
+	for _, r := range resolvedRoles {
+		resolvedMap[r] = true
+		if strings.HasPrefix(r, "sam:role:") {
+			hasCapabilityRoles = true
+		} else {
+			customAccessRoles = append(customAccessRoles, r)
+		}
+	}
+
+	isAuthorized := false
+	if resolvedMap[req.RequestedRole] {
+		isAuthorized = true
+	} else if req.RequestedRole == api.RoleNode && !hasCapabilityRoles {
+		isAuthorized = true
+	}
+
+	if !isAuthorized {
+		http.Error(w, fmt.Sprintf("requested role %q is not authorized for this identity", req.RequestedRole), http.StatusForbidden)
+		return
+	}
+
+	finalRoles := []string{req.RequestedRole}
+	finalRoles = append(finalRoles, customAccessRoles...)
+
+	policyRoles, _, err := s.store.GetMeshPolicy(ctx)
+	if err != nil {
+		logger.Errorf("Failed to retrieve mesh policy: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
 	// Mint token
 	biscuitExpiry := time.Now().Add(api.BiscuitTokenTTL)
-	biscuitData, _, err := identity.MintBiscuitToken(privKey, claims, token, pID, policy, biscuitExpiry, req.RequestedRole)
+	biscuitData, _, err := identity.MintBiscuitToken(privKey, claims, token, pID, biscuitExpiry, finalRoles, policyRoles)
 	if err != nil {
 		logger.Errorw("Biscuit minting failed", "peer_id", req.PeerId, "error", err)
 		http.Error(w, "Failed to mint biscuit: "+err.Error(), http.StatusForbidden)
@@ -525,12 +548,7 @@ func (s *Server) HandleRefresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	policy, err := s.store.GetPolicy(ctx)
-	if err != nil && err != storage.ErrNotFound {
-		logger.Errorf("Failed to retrieve mesh policy: %v", err)
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
-	}
+	// Mesh policy is distributed dynamically.
 
 	var biscuitBytes []byte
 	biscuitExpiry := time.Now().Add(api.BiscuitTokenTTL)
@@ -542,7 +560,47 @@ func (s *Server) HandleRefresh(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 			return
 		}
-		bBytes, _, err := identity.MintBiscuitToken(privKey, claims, nil, pID, policy, biscuitExpiry, nodeRecord.Role)
+		_, bindings, err := s.store.GetMeshPolicy(ctx)
+		if err != nil && err != storage.ErrNotFound {
+			logger.Errorf("Failed to load policy for role resolution: %v", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+		resolvedRoles := resolveRoles(claims, bindings)
+		var hasCapabilityRoles bool
+		var customAccessRoles []string
+		resolvedMap := make(map[string]bool)
+		for _, r := range resolvedRoles {
+			resolvedMap[r] = true
+			if strings.HasPrefix(r, "sam:role:") {
+				hasCapabilityRoles = true
+			} else {
+				customAccessRoles = append(customAccessRoles, r)
+			}
+		}
+
+		isAuthorized := false
+		if resolvedMap[nodeRecord.Role] {
+			isAuthorized = true
+		} else if nodeRecord.Role == api.RoleNode && !hasCapabilityRoles {
+			isAuthorized = true
+		}
+
+		if !isAuthorized {
+			http.Error(w, fmt.Sprintf("role %q is no longer authorized for this identity", nodeRecord.Role), http.StatusForbidden)
+			return
+		}
+
+		finalRoles := []string{nodeRecord.Role}
+		finalRoles = append(finalRoles, customAccessRoles...)
+
+		policyRoles, _, err := s.store.GetMeshPolicy(ctx)
+		if err != nil {
+			logger.Errorf("Failed to retrieve mesh policy for node %s: %v", nodeRecord.PeerID, err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+		bBytes, _, err := identity.MintBiscuitToken(privKey, claims, nil, pID, biscuitExpiry, finalRoles, policyRoles)
 		if err != nil {
 			logger.Errorf("Failed to mint refreshed token for node %s: %v", nodeRecord.PeerID, err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -551,7 +609,13 @@ func (s *Server) HandleRefresh(w http.ResponseWriter, r *http.Request) {
 		biscuitBytes = bBytes
 	} else {
 		// Bootstrap node
-		bBytes, err := identity.MintBootstrapBiscuitToken(privKey, pID, nodeRecord.Role, biscuitExpiry, policy)
+		policyRoles, _, err := s.store.GetMeshPolicy(ctx)
+		if err != nil {
+			logger.Errorf("Failed to retrieve mesh policy for node %s: %v", nodeRecord.PeerID, err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+		bBytes, err := identity.MintBootstrapBiscuitToken(privKey, pID, nodeRecord.Role, biscuitExpiry, policyRoles)
 		if err != nil {
 			logger.Errorf("Failed to mint refreshed token for node %s: %v", nodeRecord.PeerID, err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -724,36 +788,63 @@ func (s *Server) HandleRouterLease(w http.ResponseWriter, r *http.Request) {
 
 // HandlePolicies HTTP GET/POST/PUT `/policies`
 func (s *Server) HandlePolicies(w http.ResponseWriter, r *http.Request) {
-	if !s.checkAdminAuth(w, r) {
-		return
-	}
 	// Simple HTTP admin methods for policies
 	switch r.Method {
 	case http.MethodGet:
-		policy, err := s.store.GetPolicy(r.Context())
-		if err == storage.ErrNotFound {
-			http.Error(w, "No policy configured", http.StatusNotFound)
+		// Nodes need to fetch policies using their Biscuit token, Admins use OIDC/Bootstrap
+		isAdmin := false
+		user, err := s.authenticateUser(r)
+		if err == nil && user.Role == "admin" {
+			isAdmin = true
+		}
+
+		isNode := false
+		if !isAdmin {
+			// Try checking if it's a valid node biscuit
+			authHeader := r.Header.Get("Authorization")
+			if strings.HasPrefix(authHeader, "Bearer ") {
+				biscuitBytes, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(authHeader, "Bearer "))
+				if err == nil {
+					validKeys, err := s.store.GetAllValidKeys(r.Context())
+					if err == nil {
+						var trustedKeys []ed25519.PublicKey
+						for _, k := range validKeys {
+							trustedKeys = append(trustedKeys, k.Public)
+						}
+						_, err := identity.VerifyAndExtractPeerID(trustedKeys, biscuitBytes)
+						if err == nil {
+							isNode = true
+						}
+					}
+				}
+			}
+		}
+
+		if !isAdmin && !isNode {
+			http.Error(w, "Unauthorized: Admin or Node authentication required", http.StatusUnauthorized)
 			return
 		}
-		if err != nil {
+
+		roles, bindings, err := s.store.GetMeshPolicy(r.Context())
+		if err != nil && err != storage.ErrNotFound {
 			logger.Errorf("Failed to load policy: %v", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 			return
 		}
 
-		yamlData, err := yaml.Marshal(policy)
-		if err != nil {
-			http.Error(w, "Failed to marshal yaml", http.StatusInternalServerError)
-			return
+		resp := &api.PolicyConfigGetResponse{
+			Roles:    roles,
+			Bindings: bindings,
 		}
-
-		resp := &api.PolicyConfigGetResponse{YamlContent: string(yamlData)}
 		respData, _ := proto.Marshal(resp)
 		w.Header().Set("Content-Type", "application/x-protobuf")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(respData)
 
 	case http.MethodPost, http.MethodPut:
+		if !s.checkAdminAuth(w, r) {
+			return
+		}
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
 			http.Error(w, "Failed to read body", http.StatusBadRequest)
@@ -762,24 +853,19 @@ func (s *Server) HandlePolicies(w http.ResponseWriter, r *http.Request) {
 		defer func() { _ = r.Body.Close() }()
 
 		var req api.PolicyConfigUpdateRequest
-		if err := proto.Unmarshal(body, &req); err != nil {
-			http.Error(w, "Invalid request format", http.StatusBadRequest)
-			return
+		if strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
+			if err := protojson.Unmarshal(body, &req); err != nil {
+				http.Error(w, "Invalid JSON format: "+err.Error(), http.StatusBadRequest)
+				return
+			}
+		} else {
+			if err := proto.Unmarshal(body, &req); err != nil {
+				http.Error(w, "Invalid request format", http.StatusBadRequest)
+				return
+			}
 		}
 
-		var policy api.PolicyConfig
-		if err := yaml.Unmarshal([]byte(req.YamlContent), &policy); err != nil {
-			http.Error(w, "Invalid YAML policy format: "+err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		// Run validation similar to Hub config loading
-		if err := ValidatePolicyConfig(&policy); err != nil {
-			http.Error(w, "Invalid policy structure: "+err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		if err := s.store.SavePolicy(r.Context(), &policy); err != nil {
+		if err := s.store.SaveMeshPolicy(r.Context(), req.Roles, req.Bindings); err != nil {
 			logger.Errorf("Failed to save policy: %v", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 			return
@@ -809,11 +895,6 @@ func (s *Server) Close() error {
 	}
 	s.wg.Wait()
 	return errors.Join(errs...)
-}
-
-func loadPolicyFromFile(path string) (*api.PolicyConfig, error) {
-	// Reused load script from config.go
-	return LoadPolicyConfig(path)
 }
 
 // Addr returns the network address the server is listening on.
@@ -953,13 +1034,7 @@ func (s *Server) HandleEnroll(w http.ResponseWriter, r *http.Request) {
 		CreatedAt: time.Now(),
 	}
 
-	// Fetch mesh policy
-	policy, err := s.store.GetPolicy(ctx)
-	if err != nil && err != storage.ErrNotFound {
-		logger.Errorf("Failed to retrieve policy: %v", err)
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
-	}
+	// No policy needed in token.
 
 	// Fetch current signing private key
 	privKey, _, err := s.store.GetCurrentKey(ctx)
@@ -971,7 +1046,13 @@ func (s *Server) HandleEnroll(w http.ResponseWriter, r *http.Request) {
 
 	if s.config.AutoApproveEnrollment {
 		// Mode A: Auto-Approve
-		biscuitBytes, err := identity.MintBootstrapBiscuitToken(privKey, pID, tokenRecord.Role, time.Now().Add(api.BiscuitTokenTTL), policy)
+		policyRoles, _, err := s.store.GetMeshPolicy(ctx)
+		if err != nil {
+			logger.Errorf("Failed to retrieve mesh policy: %v", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+		biscuitBytes, err := identity.MintBootstrapBiscuitToken(privKey, pID, tokenRecord.Role, time.Now().Add(api.BiscuitTokenTTL), policyRoles)
 		if err != nil {
 			logger.Errorf("Failed to mint bootstrap biscuit: %v", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -1304,12 +1385,7 @@ func (s *Server) HandleAdminEnrollmentAction(w http.ResponseWriter, r *http.Requ
 			return
 		}
 
-		policy, err := s.store.GetPolicy(ctx)
-		if err != nil && err != storage.ErrNotFound {
-			logger.Errorf("Failed to retrieve policy: %v", err)
-			http.Error(w, "Internal server error", http.StatusInternalServerError)
-			return
-		}
+		// No policy fetch needed.
 
 		privKey, _, err := s.store.GetCurrentKey(ctx)
 		if err != nil {
@@ -1318,7 +1394,13 @@ func (s *Server) HandleAdminEnrollmentAction(w http.ResponseWriter, r *http.Requ
 			return
 		}
 
-		biscuitBytes, err := identity.MintBootstrapBiscuitToken(privKey, pID, tokenRecord.Role, time.Now().Add(api.BiscuitTokenTTL), policy)
+		policyRoles, _, err := s.store.GetMeshPolicy(ctx)
+		if err != nil {
+			logger.Errorf("Failed to retrieve mesh policy: %v", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+		biscuitBytes, err := identity.MintBootstrapBiscuitToken(privKey, pID, tokenRecord.Role, time.Now().Add(api.BiscuitTokenTTL), policyRoles)
 		if err != nil {
 			logger.Errorf("Failed to mint bootstrap biscuit: %v", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -1503,14 +1585,7 @@ func (s *Server) HandleUserStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var policyYAML string
-	policy, err := s.store.GetPolicy(ctx)
-	if err == nil {
-		yamlData, err := yaml.Marshal(policy)
-		if err == nil {
-			policyYAML = string(yamlData)
-		}
-	}
+	var policyYAML string // TODO: Implement relational policy rendering.
 
 	resp := map[string]any{
 		"user": map[string]any{
@@ -1649,4 +1724,83 @@ func (s *Server) HandleUserRevoke(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte("Node revoked successfully"))
+}
+
+func resolveRoles(claims jwt.MapClaims, bindings []*api.PolicyBinding) []string {
+	oidcRoles := toStringSlice(claims["roles"])
+	oidcGroups := toStringSlice(claims["groups"])
+	oidcSub, _ := claims["sub"].(string)
+	oidcEmail, _ := claims["email"].(string)
+
+	resolvedRoles := make(map[string]bool)
+	for _, b := range bindings {
+		if b == nil {
+			continue
+		}
+		for _, m := range b.Members {
+			if m == api.SystemAuthenticated {
+				resolvedRoles[b.Role] = true
+				continue
+			}
+			parts := strings.SplitN(m, ":", 2)
+			if len(parts) != 2 {
+				continue
+			}
+			prefix, value := parts[0], parts[1]
+			switch prefix {
+			case api.FactGroup:
+				for _, g := range oidcGroups {
+					if g == value {
+						resolvedRoles[b.Role] = true
+					}
+				}
+			case api.FactUser:
+				if oidcSub == value {
+					resolvedRoles[b.Role] = true
+				}
+			case api.FactEmail:
+				if oidcEmail == value {
+					resolvedRoles[b.Role] = true
+				}
+			case api.FactRole:
+				for _, r := range oidcRoles {
+					if r == value {
+						resolvedRoles[b.Role] = true
+					}
+				}
+			}
+		}
+	}
+	for _, r := range oidcRoles {
+		resolvedRoles[r] = true
+	}
+
+	var res []string
+	for r := range resolvedRoles {
+		res = append(res, r)
+	}
+	return res
+}
+
+func toStringSlice(val any) []string {
+	if val == nil {
+		return nil
+	}
+	switch v := val.(type) {
+	case string:
+		if v != "" {
+			return []string{v}
+		}
+	case []string:
+		return v
+	case []any:
+		var res []string
+		for _, item := range v {
+			if str, ok := item.(string); ok && str != "" {
+				res = append(res, str)
+			}
+		}
+		return res
+	}
+	return nil
 }

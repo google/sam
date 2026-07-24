@@ -106,19 +106,23 @@ class Handler(BaseHTTPRequestHandler):
 
             client_id = params.get('client_id', [''])[0]
 
-            # Assign groups based on client_id
+            # Assign groups and roles based on client_id
             groups = ['data-scientist']
+            roles = ['sam:role:node']
             if client_id == 'admin-client':
                 groups = ['admin']
+                roles = ['sam:role:admin']
             elif client_id == 'router-client':
                 groups = ['routers']
+                roles = ['sam:role:router']
 
             payload = {
                 'iss': ISSUER,
                 'aud': 'sam-mesh-audience',
                 'sub': 'test-user',
                 'exp': int(time.time()) + 3600,
-                'groups': groups
+                'groups': groups,
+                'roles': roles
             }
             token = jwt.encode(payload, PRIVATE_KEY, algorithm='RS256', headers={'kid': 'test-key-id'})
             body = {

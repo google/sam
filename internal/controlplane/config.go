@@ -31,7 +31,6 @@ type Options struct {
 	KeyGracePeriod        time.Duration
 	InsecureSkipTLSVerify bool
 	BiscuitTimeout        time.Duration
-	PolicyPath            string // Optional: path to bootstrap policy configuration
 	AdminToken            string // Optional: administrative bearer token for protecting policy and enrollment queue REST APIs
 	AutoApproveEnrollment bool   // If true, valid bootstrap token enrollment requests are immediately approved without administrative manual gate
 }

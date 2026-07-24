@@ -1,0 +1,48 @@
+{{- if .Values.database.postgres.deployInternal -}}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "sam-mesh.fullname" . }}-db
+  labels:
+    {{- include "sam-mesh.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ include "sam-mesh.fullname" . }}-db
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ include "sam-mesh.fullname" . }}-db
+  template:
+    metadata:
+      labels:
+        app: {{ include "sam-mesh.fullname" . }}-db
+    spec:
+      containers:
+      - name: postgres
+        image: "{{ .Values.database.postgres.image.repository }}:{{ .Values.database.postgres.image.tag }}"
+        imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+        env:
+        - name: POSTGRES_DB
+          value: {{ .Values.database.postgres.database | quote }}
+        - name: POSTGRES_USER
+          value: {{ .Values.database.postgres.user | quote }}
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "sam-mesh.fullname" . }}-secrets
+              key: db-password
+        ports:
+        - containerPort: 5432
+          name: postgres
+          protocol: TCP
+        volumeMounts:
+        - name: db-data
+          mountPath: /var/lib/postgresql/data
+  volumeClaimTemplates:
+  - metadata:
+      name: db-data
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: {{ .Values.database.postgres.storageSize | quote }}
+{{- end }}

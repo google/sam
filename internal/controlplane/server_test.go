@@ -29,7 +29,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"strings"
 	"testing"
 	"time"
 
@@ -214,23 +213,22 @@ func TestNodeAndRouterRegistrationFlow(t *testing.T) {
 	ctx := context.Background()
 
 	// 1. Setup policy configuration in the database
-	policy := &api.PolicyConfig{
-		Version: "v1alpha1",
-		Bindings: []api.Binding{
-			{Role: api.RoleRouter, Members: []string{"group:routers"}},
-			{Role: "user-role", Members: []string{"group:users"}},
+	roles := []*api.PolicyRole{
+		{
+			Name:            api.RoleRouter,
+			AllowedServices: []string{"*"},
+			AllowedTargets:  []string{"*"},
 		},
-		Roles: map[string]api.RolePolicy{
-			api.RoleRouter: {
-				AllowedServices: []string{"*"},
-				AllowedTargets:  []string{"*"},
-			},
-			"user-role": {
-				AllowedServices: []string{"mcp:read"},
-			},
+		{
+			Name:            "user-role",
+			AllowedServices: []string{"mcp:read"},
 		},
 	}
-	if err := store.SavePolicy(ctx, policy); err != nil {
+	bindings := []*api.PolicyBinding{
+		{Role: api.RoleRouter, Members: []string{"group:routers"}},
+		{Role: "user-role", Members: []string{"group:users"}},
+	}
+	if err := store.SaveMeshPolicy(ctx, roles, bindings); err != nil {
 		t.Fatalf("failed to seed policy: %v", err)
 	}
 
@@ -292,6 +290,7 @@ func TestNodeAndRouterRegistrationFlow(t *testing.T) {
 	routerJWT := mintToken(map[string]interface{}{
 		"sub":    "router-host-1",
 		"groups": []string{"routers"},
+		"roles":  []string{api.RoleRouter},
 	})
 
 	routerPubKeyBytes, _ := crypto.MarshalPublicKey(privRouter.GetPublic())
@@ -422,24 +421,23 @@ func TestPoliciesConfigurationREST(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /policies failed: %v", err)
 	}
-	if resp.StatusCode != http.StatusNotFound {
-		t.Errorf("expected 404 for missing policy, got %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200 for empty policy, got %d", resp.StatusCode)
 	}
 	_ = resp.Body.Close()
 
 	// 4. Put policies (should succeed)
-	newPolicyYaml := `
-version: v1alpha1
-bindings:
-  - role: dev
-    members:
-      - group:developers
-roles:
-  dev:
-    allowed_services:
-      - mcp://git
-`
-	updateReq := &api.PolicyConfigUpdateRequest{YamlContent: newPolicyYaml}
+	updateReq := &api.PolicyConfigUpdateRequest{
+		Roles: []*api.PolicyRole{
+			{
+				Name:            "dev",
+				AllowedServices: []string{"mcp://git"},
+			},
+		},
+		Bindings: []*api.PolicyBinding{
+			{Role: "dev", Members: []string{"group:developers"}},
+		},
+	}
 	reqData, _ := proto.Marshal(updateReq)
 
 	req, _ = http.NewRequest(http.MethodPost, baseURL+"/policies", bytes.NewReader(reqData))
@@ -473,8 +471,11 @@ roles:
 		t.Fatalf("failed to unmarshal PolicyConfigGetResponse: %v", err)
 	}
 
-	if !strings.Contains(getResp.YamlContent, "role: dev") || !strings.Contains(getResp.YamlContent, "group:developers") {
-		t.Errorf("returned policy content mismatch: %s", getResp.YamlContent)
+	if len(getResp.Roles) == 0 || getResp.Roles[0].Name != "dev" {
+		t.Errorf("returned policy content mismatch: %+v", getResp.Roles)
+	}
+	if len(getResp.Bindings) == 0 || getResp.Bindings[0].Members[0] != "group:developers" {
+		t.Errorf("returned policy content mismatch: %+v", getResp.Bindings)
 	}
 }
 
@@ -698,13 +699,11 @@ func TestTokenRefreshAndRevocation(t *testing.T) {
 	ctx := context.Background()
 
 	// Setup policy configuration in the database
-	policy := &api.PolicyConfig{
-		Version: "v1alpha1",
-		Bindings: []api.Binding{
-			{Role: api.RoleNode, Members: []string{"group:users"}},
-		},
+	roles2 := []*api.PolicyRole{}
+	bindings2 := []*api.PolicyBinding{
+		{Role: api.RoleNode, Members: []string{"group:users"}},
 	}
-	if err := store.SavePolicy(ctx, policy); err != nil {
+	if err := store.SaveMeshPolicy(ctx, roles2, bindings2); err != nil {
 		t.Fatal(err)
 	}
 
@@ -835,13 +834,11 @@ func TestNodeProactiveTokenRefresh(t *testing.T) {
 	ctx := context.Background()
 
 	// Setup policy configuration in the database
-	policy := &api.PolicyConfig{
-		Version: "v1alpha1",
-		Bindings: []api.Binding{
-			{Role: api.RoleNode, Members: []string{"group:users"}},
-		},
+	roles3 := []*api.PolicyRole{}
+	bindings3 := []*api.PolicyBinding{
+		{Role: api.RoleNode, Members: []string{"group:users"}},
 	}
-	if err := store.SavePolicy(ctx, policy); err != nil {
+	if err := store.SaveMeshPolicy(ctx, roles3, bindings3); err != nil {
 		t.Fatal(err)
 	}
 

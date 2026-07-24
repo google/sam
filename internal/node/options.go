@@ -58,6 +58,8 @@ type Options struct {
 	DiscoveryConcurrency int
 	// RequiredRole restricts enrollment and startup to only accept tokens containing this role.
 	RequiredRole string
+	// PolicySyncInterval specifies how often the node syncs the mesh policy from the Hub.
+	PolicySyncInterval time.Duration
 }
 
 // Default applies default values to Options if they are not specified.
@@ -97,6 +99,9 @@ func (o *Options) Default() {
 	}
 	if o.RequiredRole == "" {
 		o.RequiredRole = api.RoleNode
+	}
+	if o.PolicySyncInterval == 0 {
+		o.PolicySyncInterval = 1 * time.Hour
 	}
 }
 

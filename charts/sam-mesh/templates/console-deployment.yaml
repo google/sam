@@ -1,0 +1,37 @@
+{{- if .Values.console.enabled -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "sam-mesh.fullname" . }}-console
+  labels:
+    {{- include "sam-mesh.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.console.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ include "sam-mesh.fullname" . }}-console
+  template:
+    metadata:
+      labels:
+        app: {{ include "sam-mesh.fullname" . }}-console
+    spec:
+      containers:
+      - name: sam-console
+        image: "{{ .Values.console.image.repository }}:{{ .Values.global.imageTag }}"
+        imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+        env:
+        - name: ADMIN_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "sam-mesh.fullname" . }}-secrets
+              key: admin-token
+        ports:
+        - containerPort: 8081
+          name: http
+          protocol: TCP
+        args:
+        - "--hub=http://{{ include "sam-mesh.fullname" . }}-control-plane:8080"
+        - "--bind-addr=:8081"
+        - "--static-dir=/app/public"
+        - "--admin-token=$(ADMIN_TOKEN)"
+{{- end }}

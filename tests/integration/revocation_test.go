@@ -65,7 +65,7 @@ roles:
 	// 2. Start Control Plane (PostgreSQL is used in GKE/Kind, but SQLite is completely fine here for in-process integration test speed)
 	cpCmd := exec.Command(cpBin,
 		"--bind-address", fmt.Sprintf("127.0.0.1:%d", cpPort),
-		"--policy-file", policyFile,
+		"--admin-token", "test-admin-token",
 		"--db-dsn", filepath.Join(tmpDir, "cp-keys.db"),
 		"--issuer", oidcURL,
 		"--insecure-skip-tls-verify",
@@ -81,11 +81,13 @@ roles:
 	}()
 
 	waitForControlPlane(t, cpPort)
+	injectPolicyYAML(t, cpPort, "test-admin-token", policyFile)
 
 	// 3. Start Router
 	routerJWT := mintToken(map[string]interface{}{
 		"sub":    "router-integration-1",
 		"groups": []string{"routers"},
+		"roles":  []string{api.RoleRouter},
 	})
 
 	routerCmd := exec.Command(routerBin,
@@ -123,7 +125,7 @@ roles:
 
 	node1Cmd := exec.Command(nodeBin, "run",
 		"--hub", fmt.Sprintf("http://127.0.0.1:%d", cpPort),
-		"--jwt", mintToken(map[string]interface{}{"sub": "mock-user"}),
+		"--jwt", mintToken(map[string]interface{}{"sub": "mock-user", "roles": []string{api.RoleNode}}),
 		"--listen", "/ip4/127.0.0.1/udp/0/quic-v1",
 		"--listen", "/ip4/127.0.0.1/tcp/0",
 		"--allow-loopback",
@@ -153,7 +155,7 @@ roles:
 
 	node2Cmd := exec.Command(nodeBin, "run",
 		"--hub", fmt.Sprintf("http://127.0.0.1:%d", cpPort),
-		"--jwt", mintToken(map[string]interface{}{"sub": "mock-user"}),
+		"--jwt", mintToken(map[string]interface{}{"sub": "mock-user", "roles": []string{api.RoleNode}}),
 		"--listen", "/ip4/127.0.0.1/udp/0/quic-v1",
 		"--listen", "/ip4/127.0.0.1/tcp/0",
 		"--allow-loopback",

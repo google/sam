@@ -1,0 +1,76 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "sam-mesh.fullname" . }}-control-plane
+  labels:
+    {{- include "sam-mesh.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.controlPlane.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ include "sam-mesh.fullname" . }}-control-plane
+  template:
+    metadata:
+      labels:
+        app: {{ include "sam-mesh.fullname" . }}-control-plane
+    spec:
+      {{- if .Values.database.postgres.deployInternal }}
+      initContainers:
+      - name: wait-for-db
+        image: busybox:1.36.1
+        imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+        command: ['sh', '-c', 'until nc -z -w3 {{ include "sam-mesh.fullname" . }}-db 5432; do echo waiting for db; sleep 1; done']
+      {{- end }}
+      containers:
+      - name: sam-control-plane
+        image: "{{ .Values.controlPlane.image.repository }}:{{ .Values.global.imageTag }}"
+        imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+        env:
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "sam-mesh.fullname" . }}-secrets
+              key: db-password
+        - name: ADMIN_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "sam-mesh.fullname" . }}-secrets
+              key: admin-token
+        ports:
+        - containerPort: 8080
+          name: http
+          {{- if .Values.controlPlane.hostPort }}
+          hostPort: {{ .Values.controlPlane.hostPort }}
+          {{- end }}
+          protocol: TCP
+        readinessProbe:
+          httpGet:
+            path: /info
+            port: http
+          periodSeconds: 5
+        livenessProbe:
+          httpGet:
+            path: /info
+            port: http
+          periodSeconds: 15
+        args:
+        - "--bind-address=0.0.0.0:8080"
+        {{- if eq .Values.database.type "postgres" }}
+        - "--db-driver=postgres"
+        {{- $dbHost := printf "%s-db" (include "sam-mesh.fullname" .) }}
+        {{- if not .Values.database.postgres.deployInternal }}
+          {{- $dbHost = .Values.database.postgres.host }}
+        {{- end }}
+        - "--db-dsn=postgres://{{ .Values.database.postgres.user }}:$(DB_PASSWORD)@{{ $dbHost }}:5432/{{ .Values.database.postgres.database }}?sslmode=disable"
+        {{- else }}
+        - "--db-driver=sqlite"
+        - "--db-dsn=/data/control-plane.db"
+        {{- end }}
+        - "--issuer={{ .Values.controlPlane.oidcIssuer }}"
+        - "--allowed-audiences={{ .Values.controlPlane.allowedAudiences }}"
+        - "--admin-token=$(ADMIN_TOKEN)"
+        {{- if .Values.controlPlane.autoApproveEnrollment }}
+        - "--auto-approve-enrollment"
+        {{- end }}
+        - "--insecure-skip-tls-verify"
+        - "--log-level={{ .Values.controlPlane.logLevel }}"

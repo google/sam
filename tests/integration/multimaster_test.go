@@ -60,10 +60,12 @@ roles: {}
 	routerJWT := mintToken(map[string]interface{}{
 		"sub":    "router-integration-1",
 		"groups": []string{"routers"},
+		"roles":  []string{api.RoleRouter},
 	})
 
 	nodeJWT := mintToken(map[string]interface{}{
-		"sub": "mock-user",
+		"sub":   "mock-user",
+		"roles": []string{api.RoleNode},
 	})
 
 	jwtPath := filepath.Join(tmpDir, "jwt.txt")
@@ -84,7 +86,7 @@ roles: {}
 	// 1. Start Control Plane A temporarily to generate keyring
 	cmdCP_A_temp := exec.Command(cpBin,
 		"--bind-address", fmt.Sprintf("127.0.0.1:%d", portA),
-		"--policy-file", policyFile,
+		"--admin-token", "test-admin-token",
 		"--db-dsn", dsnA,
 		"--issuer", oidcURL,
 		"--insecure-skip-tls-verify",
@@ -96,6 +98,7 @@ roles: {}
 		t.Fatalf("failed to start temporary CP A: %v", err)
 	}
 	waitForControlPlane(t, portA)
+	injectPolicyYAML(t, portA, "test-admin-token", policyFile)
 	_ = cmdCP_A_temp.Process.Signal(os.Interrupt)
 	_ = cmdCP_A_temp.Wait()
 	t.Logf("Temp CP A Stderr:\n%s\nTemp CP A Stdout:\n%s", stderrCP_A_temp.String(), stdoutCP_A_temp.String())
@@ -112,7 +115,7 @@ roles: {}
 	// 3. Start CP A persistently
 	cmdCP_A := exec.Command(cpBin,
 		"--bind-address", fmt.Sprintf("127.0.0.1:%d", portA),
-		"--policy-file", policyFile,
+		"--admin-token", "test-admin-token",
 		"--db-dsn", dsnA,
 		"--issuer", oidcURL,
 		"--insecure-skip-tls-verify",
@@ -126,6 +129,7 @@ roles: {}
 	defer func() { _ = cmdCP_A.Process.Kill(); _ = cmdCP_A.Wait() }()
 
 	waitForControlPlane(t, portA)
+	injectPolicyYAML(t, portA, "test-admin-token", policyFile)
 
 	// 4. Start Router A (registered with CP A)
 	cmdRouterA := exec.Command(routerBin,
@@ -149,7 +153,7 @@ roles: {}
 	// 5. Start Control Plane B (sharing CP A's keys)
 	cmdCP_B := exec.Command(cpBin,
 		"--bind-address", fmt.Sprintf("127.0.0.1:%d", portB),
-		"--policy-file", policyFile,
+		"--admin-token", "test-admin-token",
 		"--db-dsn", dsnB,
 		"--issuer", oidcURL,
 		"--insecure-skip-tls-verify",
@@ -163,6 +167,7 @@ roles: {}
 	defer func() { _ = cmdCP_B.Process.Kill(); _ = cmdCP_B.Wait() }()
 
 	waitForControlPlane(t, portB)
+	injectPolicyYAML(t, portB, "test-admin-token", policyFile)
 
 	// 5. Start Router B (registered with CP B)
 	cmdRouterB := exec.Command(routerBin,

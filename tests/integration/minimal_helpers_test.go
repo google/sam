@@ -27,6 +27,8 @@ import (
 	"testing"
 	"time"
 
+	"gopkg.in/yaml.v2"
+
 	"crypto/ed25519"
 	"crypto/rand"
 	"io"
@@ -464,10 +466,10 @@ func startControlPlaneAndRouter(t *testing.T, tmpDir string, oidcURL string, min
 	// 1. Start Control Plane
 	cpCmd := exec.Command(cpBin,
 		"--bind-address", fmt.Sprintf("127.0.0.1:%d", cpPort),
-		"--policy-file", policyFile,
 		"--db-dsn", filepath.Join(tmpDir, "cp-keys.db"),
 		"--issuer", oidcURL,
 		"--insecure-skip-tls-verify",
+		"--admin-token", "test-admin-token",
 	)
 	cpCmd.Stdout = os.Stdout
 	cpCmd.Stderr = os.Stderr
@@ -478,10 +480,14 @@ func startControlPlaneAndRouter(t *testing.T, tmpDir string, oidcURL string, min
 	// Wait for CP to be up
 	waitForControlPlane(t, cpPort)
 
+	// Inject policy into CP database via API
+	injectPolicyYAML(t, cpPort, "test-admin-token", policyFile)
+
 	// 2. Start Router
 	routerJWT := mintToken(map[string]interface{}{
 		"sub":    "router-integration-1",
 		"groups": []string{"routers"},
+		"roles":  []string{api.RoleRouter},
 	})
 
 	routerCmd := exec.Command(routerBin,
@@ -620,7 +626,7 @@ func writePolicyWithRouter(t *testing.T, path string, yamlContent string) {
 
 	routerRole := fmt.Sprintf(`  %s:
     allowed_services: []
-    allowed_targets: []`, api.RoleRouter)
+    allowed_targets: ["*"]`, api.RoleRouter)
 	routerBinding := fmt.Sprintf(`  - role: %s
     members: ["group:routers"]`, api.RoleRouter)
 
@@ -656,5 +662,74 @@ func waitForNodeOnline(t *testing.T, logPath string) {
 			t.Fatalf("timed out waiting for node to go online")
 		case <-time.After(100 * time.Millisecond):
 		}
+	}
+}
+
+type testBinding struct {
+	Role    string   `yaml:"role"`
+	Members []string `yaml:"members"`
+}
+
+type testRolePolicy struct {
+	AllowedTargets  []string `yaml:"allowed_targets"`
+	AllowedServices []string `yaml:"allowed_services"`
+}
+
+type testPolicyConfig struct {
+	Bindings []testBinding             `yaml:"bindings"`
+	Roles    map[string]testRolePolicy `yaml:"roles"`
+}
+
+func injectPolicyYAML(t *testing.T, port int, adminToken string, policyFile string) {
+	t.Helper()
+
+	data, err := os.ReadFile(policyFile)
+	if err != nil {
+		t.Fatalf("failed to read policy file %s: %v", policyFile, err)
+	}
+
+	var config testPolicyConfig
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		t.Fatalf("failed to unmarshal policy file %s: %v", policyFile, err)
+	}
+
+	reqData := &api.PolicyConfigUpdateRequest{
+		Roles:    make([]*api.PolicyRole, 0, len(config.Roles)),
+		Bindings: make([]*api.PolicyBinding, 0, len(config.Bindings)),
+	}
+
+	for name, role := range config.Roles {
+		reqData.Roles = append(reqData.Roles, &api.PolicyRole{
+			Name:            name,
+			AllowedServices: role.AllowedServices,
+			AllowedTargets:  role.AllowedTargets,
+		})
+	}
+	for _, b := range config.Bindings {
+		reqData.Bindings = append(reqData.Bindings, &api.PolicyBinding{
+			Role:    b.Role,
+			Members: b.Members,
+		})
+	}
+
+	protoData, err := proto.Marshal(reqData)
+	if err != nil {
+		t.Fatalf("failed to marshal policy request: %v", err)
+	}
+
+	req, _ := http.NewRequest(http.MethodPost, fmt.Sprintf("http://127.0.0.1:%d/policies", port), bytes.NewReader(protoData))
+	req.Header.Set("Content-Type", "application/x-protobuf")
+	req.Header.Set("Authorization", "Bearer "+adminToken)
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("failed to POST policy to control plane: %v", err)
+	}
+	defer resp.Body.Close() //nolint:errcheck
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("unexpected POST /policies status: %s (body: %s)", resp.Status, string(body))
 	}
 }
