@@ -71,7 +71,6 @@ docker run --name sam-control-plane \
   --network sam-net \
   -p 37001:37001 \
   -v /tmp/control-plane-data:/data \
-  -v "$REPO_ROOT/tests/e2e/fixtures/default-policy.yaml:/policy.yaml" \
   -d --rm \
   sam-control-plane:local \
   --bind-address 0.0.0.0:37001 \
@@ -79,7 +78,7 @@ docker run --name sam-control-plane \
   --db-dsn /data/control-plane.db \
   --issuer http://mock-oidc:18080 \
   --allowed-audiences sam-mesh-audience,sam-hub-audience \
-  --policy-file /policy.yaml \
+  --admin-token secret-admin-token \
   --insecure-skip-tls-verify \
   --log-level debug
 
@@ -108,6 +107,23 @@ adb reverse tcp:37002 tcp:37002
 
 # Wait for Control Plane to be ready
 timeout 15s bash -c 'until curl -s http://127.0.0.1:37001/info >/dev/null; do sleep 0.5; done'
+
+# Seed initial mesh policy via REST API
+curl -s -X POST \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer secret-admin-token" \
+  -d '{
+    "roles": [
+      {"name": "admin", "allowed_services": ["*"], "allowed_targets": ["*"]},
+      {"name": "sam:role:router", "allowed_services": ["*"], "allowed_targets": ["*"]},
+      {"name": "sam:role:node", "allowed_services": ["*"], "allowed_targets": ["*"]}
+    ],
+    "bindings": [
+      {"role": "admin", "members": ["sam:system:authenticated"]},
+      {"role": "sam:role:router", "members": ["group:routers"]}
+    ]
+  }' \
+  http://127.0.0.1:37001/policies
 
 # 5. Enroll and Start the External Node on Host inside Docker
 rm -rf /tmp/host-node-data
