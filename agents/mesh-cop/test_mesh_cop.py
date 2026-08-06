@@ -1,4 +1,5 @@
 import asyncio
+import json
 
 from mesh_cop import (
     Alert,
@@ -193,3 +194,38 @@ def test_event_loss_detected_after_first_poll():
 def test_no_event_loss_alert_on_first_poll():
     _, alerts = cycle(CopState(first_snapshot=False), events=[], latest_seq=5000)
     assert alerts == []
+
+
+from mesh_cop import fetch_services, parse_tool_json
+
+
+def test_parse_tool_json():
+    result = {"content": [{"text": '{"events": [], "latest_seq": 7}'}]}
+    assert parse_tool_json(result) == {"events": [], "latest_seq": 7}
+
+
+def test_parse_tool_json_empty_text():
+    assert parse_tool_json({"content": [{"text": ""}]}) is None
+
+
+class FakeSamClient:
+    def __init__(self, pages):
+        self.pages = pages
+        self.calls = []
+
+    async def call_tool(self, name, arguments):
+        self.calls.append((name, arguments))
+        service_type = arguments["type"]
+        offset = arguments["offset"]
+        providers = self.pages.get(service_type, [])[offset:offset + arguments["limit"]]
+        return {"content": [{"text": json.dumps(providers)}]}
+
+
+def test_fetch_services_paginates_and_builds_tuples():
+    mcp_providers = [{"peer_id": f"peer-{i}", "srv_name": f"service-{i}"} for i in range(250)]
+    client = FakeSamClient({"mcp": mcp_providers, "inference": [{"peer_id": "peer-x", "srv_name": "vllm"}]})
+    snapshot = asyncio.run(fetch_services(client))
+    assert ("inference", "vllm", "peer-x") in snapshot
+    assert len(snapshot) == 251
+    mcp_calls = [c for c in client.calls if c[1]["type"] == "mcp"]
+    assert len(mcp_calls) == 2  # 250 providers, limit 200 → two pages

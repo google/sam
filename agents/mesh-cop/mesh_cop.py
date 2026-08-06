@@ -1,9 +1,76 @@
 import abc
 import asyncio
+import json
+import os
+import sys
 from dataclasses import dataclass, field
-from typing import Dict, List
+from datetime import datetime, timezone
+from typing import Dict, List, Optional, Any
 
 import httpx
+from mcp import ClientSession
+from mcp.client.streamable_http import streamable_http_client
+
+
+class SamClient:
+    """Inlined SAM Client for self-contained execution."""
+    def __init__(self, server_url: Optional[str] = None, token: Optional[str] = None):
+        if server_url is None:
+            server_url = os.environ.get("SAM_MCP_URL", "http://localhost:8080/mcp")
+        if token is None:
+            token = os.environ.get("SAM_API_TOKEN")
+        self.server_url = server_url
+        self.token = token
+        self.session: Optional[ClientSession] = None
+        self._sse_cm = None
+        self.lock = asyncio.Lock()
+
+    async def connect(self):
+        headers = {"Accept": "application/json, text/event-stream"}
+        if self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
+        self._sse_cm = streamable_http_client(self.server_url, headers=headers)
+        read_stream, write_stream, _ = await self._sse_cm.__aenter__()
+        self.session = ClientSession(read_stream, write_stream)
+        await self.session.__aenter__()
+        await self.session.initialize()
+
+    async def close(self):
+        if self.session:
+            await self.session.__aexit__(None, None, None)
+        if self._sse_cm:
+            await self._sse_cm.__aexit__(None, None, None)
+        self.session = None
+        self._sse_cm = None
+
+    async def get_tools(self) -> List[Dict[str, Any]]:
+        if not self.session:
+            raise RuntimeError("Not connected")
+        async with self.lock:
+            resp = await self.session.list_tools()
+            return [t.model_dump() if hasattr(t, "model_dump") else t for t in resp.tools]
+
+    async def call_tool(self, name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        if not self.session:
+            raise RuntimeError("Not connected")
+        async with self.lock:
+            resp = await self.session.call_tool(name, arguments)
+            return resp.model_dump() if hasattr(resp, "model_dump") else resp
+
+    async def __aenter__(self):
+        for attempt in range(1, 13):
+            try:
+                await self.connect()
+                return self
+            except Exception as e:
+                if attempt == 12:
+                    raise
+                print(f"[-] Failed to connect to SAM node (attempt {attempt}/12): {e}. Retrying in 5 seconds...")
+                await asyncio.sleep(5.0)
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.close()
 
 
 @dataclass
@@ -211,3 +278,79 @@ def evaluate_cycle(state: CopState, connected_peer_count: int, node_events: List
     alerts.extend(detect_node_events(state, node_events, latest_seq))
     alerts.extend(detect_churn(state, services_snapshot, config.miss_threshold))
     return state, alerts
+
+
+SERVICE_TYPES = ["mcp", "inference"]
+DISCOVERY_PAGE_LIMIT = 200
+
+
+def parse_tool_json(result) -> Optional[Any]:
+    text = result.get("content", [{}])[0].get("text", "")
+    if not text:
+        return None
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return None
+
+
+async def fetch_services(client) -> set:
+    snapshot = set()
+    for service_type in SERVICE_TYPES:
+        offset = 0
+        while True:
+            result = await client.call_tool("discover_remote_services",
+                                            {"type": service_type, "limit": DISCOVERY_PAGE_LIMIT, "offset": offset})
+            providers = parse_tool_json(result) or []
+            for provider in providers:
+                snapshot.add((service_type, provider.get("srv_name", ""), provider.get("peer_id", "")))
+            if len(providers) < DISCOVERY_PAGE_LIMIT:
+                break
+            offset += DISCOVERY_PAGE_LIMIT
+    return snapshot
+
+
+async def run_cycle(client, state: CopState, channels: List[Channel], config: CopConfig, node_peer_id: str) -> CopState:
+    mesh_info = parse_tool_json(await client.call_tool("get_mesh_info", {})) or {}
+    connected_peer_count = len(mesh_info.get("connected_peers") or [])
+
+    events_response = parse_tool_json(await client.call_tool("poll_node_events", {"since_seq": state.cursor})) or {}
+    node_events = events_response.get("events") or []
+    latest_seq = events_response.get("latest_seq", state.cursor)
+
+    services_snapshot = await fetch_services(client)
+
+    state, alerts = evaluate_cycle(state, connected_peer_count, node_events, latest_seq, services_snapshot, config)
+
+    timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    for alert in alerts:
+        await deliver(channels, format_alert(alert, node_peer_id, timestamp))
+    return state
+
+
+async def run_mesh_cop():
+    config = load_config(os.environ)
+    channels = build_channels(os.environ)
+    channel_names = ", ".join(channel.name for channel in channels)
+    print(f"[*] mesh-cop starting: poll={config.poll_interval}s miss_threshold={config.miss_threshold} "
+          f"min_peers={config.min_peers} channels=[{channel_names}]", flush=True)
+
+    async with SamClient() as client:
+        mesh_info = parse_tool_json(await client.call_tool("get_mesh_info", {})) or {}
+        node_peer_id = mesh_info.get("peer_id", "unknown")
+        print(f"[+] connected to local node {node_peer_id}", flush=True)
+
+        state = CopState()
+        while True:
+            try:
+                state = await run_cycle(client, state, channels, config, node_peer_id)
+            except Exception as error:
+                print(f"[-] poll cycle failed: {error}", flush=True)
+            await asyncio.sleep(config.poll_interval)
+
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(run_mesh_cop())
+    except KeyboardInterrupt:
+        sys.exit(0)
