@@ -2,10 +2,11 @@ import abc
 import asyncio
 import json
 import os
+import re
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 
 import httpx
 from sam_mcp.client import SamClient
@@ -37,15 +38,26 @@ class Alert:
 
 SEVERITY_EMOJI = {"critical": "🚨", "warning": "⚠️", "info": "ℹ️"}
 
+CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]+")
+
+
+def sanitize_alert_text(text: str, limit: int = 200) -> str:
+    """Strips control chars (incl. newlines) so attacker-controlled strings can't forge alert lines."""
+    cleaned = CONTROL_CHARS_RE.sub(" ", text).strip()
+    if len(cleaned) > limit:
+        cleaned = cleaned[:limit].rstrip() + "..."
+    return cleaned
+
 
 def format_alert(alert: Alert, node_peer_id: str, timestamp: str) -> str:
-    lines = [f"{SEVERITY_EMOJI[alert.severity]} [{alert.severity.upper()}] {alert.title}"]
+    title = sanitize_alert_text(alert.title)
+    lines = [f"{SEVERITY_EMOJI[alert.severity]} [{alert.severity.upper()}] {title}"]
     if alert.description:
-        lines.append(alert.description)
+        lines.append(sanitize_alert_text(alert.description))
     if alert.peer_id:
-        lines.append(f"peer: {alert.peer_id}")
+        lines.append(f"peer: {sanitize_alert_text(alert.peer_id)}")
     if alert.service:
-        lines.append(f"service: {alert.service}")
+        lines.append(f"service: {sanitize_alert_text(alert.service)}")
     lines.append(f"reported by {node_peer_id} at {timestamp}")
     return "\n".join(lines)
 
@@ -128,6 +140,9 @@ SEVERITY_BY_EVENT_TYPE = {
     "policy_update": "info",
 }
 
+# Event types that arrive as attacker-controlled floods and get aggregated per peer per cycle.
+AGGREGATED_EVENT_TYPES = ("rate_limit_drop", "spoofing_attempt", "stale_event")
+
 
 @dataclass
 class CopState:
@@ -156,19 +171,25 @@ def detect_partition(state: CopState, connected_peer_count: int, min_peers: int)
 
 def detect_node_events(state: CopState, node_events: List[dict], latest_seq: int) -> List[Alert]:
     alerts = []
-    rate_limit_drops_by_peer: Dict[str, int] = {}
+    counts_by_type_and_peer: Dict[str, Dict[str, int]] = {event_type: {} for event_type in AGGREGATED_EVENT_TYPES}
     for event in node_events:
         event_type = event.get("type", "")
-        if event_type == "rate_limit_drop":
+        if event_type in counts_by_type_and_peer:
             peer_id = event.get("peer_id", "")
-            rate_limit_drops_by_peer[peer_id] = rate_limit_drops_by_peer.get(peer_id, 0) + 1
+            counts_by_type_and_peer[event_type][peer_id] = counts_by_type_and_peer[event_type].get(peer_id, 0) + 1
             continue
         severity = SEVERITY_BY_EVENT_TYPE.get(event_type, "info")
         alerts.append(Alert(severity, f"node event: {event_type}",
                             event.get("message", ""), peer_id=event.get("peer_id", "")))
-    for peer_id, count in rate_limit_drops_by_peer.items():
+    for peer_id, count in counts_by_type_and_peer["rate_limit_drop"].items():
         alerts.append(Alert("warning", "node event: rate_limit_drop",
                             f"{count} message(s) dropped this cycle", peer_id=peer_id))
+    for peer_id, count in counts_by_type_and_peer["spoofing_attempt"].items():
+        alerts.append(Alert("critical", "node event: spoofing_attempt",
+                            f"{count} spoofing attempt(s) (invalid event signature) this cycle", peer_id=peer_id))
+    for peer_id, count in counts_by_type_and_peer["stale_event"].items():
+        alerts.append(Alert("warning", "node event: stale_event",
+                            f"{count} stale event(s) this cycle", peer_id=peer_id))
     if state.cursor > 0 and latest_seq - state.cursor > len(node_events):
         lost = latest_seq - state.cursor - len(node_events)
         alerts.append(Alert("warning", "node event buffer wrapped",
@@ -223,7 +244,14 @@ DISCOVERY_PAGE_LIMIT = 200
 
 
 def parse_tool_json(result) -> Optional[Any]:
-    text = result.get("content", [{}])[0].get("text", "")
+    if result.get("isError"):
+        content = result.get("content") or []
+        detail = content[0].get("text", "") if content else repr(result)
+        raise RuntimeError(f"tool error: {detail}")
+    content = result.get("content") or []
+    if not content:
+        return None
+    text = content[0].get("text", "")
     if not text:
         return None
     try:
@@ -280,6 +308,22 @@ async def connect_with_retry(retries: int = 12, delay: float = 5.0) -> SamClient
             await asyncio.sleep(delay)
 
 
+CONSECUTIVE_FAILURE_LIMIT = 3
+
+
+async def reconnect(client, state: CopState) -> Tuple[SamClient, str, CopState]:
+    """Recovers from a lost MCP session; the node's seq counter restarts too, so reset cursor."""
+    try:
+        await client.close()
+    except Exception as error:
+        print(f"[-] error closing stale client: {error}", flush=True)
+    client = await connect_with_retry()
+    mesh_info = parse_tool_json(await client.call_tool("get_mesh_info", {})) or {}
+    node_peer_id = mesh_info.get("peer_id", "unknown")
+    state.cursor = 0
+    return client, node_peer_id, state
+
+
 async def run_mesh_cop():
     config = load_config(os.environ)
     channels = build_channels(os.environ)
@@ -294,11 +338,19 @@ async def run_mesh_cop():
         print(f"[+] connected to local node {node_peer_id}", flush=True)
 
         state = CopState()
+        consecutive_failures = 0
         while True:
             try:
                 state = await run_cycle(client, state, channels, config, node_peer_id)
+                consecutive_failures = 0
             except Exception as error:
-                print(f"[-] poll cycle failed: {error}", flush=True)
+                consecutive_failures += 1
+                print(f"[-] poll cycle failed ({consecutive_failures}/{CONSECUTIVE_FAILURE_LIMIT}): {error}", flush=True)
+                if consecutive_failures >= CONSECUTIVE_FAILURE_LIMIT:
+                    print("[-] too many consecutive failures, reconnecting to SAM node", flush=True)
+                    client, node_peer_id, state = await reconnect(client, state)
+                    consecutive_failures = 0
+                    print(f"[+] reconnected to local node {node_peer_id}", flush=True)
             await asyncio.sleep(config.poll_interval)
     finally:
         await client.close()
