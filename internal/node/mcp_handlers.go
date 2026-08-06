@@ -204,6 +204,7 @@ func (n *SamNode) handleGetMeshInfo(ctx context.Context, req *mcp.CallToolReques
 	dhtSize := n.DHT.RoutingTable().Size()
 
 	resData := map[string]any{
+		"peer_id":         n.Host.ID().String(),
 		"connected_peers": connectedPeers,
 		"dht_size":        dhtSize,
 		"router_peer_id":  n.RouterPeerID.String(),
@@ -889,6 +890,23 @@ type GetRecentLogsParams struct{}
 func (n *SamNode) handleGetRecentLogs(ctx context.Context, req *mcp.CallToolRequest, params GetRecentLogsParams) (*mcp.CallToolResult, any, error) {
 	logs := GetRecentLogs()
 	data, err := json.Marshal(map[string]any{"logs": logs})
+	if err != nil {
+		return nil, nil, err
+	}
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{&mcp.TextContent{Text: string(data)}},
+	}, nil, nil
+}
+
+// PollNodeEventsParams defines parameters for the poll_node_events tool.
+type PollNodeEventsParams struct {
+	SinceSeq uint64 `json:"since_seq,omitempty" jsonschema:"Return events with seq greater than this. 0 or omitted returns everything buffered."`
+}
+
+// handlePollNodeEvents implements the poll_node_events tool.
+func (n *SamNode) handlePollNodeEvents(ctx context.Context, req *mcp.CallToolRequest, params PollNodeEventsParams) (*mcp.CallToolResult, any, error) {
+	events, latestSeq := globalEventBuffer.poll(params.SinceSeq)
+	data, err := json.Marshal(map[string]any{"events": events, "latest_seq": latestSeq})
 	if err != nil {
 		return nil, nil, err
 	}

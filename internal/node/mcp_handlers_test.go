@@ -1064,3 +1064,30 @@ func newPreDiscoverMCPHandler(t *testing.T, tools []*mcp.Tool) http.Handler {
 		real.ServeHTTP(w, r)
 	})
 }
+
+func TestHandlePollNodeEvents(t *testing.T) {
+	globalEventBuffer = newNodeEventBuffer()
+	RecordNodeEvent("security", "spoofing_attempt", "peer-a", "invalid signature")
+	RecordNodeEvent("mesh_event", "banned", "peer-b", "peer banned by hub")
+
+	node := &SamNode{}
+	result, _, err := node.handlePollNodeEvents(context.Background(), nil, PollNodeEventsParams{SinceSeq: 1})
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+
+	text := result.Content[0].(*mcp.TextContent).Text
+	var response struct {
+		Events    []NodeEvent `json:"events"`
+		LatestSeq uint64      `json:"latest_seq"`
+	}
+	if err := json.Unmarshal([]byte(text), &response); err != nil {
+		t.Fatalf("bad JSON: %v", err)
+	}
+	if response.LatestSeq != 2 {
+		t.Fatalf("latest_seq = %d, want 2", response.LatestSeq)
+	}
+	if len(response.Events) != 1 || response.Events[0].Type != "banned" {
+		t.Fatalf("unexpected events: %+v", response.Events)
+	}
+}
