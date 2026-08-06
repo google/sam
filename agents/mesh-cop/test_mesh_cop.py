@@ -229,3 +229,20 @@ def test_fetch_services_paginates_and_builds_tuples():
     assert len(snapshot) == 251
     mcp_calls = [c for c in client.calls if c[1]["type"] == "mcp"]
     assert len(mcp_calls) == 2  # 250 providers, limit 200 → two pages
+
+
+def test_connect_with_retry_returns_after_transient_failures(monkeypatch):
+    import mesh_cop as mesh_cop_module
+
+    attempts = []
+
+    class FlakyConnectClient:
+        async def connect(self):
+            attempts.append(1)
+            if len(attempts) < 3:
+                raise RuntimeError("node not up yet")
+
+    monkeypatch.setattr(mesh_cop_module, "SamClient", FlakyConnectClient)
+    client = asyncio.run(mesh_cop_module.connect_with_retry(retries=5, delay=0))
+    assert isinstance(client, FlakyConnectClient)
+    assert len(attempts) == 3

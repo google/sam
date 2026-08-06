@@ -8,69 +8,7 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any
 
 import httpx
-from mcp import ClientSession
-from mcp.client.streamable_http import streamable_http_client
-
-
-class SamClient:
-    """Inlined SAM Client for self-contained execution."""
-    def __init__(self, server_url: Optional[str] = None, token: Optional[str] = None):
-        if server_url is None:
-            server_url = os.environ.get("SAM_MCP_URL", "http://localhost:8080/mcp")
-        if token is None:
-            token = os.environ.get("SAM_API_TOKEN")
-        self.server_url = server_url
-        self.token = token
-        self.session: Optional[ClientSession] = None
-        self._sse_cm = None
-        self.lock = asyncio.Lock()
-
-    async def connect(self):
-        headers = {"Accept": "application/json, text/event-stream"}
-        if self.token:
-            headers["Authorization"] = f"Bearer {self.token}"
-        self._sse_cm = streamable_http_client(self.server_url, headers=headers)
-        read_stream, write_stream, _ = await self._sse_cm.__aenter__()
-        self.session = ClientSession(read_stream, write_stream)
-        await self.session.__aenter__()
-        await self.session.initialize()
-
-    async def close(self):
-        if self.session:
-            await self.session.__aexit__(None, None, None)
-        if self._sse_cm:
-            await self._sse_cm.__aexit__(None, None, None)
-        self.session = None
-        self._sse_cm = None
-
-    async def get_tools(self) -> List[Dict[str, Any]]:
-        if not self.session:
-            raise RuntimeError("Not connected")
-        async with self.lock:
-            resp = await self.session.list_tools()
-            return [t.model_dump() if hasattr(t, "model_dump") else t for t in resp.tools]
-
-    async def call_tool(self, name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
-        if not self.session:
-            raise RuntimeError("Not connected")
-        async with self.lock:
-            resp = await self.session.call_tool(name, arguments)
-            return resp.model_dump() if hasattr(resp, "model_dump") else resp
-
-    async def __aenter__(self):
-        for attempt in range(1, 13):
-            try:
-                await self.connect()
-                return self
-            except Exception as e:
-                if attempt == 12:
-                    raise
-                print(f"[-] Failed to connect to SAM node (attempt {attempt}/12): {e}. Retrying in 5 seconds...")
-                await asyncio.sleep(5.0)
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        await self.close()
+from sam_mcp.client import SamClient
 
 
 @dataclass
@@ -328,6 +266,20 @@ async def run_cycle(client, state: CopState, channels: List[Channel], config: Co
     return state
 
 
+async def connect_with_retry(retries: int = 12, delay: float = 5.0) -> SamClient:
+    for attempt in range(1, retries + 1):
+        client = SamClient()
+        try:
+            await client.connect()
+            return client
+        except Exception as error:
+            if attempt == retries:
+                raise
+            print(f"[-] Failed to connect to SAM node (attempt {attempt}/{retries}): {error}. "
+                  f"Retrying in {delay} seconds...", flush=True)
+            await asyncio.sleep(delay)
+
+
 async def run_mesh_cop():
     config = load_config(os.environ)
     channels = build_channels(os.environ)
@@ -335,7 +287,8 @@ async def run_mesh_cop():
     print(f"[*] mesh-cop starting: poll={config.poll_interval}s miss_threshold={config.miss_threshold} "
           f"min_peers={config.min_peers} channels=[{channel_names}]", flush=True)
 
-    async with SamClient() as client:
+    client = await connect_with_retry()
+    try:
         mesh_info = parse_tool_json(await client.call_tool("get_mesh_info", {})) or {}
         node_peer_id = mesh_info.get("peer_id", "unknown")
         print(f"[+] connected to local node {node_peer_id}", flush=True)
@@ -347,6 +300,8 @@ async def run_mesh_cop():
             except Exception as error:
                 print(f"[-] poll cycle failed: {error}", flush=True)
             await asyncio.sleep(config.poll_interval)
+    finally:
+        await client.close()
 
 
 if __name__ == "__main__":
