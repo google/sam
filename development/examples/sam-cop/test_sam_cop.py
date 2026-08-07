@@ -3,13 +3,15 @@ import json
 
 import pytest
 
-from mesh_cop import (
-    Alert,
+from channels import (
     Channel,
     SlackChannel,
     StdoutChannel,
     TelegramChannel,
     build_channels,
+)
+from sam_cop import (
+    Alert,
     deliver,
     format_alert,
     load_config,
@@ -53,6 +55,26 @@ def test_build_channels_telegram_requires_chat_id():
     assert isinstance(channels[0], StdoutChannel)
 
 
+def test_build_channels_picks_up_registered_subclass():
+    class EchoChannel(Channel):
+        name = "echo"
+        required_env = ("ECHO_TARGET",)
+
+        def __init__(self, target):
+            self.target = target
+
+        async def send(self, message):
+            pass
+
+    try:
+        channels = build_channels({"ECHO_TARGET": "x"})
+        assert len(channels) == 1
+        assert isinstance(channels[0], EchoChannel)
+        assert channels[0].target == "x"
+    finally:
+        Channel.registry.remove(EchoChannel)
+
+
 def test_format_alert():
     alert = Alert("critical", "node event: banned", "peer banned by hub", peer_id="12D3KooPeer")
     message = format_alert(alert, "12D3KooSelf", "2026-08-06T10:00:00+00:00")
@@ -91,9 +113,9 @@ def test_deliver_gives_up_without_raising():
     assert channel.attempts == 3
 
 
-from mesh_cop import CopConfig, CopState, evaluate_cycle
+from sam_cop import SamCopConfig, SamCopState, evaluate_cycle
 
-CONFIG = CopConfig(poll_interval=30.0, miss_threshold=3, min_peers=1)
+CONFIG = SamCopConfig(poll_interval=30.0, miss_threshold=3, min_peers=1)
 SERVICE_A = ("mcp", "service-a", "peer-1")
 SERVICE_B = ("inference", "service-b", "peer-2")
 
@@ -106,13 +128,13 @@ def cycle(state, peers=2, events=None, latest_seq=None, snapshot=frozenset()):
 
 
 def test_first_snapshot_sets_baseline_without_alerts():
-    state, alerts = cycle(CopState(), snapshot={SERVICE_A})
+    state, alerts = cycle(SamCopState(), snapshot={SERVICE_A})
     assert alerts == []
     assert state.baseline == {SERVICE_A}
 
 
 def test_service_appeared_alerts_immediately():
-    state, _ = cycle(CopState(), snapshot={SERVICE_A})
+    state, _ = cycle(SamCopState(), snapshot={SERVICE_A})
     state, alerts = cycle(state, snapshot={SERVICE_A, SERVICE_B})
     assert [a.severity for a in alerts] == ["info"]
     assert "appeared" in alerts[0].title
@@ -120,7 +142,7 @@ def test_service_appeared_alerts_immediately():
 
 
 def test_service_disappeared_needs_consecutive_misses():
-    state, _ = cycle(CopState(), snapshot={SERVICE_A})
+    state, _ = cycle(SamCopState(), snapshot={SERVICE_A})
     state, alerts = cycle(state, snapshot=set())
     assert alerts == []
     state, alerts = cycle(state, snapshot=set())
@@ -132,7 +154,7 @@ def test_service_disappeared_needs_consecutive_misses():
 
 
 def test_reappearing_service_resets_miss_count():
-    state, _ = cycle(CopState(), snapshot={SERVICE_A})
+    state, _ = cycle(SamCopState(), snapshot={SERVICE_A})
     state, _ = cycle(state, snapshot=set())
     state, _ = cycle(state, snapshot={SERVICE_A})
     state, alerts = cycle(state, snapshot=set())
@@ -140,7 +162,7 @@ def test_reappearing_service_resets_miss_count():
 
 
 def test_partition_alerts_once_and_suppresses_churn():
-    state, _ = cycle(CopState(), snapshot={SERVICE_A})
+    state, _ = cycle(SamCopState(), snapshot={SERVICE_A})
     state, alerts = cycle(state, peers=0, snapshot=set())
     assert [a.severity for a in alerts] == ["critical"]
     state, alerts = cycle(state, peers=0, snapshot=set())
@@ -150,7 +172,7 @@ def test_partition_alerts_once_and_suppresses_churn():
 
 
 def test_partition_recovery_resets_baseline():
-    state, _ = cycle(CopState(), snapshot={SERVICE_A})
+    state, _ = cycle(SamCopState(), snapshot={SERVICE_A})
     state, _ = cycle(state, peers=0, snapshot=set())
     state, alerts = cycle(state, peers=2, snapshot={SERVICE_B})
     assert [a.severity for a in alerts] == ["info"]
@@ -167,7 +189,7 @@ def test_node_event_severities():
         {"seq": 3, "type": "policy_update", "peer_id": "", "message": "m"},
         {"seq": 4, "type": "key_rotation", "peer_id": "", "message": "m"},
     ]
-    state, alerts = cycle(CopState(cursor=0, first_snapshot=False), events=events, latest_seq=4)
+    state, alerts = cycle(SamCopState(cursor=0, first_snapshot=False), events=events, latest_seq=4)
     # spoofing_attempt is aggregated per peer, so it surfaces after the one-alert-per-event types.
     assert [a.severity for a in alerts] == ["critical", "info", "warning", "critical"]
     assert state.cursor == 4
@@ -179,7 +201,7 @@ def test_rate_limit_drops_aggregate_per_peer():
         {"seq": 2, "type": "rate_limit_drop", "peer_id": "p1", "message": "m"},
         {"seq": 3, "type": "rate_limit_drop", "peer_id": "p2", "message": "m"},
     ]
-    _, alerts = cycle(CopState(first_snapshot=False), events=events, latest_seq=3)
+    _, alerts = cycle(SamCopState(first_snapshot=False), events=events, latest_seq=3)
     assert len(alerts) == 2
     assert all(a.severity == "warning" for a in alerts)
     descriptions = " | ".join(a.description for a in alerts)
@@ -192,7 +214,7 @@ def test_spoofing_attempts_aggregate_per_peer():
         {"seq": 2, "type": "spoofing_attempt", "peer_id": "p1", "message": "m"},
         {"seq": 3, "type": "spoofing_attempt", "peer_id": "p1", "message": "m"},
     ]
-    _, alerts = cycle(CopState(first_snapshot=False), events=events, latest_seq=3)
+    _, alerts = cycle(SamCopState(first_snapshot=False), events=events, latest_seq=3)
     assert len(alerts) == 1
     assert alerts[0].severity == "critical"
     assert alerts[0].peer_id == "p1"
@@ -204,7 +226,7 @@ def test_stale_events_aggregate_per_peer():
         {"seq": 1, "type": "stale_event", "peer_id": "p2", "message": "m"},
         {"seq": 2, "type": "stale_event", "peer_id": "p2", "message": "m"},
     ]
-    _, alerts = cycle(CopState(first_snapshot=False), events=events, latest_seq=2)
+    _, alerts = cycle(SamCopState(first_snapshot=False), events=events, latest_seq=2)
     assert len(alerts) == 1
     assert alerts[0].severity == "warning"
     assert alerts[0].peer_id == "p2"
@@ -212,7 +234,7 @@ def test_stale_events_aggregate_per_peer():
 
 
 def test_event_loss_detected_after_first_poll():
-    state = CopState(cursor=5, first_snapshot=False)
+    state = SamCopState(cursor=5, first_snapshot=False)
     state, alerts = cycle(state, events=[{"seq": 100, "type": "policy_update", "peer_id": "", "message": "m"}], latest_seq=100)
     severities = [a.severity for a in alerts]
     assert severities.count("warning") == 1
@@ -221,7 +243,7 @@ def test_event_loss_detected_after_first_poll():
 
 
 def test_no_event_loss_alert_on_first_poll():
-    _, alerts = cycle(CopState(first_snapshot=False), events=[], latest_seq=5000)
+    _, alerts = cycle(SamCopState(first_snapshot=False), events=[], latest_seq=5000)
     assert alerts == []
 
 
@@ -250,7 +272,7 @@ def test_format_alert_sanitizes_hostile_service_name():
     assert "svc" in lines[3] and "CRITICAL" in lines[3]
 
 
-from mesh_cop import fetch_services, parse_tool_json
+from sam_cop import fetch_services, parse_tool_json
 
 
 def test_parse_tool_json():
@@ -296,7 +318,7 @@ def test_fetch_services_paginates_and_builds_tuples():
 
 
 def test_connect_with_retry_returns_after_transient_failures(monkeypatch):
-    import mesh_cop as mesh_cop_module
+    import sam_cop as sam_cop_module
 
     attempts = []
 
@@ -306,14 +328,14 @@ def test_connect_with_retry_returns_after_transient_failures(monkeypatch):
             if len(attempts) < 3:
                 raise RuntimeError("node not up yet")
 
-    monkeypatch.setattr(mesh_cop_module, "SamClient", FlakyConnectClient)
-    client = asyncio.run(mesh_cop_module.connect_with_retry(retries=5, delay=0))
+    monkeypatch.setattr(sam_cop_module, "SamClient", FlakyConnectClient)
+    client = asyncio.run(sam_cop_module.connect_with_retry(retries=5, delay=0))
     assert isinstance(client, FlakyConnectClient)
     assert len(attempts) == 3
 
 
 def test_reconnect_swallows_close_errors_refetches_peer_id_and_resets_cursor(monkeypatch):
-    import mesh_cop as mesh_cop_module
+    import sam_cop as sam_cop_module
 
     class BrokenCloseClient:
         async def close(self):
@@ -326,21 +348,21 @@ def test_reconnect_swallows_close_errors_refetches_peer_id_and_resets_cursor(mon
     async def fake_connect_with_retry(retries=12, delay=5.0):
         return NewClient()
 
-    monkeypatch.setattr(mesh_cop_module, "connect_with_retry", fake_connect_with_retry)
+    monkeypatch.setattr(sam_cop_module, "connect_with_retry", fake_connect_with_retry)
 
-    state = CopState(cursor=42, first_snapshot=False)
-    new_client, node_peer_id, state = asyncio.run(mesh_cop_module.reconnect(BrokenCloseClient(), state))
+    state = SamCopState(cursor=42, first_snapshot=False)
+    new_client, node_peer_id, state = asyncio.run(sam_cop_module.reconnect(BrokenCloseClient(), state))
     assert isinstance(new_client, NewClient)
     assert node_peer_id == "peer-new"
     assert state.cursor == 0
 
 
 class StopLoop(Exception):
-    """Sentinel used to break run_mesh_cop's infinite loop once the assertions are ready."""
+    """Sentinel used to break run_sam_cop's infinite loop once the assertions are ready."""
 
 
-def test_run_mesh_cop_reconnects_after_three_consecutive_failures(monkeypatch):
-    import mesh_cop as mesh_cop_module
+def test_run_sam_cop_reconnects_after_three_consecutive_failures(monkeypatch):
+    import sam_cop as sam_cop_module
 
     class FailsAfterStartupClient:
         def __init__(self):
@@ -382,12 +404,12 @@ def test_run_mesh_cop_reconnects_after_three_consecutive_failures(monkeypatch):
         if len(sleep_calls) >= 3:  # 2 failed cycles + the reconnecting cycle
             raise StopLoop()
 
-    monkeypatch.setattr(mesh_cop_module, "connect_with_retry", fake_connect_with_retry)
-    monkeypatch.setattr(mesh_cop_module.asyncio, "sleep", fake_sleep)
-    monkeypatch.setattr(mesh_cop_module.os, "environ", {})
+    monkeypatch.setattr(sam_cop_module, "connect_with_retry", fake_connect_with_retry)
+    monkeypatch.setattr(sam_cop_module.asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr(sam_cop_module.os, "environ", {})
 
     with pytest.raises(StopLoop):
-        asyncio.run(mesh_cop_module.run_mesh_cop())
+        asyncio.run(sam_cop_module.run_sam_cop())
 
     assert old_client.closed is True
     assert len(connect_calls) == 2

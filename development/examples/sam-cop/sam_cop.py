@@ -1,4 +1,3 @@
-import abc
 import asyncio
 import json
 import os
@@ -8,19 +7,20 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any, Tuple
 
-import httpx
 from sam_mcp.client import SamClient
+
+from channels import Channel, build_channels
 
 
 @dataclass
-class CopConfig:
+class SamCopConfig:
     poll_interval: float
     miss_threshold: int
     min_peers: int
 
 
-def load_config(env) -> CopConfig:
-    return CopConfig(
+def load_config(env) -> SamCopConfig:
+    return SamCopConfig(
         poll_interval=float(env.get("POLL_INTERVAL", "30")),
         miss_threshold=int(env.get("MISS_THRESHOLD", "3")),
         min_peers=int(env.get("MIN_PEERS", "1")),
@@ -62,59 +62,6 @@ def format_alert(alert: Alert, node_peer_id: str, timestamp: str) -> str:
     return "\n".join(lines)
 
 
-class Channel(abc.ABC):
-    """Delivery backend. Implement send() and add one entry in build_channels()."""
-
-    name = "channel"
-
-    @abc.abstractmethod
-    async def send(self, message: str) -> None: ...
-
-
-class SlackChannel(Channel):
-    name = "slack"
-
-    def __init__(self, webhook_url: str):
-        self.webhook_url = webhook_url
-
-    async def send(self, message: str) -> None:
-        async with httpx.AsyncClient() as http_client:
-            response = await http_client.post(self.webhook_url, json={"text": message}, timeout=10.0)
-            response.raise_for_status()
-
-
-class TelegramChannel(Channel):
-    name = "telegram"
-
-    def __init__(self, bot_token: str, chat_id: str):
-        self.bot_token = bot_token
-        self.chat_id = chat_id
-
-    async def send(self, message: str) -> None:
-        url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
-        async with httpx.AsyncClient() as http_client:
-            response = await http_client.post(url, json={"chat_id": self.chat_id, "text": message}, timeout=10.0)
-            response.raise_for_status()
-
-
-class StdoutChannel(Channel):
-    name = "stdout"
-
-    async def send(self, message: str) -> None:
-        print(f"[ALERT] {message}", flush=True)
-
-
-def build_channels(env) -> List[Channel]:
-    channels: List[Channel] = []
-    if env.get("SLACK_WEBHOOK_URL"):
-        channels.append(SlackChannel(env["SLACK_WEBHOOK_URL"]))
-    if env.get("TELEGRAM_BOT_TOKEN") and env.get("TELEGRAM_CHAT_ID"):
-        channels.append(TelegramChannel(env["TELEGRAM_BOT_TOKEN"], env["TELEGRAM_CHAT_ID"]))
-    if not channels:
-        channels.append(StdoutChannel())
-    return channels
-
-
 async def deliver(channels: List[Channel], message: str) -> None:
     async def deliver_to_channel(channel: Channel) -> None:
         for attempt in range(3):
@@ -145,7 +92,7 @@ AGGREGATED_EVENT_TYPES = ("rate_limit_drop", "spoofing_attempt", "stale_event")
 
 
 @dataclass
-class CopState:
+class SamCopState:
     cursor: int = 0
     baseline: set = field(default_factory=set)
     miss_counts: dict = field(default_factory=dict)
@@ -153,7 +100,7 @@ class CopState:
     first_snapshot: bool = True
 
 
-def detect_partition(state: CopState, connected_peer_count: int, min_peers: int) -> List[Alert]:
+def detect_partition(state: SamCopState, connected_peer_count: int, min_peers: int) -> List[Alert]:
     alerts = []
     if connected_peer_count < min_peers:
         if not state.partitioned:
@@ -169,8 +116,9 @@ def detect_partition(state: CopState, connected_peer_count: int, min_peers: int)
     return alerts
 
 
-def detect_node_events(state: CopState, node_events: List[dict], latest_seq: int) -> List[Alert]:
+def detect_node_events(state: SamCopState, node_events: List[dict], latest_seq: int) -> List[Alert]:
     alerts = []
+    # Tally flood-prone event types per peer so N events collapse into one alert; other types alert one-to-one.
     counts_by_type_and_peer: Dict[str, Dict[str, int]] = {event_type: {} for event_type in AGGREGATED_EVENT_TYPES}
     for event in node_events:
         event_type = event.get("type", "")
@@ -198,7 +146,7 @@ def detect_node_events(state: CopState, node_events: List[dict], latest_seq: int
     return alerts
 
 
-def detect_churn(state: CopState, services_snapshot: set, miss_threshold: int) -> List[Alert]:
+def detect_churn(state: SamCopState, services_snapshot: set, miss_threshold: int) -> List[Alert]:
     if state.partitioned:
         return []
     if state.first_snapshot:
@@ -230,8 +178,8 @@ def detect_churn(state: CopState, services_snapshot: set, miss_threshold: int) -
     return alerts
 
 
-def evaluate_cycle(state: CopState, connected_peer_count: int, node_events: List[dict],
-                   latest_seq: int, services_snapshot: set, config: CopConfig):
+def evaluate_cycle(state: SamCopState, connected_peer_count: int, node_events: List[dict],
+                   latest_seq: int, services_snapshot: set, config: SamCopConfig):
     alerts = []
     alerts.extend(detect_partition(state, connected_peer_count, config.min_peers))
     alerts.extend(detect_node_events(state, node_events, latest_seq))
@@ -276,7 +224,7 @@ async def fetch_services(client) -> set:
     return snapshot
 
 
-async def run_cycle(client, state: CopState, channels: List[Channel], config: CopConfig, node_peer_id: str) -> CopState:
+async def run_cycle(client, state: SamCopState, channels: List[Channel], config: SamCopConfig, node_peer_id: str) -> SamCopState:
     mesh_info = parse_tool_json(await client.call_tool("get_mesh_info", {})) or {}
     connected_peer_count = len(mesh_info.get("connected_peers") or [])
 
@@ -311,7 +259,7 @@ async def connect_with_retry(retries: int = 12, delay: float = 5.0) -> SamClient
 CONSECUTIVE_FAILURE_LIMIT = 3
 
 
-async def reconnect(client, state: CopState) -> Tuple[SamClient, str, CopState]:
+async def reconnect(client, state: SamCopState) -> Tuple[SamClient, str, SamCopState]:
     """Recovers from a lost MCP session; the node's seq counter restarts too, so reset cursor."""
     try:
         await client.close()
@@ -324,11 +272,11 @@ async def reconnect(client, state: CopState) -> Tuple[SamClient, str, CopState]:
     return client, node_peer_id, state
 
 
-async def run_mesh_cop():
+async def run_sam_cop():
     config = load_config(os.environ)
     channels = build_channels(os.environ)
     channel_names = ", ".join(channel.name for channel in channels)
-    print(f"[*] mesh-cop starting: poll={config.poll_interval}s miss_threshold={config.miss_threshold} "
+    print(f"[*] sam-cop starting: poll={config.poll_interval}s miss_threshold={config.miss_threshold} "
           f"min_peers={config.min_peers} channels=[{channel_names}]", flush=True)
 
     client = await connect_with_retry()
@@ -337,7 +285,7 @@ async def run_mesh_cop():
         node_peer_id = mesh_info.get("peer_id", "unknown")
         print(f"[+] connected to local node {node_peer_id}", flush=True)
 
-        state = CopState()
+        state = SamCopState()
         consecutive_failures = 0
         while True:
             try:
@@ -358,6 +306,6 @@ async def run_mesh_cop():
 
 if __name__ == "__main__":
     try:
-        asyncio.run(run_mesh_cop())
+        asyncio.run(run_sam_cop())
     except KeyboardInterrupt:
         sys.exit(0)

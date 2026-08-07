@@ -7,6 +7,22 @@ import (
 
 const nodeEventBufferSize = 1000
 
+// Node event categories.
+const (
+	EventCategorySecurity = "security"
+	EventCategoryMesh     = "mesh_event"
+)
+
+// Node event types.
+const (
+	EventTypeRateLimitDrop   = "rate_limit_drop"
+	EventTypeSpoofingAttempt = "spoofing_attempt"
+	EventTypeStaleEvent      = "stale_event"
+	EventTypeBanned          = "banned"
+	EventTypeKeyRotation     = "key_rotation"
+	EventTypePolicyUpdate    = "policy_update"
+)
+
 // NodeEvent is one verified observation recorded by the node.
 type NodeEvent struct {
 	Seq       uint64 `json:"seq"`
@@ -24,6 +40,7 @@ type nodeEventBuffer struct {
 }
 
 func newNodeEventBuffer() *nodeEventBuffer {
+	// Seqs start at 1 so cursor 0 means "never polled": poll(0) returns everything and an empty buffer reports latest seq 0.
 	return &nodeEventBuffer{nextSeq: 1}
 }
 
