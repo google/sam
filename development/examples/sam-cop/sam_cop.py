@@ -98,6 +98,10 @@ class SamCopState:
     miss_counts: dict = field(default_factory=dict)
     partitioned: bool = False
     first_snapshot: bool = True
+    routers: set = field(default_factory=set)
+    signing_keys: set = field(default_factory=set)
+    control_plane_first_snapshot: bool = True
+    control_plane_misses: int = 0
 
 
 def detect_partition(state: SamCopState, connected_peer_count: int, min_peers: int) -> List[Alert]:
@@ -178,12 +182,72 @@ def detect_churn(state: SamCopState, services_snapshot: set, miss_threshold: int
     return alerts
 
 
+# Sentinel distinguishing "control plane not polled" (tests) from "poll failed" (None).
+CONTROL_PLANE_UNPOLLED = object()
+
+
+def router_peer_ids(router_addresses) -> set:
+    """One router leases several multiaddrs; collapse them to the trailing /p2p/ peer ID."""
+    routers = set()
+    for address in router_addresses:
+        if "/p2p/" in address:
+            routers.add(address.rsplit("/p2p/", 1)[1])
+        else:
+            routers.add(address)
+    return routers
+
+
+def detect_control_plane(state: SamCopState, control_plane_info, miss_threshold: int) -> List[Alert]:
+    if control_plane_info is CONTROL_PLANE_UNPOLLED:
+        return []
+
+    alerts = []
+    if control_plane_info is None:
+        state.control_plane_misses += 1
+        if state.control_plane_misses == miss_threshold:
+            alerts.append(Alert("warning", "control plane unreachable",
+                                f"/info and /keys fetch failed for {miss_threshold} consecutive polls"))
+        return alerts
+    if state.control_plane_misses >= miss_threshold:
+        alerts.append(Alert("info", "control plane reachable again",
+                            "control plane info fetch succeeded after repeated failures"))
+    state.control_plane_misses = 0
+
+    routers = router_peer_ids(control_plane_info.get("router_addresses") or [])
+    signing_keys = set(control_plane_info.get("signing_keys") or [])
+
+    if state.control_plane_first_snapshot:
+        state.routers = routers
+        state.signing_keys = signing_keys
+        state.control_plane_first_snapshot = False
+        return alerts
+
+    # No miss-threshold debounce: the control plane's lease TTL already debounces router churn.
+    for router in sorted(routers - state.routers):
+        alerts.append(Alert("info", "router appeared", "new router leased on the control plane", peer_id=router))
+    for router in sorted(state.routers - routers):
+        alerts.append(Alert("warning", "router disappeared",
+                            "router lease expired or was dropped on the control plane", peer_id=router))
+    state.routers = routers
+
+    for signing_key in sorted(signing_keys - state.signing_keys):
+        alerts.append(Alert("critical", "new control-plane signing key",
+                            f"unrecognized signing key published on /keys: {signing_key[:16]}..."))
+    for signing_key in sorted(state.signing_keys - signing_keys):
+        alerts.append(Alert("warning", "control-plane signing key retired",
+                            f"signing key removed from /keys: {signing_key[:16]}..."))
+    state.signing_keys = signing_keys
+    return alerts
+
+
 def evaluate_cycle(state: SamCopState, connected_peer_count: int, node_events: List[dict],
-                   latest_seq: int, services_snapshot: set, config: SamCopConfig):
+                   latest_seq: int, services_snapshot: set, config: SamCopConfig,
+                   control_plane_info=CONTROL_PLANE_UNPOLLED):
     alerts = []
     alerts.extend(detect_partition(state, connected_peer_count, config.min_peers))
     alerts.extend(detect_node_events(state, node_events, latest_seq))
     alerts.extend(detect_churn(state, services_snapshot, config.miss_threshold))
+    alerts.extend(detect_control_plane(state, control_plane_info, config.miss_threshold))
     return state, alerts
 
 
@@ -234,7 +298,16 @@ async def run_cycle(client, state: SamCopState, channels: List[Channel], config:
 
     services_snapshot = await fetch_services(client)
 
-    state, alerts = evaluate_cycle(state, connected_peer_count, node_events, latest_seq, services_snapshot, config)
+    # A control plane outage must not fail the cycle: node-event detection stays live
+    # and the failure must not feed the reconnect counter.
+    try:
+        control_plane_info = parse_tool_json(await client.call_tool("get_control_plane_info", {}))
+    except Exception as error:
+        control_plane_info = None
+        print(f"[-] control plane info fetch failed: {error}", flush=True)
+
+    state, alerts = evaluate_cycle(state, connected_peer_count, node_events, latest_seq,
+                                   services_snapshot, config, control_plane_info)
 
     timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
     for alert in alerts:

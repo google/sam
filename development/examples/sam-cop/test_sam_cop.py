@@ -414,3 +414,82 @@ def test_run_sam_cop_reconnects_after_three_consecutive_failures(monkeypatch):
     assert old_client.closed is True
     assert len(connect_calls) == 2
     assert new_client.calls >= 1
+
+
+from sam_cop import CONTROL_PLANE_UNPOLLED, detect_control_plane, router_peer_ids
+
+ROUTER_A_ADDRESSES = ["/dns4/router-a/tcp/4001/p2p/12D3KooRouterA",
+                      "/dns4/router-a/udp/4001/quic-v1/p2p/12D3KooRouterA"]
+ROUTER_B_ADDRESS = "/dns4/router-b/tcp/4001/p2p/12D3KooRouterB"
+CONTROL_PLANE_INFO = {"router_addresses": ROUTER_A_ADDRESSES + [ROUTER_B_ADDRESS],
+                      "signing_keys": ["a2V5LW9uZQ=="]}
+
+
+def test_router_peer_ids_collapses_multiaddrs_per_router():
+    assert router_peer_ids(ROUTER_A_ADDRESSES) == {"12D3KooRouterA"}
+    assert router_peer_ids(["/dns4/no-peer-component/tcp/4001"]) == {"/dns4/no-peer-component/tcp/4001"}
+
+
+def test_control_plane_first_snapshot_sets_baseline_without_alerts():
+    state = SamCopState()
+    alerts = detect_control_plane(state, CONTROL_PLANE_INFO, CONFIG.miss_threshold)
+    assert alerts == []
+    assert state.routers == {"12D3KooRouterA", "12D3KooRouterB"}
+    assert state.signing_keys == {"a2V5LW9uZQ=="}
+
+
+def test_router_disappearance_alerts_warning_without_debounce():
+    state = SamCopState()
+    detect_control_plane(state, CONTROL_PLANE_INFO, CONFIG.miss_threshold)
+    alerts = detect_control_plane(state, {"router_addresses": ROUTER_A_ADDRESSES,
+                                          "signing_keys": ["a2V5LW9uZQ=="]}, CONFIG.miss_threshold)
+    assert [a.severity for a in alerts] == ["warning"]
+    assert "router disappeared" in alerts[0].title
+    assert alerts[0].peer_id == "12D3KooRouterB"
+
+
+def test_router_appearance_alerts_info():
+    state = SamCopState()
+    detect_control_plane(state, {"router_addresses": ROUTER_A_ADDRESSES, "signing_keys": []}, CONFIG.miss_threshold)
+    alerts = detect_control_plane(state, CONTROL_PLANE_INFO, CONFIG.miss_threshold)
+    assert any(a.severity == "info" and "router appeared" in a.title and a.peer_id == "12D3KooRouterB"
+               for a in alerts)
+
+
+def test_new_signing_key_alerts_critical():
+    state = SamCopState()
+    detect_control_plane(state, CONTROL_PLANE_INFO, CONFIG.miss_threshold)
+    alerts = detect_control_plane(state, {"router_addresses": CONTROL_PLANE_INFO["router_addresses"],
+                                          "signing_keys": ["a2V5LW9uZQ==", "a2V5LXR3bw=="]}, CONFIG.miss_threshold)
+    assert [a.severity for a in alerts] == ["critical"]
+    assert "new control-plane signing key" in alerts[0].title
+
+
+def test_signing_key_retirement_alerts_warning():
+    state = SamCopState()
+    detect_control_plane(state, CONTROL_PLANE_INFO, CONFIG.miss_threshold)
+    alerts = detect_control_plane(state, {"router_addresses": CONTROL_PLANE_INFO["router_addresses"],
+                                          "signing_keys": []}, CONFIG.miss_threshold)
+    assert [a.severity for a in alerts] == ["warning"]
+    assert "signing key retired" in alerts[0].title
+
+
+def test_control_plane_unreachable_alerts_once_at_threshold_then_recovers():
+    state = SamCopState()
+    detect_control_plane(state, CONTROL_PLANE_INFO, CONFIG.miss_threshold)
+    assert detect_control_plane(state, None, CONFIG.miss_threshold) == []
+    assert detect_control_plane(state, None, CONFIG.miss_threshold) == []
+    alerts = detect_control_plane(state, None, CONFIG.miss_threshold)
+    assert [a.severity for a in alerts] == ["warning"]
+    assert "control plane unreachable" in alerts[0].title
+    assert detect_control_plane(state, None, CONFIG.miss_threshold) == []
+    alerts = detect_control_plane(state, CONTROL_PLANE_INFO, CONFIG.miss_threshold)
+    assert [a.severity for a in alerts] == ["info"]
+    assert "reachable again" in alerts[0].title
+
+
+def test_unpolled_control_plane_is_noop():
+    state = SamCopState()
+    assert detect_control_plane(state, CONTROL_PLANE_UNPOLLED, CONFIG.miss_threshold) == []
+    assert state.control_plane_first_snapshot is True
+    assert state.control_plane_misses == 0
