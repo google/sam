@@ -2,6 +2,7 @@ package node
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -907,6 +908,45 @@ type PollNodeEventsParams struct {
 func (n *SamNode) handlePollNodeEvents(ctx context.Context, req *mcp.CallToolRequest, params PollNodeEventsParams) (*mcp.CallToolResult, any, error) {
 	events, latestSeq := globalEventBuffer.poll(params.SinceSeq)
 	data, err := json.Marshal(map[string]any{"events": events, "latest_seq": latestSeq})
+	if err != nil {
+		return nil, nil, err
+	}
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{&mcp.TextContent{Text: string(data)}},
+	}, nil, nil
+}
+
+// GetControlPlaneInfoParams defines parameters for the get_control_plane_info tool.
+type GetControlPlaneInfoParams struct{}
+
+// handleGetControlPlaneInfo implements the get_control_plane_info tool.
+func (n *SamNode) handleGetControlPlaneInfo(ctx context.Context, req *mcp.CallToolRequest, params GetControlPlaneInfoParams) (*mcp.CallToolResult, any, error) {
+	controlPlaneURL, err := n.Store.LoadControlPlaneURL()
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to load control plane URL: %w", err)
+	}
+	if controlPlaneURL == "" {
+		return nil, nil, fmt.Errorf("no control plane URL stored; is the node enrolled?")
+	}
+
+	info, err := FetchControlPlaneInfo(ctx, controlPlaneURL)
+	if err != nil {
+		return nil, nil, err
+	}
+	keys, err := FetchControlPlaneKeys(ctx, controlPlaneURL)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	signingKeys := []string{}
+	for _, key := range keys.PublicKeys {
+		signingKeys = append(signingKeys, base64.StdEncoding.EncodeToString(key))
+	}
+	data, err := json.Marshal(map[string]any{
+		"control_plane_url": controlPlaneURL,
+		"router_addresses":  info.RouterAddresses,
+		"signing_keys":      signingKeys,
+	})
 	if err != nil {
 		return nil, nil, err
 	}

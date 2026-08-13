@@ -28,14 +28,14 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// FetchControlPlaneInfo retrieves the latest configuration from the control plane's /info endpoint.
-func FetchControlPlaneInfo(ctx context.Context, controlPlaneURL string) (*api.ControlPlaneInfoResponse, error) {
+// fetchControlPlaneProto GETs a control plane endpoint and returns the raw protobuf body.
+func fetchControlPlaneProto(ctx context.Context, controlPlaneURL, path string) ([]byte, error) {
 	if !strings.HasPrefix(controlPlaneURL, "http://") && !strings.HasPrefix(controlPlaneURL, "https://") {
 		controlPlaneURL = "https://" + controlPlaneURL
 	}
 	controlPlaneURL = strings.TrimSuffix(controlPlaneURL, "/")
 
-	urlStr := controlPlaneURL + "/info"
+	urlStr := controlPlaneURL + path
 	req, err := http.NewRequestWithContext(ctx, "GET", urlStr, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
@@ -59,12 +59,33 @@ func FetchControlPlaneInfo(ctx context.Context, controlPlaneURL string) (*api.Co
 		return nil, fmt.Errorf("control plane returned status %s: %s", resp.Status, string(body))
 	}
 
+	return body, nil
+}
+
+// FetchControlPlaneInfo retrieves the latest configuration from the control plane's /info endpoint.
+func FetchControlPlaneInfo(ctx context.Context, controlPlaneURL string) (*api.ControlPlaneInfoResponse, error) {
+	body, err := fetchControlPlaneProto(ctx, controlPlaneURL, "/info")
+	if err != nil {
+		return nil, err
+	}
 	var info api.ControlPlaneInfoResponse
 	if err := proto.Unmarshal(body, &info); err != nil {
 		return nil, fmt.Errorf("failed to decode /info response: %w", err)
 	}
-
 	return &info, nil
+}
+
+// FetchControlPlaneKeys retrieves the currently valid signing keys from the control plane's /keys endpoint.
+func FetchControlPlaneKeys(ctx context.Context, controlPlaneURL string) (*api.KeysResponse, error) {
+	body, err := fetchControlPlaneProto(ctx, controlPlaneURL, "/keys")
+	if err != nil {
+		return nil, err
+	}
+	var keys api.KeysResponse
+	if err := proto.Unmarshal(body, &keys); err != nil {
+		return nil, fmt.Errorf("failed to decode /keys response: %w", err)
+	}
+	return &keys, nil
 }
 
 // SyncMeshConfig loads the mesh configuration from the store, attempts to refresh it
