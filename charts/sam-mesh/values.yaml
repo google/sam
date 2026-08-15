@@ -2,6 +2,14 @@ global:
   imageTag: local
   imagePullPolicy: IfNotPresent
 
+# One Gateway per externally-reachable service, each on HTTP :80. No route uses an
+# HTTPRoute filter: cloud-provider-kind implements neither path redirect nor path rewrite.
+gateway:
+  enabled: false
+  className: cloud-provider-kind
+  # Routes the control plane's /admin API. Dev only; the cloud leaves it unrouted.
+  adminRoute: false
+
 controlPlane:
   replicaCount: 2
   image:
@@ -61,6 +69,12 @@ router:
     repository: sam-router
   useOidcToken: false
   logLevel: info
+  # Binds 4501 TCP+UDP on the router's own node and announces /ip4/<node IP>/... for both
+  # transports. One router per node.
+  hostPort: null
+  # Overrides the announced multiaddrs; derived from hostPort when left empty.
+  externalAddrs: []
+  allowLoopback: false
   resources:
     requests:
       cpu: 100m
@@ -71,7 +85,6 @@ router:
   service:
     type: ClusterIP
     port: 4501
-    nodePort: null
 
 console:
   enabled: true
@@ -92,7 +105,14 @@ console:
 
 dex:
   enabled: false
-  nodePort: 30556
+  # Public URL clients discover Dex at; defaults to its in-cluster Service URL.
+  issuer: ""
+  # Console callback URLs allowed for the sam-console client; defaults to localhost.
+  redirectURIs: []
+  service:
+    type: ClusterIP
+    port: 5556
+    nodePort: null
   image:
     repository: dexidp/dex
     tag: v2.39.0

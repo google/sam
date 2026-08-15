@@ -1,3 +1,36 @@
+{{/*
+Dex config body. Named so the Deployment can checksum it: nothing else would restart Dex
+when the issuer or the redirect URIs change.
+*/}}
+{{- define "sam-mesh.dexConfig" -}}
+issuer: {{ .Values.dex.issuer | default (printf "http://%s-dex:%v/dex" (include "sam-mesh.fullname" .) .Values.dex.service.port) }}
+storage:
+  type: memory
+web:
+  http: 0.0.0.0:5556
+oauth2:
+  skipApprovalScreen: true
+staticClients:
+- id: sam-console
+  redirectURIs:
+  {{- if .Values.dex.redirectURIs }}
+  {{- range .Values.dex.redirectURIs }}
+  - {{ . | quote }}
+  {{- end }}
+  {{- else }}
+  - http://localhost:9092/auth/callback
+  - http://127.0.0.1:9092/auth/callback
+  {{- end }}
+  name: 'SAM Console'
+  public: true
+enablePasswordDB: true
+staticPasswords:
+- email: admin@example.com
+  # bcrypt hash for 'password'
+  hash: "$2a$10$TUOgJVdtu0AL6Y6TcNBQXOSjRWRKhIkC0kXDzN9kOkPB4hg2aFPE2"
+  username: admin
+  userID: "0898fa90-3453-4311-8566-020953250212"
+{{- end }}
 {{- if .Values.dex.enabled -}}
 apiVersion: v1
 kind: ConfigMap
@@ -7,27 +40,7 @@ metadata:
     {{- include "sam-mesh.labels" . | nindent 4 }}
 data:
   config.yaml: |
-    issuer: http://{{ include "sam-mesh.fullname" . }}-dex:5556/dex
-    storage:
-      type: memory
-    web:
-      http: 0.0.0.0:5556
-    oauth2:
-      skipApprovalScreen: true
-    staticClients:
-    - id: sam-console
-      redirectURIs:
-      - http://localhost:9092/auth/callback
-      - http://127.0.0.1:9092/auth/callback
-      name: 'SAM Console'
-      public: true
-    enablePasswordDB: true
-    staticPasswords:
-    - email: admin@example.com
-      # bcrypt hash for 'password'
-      hash: "$2a$10$TUOgJVdtu0AL6Y6TcNBQXOSjRWRKhIkC0kXDzN9kOkPB4hg2aFPE2"
-      username: admin
-      userID: "0898fa90-3453-4311-8566-020953250212"
+    {{- include "sam-mesh.dexConfig" . | nindent 4 }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -44,6 +57,8 @@ spec:
     metadata:
       labels:
         app: {{ include "sam-mesh.fullname" . }}-dex
+      annotations:
+        checksum/config: {{ include "sam-mesh.dexConfig" . | sha256sum }}
     spec:
       nodeSelector:
         sam-role: control-plane
@@ -73,14 +88,14 @@ metadata:
   labels:
     {{- include "sam-mesh.labels" . | nindent 4 }}
 spec:
-  type: NodePort
+  type: {{ .Values.dex.service.type }}
   selector:
     app: {{ include "sam-mesh.fullname" . }}-dex
   ports:
   - name: http
-    port: 5556
+    port: {{ .Values.dex.service.port }}
     targetPort: 5556
-    {{- if .Values.dex.nodePort }}
-    nodePort: {{ .Values.dex.nodePort }}
+    {{- if and (eq .Values.dex.service.type "NodePort") .Values.dex.service.nodePort }}
+    nodePort: {{ .Values.dex.service.nodePort }}
     {{- end }}
 {{- end }}

@@ -14,6 +14,10 @@ spec:
     metadata:
       labels:
         app: {{ include "sam-mesh.fullname" . }}-console
+      annotations:
+        # The console discovers the issuer from /info once, at startup, and registers its
+        # /auth routes only if that succeeds. Restart it when the issuer changes.
+        checksum/oidc-issuer: {{ .Values.controlPlane.oidcIssuer | sha256sum }}
     spec:
       initContainers:
       - name: wait-control-plane
