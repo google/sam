@@ -2,7 +2,7 @@
 title: "Kubernetes Deployment and Local Testing Guide"
 linkTitle: "Kubernetes Deployment and Local Testing Guide"
 ---
-This guide explains how to deploy the SAM control plane and router in a Kubernetes cluster and how to test it locally with `kind` — using the bundled `make kind-*` targets for a one-command mesh, or a manual setup with `cloud-provider-kind`.
+This guide explains how to deploy the SAM control plane and router in a Kubernetes cluster and how to test it locally with `kind` — using the bundled `make kind-*` targets for a one-command mesh, or a manual setup. Both paths need `cloud-provider-kind`.
 
 > [!TIP]
 > This guide focuses on local development sandboxing. For production-grade Kubernetes deployments (GKE, EKS, AKS), see the [Production Kubernetes Deployment](../../user/kubernetes-deployment/) guide.
@@ -24,14 +24,20 @@ This creates a `sam-kind` cluster (one control-plane plus workers for the contro
 - The **control plane**, configured to trust the cluster's own OIDC issuer.
 - Five **nodes** declared in `development/kind/mesh-config.yaml` (`node-a` through `node-e`), all **bare** by default — assign services to suit what you're testing.
 
-Nodes authenticate to the control plane via **Workload Identity Federation** (projected ServiceAccount tokens), so no static secrets or mock OIDC provider are needed. The control plane is exposed to the host on `127.0.0.1:9090` (HTTP enroll) and `127.0.0.1:4001` (libp2p) via a NodePort and the cluster's `extraPortMappings` — `cloud-provider-kind` is not required.
+In-cluster nodes authenticate to the control plane via **Workload Identity Federation** (projected ServiceAccount tokens), so no static secrets or mock OIDC provider are needed.
+
+The mesh is exposed the way the cloud testnets are, so there are no port-forwards and no `extraPortMappings`. `run.sh` runs **`cloud-provider-kind`** as a container (a hard prerequisite — it needs the docker socket) to serve Gateway API LoadBalancer addresses, and prints them when the mesh is up:
+
+- The **control plane** on its own address, routing the same 8 exact enrollment paths the cloud allows, plus a dev-only `/admin` route.
+- The **console** and **Dex** each on their own address. The console sits at `/` rather than the cloud's `/console` prefix, because `cloud-provider-kind` implements no path rewrite.
+- The **router** at its own node's IP on port 4501, TCP **and** QUIC, announced from `status.hostIP` — the same mechanism GKE uses.
 
 Once everything is up, `make kind-up` opens a tmux session with live per-pod logs (control plane, router and each node in its own pane). Manage the mesh with:
 
 ```bash
 make kind-up ARGS=-s     # bring the mesh up without attaching the log view
 make kind-logs           # (re)attach the live-logs tmux session
-make kind-down           # delete the sam-kind cluster
+make kind-down           # delete the sam-kind cluster and stop cloud-provider-kind
 ```
 
 ### Mesh Layout (`mesh-config.yaml`)
@@ -104,7 +110,7 @@ make build            # produce ./bin/sam-node
 make kind-local-node
 ```
 
-This mints a ServiceAccount token and runs `./bin/sam-node` against the control plane at `127.0.0.1:9090`, exposing its MCP API on `127.0.0.1:9099` with the API token `devtoken`. Extra flags pass through via `ARGS`, e.g. to host an example service:
+This mints a bootstrap token through the control plane's `/admin` API and runs `./bin/sam-node` against the control plane's gateway address — the same credential and path a real external node uses — exposing its MCP API on `127.0.0.1:9099` with the API token `devtoken`. Extra flags pass through via `ARGS`, e.g. to host an example service:
 
 ```bash
 make kind-local-node ARGS="--config development/examples/calc-mcp/sam-node-config.yaml"

@@ -1,22 +1,9 @@
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 nodes:
+  # No extraPortMappings: the mesh is reached at the gateway LoadBalancer addresses
+  # cloud-provider-kind assigns, and the router at its own node's IP.
   - role: control-plane
-    # Expose the control plane and router to the host (via the sam-control-plane-nodeport NodePort) so a
-    # locally-built sam-node can enroll: host:9090->HTTP, host:4001->libp2p TCP.
-    extraPortMappings:
-      - containerPort: 30090
-        hostPort: 9090
-        protocol: TCP
-      - containerPort: 30401
-        hostPort: 4001
-        protocol: TCP
-      - containerPort: 30081
-        hostPort: 9092
-        protocol: TCP
-      - containerPort: 30556
-        hostPort: 5556
-        protocol: TCP
   - role: worker
     labels:
       sam-role: control-plane
