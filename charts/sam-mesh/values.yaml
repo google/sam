@@ -112,7 +112,6 @@ dex:
   service:
     type: ClusterIP
     port: 5556
-    nodePort: null
   image:
     repository: dexidp/dex
     tag: v2.39.0

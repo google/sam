@@ -95,7 +95,4 @@ spec:
   - name: http
     port: {{ .Values.dex.service.port }}
     targetPort: 5556
-    {{- if and (eq .Values.dex.service.type "NodePort") .Values.dex.service.nodePort }}
-    nodePort: {{ .Values.dex.service.nodePort }}
-    {{- end }}
 {{- end }}

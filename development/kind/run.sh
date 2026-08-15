@@ -194,18 +194,16 @@ read_mesh_nodes
 ISSUER="$(kubectl --context "${KCTX}" get --raw /.well-known/openid-configuration | jq -r .issuer)"
 [[ -n "$ISSUER" ]] || { echo "could not determine cluster OIDC issuer" >&2; exit 1; }
 
-OIDC_CLIENT_ID="${OIDC_CLIENT_ID:-sam-console}"
-
 # Dex's own address isn't known until its gateway has one, so phase 1 trusts only the
 # cluster issuer and phase 2 prepends Dex.
 CONTROL_PLANE_ISSUERS="${ISSUER}"
 
-ALLOWED_AUDIENCES="sam-mesh-audience,sam-control-plane-audience"
-if [[ -n "${OIDC_CLIENT_ID}" ]]; then
-  ALLOWED_AUDIENCES="${OIDC_CLIENT_ID},${ALLOWED_AUDIENCES}"
-fi
+# The first audience is what the control plane reports as the OIDC client id, so it has to
+# match Dex's static client.
+ALLOWED_AUDIENCES="sam-console,sam-mesh-audience,sam-control-plane-audience"
 
-export NAMESPACE ISSUER IMAGE_TAG OIDC_CLIENT_ID CONTROL_PLANE_ISSUERS ALLOWED_AUDIENCES
+# Only the node template's envsubst reads these from the environment.
+export NAMESPACE IMAGE_TAG
 
 echo "== Applying namespace and RBAC cluster rules =="
 envsubst '${NAMESPACE}' < "${SCRIPT_DIR}/00-namespace-rbac.yaml" | kubectl --context "${KCTX}" apply -f -
