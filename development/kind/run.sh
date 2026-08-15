@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Kind dev mesh: a control plane and router plus the nodes declared in mesh-config.yaml, each pinned
-# to its own k8s node, with live per-pod logs in named tmux panes.
+# Kind dev mesh: a control plane and router plus the nodes from mesh-config.yaml, each pinned to its
+# own k8s node, with live per-pod logs in named tmux panes. Control plane, console and Dex are reached
+# over Gateway API LoadBalancer addresses from cloud-provider-kind (started here); the router at its node IP.
 set -euo pipefail
 
 CLUSTER="sam-kind"
@@ -10,6 +11,10 @@ KCTX="kind-${CLUSTER}"
 IMAGE_TAG="local"
 CONTROL_PLANE_URL="http://sam-mesh-control-plane:8080"
 HELM="helm"
+# Serves the gateway LoadBalancer IPs. It installs the Gateway API CRDs and the
+# cloud-provider-kind GatewayClass itself, so the cluster needs no CRD step.
+CPK_CONTAINER="cloud-provider-kind"
+CPK_IMAGE="registry.k8s.io/cloud-provider-kind/cloud-controller-manager:v0.11.1"
 
 
 
@@ -37,6 +42,53 @@ check_prereqs() {
     echo "kind cluster '${CLUSTER}' already exists; delete it first: make kind-down" >&2
     exit 1
   fi
+}
+
+# Must run after the cluster, so the 'kind' docker network exists.
+start_cloud_provider_kind() {
+  if [[ -n "$(docker ps -q -f "name=^${CPK_CONTAINER}$")" ]]; then
+    echo "cloud-provider-kind already running"
+    return
+  fi
+  docker rm -f "${CPK_CONTAINER}" >/dev/null 2>&1 || true
+  docker run -d --name "${CPK_CONTAINER}" --network kind \
+    -v /var/run/docker.sock:/var/run/docker.sock "${CPK_IMAGE}" >/dev/null
+}
+
+teardown() {
+  kind delete cluster --name "${CLUSTER}"
+  docker rm -f "${CPK_CONTAINER}" >/dev/null 2>&1 || true
+}
+
+# gateway_ip <gateway>: the LoadBalancer address cloud-provider-kind assigned, waited for.
+gateway_ip() {
+  local gateway="$1" ip=""
+  for _ in $(seq 1 60); do
+    ip="$(kubectl --context "${KCTX}" -n "${NAMESPACE}" get gateway "${gateway}" \
+      -o jsonpath='{.status.addresses[0].value}' 2>/dev/null || true)"
+    [[ -n "$ip" ]] && { echo "$ip"; return 0; }
+    sleep 2
+  done
+  echo "gateway '${gateway}' never got a LoadBalancer address; is cloud-provider-kind running?" >&2
+  return 1
+}
+
+# deploy_chart [extra --set flags]: later flags win, so phase 2 overrides phase 1.
+# TLS verification is skipped because one issuer is the kind cluster's own API server,
+# served with a self-signed cert.
+deploy_chart() {
+  "${HELM}" --kube-context "${KCTX}" upgrade --install sam-mesh "${PROJECT_ROOT}/charts/sam-mesh" --timeout 10m \
+    --namespace "${NAMESPACE}" \
+    --set global.imageTag="${IMAGE_TAG}" \
+    --set controlPlane.oidcIssuer="${CONTROL_PLANE_ISSUERS//,/\\,}" \
+    --set controlPlane.allowedAudiences="${ALLOWED_AUDIENCES//,/\\,}" \
+    --set controlPlane.insecureSkipTlsVerify=true \
+    --set gateway.enabled=true \
+    --set gateway.adminRoute=true \
+    --set router.hostPort=4501 \
+    --set router.useOidcToken=true \
+    --set dex.enabled=true \
+    "$@"
 }
 
 
@@ -107,8 +159,8 @@ read_mesh_nodes() {
 ### MAIN ###
 
 
-if [[ $# -gt 0 && "$1" != "-s" && "$1" != "-l" ]]; then
-  echo "usage: $(basename "$0") [-s]" >&2
+if [[ $# -gt 0 && "$1" != "-s" && "$1" != "-l" && "$1" != "-d" ]]; then
+  echo "usage: $(basename "$0") [-s|-l|-d]" >&2
   exit 1
 fi
 
@@ -118,10 +170,18 @@ if [[ "${1:-}" == "-l" ]]; then
   exit 0
 fi
 
+if [[ "${1:-}" == "-d" ]]; then
+  teardown
+  exit 0
+fi
+
 check_prereqs "${1:-}"
 
 echo "== Creating kind cluster '${CLUSTER}' =="
 kind create cluster --name "${CLUSTER}" --config "${SCRIPT_DIR}/kind-config.yaml"
+
+echo "== Starting cloud-provider-kind =="
+start_cloud_provider_kind
 
 echo "== Building sam images =="
 make docker-build-control-plane docker-build-router docker-build-node docker-build-sam-console
@@ -134,43 +194,54 @@ read_mesh_nodes
 ISSUER="$(kubectl --context "${KCTX}" get --raw /.well-known/openid-configuration | jq -r .issuer)"
 [[ -n "$ISSUER" ]] || { echo "could not determine cluster OIDC issuer" >&2; exit 1; }
 
-OIDC_ISSUER="${OIDC_ISSUER:-http://sam-mesh-dex:5556/dex}"
 OIDC_CLIENT_ID="${OIDC_CLIENT_ID:-sam-console}"
-OIDC_CLIENT_SECRET="${OIDC_CLIENT_SECRET:-}"
-OIDC_REDIRECT_URL="${OIDC_REDIRECT_URL:-}"
 
+# Dex's own address isn't known until its gateway has one, so phase 1 trusts only the
+# cluster issuer and phase 2 prepends Dex.
 CONTROL_PLANE_ISSUERS="${ISSUER}"
-if [[ -n "${OIDC_ISSUER}" ]]; then
-  CONTROL_PLANE_ISSUERS="${OIDC_ISSUER},${ISSUER}"
-fi
 
 ALLOWED_AUDIENCES="sam-mesh-audience,sam-control-plane-audience"
 if [[ -n "${OIDC_CLIENT_ID}" ]]; then
   ALLOWED_AUDIENCES="${OIDC_CLIENT_ID},${ALLOWED_AUDIENCES}"
 fi
 
-export NAMESPACE ISSUER IMAGE_TAG OIDC_ISSUER OIDC_CLIENT_ID OIDC_CLIENT_SECRET OIDC_REDIRECT_URL CONTROL_PLANE_ISSUERS ALLOWED_AUDIENCES
+export NAMESPACE ISSUER IMAGE_TAG OIDC_CLIENT_ID CONTROL_PLANE_ISSUERS ALLOWED_AUDIENCES
 
 echo "== Applying namespace and RBAC cluster rules =="
 envsubst '${NAMESPACE}' < "${SCRIPT_DIR}/00-namespace-rbac.yaml" | kubectl --context "${KCTX}" apply -f -
 
 echo "== Deploying SAM Mesh via Helm =="
-"${HELM}" --kube-context "${KCTX}" upgrade --install sam-mesh "${PROJECT_ROOT}/charts/sam-mesh" --timeout 10m \
-  --namespace "${NAMESPACE}" \
-  --set global.imageTag="${IMAGE_TAG}" \
-  --set controlPlane.oidcIssuer="${CONTROL_PLANE_ISSUERS//,/\\,}" \
-  --set controlPlane.allowedAudiences="${ALLOWED_AUDIENCES//,/\\,}" \
-  --set controlPlane.service.type=NodePort \
-  --set controlPlane.service.nodePort=30090 \
-  --set router.service.type=NodePort \
-  --set router.service.nodePort=30401 \
-  --set router.useOidcToken=true \
-  --set router.externalAddrs[0]="/dns4/sam-mesh-router/tcp/4501" \
-  --set router.externalAddrs[1]="/ip4/127.0.0.1/tcp/4001" \
-  --set console.service.type=NodePort \
-  --set console.service.nodePort=30081 \
-  --set dex.enabled=true \
-  --set controlPlane.insecureSkipTlsVerify=true # ISSUER is the kind cluster's own API server, served with a self-signed cert
+deploy_chart
+
+# The OIDC URLs are the gateway addresses, which only exist once the gateways do — so
+# resolve them, then redeploy with the URLs everything must agree on.
+echo "== Waiting for gateway LoadBalancer addresses =="
+MAIN_IP="$(gateway_ip sam-mesh-gateway)"
+CONSOLE_IP="$(gateway_ip sam-mesh-console-gateway)"
+DEX_IP="$(gateway_ip sam-mesh-dex-gateway)"
+echo "control plane: http://${MAIN_IP}  console: http://${CONSOLE_IP}  dex: http://${DEX_IP}"
+
+OIDC_ISSUER="http://${DEX_IP}/dex"
+
+echo "== Waiting for Dex to be ready =="
+kubectl --context "${KCTX}" -n "${NAMESPACE}" wait --for=condition=available --timeout=180s deployment/sam-mesh-dex
+
+# The control plane discovers the issuer at startup and refuses to start if it can't, so
+# prove a pod can reach the gateway address before pinning the mesh to it.
+echo "== Checking Dex discovery from inside the cluster =="
+kubectl --context "${KCTX}" -n "${NAMESPACE}" run dex-discovery-check \
+  --rm -i --restart=Never --quiet --image=curlimages/curl:8.6.0 -- \
+  curl -sf --retry 10 --retry-delay 2 --retry-connrefused --max-time 60 \
+  "${OIDC_ISSUER}/.well-known/openid-configuration" >/dev/null || {
+    echo "cannot reach ${OIDC_ISSUER} from inside the cluster; pods must be able to route to the cloud-provider-kind LoadBalancer addresses" >&2
+    exit 1
+  }
+
+echo "== Wiring the OIDC URLs =="
+CONTROL_PLANE_ISSUERS="${OIDC_ISSUER},${ISSUER}"
+deploy_chart \
+  --set dex.issuer="${OIDC_ISSUER}" \
+  --set dex.redirectURIs[0]="http://${CONSOLE_IP}/auth/callback"
 
 echo "== Waiting for database to be ready =="
 kubectl --context "${KCTX}" -n "${NAMESPACE}" wait --for=condition=ready --timeout=180s pod -l app=sam-mesh-db
@@ -185,8 +256,6 @@ echo "== Waiting for router to be ready =="
 kubectl --context "${KCTX}" -n "${NAMESPACE}" wait --for=condition=ready --timeout=180s pod -l app=sam-mesh-router
 echo "== Waiting for console to be ready =="
 kubectl --context "${KCTX}" -n "${NAMESPACE}" wait --for=condition=available --timeout=180s deployment/sam-mesh-console
-echo "== Waiting for Dex to be ready =="
-kubectl --context "${KCTX}" -n "${NAMESPACE}" wait --for=condition=available --timeout=180s deployment/sam-mesh-dex
 
 
 echo "== Applying sam-nodes =="
@@ -207,7 +276,8 @@ echo "then:"
 echo "  ./bin/mcp-client -url http://127.0.0.1:9091/mcp -token devtoken -tool find_remote_tools -args '{}'"
 echo ""
 echo "You can access the SAM Web Console at:"
-echo "  http://localhost:9092/"
+echo "  http://${CONSOLE_IP}/"
+echo "The control plane is at http://${MAIN_IP} and Dex at ${OIDC_ISSUER}"
 
 if [[ "${1:-}" != "-s" ]]; then
   show_cluster_logs

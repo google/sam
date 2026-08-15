@@ -121,7 +121,7 @@ kind-logs:
 	./development/kind/run.sh -l
 
 kind-down:
-	kind delete cluster --name sam-kind
+	./development/kind/run.sh -d
 
 .PHONY: kind-local-node
 kind-local-node:
