@@ -11,9 +11,6 @@ spec:
   - name: p2p-tcp
     port: {{ .Values.router.service.port }}
     targetPort: 4501
-    {{- if and (eq .Values.router.service.type "NodePort") .Values.router.service.nodePort }}
-    nodePort: {{ .Values.router.service.nodePort }}
-    {{- end }}
     protocol: TCP
   - name: p2p-udp
     port: {{ .Values.router.service.port }}

@@ -76,6 +76,13 @@ spec:
               name: {{ include "sam-mesh.fullname" . }}-router-token
               key: token
         {{- end }}
+        {{- if .Values.router.hostPort }}
+        # kubelet expands $(HOST_IP) in the args below.
+        - name: HOST_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.hostIP
+        {{- end }}
         args:
         - "--control-plane=http://{{ include "sam-mesh.fullname" . }}-control-plane:{{ .Values.controlPlane.service.port }}"
         - "--listen=/ip4/0.0.0.0/tcp/4501"
@@ -84,11 +91,16 @@ spec:
         {{- range .Values.router.externalAddrs }}
         - "--external-addr={{ . }}"
         {{- end }}
+        {{- else if .Values.router.hostPort }}
+        - "--external-addr=/ip4/$(HOST_IP)/tcp/{{ .Values.router.hostPort }}"
+        - "--external-addr=/ip4/$(HOST_IP)/udp/{{ .Values.router.hostPort }}/quic-v1"
         {{- else }}
         - "--external-addr=/dns4/{{ include "sam-mesh.fullname" . }}-router/tcp/4501"
         {{- end }}
         - "--keys-path=/data/router.key"
+        {{- if .Values.router.allowLoopback }}
         - "--allow-loopback"
+        {{- end }}
         - "--log-level={{ .Values.router.logLevel }}"
         {{- if .Values.router.useOidcToken }}
         - "--jwt-path=/var/run/secrets/tokens/sam-token"
