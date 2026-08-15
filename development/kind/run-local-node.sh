@@ -30,13 +30,13 @@ CONTROL_PLANE_URL="http://${MAIN_IP}"
 # Mint an enrollment credential the way an operator would, through the dev-routed /admin API.
 ADMIN_TOKEN="$(kubectl --context "${KCTX}" -n "${NAMESPACE}" get secret sam-mesh-secrets \
   -o jsonpath='{.data.admin-token}' | base64 -d)"
-BOOTSTRAP_TOKEN="$(curl -sf -X POST "${CONTROL_PLANE_URL}/admin/bootstrap-tokens" \
+TOKEN_RESPONSE="$(curl -s -X POST "${CONTROL_PLANE_URL}/admin/bootstrap-tokens" \
   -H "Authorization: Bearer ${ADMIN_TOKEN}" \
   -H "Content-Type: application/json" \
-  -d '{"role":"sam:role:node","ttl_hours":1,"max_usages":1,"description":"local sam-node"}' \
-  | jq -r .token)"
-[[ -n "${BOOTSTRAP_TOKEN}" && "${BOOTSTRAP_TOKEN}" != "null" ]] || {
-  echo "could not mint a bootstrap token at ${CONTROL_PLANE_URL}/admin/bootstrap-tokens" >&2
+  -d '{"role":"sam:role:node","ttl_hours":1,"max_usages":1,"description":"local sam-node"}' || true)"
+BOOTSTRAP_TOKEN="$(printf '%s' "${TOKEN_RESPONSE}" | jq -r '.token // empty' 2>/dev/null || true)"
+[[ -n "${BOOTSTRAP_TOKEN}" ]] || {
+  echo "could not mint a bootstrap token at ${CONTROL_PLANE_URL}/admin/bootstrap-tokens: ${TOKEN_RESPONSE}" >&2
   exit 1; }
 
 echo "Enrolling local ./bin/sam-node into the mesh control plane at ${CONTROL_PLANE_URL}…"
