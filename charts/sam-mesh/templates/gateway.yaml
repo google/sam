@@ -19,7 +19,7 @@ spec:
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
-  name: {{ $fullName }}-control-plane
+  name: {{ $fullName }}-control-plane-route
   labels:
     {{- include "sam-mesh.labels" . | nindent 4 }}
 spec:
@@ -87,7 +87,7 @@ spec:
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
-  name: {{ $fullName }}-console
+  name: {{ $fullName }}-console-route
   labels:
     {{- include "sam-mesh.labels" . | nindent 4 }}
 spec:
@@ -123,7 +123,7 @@ spec:
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
-  name: {{ $fullName }}-dex
+  name: {{ $fullName }}-dex-route
   labels:
     {{- include "sam-mesh.labels" . | nindent 4 }}
 spec:
