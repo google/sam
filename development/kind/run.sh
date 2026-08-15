@@ -231,7 +231,7 @@ kubectl --context "${KCTX}" -n "${NAMESPACE}" wait --for=condition=available --t
 echo "== Checking Dex discovery from inside the cluster =="
 kubectl --context "${KCTX}" -n "${NAMESPACE}" run dex-discovery-check \
   --rm -i --restart=Never --quiet --image=curlimages/curl:8.6.0 -- \
-  curl -sf --retry 10 --retry-delay 2 --retry-connrefused --max-time 60 \
+  curl -sf --retry 10 --retry-delay 2 --retry-connrefused --connect-timeout 5 --max-time 20 \
   "${OIDC_ISSUER}/.well-known/openid-configuration" >/dev/null || {
     echo "cannot reach ${OIDC_ISSUER} from inside the cluster; pods must be able to route to the cloud-provider-kind LoadBalancer addresses" >&2
     exit 1
