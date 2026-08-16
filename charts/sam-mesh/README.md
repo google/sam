@@ -108,14 +108,30 @@ gateway:
 ```
 
 No route uses an HTTPRoute filter, so every rule is core conformance and any
-compliant controller can serve it. That is why the console gets its own
-gateway instead of a `/console` prefix on the main one: a prefix needs the
-`URLRewrite` filter, which is an *extended* feature some controllers
-(cloud-provider-kind among them) do not implement.
+compliant controller can serve it.
 
-When the console is served on its own hostname, point `dex.redirectURIs` at
-`https://<console-hostname>/auth/callback` and set `dex.issuer` to the URL
-clients reach Dex at.
+### Where the console lives (`console.basePath`)
+
+By default the console gets its own gateway and serves at `/`, which keeps it
+on a separate hostname or address. Set `console.basePath` to serve it on the
+control plane's gateway instead:
+
+```bash
+helm upgrade --install sam-mesh ./charts/sam-mesh \
+  --set gateway.enabled=true --set gateway.className=<class> \
+  --set console.basePath=/console
+```
+
+That drops the console's own Gateway and adds a `PathPrefix /console` rule to
+the control-plane route, so one address fronts both. The prefix needs **no**
+rewrite filter: the chart passes the same value as `--base-path`, and the
+console serves that prefix itself (it also keeps serving at the root, so a
+proxy that does strip the prefix still works).
+
+When the console is on its own hostname, point `dex.redirectURIs` at
+`https://<console-hostname>/auth/callback`; with a `basePath` it becomes
+`https://<hub-hostname>/console/auth/callback`. Either way `dex.issuer` must be
+the URL clients reach Dex at.
 
 ## Dex (`dex.enabled`)
 

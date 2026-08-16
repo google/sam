@@ -243,3 +243,40 @@ func TestDiscoverProviderWithRetry(t *testing.T) {
 		}
 	})
 }
+
+// TestNewServer_BasePathServesBothPrefixes: with a BasePath the console must answer both the
+// prefixed URLs it hands out (so a proxy can forward /console/* untouched) and the root.
+func TestNewServer_BasePathServesBothPrefixes(t *testing.T) {
+	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK) // empty /info: no OIDC, which the console tolerates
+	}))
+	defer controlPlane.Close()
+
+	srv, err := NewServer(Config{
+		ControlPlaneURL: controlPlane.URL,
+		AdminToken:      "test-admin-token",
+		StaticDir:       t.TempDir(),
+		BasePath:        "/console",
+	})
+	if err != nil {
+		t.Fatalf("failed to create server: %v", err)
+	}
+	console := httptest.NewServer(srv.Handler())
+	defer console.Close()
+
+	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	for path, want := range map[string]int{
+		"/info":         http.StatusOK,
+		"/console/info": http.StatusOK,
+		"/console":      http.StatusMovedPermanently, // ServeMux redirects to the subtree root
+	} {
+		resp, err := client.Get(console.URL + path)
+		if err != nil {
+			t.Fatalf("GET %s: %v", path, err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != want {
+			t.Errorf("GET %s: got %d, want %d", path, resp.StatusCode, want)
+		}
+	}
+}

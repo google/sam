@@ -109,6 +109,9 @@ router:
 console:
   enabled: true
   replicaCount: 1
+  # Serve the console under a path prefix (e.g. /console) on the control plane's gateway
+  # instead of giving it its own. Empty means its own gateway at /.
+  basePath: ""
   image:
     repository: sam-console
   resources:

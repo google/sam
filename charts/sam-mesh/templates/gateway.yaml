@@ -84,10 +84,20 @@ spec:
     - name: {{ $fullName }}-control-plane
       port: {{ .Values.controlPlane.service.port }}
   {{- end }}
-{{- if .Values.console.enabled }}
+  {{- if and .Values.console.enabled .Values.console.basePath }}
+  # Plain prefix, no rewrite filter: the console serves this path itself, because the
+  # chart passes it as --base-path.
+  - matches:
+    - path:
+        type: PathPrefix
+        value: {{ .Values.console.basePath }}
+    backendRefs:
+    - name: {{ $fullName }}-console
+      port: {{ .Values.console.service.port }}
+  {{- end }}
+{{- if and .Values.console.enabled (not .Values.console.basePath) }}
 ---
-# Own Gateway rather than a /console prefix on the main one: that needs a path rewrite,
-# which is an extended Gateway API feature, and the console's frontend uses relative URLs.
+# No console.basePath, so the console gets its own Gateway and serves at /.
 {{ include "sam-mesh.gateway" (dict "root" $ "suffix" "-console-gateway" "override" $consoleGateway) }}
 ---
 apiVersion: gateway.networking.k8s.io/v1

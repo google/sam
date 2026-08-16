@@ -101,12 +101,14 @@ func NewServer(cfg Config) (*Server, error) {
 		},
 	}
 
+	routes := http.NewServeMux()
+
 	// Proxy all API requests to the control plane
-	s.mux.Handle("/api/", http.StripPrefix("/api", proxy))
+	routes.Handle("/api/", http.StripPrefix("/api", proxy))
 
 	// Serve static files
 	fs := http.FileServer(http.Dir(s.cfg.StaticDir))
-	s.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	routes.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		// Basic check if file exists
 		path := filepath.Join(s.cfg.StaticDir, r.URL.Path)
 		if _, err := os.Stat(path); os.IsNotExist(err) && r.URL.Path != "/" {
@@ -119,12 +121,19 @@ func NewServer(cfg Config) (*Server, error) {
 
 	// OIDC login endpoints
 	if s.provider != nil {
-		s.mux.HandleFunc("/auth/login", s.HandleLogin)
-		s.mux.HandleFunc("/auth/callback", s.HandleCallback)
-		s.mux.HandleFunc("/auth/session", s.HandleSession)
+		routes.HandleFunc("/auth/login", s.HandleLogin)
+		routes.HandleFunc("/auth/callback", s.HandleCallback)
+		routes.HandleFunc("/auth/session", s.HandleSession)
 	}
-	s.mux.HandleFunc("/auth/logout", s.HandleLogout)
-	s.mux.HandleFunc("/info", s.HandleInfo)
+	routes.HandleFunc("/auth/logout", s.HandleLogout)
+	routes.HandleFunc("/info", s.HandleInfo)
+
+	// Serve under BasePath too, so the links this server emits resolve without the proxy
+	// stripping the prefix. Still served at the root for proxies that do strip it.
+	if s.cfg.BasePath != "" {
+		s.mux.Handle(s.cfg.BasePath+"/", http.StripPrefix(s.cfg.BasePath, routes))
+	}
+	s.mux.Handle("/", routes)
 
 	return s, nil
 }
