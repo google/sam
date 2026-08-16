@@ -2,7 +2,7 @@
 # Kind dev mesh: a control plane and router plus the nodes from mesh-config.yaml, each pinned to its
 # own k8s node, with live per-pod logs in named tmux panes. Control plane, console and Dex are reached
 # over Gateway API LoadBalancer addresses from cloud-provider-kind (started here); the router at its node IP.
-set -euo pipefail
+set -euox pipefail
 
 CLUSTER="sam-kind"
 NAMESPACE="sam-kind"
@@ -44,8 +44,16 @@ check_prereqs() {
   fi
 }
 
+# cloud-provider-kind names each gateway's envoy container after a hash of the gateway, so
+# one left behind by a deleted cluster is adopted by the next run and reported Programmed
+# while its config stream is dead and it serves nothing.
+remove_lb_containers() {
+  docker ps -aq -f "label=io.x-k8s.cloud-provider-kind.cluster=${CLUSTER}" | xargs -r docker rm -f >/dev/null
+}
+
 # Must run after the cluster, so the 'kind' docker network exists.
 start_cloud_provider_kind() {
+  remove_lb_containers
   if [[ -n "$(docker ps -q -f "name=^${CPK_CONTAINER}$")" ]]; then
     echo "cloud-provider-kind already running"
     return
@@ -58,6 +66,7 @@ start_cloud_provider_kind() {
 teardown() {
   kind delete cluster --name "${CLUSTER}"
   docker rm -f "${CPK_CONTAINER}" >/dev/null 2>&1 || true
+  remove_lb_containers
 }
 
 # gateway_ip <gateway>: the LoadBalancer address cloud-provider-kind assigned, waited for.
@@ -227,6 +236,9 @@ kubectl --context "${KCTX}" -n "${NAMESPACE}" wait --for=condition=available --t
 # The control plane discovers the issuer at startup and refuses to start if it can't, so
 # prove a pod can reach the gateway address before pinning the mesh to it.
 echo "== Checking Dex discovery from inside the cluster =="
+# A pod left behind by an interrupted run fails the next one with AlreadyExists, which
+# reads exactly like a routing failure.
+kubectl --context "${KCTX}" -n "${NAMESPACE}" delete pod dex-discovery-check --ignore-not-found >/dev/null
 kubectl --context "${KCTX}" -n "${NAMESPACE}" run dex-discovery-check \
   --rm -i --restart=Never --quiet --image=curlimages/curl:8.6.0 -- \
   curl -sf --retry 10 --retry-delay 2 --retry-connrefused --connect-timeout 5 --max-time 20 \
