@@ -15,6 +15,9 @@ HELM="helm"
 # cloud-provider-kind GatewayClass itself, so the cluster needs no CRD step.
 CPK_CONTAINER="cloud-provider-kind"
 CPK_IMAGE="registry.k8s.io/cloud-provider-kind/cloud-controller-manager:v0.11.1"
+# The console shares the control plane's gateway under this prefix, as it does on the
+# cloud. The console serves the prefix itself, so no route needs a rewrite filter.
+CONSOLE_BASE_PATH="/console"
 
 
 
@@ -97,6 +100,7 @@ deploy_chart() {
     --set gateway.adminRoute=true \
     --set router.hostPort=4501 \
     --set router.useOidcToken=true \
+    --set console.basePath="${CONSOLE_BASE_PATH}" \
     --set dex.enabled=true \
     "$@"
 }
@@ -225,9 +229,9 @@ deploy_chart
 # resolve them, then redeploy with the URLs everything must agree on.
 echo "== Waiting for gateway LoadBalancer addresses =="
 MAIN_IP="$(gateway_ip sam-mesh-gateway)"
-CONSOLE_IP="$(gateway_ip sam-mesh-console-gateway)"
 DEX_IP="$(gateway_ip sam-mesh-dex-gateway)"
-echo "control plane: http://${MAIN_IP}  console: http://${CONSOLE_IP}  dex: http://${DEX_IP}"
+CONSOLE_URL="http://${MAIN_IP}${CONSOLE_BASE_PATH}/"
+echo "control plane: http://${MAIN_IP}  console: ${CONSOLE_URL}  dex: http://${DEX_IP}"
 
 OIDC_ISSUER="http://${DEX_IP}/dex"
 
@@ -252,7 +256,7 @@ echo "== Wiring the OIDC URLs =="
 CONTROL_PLANE_ISSUERS="${OIDC_ISSUER},${ISSUER}"
 deploy_chart \
   --set dex.issuer="${OIDC_ISSUER}" \
-  --set dex.redirectURIs[0]="http://${CONSOLE_IP}/auth/callback"
+  --set dex.redirectURIs[0]="http://${MAIN_IP}${CONSOLE_BASE_PATH}/auth/callback"
 
 echo "== Waiting for database to be ready =="
 kubectl --context "${KCTX}" -n "${NAMESPACE}" wait --for=condition=ready --timeout=180s pod -l app=sam-mesh-db
@@ -282,7 +286,7 @@ done
 
 echo
 echo "Mesh up."
-echo "  console:       http://${CONSOLE_IP}/"
+echo "  console:       ${CONSOLE_URL}"
 echo "  control plane: http://${MAIN_IP}"
 echo "  dex:           ${OIDC_ISSUER}"
 echo

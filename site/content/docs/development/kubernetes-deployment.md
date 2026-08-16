@@ -29,7 +29,8 @@ In-cluster nodes authenticate to the control plane via **Workload Identity Feder
 The mesh is exposed the way the cloud testnets are, so there are no port-forwards and no `extraPortMappings`. `run.sh` runs **`cloud-provider-kind`** as a container (a hard prerequisite — it needs the docker socket) to serve Gateway API LoadBalancer addresses, and prints them when the mesh is up:
 
 - The **control plane** on its own address, routing the same 8 exact enrollment paths the cloud allows, plus a dev-only `/admin` route.
-- The **console** and **Dex** each on their own address. The console sits at `/` rather than the cloud's `/console` prefix, because `cloud-provider-kind` implements no path rewrite.
+- The **console** at `/console/` on that same address, as on the cloud. Unlike the cloud the route carries no rewrite filter: the console is given `--base-path=/console` and serves the prefix itself, which `cloud-provider-kind` can route and its missing rewrite filter cannot break.
+- **Dex** on its own address, mirroring the cloud's separate `auth.` hostname.
 - The **router** at its own node's IP on port 4501, TCP **and** QUIC, announced from `status.hostIP` — the same mechanism GKE uses.
 
 Once everything is up, `make kind-up` opens a tmux session with live per-pod logs (control plane, router and each node in its own pane). Manage the mesh with:
