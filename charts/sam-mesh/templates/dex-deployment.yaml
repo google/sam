@@ -25,10 +25,12 @@ staticClients:
   public: true
 enablePasswordDB: true
 staticPasswords:
-- email: admin@example.com
+# The control plane auto-registers a first-time OIDC login with the "user" role, so this
+# account is not an admin however it is named.
+- email: user@example.com
   # bcrypt hash for 'password'
   hash: "$2a$10$TUOgJVdtu0AL6Y6TcNBQXOSjRWRKhIkC0kXDzN9kOkPB4hg2aFPE2"
-  username: admin
+  username: user
   userID: "0898fa90-3453-4311-8566-020953250212"
 {{- end }}
 {{- if .Values.dex.enabled -}}
