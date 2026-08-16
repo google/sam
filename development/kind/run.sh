@@ -2,7 +2,7 @@
 # Kind dev mesh: a control plane and router plus the nodes from mesh-config.yaml, each pinned to its
 # own k8s node, with live per-pod logs in named tmux panes. Control plane, console and Dex are reached
 # over Gateway API LoadBalancer addresses from cloud-provider-kind (started here); the router at its node IP.
-set -euox pipefail
+set -euo pipefail
 
 CLUSTER="sam-kind"
 NAMESPACE="sam-kind"
@@ -280,14 +280,16 @@ for node in "${NODES[@]}"; do
 done
 
 echo
-echo "Mesh up. To call a node's MCP API, port-forward it in another shell, e.g.:"
-echo "  kubectl --context ${KCTX} -n ${NAMESPACE} port-forward deploy/node-a 9091:8080"
-echo "then:"
-echo "  ./bin/mcp-client -url http://127.0.0.1:9091/mcp -token devtoken -tool find_remote_tools -args '{}'"
-echo ""
-echo "You can access the SAM Web Console at:"
-echo "  http://${CONSOLE_IP}/"
-echo "The control plane is at http://${MAIN_IP} and Dex at ${OIDC_ISSUER}"
+echo "Mesh up."
+echo "  console:       http://${CONSOLE_IP}/"
+echo "  control plane: http://${MAIN_IP}"
+echo "  dex:           ${OIDC_ISSUER}"
+echo
+echo "To drive the mesh, enroll a local node in another shell (it stays in the foreground):"
+echo "  make build && make kind-local-node"
+echo "then call its MCP API on 127.0.0.1:9099:"
+echo "  ./bin/mcp-client -url http://127.0.0.1:9099/mcp -token devtoken -tool get_mesh_info -args '{}'"
+echo "  ./bin/mcp-client -url http://127.0.0.1:9099/mcp -token devtoken -tool find_remote_tools -args '{}'"
 
 if [[ "${1:-}" != "-s" ]]; then
   show_cluster_logs
