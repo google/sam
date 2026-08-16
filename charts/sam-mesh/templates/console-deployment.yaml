@@ -28,10 +28,27 @@ spec:
         - |
           set -e
           CP_URL="http://{{ include "sam-mesh.fullname" . }}-control-plane:{{ .Values.controlPlane.service.port }}"
+          {{- $issuer := .Values.controlPlane.oidcIssuer | splitList "," | first | trim }}
+          {{- if $issuer }}
+          # During an upgrade the old pods still answer /info with the old issuer, so wait
+          # for several answers in a row naming the issuer this release configures, not
+          # just any control plane.
+          agreed=0
+          until [ "$agreed" -ge 3 ]; do
+            if curl -sf "${CP_URL}/info" | grep -qF '{{ $issuer }}'; then
+              agreed=$((agreed+1))
+            else
+              echo "Control plane not serving issuer {{ $issuer }} yet, sleeping..."
+              agreed=0
+            fi
+            sleep 2
+          done
+          {{- else }}
           until curl -sf "${CP_URL}/info" > /dev/null; do
             echo "Control plane not ready yet, sleeping..."
             sleep 2
           done
+          {{- end }}
       containers:
       - name: sam-console
         image: "{{ .Values.console.image.repository }}:{{ .Values.global.imageTag }}"
