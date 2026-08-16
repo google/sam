@@ -2,13 +2,33 @@ global:
   imageTag: local
   imagePullPolicy: IfNotPresent
 
-# One Gateway per externally-reachable service, each on HTTP :80. No route uses an
-# HTTPRoute filter: cloud-provider-kind implements neither path redirect nor path rewrite.
+# One Gateway per externally-reachable service, each with its own HTTPRoute. No route uses
+# an HTTPRoute filter, so any conformant controller can serve them.
 gateway:
   enabled: false
-  className: cloud-provider-kind
+  # Required when enabled. No default: the GatewayClass is provider-specific, e.g.
+  # cloud-provider-kind in kind, gke-l7-global-external-managed on GKE.
+  className: ""
   # Routes the control plane's /admin API. Dev only; the cloud leaves it unrouted.
   adminRoute: false
+  # listeners, hostnames, addresses and annotations pass through to the Gateway API
+  # objects verbatim, so anything the spec allows is expressible. These are the defaults
+  # for every gateway; plain HTTP on 80 matching any host suits a local cluster.
+  listeners:
+  - name: http
+    protocol: HTTP
+    port: 80
+    allowedRoutes:
+      namespaces:
+        from: Same
+  hostnames: []
+  addresses: []
+  annotations: {}
+  # Per-gateway overrides. Any of the four above set here replaces the shared value for
+  # that gateway alone — one certificate or provider annotation per hostname.
+  controlPlane: {}
+  console: {}
+  dex: {}
 
 controlPlane:
   replicaCount: 2

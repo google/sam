@@ -59,6 +59,64 @@ administrator to approve each enrollment via `/admin/enrollments` before a
 node can join — see the
 [Control Plane Configuration guide](https://sam-mesh.dev/docs/user/control-plane-configuration/#6-headless-node-enrollment-bootstrap-token-flow).
 
+## Gateway API (`gateway.enabled`)
+
+Disabled by default. When enabled the chart creates one `Gateway` per
+externally-reachable service — control plane, console and Dex — each with its
+own `HTTPRoute`. `gateway.className` is then **required**, with no default,
+because the right GatewayClass is provider-specific (`cloud-provider-kind` in
+kind, `gke-l7-global-external-managed` on GKE, `istio`, `envoy-gateway`, …).
+
+The control-plane route exposes only the enrollment surface (`/register`,
+`/info`, `/keys`, `/routers/lease`, `/policies`, `/enroll`, `/enroll/status`,
+`/refresh`); everything else, including `/admin` and `/user`, is unrouted.
+`gateway.adminRoute: true` additionally routes `/admin` — a dev convenience,
+leave it off in production. The console and Dex each get a `PathPrefix /` route.
+
+`listeners`, `hostnames`, `addresses` and `annotations` are passed through to
+the Gateway API objects verbatim, so anything the spec allows is expressible.
+They default to one plain-HTTP listener on port 80 matching every host, which
+suits a local cluster. `gateway.controlPlane`, `gateway.console` and
+`gateway.dex` override any of the four for that gateway alone — needed when
+each hostname has its own certificate or provider annotation:
+
+```yaml
+gateway:
+  enabled: true
+  className: gke-l7-global-external-managed
+  listeners:
+  - name: https
+    protocol: HTTPS
+    port: 443
+    tls:
+      certificateRefs:
+      - name: sam-mesh-tls
+    allowedRoutes:
+      namespaces:
+        from: Same
+  hostnames: [hub.example.com]
+  controlPlane:
+    addresses:
+    - type: NamedAddress
+      value: sam-hub-ip
+    annotations:
+      networking.gke.io/certmap: sam-hub-cert-map
+  console:
+    hostnames: [console.example.com]
+  dex:
+    hostnames: [auth.example.com]
+```
+
+No route uses an HTTPRoute filter, so every rule is core conformance and any
+compliant controller can serve it. That is why the console gets its own
+gateway instead of a `/console` prefix on the main one: a prefix needs the
+`URLRewrite` filter, which is an *extended* feature some controllers
+(cloud-provider-kind among them) do not implement.
+
+When the console is served on its own hostname, point `dex.redirectURIs` at
+`https://<console-hostname>/auth/callback` and set `dex.issuer` to the URL
+clients reach Dex at.
+
 ## Dex (`dex.enabled`)
 
 Disabled by default. The bundled Dex is only meant for local/dev OIDC login

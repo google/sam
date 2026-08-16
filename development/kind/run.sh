@@ -93,6 +93,7 @@ deploy_chart() {
     --set controlPlane.allowedAudiences="${ALLOWED_AUDIENCES//,/\\,}" \
     --set controlPlane.insecureSkipTlsVerify=true \
     --set gateway.enabled=true \
+    --set gateway.className=cloud-provider-kind \
     --set gateway.adminRoute=true \
     --set router.hostPort=4501 \
     --set router.useOidcToken=true \

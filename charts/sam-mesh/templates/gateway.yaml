@@ -1,20 +1,36 @@
-{{- if .Values.gateway.enabled -}}
-{{- $fullName := include "sam-mesh.fullname" . -}}
+{{/*
+Renders one Gateway. listeners, addresses and annotations are passed through verbatim, so
+any provider's TLS, static-address or annotation shape is expressible from values.
+Call with: (dict "root" $ "suffix" "-gateway" "override" $someOverride)
+*/}}
+{{- define "sam-mesh.gateway" -}}
+{{- $gateway := .root.Values.gateway -}}
+{{- $override := .override -}}
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
 metadata:
-  name: {{ $fullName }}-gateway
+  name: {{ include "sam-mesh.fullname" .root }}{{ .suffix }}
   labels:
-    {{- include "sam-mesh.labels" . | nindent 4 }}
+    {{- include "sam-mesh.labels" .root | nindent 4 }}
+  {{- with ($override.annotations | default $gateway.annotations) }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
-  gatewayClassName: {{ .Values.gateway.className }}
+  gatewayClassName: {{ required "gateway.className is required when gateway.enabled is true" $gateway.className }}
+  {{- with ($override.addresses | default $gateway.addresses) }}
+  addresses:
+    {{- toYaml . | nindent 2 }}
+  {{- end }}
   listeners:
-  - name: http
-    protocol: HTTP
-    port: 80
-    allowedRoutes:
-      namespaces:
-        from: Same
+    {{- toYaml ($override.listeners | default $gateway.listeners) | nindent 2 }}
+{{- end -}}
+{{- if .Values.gateway.enabled -}}
+{{- $fullName := include "sam-mesh.fullname" . -}}
+{{- $controlPlaneGateway := .Values.gateway.controlPlane | default dict -}}
+{{- $consoleGateway := .Values.gateway.console | default dict -}}
+{{- $dexGateway := .Values.gateway.dex | default dict -}}
+{{ include "sam-mesh.gateway" (dict "root" $ "suffix" "-gateway" "override" $controlPlaneGateway) }}
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -25,6 +41,10 @@ metadata:
 spec:
   parentRefs:
   - name: {{ $fullName }}-gateway
+  {{- with ($controlPlaneGateway.hostnames | default .Values.gateway.hostnames) }}
+  hostnames:
+    {{- toYaml . | nindent 2 }}
+  {{- end }}
   rules:
   # The enrollment surface, matching the cloud's allow-list exactly.
   - matches:
@@ -66,23 +86,9 @@ spec:
   {{- end }}
 {{- if .Values.console.enabled }}
 ---
-# Own Gateway rather than /console on the main one: that needs a prefix rewrite, which
-# cloud-provider-kind does not implement, and the frontend uses relative URLs.
-apiVersion: gateway.networking.k8s.io/v1
-kind: Gateway
-metadata:
-  name: {{ $fullName }}-console-gateway
-  labels:
-    {{- include "sam-mesh.labels" . | nindent 4 }}
-spec:
-  gatewayClassName: {{ .Values.gateway.className }}
-  listeners:
-  - name: http
-    protocol: HTTP
-    port: 80
-    allowedRoutes:
-      namespaces:
-        from: Same
+# Own Gateway rather than a /console prefix on the main one: that needs a path rewrite,
+# which is an extended Gateway API feature, and the console's frontend uses relative URLs.
+{{ include "sam-mesh.gateway" (dict "root" $ "suffix" "-console-gateway" "override" $consoleGateway) }}
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -93,6 +99,10 @@ metadata:
 spec:
   parentRefs:
   - name: {{ $fullName }}-console-gateway
+  {{- with ($consoleGateway.hostnames | default .Values.gateway.hostnames) }}
+  hostnames:
+    {{- toYaml . | nindent 2 }}
+  {{- end }}
   rules:
   - matches:
     - path:
@@ -104,21 +114,7 @@ spec:
 {{- end }}
 {{- if .Values.dex.enabled }}
 ---
-apiVersion: gateway.networking.k8s.io/v1
-kind: Gateway
-metadata:
-  name: {{ $fullName }}-dex-gateway
-  labels:
-    {{- include "sam-mesh.labels" . | nindent 4 }}
-spec:
-  gatewayClassName: {{ .Values.gateway.className }}
-  listeners:
-  - name: http
-    protocol: HTTP
-    port: 80
-    allowedRoutes:
-      namespaces:
-        from: Same
+{{ include "sam-mesh.gateway" (dict "root" $ "suffix" "-dex-gateway" "override" $dexGateway) }}
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -129,6 +125,10 @@ metadata:
 spec:
   parentRefs:
   - name: {{ $fullName }}-dex-gateway
+  {{- with ($dexGateway.hostnames | default .Values.gateway.hostnames) }}
+  hostnames:
+    {{- toYaml . | nindent 2 }}
+  {{- end }}
   rules:
   - matches:
     - path:
