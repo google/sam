@@ -51,7 +51,12 @@ check_prereqs() {
 # one left behind by a deleted cluster is adopted by the next run and reported Programmed
 # while its config stream is dead and it serves nothing.
 remove_lb_containers() {
-  docker ps -aq -f "label=io.x-k8s.cloud-provider-kind.cluster=${CLUSTER}" | xargs -r docker rm -f >/dev/null
+  local containers
+  containers="$(docker ps -aq -f "label=io.x-k8s.cloud-provider-kind.cluster=${CLUSTER}")"
+  if [[ -n "${containers}" ]]; then
+    # shellcheck disable=SC2086 # one container id per argument
+    docker rm -f ${containers} >/dev/null
+  fi
 }
 
 # Must run after the cluster, so the 'kind' docker network exists.
