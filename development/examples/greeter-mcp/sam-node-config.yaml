@@ -1,6 +1,6 @@
 version: "v1alpha1"
 attenuation:
-  policies:
+  policies: []
 services:
   - type: "mcp"
     name: "greeter"

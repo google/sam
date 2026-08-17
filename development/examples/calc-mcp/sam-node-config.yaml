@@ -1,8 +1,6 @@
 version: "v1alpha1"
 attenuation:
-  # Allow cross-node MCP only when the caller's biscuit carries a
-  # node($peer) fact — i.e. it was issued by our control plane upon enrollment.
-  policies:
+  policies: []
 services:
   - type: "mcp"
     name: "calculator"
