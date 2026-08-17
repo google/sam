@@ -86,9 +86,6 @@ Host the buddy on one node in `development/kind/mesh-config.yaml`:
 ```yaml
 node-a:                    # bare node (orchestrator entry)
 node-b: gemini-buddy-mcp   # the buddy
-node-c:
-node-d:
-node-e:
 ```
 
 ### 3. Bring the mesh up and start a local orchestrator node
