@@ -54,4 +54,5 @@ __pycache__/
 *.egg-info/
 keys.db
 mobile/logcat.txt
+.scratch/
 

@@ -6,6 +6,3 @@
 # All nodes ship bare by default — assign services to suit what you're testing.
 node-a:
 node-b:
-node-c:
-node-d:
-node-e:

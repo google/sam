@@ -1,8 +1,6 @@
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 nodes:
-  # No extraPortMappings: the mesh is reached at the gateway LoadBalancer addresses
-  # cloud-provider-kind assigns, and the router at its own node's IP.
   - role: control-plane
   - role: worker
     labels:
@@ -13,12 +11,3 @@ nodes:
   - role: worker
     labels:
       sam-role: node-b
-  - role: worker
-    labels:
-      sam-role: node-c
-  - role: worker
-    labels:
-      sam-role: node-d
-  - role: worker
-    labels:
-      sam-role: node-e
