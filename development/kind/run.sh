@@ -99,6 +99,7 @@ deploy_chart() {
     --set gateway.className=cloud-provider-kind \
     --set gateway.adminRoute=true \
     --set router.hostPort=4501 \
+    --set router.nodeSelector.sam-role=control-plane \
     --set router.useOidcToken=true \
     --set console.basePath="${CONSOLE_BASE_PATH}" \
     --set dex.enabled=true \

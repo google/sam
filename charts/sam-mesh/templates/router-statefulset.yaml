@@ -24,6 +24,10 @@ spec:
         app: {{ include "sam-mesh.fullname" . }}-router
     spec:
       serviceAccountName: {{ include "sam-mesh.fullname" . }}-router-sa
+      {{- with .Values.router.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       {{- with .Values.router.podSecurityContext }}
       securityContext:
         {{- toYaml . | nindent 8 }}
