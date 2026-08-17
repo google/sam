@@ -273,6 +273,8 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
 
     # router.externalAddrs: nodes resolve sam-router per-network via --add-host, so the router must
     # announce that name. Announcing a node IP instead is unroutable from an isolated test network.
+    # bootstrap.nodeServices: policy.bats asserts the control plane denies an ungranted service, so
+    # this lane pins the grants it tests rather than inheriting the chart default.
     "${helm_bin}" --kube-context="${KUBECONTEXT}" upgrade --install sam ./charts/sam-mesh \
       --namespace default \
       --set fullnameOverride="sam" \
@@ -285,7 +287,8 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
       --set controlPlane.hostPort=8080 \
       --set router.useOidcToken=false \
       --set router.hostPort=4501 \
-      --set 'router.externalAddrs={/dns4/sam-router/tcp/4501}'
+      --set 'router.externalAddrs={/dns4/sam-router/tcp/4501}' \
+      --set 'bootstrap.nodeServices={mcp://calculator,mcp://db-agent,mcp://http-tool,mcp://stdio-tool,system://sam.catalog}'
 
     kubectl --context="${KUBECONTEXT}" rollout status statefulset/sam-db --timeout=60s
     kubectl --context="${KUBECONTEXT}" rollout status deployment/sam-control-plane --timeout=60s
