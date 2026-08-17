@@ -71,10 +71,12 @@ start_cloud_provider_kind() {
     -v /var/run/docker.sock:/var/run/docker.sock "${CPK_IMAGE}" >/dev/null
 }
 
+# Stop cloud-provider-kind before its containers, or it recreates them, and remove them before
+# deleting the cluster, or deleting it makes cloud-provider-kind race us to the same containers.
 teardown() {
-  kind delete cluster --name "${CLUSTER}"
   docker rm -f "${CPK_CONTAINER}" >/dev/null 2>&1 || true
   remove_lb_containers
+  kind delete cluster --name "${CLUSTER}"
 }
 
 # gateway_ip <gateway>: the LoadBalancer address cloud-provider-kind assigned, waited for.
