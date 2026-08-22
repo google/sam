@@ -60,8 +60,8 @@ func buildBinary(t *testing.T, pkgPath string) string {
 	t.Helper()
 	root := repoRoot(t)
 	out := filepath.Join(t.TempDir(), filepath.Base(pkgPath))
-	cmd := exec.Command("go", "build", "-o", out, pkgPath)
-	cmd.Dir = root
+	cmd := exec.Command("go", "build", "-o", out, ".")
+	cmd.Dir = filepath.Join(root, pkgPath)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("building %s failed: %v\n%s", pkgPath, err, string(output))
 	}

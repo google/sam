@@ -36,6 +36,19 @@ type RequestContext struct {
 	Group    string
 	Protocol string
 	Target   string
+
+	// Agent is the principal the calling node says the request is for, and it
+	// is exactly that: the calling node's word. It arrives beside the token
+	// rather than inside it, because Biscuit deliberately hides an appended
+	// block's facts from the authorizer (see internal/identity's
+	// TestAttenuationBlockFactsAreInvisibleToTheAuthorizer). Nothing is lost by
+	// that: whoever can append a block can append any block, so a claim in a
+	// block would be worth no more than a claim in a header on the same
+	// authenticated connection.
+	//
+	// So it is attribution, not proof. Policy that cares should also constrain
+	// which peers may speak for which agent namespaces.
+	Agent string
 }
 
 // recoverStreamHandler isolates a panic while processing untrusted peer bytes
@@ -120,6 +133,7 @@ func (n *SamNode) WithBiscuitAuth(next func(network.Stream, RequestContext)) net
 			User:     "", // Not used in Authorize
 			Protocol: string(ts.Protocol()),
 			Target:   authFrame.TargetService,
+			Agent:    agentClaim(authFrame.GetAgent()),
 		}
 
 		writer := msgio.NewVarintWriter(ts)
@@ -232,6 +246,18 @@ func (n *SamNode) Authorize(rawToken []byte, req RequestContext, pubKey ed25519.
 			IDs:  []biscuit.Term{biscuit.String(req.PeerID.String())},
 		},
 	})
+
+	// The calling node's claim about which agent it speaks for. Injected here
+	// rather than trusted from the token, so it is visible to policy while
+	// staying plainly what it is: an assertion by the peer at the other end.
+	if req.Agent != "" {
+		authorizer.AddFact(biscuit.Fact{
+			Predicate: biscuit.Predicate{
+				Name: api.FactAgent,
+				IDs:  []biscuit.Term{biscuit.String(req.Agent)},
+			},
+		})
+	}
 
 	// Enforce client_peer_id matches connection_peer_id
 	authorizer.AddCheck(api.BaselineReplayCheck)

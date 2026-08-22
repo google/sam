@@ -1,0 +1,55 @@
+{
+  "experiment": "200 concurrent agent principals, 200 requests each, through their own boundaries",
+  "recorded": "2026-08-21",
+  "host": "n2-standard-64, us-central1-c",
+  "mesh": "bananas.sam-mesh.dev",
+  "resident_population": {
+    "microvms": 1000,
+    "boundaries": 1000,
+    "note": "the other 800 sandboxes stayed resident and idle during the load"
+  },
+  "driver": {
+    "tool": "sam-bench",
+    "target": "http://mesh.sam.alt/v1/models",
+    "boundaries": 200,
+    "requests_per_agent": 200,
+    "concurrency_per_agent": 2,
+    "warmup_per_agent": 5,
+    "entry_point": "the boundary's SOCKS5 socket on the host, the same entry point the guest uses over vsock",
+    "excludes": "the in-guest netstack and the vsock hop"
+  },
+  "aggregate": {
+    "requests_ok": 40000,
+    "requests_failed": 0,
+    "wall_clock_seconds": 0.432,
+    "throughput_rps": 92499.0
+  },
+  "per_agent_rps": {
+    "median": 533.5,
+    "min": 490.4,
+    "max": 651.5
+  },
+  "client_ttfb_ms": {
+    "p50_median_across_agents": 2.025,
+    "p50_worst_agent": 2.668,
+    "p95_median_across_agents": 13.225,
+    "p95_worst_agent": 17.623,
+    "p99_median_across_agents": 21.369,
+    "p99_worst_agent": 57.087,
+    "worst_single_request": 98.264
+  },
+  "server_side_sam_node": {
+    "all_requests": 41000,
+    "all_code_200": true,
+    "under_0.5ms": 35580,
+    "under_5ms": 39412,
+    "under_10ms": 40207,
+    "under_25ms": 40586,
+    "cold_start_5s_to_10s": 400,
+    "note": "the 400 slow requests are first-flow setups on boundaries idle for ~45 minutes; steady state is the sub-millisecond mass"
+  },
+  "cold_start_ms": {
+    "median_across_agents": 5037.0,
+    "max": 5058.0
+  }
+}

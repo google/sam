@@ -11,10 +11,6 @@ data:
       checks: []
       rules: []
     services: []
-  secrets.yaml: |
-    example.com:
-      kind: Bearer
-      value: real-upstream-secret-123
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -22,6 +18,20 @@ metadata:
   name: sam-box-sa
   namespace: sam-canary-${ENV_NAME}
 ---
+# Canary for the sandbox datapath: an agent holding no credential reaches an
+# allowlisted destination through the boundary, and nothing else.
+#
+# The node enrols and owns the mesh identity; sam-box consumes it over the API
+# socket and serves the sandbox. All that is shared between them is the socket,
+# which is the point of the arrangement.
+#
+# The agent is a real sandbox rather than a client that has been told where to
+# find a proxy. Every container in a pod shares one network namespace, so
+# nano-init makes its own with --create-namespaces and gives itself the only
+# route out; the agent then speaks ordinary HTTP to ordinary names, and the
+# fact that it reaches anything at all is the assertion. A curl pointed at
+# --socks5-hostname would prove the boundary works for a client that chose to
+# use it, which is the one case nobody needs proving.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -38,39 +48,35 @@ spec:
         app: box-canary-${ENV_NAME}
     spec:
       serviceAccountName: sam-box-sa
+      # nano-init ships as its own image with no shell in it, so the binary is
+      # handed to the agent container rather than the agent image being built
+      # around it. Any image with a client in it can be a sandbox this way.
       initContainers:
-      - name: init-nano-init
+      - name: nano-init
         image: ghcr.io/google/sam-nano-init:${IMAGE_TAG}
-        command: ["/nano-init", "copy", "/shared-bin/nano-init"]
+        args: ["copy", "/sandbox/nano-init"]
         volumeMounts:
-        - name: shared-bin
-          mountPath: /shared-bin
+        - name: sandbox
+          mountPath: /sandbox
       containers:
-      - name: agent
-        image: alpine/curl:8.12.1
-        command:
-          - "/shared-bin/nano-init"
-          - "run"
-          - "/var/run/sam/sam-box.sock"
-          - "sh"
-          - "-c"
-          - "while true; do curl -v -H 'Authorization: Bearer dummy-token' http://example.com/test; sleep 10; done"
-        volumeMounts:
-        - name: shared-bin
-          mountPath: /shared-bin
-        - name: sam-uds
-          mountPath: /var/run/sam
-      - name: sam-box
-        image: ghcr.io/google/sam-box:${IMAGE_TAG}
+      - name: sam-node
+        image: ghcr.io/google/sam-node:${IMAGE_TAG}
         args:
           - "run"
-          - "--uds-path=/var/run/sam/sam-box.sock"
           - "--config=/etc/sam/sam-node.yaml"
-          - "--secrets-file=/etc/sam/secrets.yaml"
           - "--control-plane=http://sam-control-plane-${ENV_NAME}.${NAMESPACE}.svc.cluster.local:8080"
           - "--jwt-path=/var/run/secrets/tokens/sam-token"
-          - "--allow-loopback"
-          - "--log-level=debug"
+          # Socket only: with no TCP listener there is no API token to leak, and
+          # the socket's permissions are the credential.
+          - "--bind-addr="
+          - "--socket-path=/var/run/sam/node.sock"
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 256Mi
         volumeMounts:
         - name: config-volume
           mountPath: /etc/sam
@@ -79,11 +85,96 @@ spec:
           readOnly: true
         - name: sam-uds
           mountPath: /var/run/sam
+      - name: sam-box
+        image: ghcr.io/google/sam-box:${IMAGE_TAG}
+        args:
+          - "run"
+          - "--socket=/var/run/sam/agent.sock"
+          - "--sidecar-socket=/var/run/sam/node.sock"
+          - "--egress-allow=example.com"
+          - "--log-level=debug"
+        resources:
+          requests:
+            cpu: 20m
+            memory: 32Mi
+          limits:
+            cpu: 100m
+            memory: 128Mi
+        volumeMounts:
+        - name: sam-uds
+          mountPath: /var/run/sam
+      # No securityContext: creating the namespaces needs CAP_SYS_ADMIN and the
+      # tun needs CAP_NET_ADMIN, and a user namespace supplies both over the
+      # namespaces it owns. Granting CAP_SYS_ADMIN alone would be worse than
+      # granting nothing -- the namespace would be created and the tun would
+      # then fail for want of the other one.
+      - name: agent
+        image: alpine/curl:8.12.1
+        # The boundary socket is 0600, owned by the uid sam-box runs as, and
+        # that is the access control rather than an accident of packaging. A
+        # user namespace maps exactly one uid, so the sandbox has to be that
+        # uid: as root it would map 0 and hold no privilege over a file owned
+        # by 65532, and the connection would be refused.
+        #
+        # Unconfined AppArmor is the one relaxation the sandbox needs. The
+        # profile containerd applies by default permits the mount namespace and
+        # then denies the bind mount inside it, so the sandbox would get a
+        # namespace it cannot give a private resolv.conf. Everything else stays
+        # off: no capabilities, no privileged, and a user namespace that holds
+        # the process to what it owns.
+        securityContext:
+          runAsUser: 65532
+          runAsGroup: 65532
+          appArmorProfile:
+            type: Unconfined
+        command:
+          - "/sandbox/nano-init"
+          - "run"
+          - "--create-namespaces"
+          - "/var/run/sam/agent.sock"
+          - "sh"
+          - "-c"
+          - |
+            echo "the sandbox's interfaces (expect lo and tun0 only): $(ip -o link show | cut -d: -f2 | tr -d ' ' | paste -sd,)"
+            while true; do
+              echo "allowlisted destination (expect 200): $(curl -s -o /dev/null -w '%{http_code}' http://example.com/)"
+              echo "the node's own API (expect 403): $(curl -s -o /dev/null -w '%{http_code}' http://mesh.sam.alt/sam/service/register)"
+              curl -s -o /dev/null http://blocked.example/ && echo "unlisted destination was NOT refused" || echo "unlisted destination refused (expected)"
+              sleep 30
+            done
+        resources:
+          requests:
+            cpu: 10m
+            memory: 16Mi
+          limits:
+            cpu: 50m
+            memory: 64Mi
+        volumeMounts:
+        - name: sam-uds
+          mountPath: /var/run/sam
+        - name: sandbox
+          mountPath: /sandbox
+        # A new mount namespace copies the mount table, not the files behind
+        # it, so the private resolv.conf is a bind mount over a real file that
+        # has to be created somewhere.
+        - name: scratch
+          mountPath: /tmp
+        # A bind mount is enough. The device cgroup does not deny this one, so
+        # there is no device plugin involved; what the tun needs is the
+        # capability, and the user namespace supplies that.
+        - name: tun
+          mountPath: /dev/net/tun
       volumes:
-      - name: shared-bin
-        emptyDir: {}
       - name: sam-uds
         emptyDir: {}
+      - name: sandbox
+        emptyDir: {}
+      - name: scratch
+        emptyDir: {}
+      - name: tun
+        hostPath:
+          path: /dev/net/tun
+          type: CharDevice
       - name: config-volume
         configMap:
           name: sam-canary-box-config-${ENV_NAME}

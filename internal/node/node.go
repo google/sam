@@ -1866,6 +1866,7 @@ func (n *SamNode) StartIngressServer(ctx context.Context) error {
 				User:     "", // Extracted implicitly if needed, or left empty
 				Protocol: "/libp2p-http",
 				Target:   target,
+				Agent:    agentClaim(r.Header.Get(api.HeaderSamAgent)),
 			}
 
 			// Verify authorization
@@ -1877,6 +1878,9 @@ func (n *SamNode) StartIngressServer(ctx context.Context) error {
 
 			// Strip the biscuit header so it doesn't leak to the backend service
 			r.Header.Del(api.HeaderSamBiscuit)
+			// The agent is for policy, not for the backend, which has no way to
+			// judge it.
+			r.Header.Del(api.HeaderSamAgent)
 
 			svc, ok := n.services.Get(serviceName)
 			if !ok {

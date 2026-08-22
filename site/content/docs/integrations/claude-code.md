@@ -6,7 +6,7 @@ You can connect your `sam-node` to [Claude Code](https://claude.com/claude-code)
 
 ## Overview
 
-`sam-node` exposes a standard Model Context Protocol (MCP) server over HTTP Server-Sent Events (SSE). Claude Code is a generic MCP client, so once the server is registered its tools — `discover_remote_services`, `find_remote_tools`, `describe_remote_tool`, and `call_remote_tool` — are surfaced directly to your agent.
+`sam-node` exposes a standard Model Context Protocol (MCP) server over Streamable HTTP. Claude Code is a generic MCP client, so once the server is registered its tools — `discover_remote_services`, `find_remote_tools`, `describe_remote_tool`, and `call_remote_tool` — are surfaced directly to your agent.
 
 ## Prerequisites
 

@@ -1,0 +1,10 @@
+openai>=1.40,<3
+# Pinned to a major version: 1.x spells the transport streamablehttp_client and
+# 2.x spells it streamable_http_client, so an unpinned floor silently changes
+# the API underneath a sandbox image.
+mcp>=2.0,<3
+# Pinned below 1.0 deliberately: LangChain 1.x removed AgentExecutor and
+# create_tool_calling_agent from langchain.agents, so an unpinned install
+# builds an image whose agent fails at import rather than at run time.
+langchain>=0.3,<1
+langchain-openai>=0.2,<1

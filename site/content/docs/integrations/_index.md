@@ -23,7 +23,7 @@ Explore the step-by-step guides to integrate SAM with your favorite AI Agent sys
 
 ## Connecting via MCP
 
-The `sam-node` exposes the MCP server over HTTP Server-Sent Events (SSE). By default, it listens at `127.0.0.1:8080`.
+The `sam-node` exposes the MCP server over Streamable HTTP. By default, it listens at `127.0.0.1:8080`.
 
 The repository provides a Python SDK (`sam-mcp-python`) which implements the MCP client.
 

@@ -315,6 +315,9 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
     local idx="$1"
     local flags="${2:-}"
     local config_path="${3:-}"
+    # Extra docker arguments, for tests that need to share something with the
+    # node container, such as the directory its API socket lives in.
+    local docker_args="${4:-}"
     local name="${MESH_PREFIX}-node-${idx}"
 
     local add_hosts
@@ -338,6 +341,7 @@ if [[ -z "${MESH_HELPERS_LOADED:-}" ]]; then
       --network-alias "${name}" \
       ${add_hosts} \
       "${mount_args[@]}" \
+      ${docker_args} \
       -e SAM_CLIENT_SECRET="sam-e2e-secret" \
       -e SAM_API_TOKEN="secret-token" \
       "${MESH_RUNTIME_IMAGE}" \

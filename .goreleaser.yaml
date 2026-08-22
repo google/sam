@@ -72,7 +72,10 @@ builds:
     ldflags:
       - -s -w
   - id: nano-init
-    main: ./cmd/nano-init
+    main: .
+    # nano-init is its own module: it carries a userspace TCP stack, and that
+    # dependency has no business in the graph every other binary builds from.
+    dir: ./cmd/nano-init
     binary: nano-init
     env:
       - CGO_ENABLED=0

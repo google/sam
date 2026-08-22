@@ -268,7 +268,6 @@ func TestNewServer_BasePathServesBothPrefixes(t *testing.T) {
 	for path, want := range map[string]int{
 		"/info":         http.StatusOK,
 		"/console/info": http.StatusOK,
-		"/console":      http.StatusMovedPermanently, // ServeMux redirects to the subtree root
 	} {
 		resp, err := client.Get(console.URL + path)
 		if err != nil {
@@ -278,6 +277,21 @@ func TestNewServer_BasePathServesBothPrefixes(t *testing.T) {
 		if resp.StatusCode != want {
 			t.Errorf("GET %s: got %d, want %d", path, resp.StatusCode, want)
 		}
+	}
+
+	// ServeMux sends the bare base path to the subtree root. Which 3xx it picks
+	// is the standard library's business and has changed between Go releases;
+	// what the console depends on is landing on /console/.
+	resp, err := client.Get(console.URL + "/console")
+	if err != nil {
+		t.Fatalf("GET /console: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < 300 || resp.StatusCode > 399 {
+		t.Errorf("GET /console: got %d, want a redirect to the subtree root", resp.StatusCode)
+	}
+	if got := resp.Header.Get("Location"); got != "/console/" {
+		t.Errorf("GET /console: Location = %q, want %q", got, "/console/")
 	}
 }
 

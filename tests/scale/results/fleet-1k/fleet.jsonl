@@ -1,0 +1,14 @@
+{"elapsed_s":0,"agents_seen":71,"microvms":120,"boundaries":120,"guest_rss_kb":18084472,"boundary_rss_kb":3210524,"node_rss_kb":90924,"mem_available_kb":239769864,"load1":9.14,"requests_in_flight":141}
+{"elapsed_s":21,"agents_seen":190,"microvms":240,"boundaries":240,"guest_rss_kb":39666876,"boundary_rss_kb":6523124,"node_rss_kb":141940,"mem_available_kb":214940756,"load1":50.64,"requests_in_flight":34}
+{"elapsed_s":44,"agents_seen":328,"microvms":383,"boundaries":384,"guest_rss_kb":65083260,"boundary_rss_kb":10493304,"node_rss_kb":195820,"mem_available_kb":184662356,"load1":74.14,"requests_in_flight":26}
+{"elapsed_s":71,"agents_seen":503,"microvms":553,"boundaries":554,"guest_rss_kb":94647980,"boundary_rss_kb":15146248,"node_rss_kb":255572,"mem_available_kb":150693864,"load1":86.04,"requests_in_flight":41}
+{"elapsed_s":99,"agents_seen":691,"microvms":734,"boundaries":735,"guest_rss_kb":125481936,"boundary_rss_kb":19656624,"node_rss_kb":316572,"mem_available_kb":117163088,"load1":92.43,"requests_in_flight":9}
+{"elapsed_s":126,"agents_seen":880,"microvms":930,"boundaries":933,"guest_rss_kb":159709888,"boundary_rss_kb":25319452,"node_rss_kb":388896,"mem_available_kb":75279728,"load1":101.08,"requests_in_flight":18}
+{"elapsed_s":160,"agents_seen":1000,"microvms":1000,"boundaries":1000,"guest_rss_kb":170637612,"boundary_rss_kb":25838892,"node_rss_kb":395488,"mem_available_kb":74554096,"load1":68.57,"requests_in_flight":0}
+{"elapsed_s":184,"agents_seen":1000,"microvms":1000,"boundaries":1000,"guest_rss_kb":170637612,"boundary_rss_kb":25739804,"node_rss_kb":395504,"mem_available_kb":74580948,"load1":49.30,"requests_in_flight":0}
+{"elapsed_s":207,"agents_seen":1000,"microvms":1000,"boundaries":1000,"guest_rss_kb":170637612,"boundary_rss_kb":25643792,"node_rss_kb":395504,"mem_available_kb":74652972,"load1":32.68,"requests_in_flight":0}
+{"elapsed_s":230,"agents_seen":1000,"microvms":1000,"boundaries":1000,"guest_rss_kb":170637612,"boundary_rss_kb":25531624,"node_rss_kb":395508,"mem_available_kb":74783932,"load1":23.47,"requests_in_flight":0}
+{"elapsed_s":254,"agents_seen":1000,"microvms":1000,"boundaries":1000,"guest_rss_kb":170637612,"boundary_rss_kb":25395664,"node_rss_kb":395516,"mem_available_kb":74857396,"load1":15.97,"requests_in_flight":0}
+{"elapsed_s":277,"agents_seen":1000,"microvms":1000,"boundaries":1000,"guest_rss_kb":170637612,"boundary_rss_kb":25324920,"node_rss_kb":285464,"mem_available_kb":74909588,"load1":10.52,"requests_in_flight":0}
+{"elapsed_s":300,"agents_seen":1000,"microvms":1000,"boundaries":1000,"guest_rss_kb":170637612,"boundary_rss_kb":25279044,"node_rss_kb":307168,"mem_available_kb":74927616,"load1":7.60,"requests_in_flight":0}
+{"elapsed_s":323,"agents_seen":1000,"microvms":1000,"boundaries":1000,"guest_rss_kb":170637612,"boundary_rss_kb":25139408,"node_rss_kb":319016,"mem_available_kb":74979432,"load1":5.17,"requests_in_flight":0}

@@ -67,6 +67,14 @@ const (
 	// Example Datalog: allow if node("12D3KooWP2G8nJCLASp1Kb4TmQS4wCpMH2vpSUz8ug8DYEJiuf1i")
 	FactNode = "node"
 
+	// FactAgent defines the agent on whose behalf a request is made. Unlike
+	// FactNode it does not identify a host: it is appended to the token when an
+	// agent is admitted, and the same identifier is asserted again wherever that
+	// agent is next resumed. See api/agent.go for the identifier rules.
+	// Contains: biscuit.String(agentID)
+	// Example Datalog: allow if agent("reviewer-7.prod.acme.example")
+	FactAgent = "agent"
+
 	// FactClientPeerID defines the client PeerID performing the request, used for replay defense.
 	// Contains: biscuit.String(clientPeerID)
 	// Example Datalog: check if client_peer_id($id), connection_peer_id($id)

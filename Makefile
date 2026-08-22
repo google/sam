@@ -1,8 +1,6 @@
 REPO_ROOT:=${CURDIR}
 OUT_DIR=$(REPO_ROOT)/bin
 
-# libinterceptor.so is declared before "build" for its file-based prerequisite
-# rule; without this, plain "make" would default to that first rule instead.
 .DEFAULT_GOAL := build
 
 # disable CGO by default for static binaries
@@ -24,18 +22,17 @@ ANDROID_CC_ARM64=$(ANDROID_NDK_TOOLCHAIN)/aarch64-linux-android30-clang
 ANDROID_CC_X86_64=$(ANDROID_NDK_TOOLCHAIN)/x86_64-linux-android30-clang
 
 
-$(OUT_DIR)/libinterceptor.so: cmd/nano-init/interceptor/interceptor.c
-	mkdir -p "$(OUT_DIR)"
-	gcc -shared -fPIC -ldl -o "$(OUT_DIR)/libinterceptor.so" cmd/nano-init/interceptor/interceptor.c
-
-build: $(OUT_DIR)/libinterceptor.so
+build:
 	go build -v -o "$(OUT_DIR)/sam-node" ./cmd/sam-node
 	go build -v -o "$(OUT_DIR)/sam-control-plane" ./cmd/sam-control-plane
 	go build -v -o "$(OUT_DIR)/sam-router" ./cmd/sam-router
 	go build -v -o "$(OUT_DIR)/mcp-client" ./cmd/mcp-client
-	go build -v -o "$(OUT_DIR)/nano-init" ./cmd/nano-init
 	go build -v -o "$(OUT_DIR)/sam-box" ./cmd/sam-box
+	go build -v -o "$(OUT_DIR)/sam-bench" ./cmd/sam-bench
 	go build -v -o "$(OUT_DIR)/sam-console" ./cmd/sam-console
+	# nano-init is a separate module: it carries a userspace TCP stack, which
+	# has no business in the dependency graph every other binary builds from.
+	go -C cmd/nano-init build -v -o "$(OUT_DIR)/nano-init" .
 
 
 .PHONY: mobile-ffi-host mobile-ffi-android mobile-ffi-android-x86_64 mobile-ffi-ios mobile-ffi mobile-app-apk mobile-app-apk-emulator
@@ -133,6 +130,7 @@ kind-e2e-mesh: build
 
 test:
 	CGO_ENABLED=1 go test -v -race -count 1 $(if $(WHAT),-run $(WHAT)) ./...
+	CGO_ENABLED=1 go -C cmd/nano-init test -race -count 1 $(if $(WHAT),-run $(WHAT)) ./...
 
 .PHONY: test-python test-python-e2e
 test-python:

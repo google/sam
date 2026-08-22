@@ -21,6 +21,12 @@ option go_package = "github.com/google/sam/api";
 message AuthFrame {
   bytes biscuit = 1;
   string target_service = 2; // Optional: specific service requested
+
+  // The agent this request is made for, as a canonical agent identifier (see
+  // api/agent.go). It is the calling node's claim, carried beside the token
+  // because Biscuit hides an appended block's facts from the authorizer; the
+  // HTTP datapath carries the same claim in HeaderSamAgent.
+  string agent = 3;
 }
 
 message AuthResponse {
@@ -220,6 +226,126 @@ message TokenRevokeRequest {
 
 message TokenRevokeResponse {
   bool success = 1;
+  string error = 2;
+}
+
+
+// ============================================================================
+// Agent Sandbox Connector API
+// ============================================================================
+//
+// The interface an agent scheduler (Agent Substrate, or any other) implements
+// to place agents on the mesh. It is host-local and served on a control socket
+// that is deliberately not reachable from inside a sandbox: identity must never
+// arrive in band from the agent itself, which could only lie about it.
+
+// AgentSecret configures credential injection for one destination. It carries
+// a path, never a value: secret material must not travel through this API.
+message AgentSecret {
+  string host = 1;
+  string kind = 2;        // bearer | basicauth | customheader
+  string header_name = 3; // customheader only
+  string value_path = 4;
+}
+
+// AgentEgress is deny-by-default. Patterns are matched against the destination
+// name taken from the sandbox boundary, never against a resolved address.
+message AgentEgress {
+  repeated string allow = 1;
+  repeated AgentSecret secrets = 2;
+}
+
+// AgentIngress declares that the agent serves a mesh service. The name is the
+// service half of the mesh host the rest of the mesh dials (see api/names.go);
+// port is where the agent listens inside its sandbox.
+message AgentIngress {
+  ServiceType type = 1;
+  string name = 2;
+  uint32 port = 3;
+  string description = 4;
+}
+
+// AgentBundle is everything the platform declares about one agent. Its
+// canonical form is a YAML file in the agent's own state directory, so that a
+// suspend/resume onto another host carries it with no extra machinery; this
+// message is the transport mirror of that file.
+message AgentBundle {
+  string version = 1;
+
+  // Canonical mesh identifier, without the "agent:" prefix. Dot-separated and
+  // DNS-shaped; see api/agent.go for the rules and why they exist.
+  string agent_id = 2;
+
+  // The platform's own identifier, verbatim, kept for audit because the
+  // translation into agent_id is not always reversible.
+  string external_id = 3;
+
+  // Path to the workload credential the platform already issues: a projected
+  // Kubernetes service-account token, a pod certificate, or an SVID. It is
+  // verified at admission against the platform's issuer and then translated
+  // into agent facts, the same way OIDC claims are translated at node
+  // enrollment. The scheduler needs no mesh credential of its own.
+  string credential_path = 4;
+
+  AgentEgress egress = 5;
+  repeated AgentIngress ingress = 6;
+}
+
+// AgentAttachRequest admits an agent. It is idempotent on agent_id: resuming
+// after a crash or a migration is another Attach, not a distinct operation.
+message AgentAttachRequest {
+  AgentBundle bundle = 1;
+}
+
+message AgentAttachResponse {
+  // Sandbox boundary endpoints to wire into the sandbox: SOCKS5 for guest to
+  // host, and a reverse channel for host to guest that is empty when the
+  // bundle declares no ingress.
+  string egress_socket = 1;
+  string ingress_socket = 2;
+  string error = 3;
+}
+
+// AgentDetachRequest stops an agent: ingress is unregistered, channels are
+// closed and credentials dropped. It must leave no residual advertisement.
+message AgentDetachRequest {
+  string agent_id = 1;
+}
+
+message AgentDetachResponse {
+  bool success = 1;
+  string error = 2;
+}
+
+// AgentRefreshRequest hands in a rotated workload credential. Platforms rotate
+// these on their own schedule, which is what bounds how long a stale admission
+// stays usable.
+message AgentRefreshRequest {
+  string agent_id = 1;
+  string credential_path = 2;
+}
+
+message AgentRefreshResponse {
+  bool success = 1;
+  string error = 2;
+  int64 expires_at = 3;
+}
+
+// AgentStatusRequest reports on one agent, or on all of them when agent_id is
+// empty, for a scheduler's reconcile loop.
+message AgentStatusRequest {
+  string agent_id = 1;
+}
+
+message AgentStatus {
+  string agent_id = 1;
+  bool attached = 2;
+  repeated AgentIngress ingress = 3;
+  int64 credential_expires_at = 4;
+}
+
+message AgentStatusResponse {
+  repeated AgentStatus agents = 1;
   string error = 2;
 }
 

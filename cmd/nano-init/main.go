@@ -12,150 +12,295 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Command nano-init is PID 1 in an agent sandbox.
+//
+// It gives the sandbox one route, which leads to the boundary, and then gets
+// out of the agent's way.
+//
+// It used to do the opposite. It rewrote /etc/resolv.conf to point at a DNS
+// server it ran itself, answered lookups with addresses it invented, injected
+// HTTP_PROXY and friends into the agent's environment, and preloaded a shared
+// object into the agent's address space to catch the connections that got past
+// all that. Every one of those asks the agent to cooperate, and an agent that
+// has to cooperate with its own confinement is not confined: the next library
+// that ignores the proxy variables, the next subprocess that clears its
+// environment, the next static binary with no loader to preload into, each one
+// was outside the boundary.
+//
+// Routing does not ask. There is no interface in this sandbox except the tun,
+// and the tun goes to the boundary, so an agent that ignores every convention
+// here still reaches only what policy allowed. The resolver that remains is a
+// convenience for clients that look a name up before connecting, not a control:
+// an agent that resolves some other way is routed through the tun regardless.
+//
+// The TCP stack is gVisor's, via tun2socks. Writing one would mean writing
+// retransmission, windowing and teardown, and getting those subtly wrong shows
+// up as tail latency under load, which is exactly where this has to be
+// trusted.
 package main
 
 import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"net"
-	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
-	"runtime"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
-	"golang.org/x/net/dns/dnsmessage"
+	"github.com/vishvananda/netlink"
+	"github.com/xjasonlyu/tun2socks/v2/engine"
+	"github.com/xjasonlyu/tun2socks/v2/tunnel"
+)
+
+const (
+	tunName = "tun0"
+
+	// Addresses inside the sandbox are link-local because that is what these
+	// addresses are for: RFC 3927 describes a single link with no router, and
+	// a tun to the boundary is exactly that. A sandbox numbered out of
+	// 10.0.0.0/8 will eventually be deployed somewhere that already uses it.
+	tunIP   = "169.254.1.1"
+	tunAddr = tunIP + "/30"
+
+	// The resolver answers on the tun's own address, which is the one address
+	// this sandbox is certain to have. Nothing outside can reach it: a
+	// link-local address is not routed anywhere.
+	dnsAddr = tunIP + ":53"
+
+	// Disjoint from tunAddr: an overlap would hand out the interface's own
+	// address as a name's answer, which fails in a way nobody enjoys reading.
+	virtualPool = "169.254.64.0/18"
 )
 
 func main() {
 	if len(os.Args) < 2 {
-		printUsageAndExit()
+		usage()
 	}
 
-	subCmd := os.Args[1]
-	switch subCmd {
+	switch os.Args[1] {
 	case "copy":
 		if len(os.Args) != 3 {
-			log.Fatalf("Usage: %s copy <dest>", os.Args[0])
+			log.Fatalf("usage: %s copy <dest>", os.Args[0])
 		}
 		src, err := os.Executable()
 		if err != nil {
 			src = "/nano-init"
 		}
-		dest := os.Args[2]
-		log.Printf("Copying %s to %s...", src, dest)
-		if err := copyFile(src, dest); err != nil {
-			log.Fatalf("Failed to copy binary: %v", err)
+		if err := copyFile(src, os.Args[2]); err != nil {
+			log.Fatalf("copy binary: %v", err)
 		}
-		log.Println("Copy complete.")
-		return
 
 	case "run":
-		if len(os.Args) < 4 {
-			log.Fatalf("Usage: %s run <uds-path> <cmd> [args...]", os.Args[0])
+		createNS, ingressSocket, args := parseRunFlags(os.Args[2:])
+		if len(args) < 2 {
+			usage()
 		}
-		udsPath := os.Args[2]
-		cmdName := os.Args[3]
-		cmdArgs := os.Args[4:]
-
-		runProxy(udsPath, cmdName, cmdArgs)
+		run(createNS, ingressSocket, args[0], args[1], args[2:])
 
 	default:
-		printUsageAndExit()
+		usage()
 	}
 }
 
-func printUsageAndExit() {
-	log.Fatalf("Usage:\n  %s copy <dest>\n  %s run <uds-path> <cmd> [args...]", os.Args[0], os.Args[0])
+// parseRunFlags reads our own flags and stops at the first argument that is not
+// one, because everything after that belongs to the agent and must reach it
+// untouched.
+func parseRunFlags(args []string) (createNS bool, ingressSocket string, rest []string) {
+	for len(args) > 0 {
+		switch {
+		case args[0] == "--create-namespaces":
+			createNS, args = true, args[1:]
+		case args[0] == "--ingress-socket":
+			if len(args) < 2 {
+				log.Fatalf("--ingress-socket needs a path")
+			}
+			ingressSocket, args = args[1], args[2:]
+		case strings.HasPrefix(args[0], "--ingress-socket="):
+			ingressSocket, args = strings.TrimPrefix(args[0], "--ingress-socket="), args[1:]
+		default:
+			return createNS, ingressSocket, args
+		}
+	}
+	return createNS, ingressSocket, nil
 }
 
-func runProxy(udsPath, cmdName string, cmdArgs []string) {
+// runFlags rebuilds the arguments for the re-executed half, so it is given
+// what this one was given.
+func runFlags(ingressSocket, boundarySocket, cmdName string, cmdArgs []string) []string {
+	args := []string{"run", "--create-namespaces"}
+	if ingressSocket != "" {
+		args = append(args, "--ingress-socket", ingressSocket)
+	}
+	args = append(args, boundarySocket, cmdName)
+	return append(args, cmdArgs...)
+}
+
+func usage() {
+	log.Fatalf("usage:\n  %s copy <dest>\n  %s run [--create-namespaces] [--ingress-socket <path>] <boundary-socket> <cmd> [args...]",
+		os.Args[0], os.Args[0])
+}
+
+// run wires the sandbox up and hands it to the agent.
+func run(createNS bool, ingressSocket, boundarySocket, cmdName string, cmdArgs []string) {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 	defer cancel()
 
-	log.Printf("Bootstrapping CA certificate from UDS: %s", udsPath)
-	if err := bootstrapCA(ctx, udsPath); err != nil {
-		log.Fatalf("Bootstrap CA failed: %v", err)
-	}
-	log.Println("Bootstrap CA successfully written to /tmp/ephemeral_ca.pem")
-
-	// 1b. Bootstrap Interceptor
-	log.Println("Attempting to bootstrap socket interceptor from UDS gateway...")
-	var bootstrappedInterceptor string
-	if interceptor, err := bootstrapInterceptor(ctx, udsPath); err != nil {
-		log.Printf("Warning: failed to bootstrap socket interceptor: %v. Running without transparent interception.", err)
-	} else {
-		bootstrappedInterceptor = interceptor
-		log.Printf("Socket interceptor successfully written to %s", bootstrappedInterceptor)
-	}
-
-	// 2. DNS Spoofer
-	dnsPort := os.Getenv("SAM_DNS_PORT")
-	if dnsPort == "" {
-		dnsPort = "53"
-	}
-	dnsAddr := "127.0.0.1:" + dnsPort
-	if err := startDNSSpoofer(ctx, dnsAddr); err != nil {
-		log.Fatalf("Failed to start DNS spoofer: %v", err)
-	}
-	log.Printf("DNS spoofer listening on UDP %s", dnsAddr)
-
-	// Overwrite /etc/resolv.conf
-	if err := os.WriteFile("/etc/resolv.conf", []byte("nameserver 127.0.0.1\n"), 0644); err != nil {
-		log.Printf("Warning: failed to overwrite /etc/resolv.conf: %v", err)
-	} else {
-		log.Println("Overwrote /etc/resolv.conf to nameserver 127.0.0.1")
+	// The namespaces have to exist before anything is checked in them, and a
+	// whole Go program can only enter a new network namespace by being started
+	// in one. So this half makes them and becomes a supervisor; the half that
+	// comes back through here does the work.
+	if createNS && !insideCreatedNamespaces() {
+		userNS, err := needUserNamespace()
+		if err != nil {
+			log.Fatalf("refusing to start: %v", err)
+		}
+		self, err := os.Executable()
+		if err != nil {
+			log.Fatalf("locate this binary to re-execute it: %v", err)
+		}
+		args := runFlags(ingressSocket, boundarySocket, cmdName, cmdArgs)
+		code, err := runAgent(ctx, cancel, self, args, withNamespaces(userNS))
+		if err != nil {
+			log.Fatalf("create the sandbox namespaces: %v\n%s", err, namespaceHint(err))
+		}
+		os.Exit(code)
 	}
 
-	// 3. TCP Forwarding
-	listener4, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		log.Fatalf("Failed to bind random TCP port: %v", err)
-	}
-	defer func() { _ = listener4.Close() }()
-	assignedProxyPort := listener4.Addr().(*net.TCPAddr).Port
-	log.Printf("Blind UDS-forwarder listening on 127.0.0.1:%d", assignedProxyPort)
-
-	var listener6 net.Listener
-	if l6, err := net.Listen("tcp", fmt.Sprintf("[::1]:%d", assignedProxyPort)); err == nil {
-		listener6 = l6
-		defer func() { _ = listener6.Close() }()
-		log.Printf("Blind UDS-forwarder listening on [::1]:%d", assignedProxyPort)
-	} else {
-		log.Printf("Warning: failed to bind TCP port on IPv6 loopback: %v. Running IPv4-only forwarder.", err)
-	}
-
-	serveListener := func(l net.Listener) {
-		for {
-			conn, err := l.Accept()
-			if err != nil {
-				select {
-				case <-ctx.Done():
-					return
-				default:
-					log.Printf("TCP Accept error on %s: %v", l.Addr(), err)
-					time.Sleep(50 * time.Millisecond)
-					continue
-				}
-			}
-			go handleConnection(conn, udsPath)
+	if createNS {
+		if err := privateResolvConf(); err != nil {
+			log.Fatalf("refusing to start: %v", err)
 		}
 	}
 
-	go serveListener(listener4)
-	if listener6 != nil {
-		go serveListener(listener6)
+	// First, and before anything is built: if this namespace is not a sandbox
+	// then the boundary is beside the point, and saying so in that order is
+	// the difference between "you forgot --network none" and a puzzling
+	// complaint about a socket.
+	if err := assertIsolated(); err != nil {
+		log.Fatalf("refusing to start: %v", err)
 	}
 
-	// 4. Execution of the target process
+	if err := checkBoundary(boundarySocket); err != nil {
+		log.Fatalf("this sandbox has no way out: %v", err)
+	}
+
+	names, err := newResolver(virtualPool)
+	if err != nil {
+		log.Fatalf("resolver: %v", err)
+	}
+	if err := setupNetwork(ctx, boundarySocket, names); err != nil {
+		log.Fatalf("set up sandbox network: %v", err)
+	}
+
+	// Started here rather than earlier because it only makes sense once the
+	// sandbox exists: this is the one process that can reach the agent at the
+	// address the gateway will name.
+	if ingressSocket != "" {
+		go func() {
+			if err := serveIngress(ctx, ingressSocket); err != nil {
+				log.Printf("ingress: %v", err)
+			}
+		}()
+	}
+
+	code, err := runAgent(ctx, cancel, cmdName, cmdArgs)
+	if err != nil {
+		log.Fatalf("start agent: %v", err)
+	}
+	os.Exit(code)
+}
+
+// setupNetwork builds the only route out of the sandbox.
+//
+// This talks netlink rather than shelling out to `ip`, and carries its own TCP
+// stack rather than running a separate binary, so a sandbox image can be the
+// agent and nothing else. That is not tidiness: image size is what decides how
+// many agents fit on a host.
+func setupNetwork(ctx context.Context, boundarySocket string, names *resolver) error {
+	// As PID 1 in a microVM nothing else has done this, and a sandbox without
+	// loopback breaks things that have no business caring about the network.
+	if lo, err := netlink.LinkByName("lo"); err == nil {
+		_ = netlink.LinkSetUp(lo)
+	}
+
+	tun := &netlink.Tuntap{
+		LinkAttrs: netlink.LinkAttrs{Name: tunName},
+		Mode:      netlink.TUNTAP_MODE_TUN,
+	}
+	if err := netlink.LinkAdd(tun); err != nil {
+		return fmt.Errorf("create %s: %w\n%s", tunName, err, describeTunFailure(err))
+	}
+	if err := netlink.LinkSetUp(tun); err != nil {
+		return fmt.Errorf("bring up %s: %w", tunName, err)
+	}
+
+	addr, err := netlink.ParseAddr(tunAddr)
+	if err != nil {
+		return fmt.Errorf("parse %s: %w", tunAddr, err)
+	}
+	if err := netlink.AddrAdd(tun, addr); err != nil {
+		return fmt.Errorf("address %s: %w", tunName, err)
+	}
+
+	// A device route with no gateway: nothing on the far side of this link has
+	// an address worth naming, and everything goes the same way regardless.
+	// The destination has to be spelled out rather than left nil, which
+	// netlink reads as "no route specified at all".
+	if err := netlink.RouteAdd(&netlink.Route{
+		LinkIndex: tun.Attrs().Index,
+		Scope:     netlink.SCOPE_LINK,
+		Dst:       &net.IPNet{IP: net.IPv4zero, Mask: net.CIDRMask(0, 32)},
+	}); err != nil {
+		return fmt.Errorf("default route via %s: %w", tunName, err)
+	}
+
+	dns, err := net.ListenPacket("udp", dnsAddr)
+	if err != nil {
+		return fmt.Errorf("resolver on %s: %w", dnsAddr, err)
+	}
+	go names.serveDNS(dns)
+	go func() {
+		<-ctx.Done()
+		_ = dns.Close()
+	}()
+
+	if err := os.WriteFile("/etc/resolv.conf", []byte("nameserver "+tunIP+"\n"), 0o644); err != nil {
+		// Not fatal: resolution is a convenience here, not the control.
+		log.Printf("could not write /etc/resolv.conf, name resolution may fail: %v", err)
+	}
+
+	// direct:// is a placeholder the engine insists on. The real dialer is
+	// installed below, before the agent exists to send anything, so nothing
+	// can take the placeholder path.
+	engine.Insert(&engine.Key{
+		Device:   "tun://" + tunName,
+		Proxy:    "direct://",
+		LogLevel: "warn",
+	})
+	engine.Start()
+
+	tunnel.T().SetProxy(&boundaryProxy{socket: boundarySocket, resolver: names})
+	return nil
+}
+
+// runAgent starts the agent and reports the exit status it should be judged by.
+//
+// The same supervision serves the namespace trampoline, whose child is this
+// binary again: orphans still reparent here and still have to be reaped, and
+// the exit code still has to be the one the caller sees.
+func runAgent(ctx context.Context, cancel context.CancelFunc, cmdName string, cmdArgs []string, opts ...func(*exec.Cmd)) (int, error) {
 	cmd := exec.CommandContext(ctx, cmdName, cmdArgs...)
+	cmd.Stdout, cmd.Stderr, cmd.Stdin = os.Stdout, os.Stderr, os.Stdin
+	cmd.Env = os.Environ() // Nothing injected: the agent is not configured, it is routed.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	for _, opt := range opts {
+		opt(cmd)
+	}
 	cmd.Cancel = func() error {
 		if cmd.Process == nil {
 			return nil
@@ -164,260 +309,40 @@ func runProxy(udsPath, cmdName string, cmdArgs []string) {
 	}
 	cmd.WaitDelay = 5 * time.Second
 
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Stdin = os.Stdin
-
-	// Inject environment variables
-	interceptorPath := os.Getenv("SAM_INTERCEPTOR_PATH")
-	if interceptorPath == "" {
-		interceptorPath = bootstrappedInterceptor
-	}
-	cmd.Env = buildAgentEnv(assignedProxyPort, "/tmp/ephemeral_ca.pem", interceptorPath)
-
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-
 	if err := cmd.Start(); err != nil {
-		log.Fatalf("Failed to start agent: %v", err)
+		// Returned rather than fatal: the namespace trampoline starts this same
+		// binary, and a refusal there means something quite different.
+		return 0, err
 	}
 
-	agentExitStatus := make(chan syscall.WaitStatus, 1)
-	setupPID1Duties(cmd.Process.Pid, agentExitStatus)
+	// As PID 1 this process inherits every orphan in the sandbox, so it has to
+	// reap them or the guest fills with zombies. Reaping also means Wait can
+	// lose the race for the agent's own status, hence the channel.
+	agentExit := make(chan syscall.WaitStatus, 1)
+	reapChildren(cmd.Process.Pid, agentExit)
 
 	waitErr := cmd.Wait()
 	cancel()
 
-	var status syscall.WaitStatus
-	hasStatus := false
-
 	if waitErr != nil && errors.Is(waitErr, syscall.ECHILD) {
-		status = <-agentExitStatus
-		hasStatus = true
-	}
-
-	if hasStatus {
+		status := <-agentExit
 		if status.Signaled() {
-			os.Exit(128 + int(status.Signal()))
+			return 128 + int(status.Signal()), nil
 		}
-		os.Exit(status.ExitStatus())
+		return status.ExitStatus(), nil
 	}
-
 	if waitErr != nil {
-		if exitError, ok := waitErr.(*exec.ExitError); ok {
-			os.Exit(exitError.ExitCode())
+		var exitErr *exec.ExitError
+		if errors.As(waitErr, &exitErr) {
+			return exitErr.ExitCode(), nil
 		}
-		os.Exit(1)
+		return 1, nil
 	}
-	os.Exit(0)
+	return 0, nil
 }
 
-func bootstrapCA(ctx context.Context, udsPath string) error {
-	client := &http.Client{
-		Transport: &http.Transport{
-			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-				return net.Dial("unix", udsPath)
-			},
-		},
-	}
-	req, err := http.NewRequestWithContext(ctx, "GET", "http://localhost/internal/bootstrap/ca.crt", nil)
-	if err != nil {
-		return err
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("unexpected status: %s", resp.Status)
-	}
-
-	caBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return err
-	}
-
-	return os.WriteFile("/tmp/ephemeral_ca.pem", caBytes, 0644)
-}
-
-func bootstrapInterceptor(ctx context.Context, udsPath string) (string, error) {
-	client := &http.Client{
-		Transport: &http.Transport{
-			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-				return net.Dial("unix", udsPath)
-			},
-		},
-		Timeout: 5 * time.Second,
-	}
-
-	arch := runtime.GOARCH
-	libc := detectLibc()
-
-	urlStr := fmt.Sprintf("http://localhost/internal/bootstrap/libinterceptor.so?arch=%s&libc=%s", arch, libc)
-	req, err := http.NewRequestWithContext(ctx, "GET", urlStr, nil)
-	if err != nil {
-		return "", err
-	}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("server returned status: %s", resp.Status)
-	}
-
-	soBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
-
-	targetPath := "/tmp/libinterceptor.so"
-	if err := os.WriteFile(targetPath, soBytes, 0755); err != nil {
-		return "", err
-	}
-
-	return targetPath, nil
-}
-
-func detectLibc() string {
-	paths := []string{
-		"/lib/ld-musl-x86_64.so.1",
-		"/lib/ld-musl-aarch64.so.1",
-		"/lib/ld-musl-arm.so.1",
-	}
-	for _, p := range paths {
-		if _, err := os.Stat(p); err == nil {
-			return "musl"
-		}
-	}
-
-	// Also scan directories as fallback
-	if files, err := os.ReadDir("/lib"); err == nil {
-		for _, f := range files {
-			if strings.Contains(strings.ToLower(f.Name()), "musl") {
-				return "musl"
-			}
-		}
-	}
-	if files, err := os.ReadDir("/lib64"); err == nil {
-		for _, f := range files {
-			if strings.Contains(strings.ToLower(f.Name()), "musl") {
-				return "musl"
-			}
-		}
-	}
-
-	return "glibc"
-}
-
-func startDNSSpoofer(ctx context.Context, dnsAddr string) error {
-	addr, err := net.ResolveUDPAddr("udp", dnsAddr)
-	if err != nil {
-		return err
-	}
-	conn, err := net.ListenUDP("udp", addr)
-	if err != nil {
-		return err
-	}
-	go func() {
-		<-ctx.Done()
-		_ = conn.Close()
-	}()
-
-	go func() {
-		buf := make([]byte, 512)
-		for {
-			n, remoteAddr, err := conn.ReadFromUDP(buf)
-			if err != nil {
-				select {
-				case <-ctx.Done():
-					return
-				default:
-					log.Printf("DNS Server read error: %v", err)
-					time.Sleep(50 * time.Millisecond)
-					continue
-				}
-			}
-
-			packet := make([]byte, n)
-			copy(packet, buf[:n])
-
-			go func(p []byte, rAddr *net.UDPAddr) {
-				var msg dnsmessage.Message
-				if err := msg.Unpack(p); err != nil {
-					return
-				}
-
-				resp := dnsmessage.Message{
-					Header: dnsmessage.Header{
-						ID:            msg.ID,
-						Response:      true,
-						Authoritative: true,
-					},
-					Questions: msg.Questions,
-				}
-
-				if len(msg.Questions) > 0 {
-					q := msg.Questions[0]
-					switch q.Type {
-					case dnsmessage.TypeA:
-						resp.Answers = append(resp.Answers, dnsmessage.Resource{
-							Header: dnsmessage.ResourceHeader{Name: q.Name, Type: dnsmessage.TypeA, Class: dnsmessage.ClassINET, TTL: 300},
-							Body:   &dnsmessage.AResource{A: [4]byte{127, 0, 0, 1}},
-						})
-					case dnsmessage.TypeAAAA:
-						ip := net.ParseIP("::1").To16()
-						var aaaa [16]byte
-						copy(aaaa[:], ip)
-						resp.Answers = append(resp.Answers, dnsmessage.Resource{
-							Header: dnsmessage.ResourceHeader{Name: q.Name, Type: dnsmessage.TypeAAAA, Class: dnsmessage.ClassINET, TTL: 300},
-							Body:   &dnsmessage.AAAAResource{AAAA: aaaa},
-						})
-					}
-				}
-
-				packed, err := resp.Pack()
-				if err == nil {
-					_, _ = conn.WriteToUDP(packed, rAddr)
-				}
-			}(packet, remoteAddr)
-		}
-	}()
-
-	return nil
-}
-
-func handleConnection(client net.Conn, udsPath string) {
-	defer func() { _ = client.Close() }()
-
-	uds, err := net.DialTimeout("unix", udsPath, 5*time.Second)
-	if err != nil {
-		log.Printf("UDS Dial error: %v", err)
-		return
-	}
-	defer func() { _ = uds.Close() }()
-
-	cp := func(dst, src net.Conn, done chan<- struct{}) {
-		_, _ = io.Copy(dst, src)
-		if cw, ok := dst.(interface{ CloseWrite() error }); ok {
-			_ = cw.CloseWrite()
-		}
-		done <- struct{}{}
-	}
-
-	done := make(chan struct{}, 2)
-	go cp(uds, client, done)
-	go cp(client, uds, done)
-
-	<-done
-	<-done
-}
-
-func setupPID1Duties(agentPid int, exitChan chan<- syscall.WaitStatus) {
+// reapChildren collects orphans and remembers the agent's own status.
+func reapChildren(agentPid int, exitChan chan<- syscall.WaitStatus) {
 	sigCh := make(chan os.Signal, 10)
 	signal.Notify(sigCh, syscall.SIGCHLD)
 
@@ -427,7 +352,7 @@ func setupPID1Duties(agentPid int, exitChan chan<- syscall.WaitStatus) {
 				var status syscall.WaitStatus
 				pid, err := syscall.Wait4(-1, &status, syscall.WNOHANG, nil)
 				if pid <= 0 || err != nil {
-					break
+					return
 				}
 				if pid == agentPid {
 					select {
@@ -437,67 +362,11 @@ func setupPID1Duties(agentPid int, exitChan chan<- syscall.WaitStatus) {
 				}
 			}
 		}
-		// Initial reap pass to catch any processes that exited before signal.Notify was registered
+		// Once before waiting on signals, to catch anything that exited
+		// between Start and Notify.
 		reap()
 		for range sigCh {
 			reap()
 		}
 	}()
-}
-
-func buildAgentEnv(assignedPort int, caPath string, interceptorPath string) []string {
-	proxyURL := fmt.Sprintf("http://127.0.0.1:%d", assignedPort)
-
-	overrides := map[string]string{
-		"SSL_CERT_FILE":       caPath,
-		"REQUESTS_CA_BUNDLE":  caPath,
-		"NODE_EXTRA_CA_CERTS": caPath,
-		"HTTP_PROXY":          proxyURL,
-		"HTTPS_PROXY":         proxyURL,
-		"ALL_PROXY":           proxyURL,
-		"http_proxy":          proxyURL,
-		"https_proxy":         proxyURL,
-		"all_proxy":           proxyURL,
-		"SAM_PROXY_PORT":      strconv.Itoa(assignedPort),
-	}
-
-	if interceptorPath != "" {
-		overrides["LD_PRELOAD"] = interceptorPath
-	}
-
-	var result []string
-	for _, env := range os.Environ() {
-		parts := strings.SplitN(env, "=", 2)
-		if len(parts) != 2 {
-			continue
-		}
-		key := parts[0]
-		if _, exists := overrides[key]; exists {
-			continue
-		}
-		result = append(result, env)
-	}
-
-	for k, v := range overrides {
-		result = append(result, fmt.Sprintf("%s=%s", k, v))
-	}
-
-	return result
-}
-
-func copyFile(src, dest string) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer in.Close() //nolint:errcheck
-	out, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
-	if err != nil {
-		return err
-	}
-	if _, err = io.Copy(out, in); err != nil {
-		out.Close() //nolint:errcheck
-		return err
-	}
-	return out.Close()
 }

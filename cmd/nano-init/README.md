@@ -1,34 +1,82 @@
 # nano-init
 
-`nano-init` is a minimal init system designed to run as PID 1 in a container, while transparently proxying HTTP/HTTPS traffic to a Unix Domain Socket (UDS).
+PID 1 in an agent sandbox. It gives the sandbox one route, which leads to the
+boundary, and then gets out of the agent's way.
 
 ## What it does
 
-1.  **PID 1 Duties (Zombie Reaping):** It correctly handles `SIGCHLD` to reap any zombie child processes spawned during the container's lifecycle.
-2.  **UDS to TCP Proxy:** It spins up a transparent TCP listener on a random localhost port and securely proxies all traffic over a given Unix Domain Socket.
-3.  **Process Management:** It wraps your target application (e.g., an agent), automatically injecting the standard `HTTP_PROXY` and `HTTPS_PROXY` environment variables pointing to the dynamic TCP port it opened.
-4.  **Signal Propagation:** It intercepts termination signals (`SIGINT`, `SIGTERM`, `SIGQUIT`) and gracefully propagates them to the child process group to orchestrate clean shutdowns.
-5.  **Exit Code Passthrough:** When the target process exits, `nano-init` catches its exit code and exits with the same code.
+1. **Builds the only way out.** Creates `tun0` over netlink, gives it a
+   link-local address, and makes it the default route. There is no other
+   interface in the sandbox, so this is not the preferred path out; it is the
+   only one.
+2. **Carries a TCP stack.** Terminates the sandbox's TCP in userspace via
+   gVisor (through `tun2socks`) and opens a SOCKS5 flow to the boundary for
+   each connection.
+3. **Keeps the name.** Answers DNS with a placeholder address per name and
+   remembers the pairing, so what reaches the boundary is `mesh.sam.alt` rather
+   than an address. The boundary chooses a provider from the name, which is the
+   entire reason the name has to survive the trip.
+4. **PID 1 duties.** Reaps orphans, propagates `SIGINT`/`SIGTERM`/`SIGQUIT` to
+   the child's process group, and exits with the agent's own status.
 
-## Why it is needed
+It is a separate Go module. A userspace TCP stack is a large dependency and has
+no business in the graph every other SAM binary builds from.
 
-Many applications and standard libraries lack native support for using a Unix Domain Socket as an HTTP/HTTPS proxy. By running `nano-init` as the entrypoint, the containerized application can simply use standard TCP-based `HTTP_PROXY` environment variables to securely route traffic out through the node's Unix Domain Socket, without needing any code modifications or complex network configurations.
+## What it deliberately does not do
 
-### Architecture & Rationale
+It does not touch the agent. No `HTTP_PROXY` in its environment, no CA bundle
+injected, nothing preloaded into its address space.
 
-When deploying agent sandboxes, runtimes like gVisor, Kata Containers, or Docker with `network:none` are used to completely isolate the network namespace. In this isolated environment, we securely bind mount a Unix Domain Socket into the sandbox. `nano-init` then acts as the primary init process, forwarding all the agent's HTTP traffic to that bind-mounted socket.
+That is a reversal. This program used to do all three, and argued for it: route
+everything through an HTTP proxy, the reasoning went, because HTTP has
+well-established ways to assert identity, and supporting arbitrary L3/L4 would
+mean building a network stack.
 
-This approach is highly opinionated by design:
-* **Simplified Auth/Authz:** HTTP has a long, well-established list of mechanisms for authentication and authorization. Funneling traffic through an HTTP proxy simplifies how we assert identity and enforce access control for agents.
-* **Scalability vs L3/L4:** Supporting arbitrary L3 or L4 protocols directly is complex and difficult to scale securely. By enforcing HTTP proxying at the boundary, we avoid building a custom L3/L4 stack and instead leverage our existing network architecture to provide a highly scalable authentication and authorization framework.
+The objection is not that it was inelegant. It is that **every one of those
+mechanisms is a request for the agent's cooperation.** `HTTP_PROXY` works if
+the client library reads it. `LD_PRELOAD` works if the binary has a dynamic
+loader. Both are outside the boundary the moment an agent uses a library that
+ignores the convention, spawns a subprocess that clears its environment, or
+speaks something that is not HTTP. An agent that has to cooperate with its own
+confinement is not confined — and an agent driven by a model, acting on text it
+did not write, is exactly the case where you cannot assume cooperation.
+
+Routing does not ask. The cost is the network stack the old rationale wanted to
+avoid, which is why this uses gVisor's rather than writing one: retransmission,
+windowing and teardown are easy to get subtly wrong, and the symptom is tail
+latency under load.
+
+Name resolution is the one piece that looks like the old design and is not. The
+resolver here is a convenience for clients that look a name up before
+connecting; it is not a control. An agent that ignores it and hardcodes another
+resolver has its packets routed through the tun regardless, and reaches exactly
+what policy allows.
+
 ## Usage
 
 ```bash
-./nano-init <uds-path> <cmd> [args...]
+nano-init run <boundary-socket> <cmd> [args...]
 ```
-
-Example:
 
 ```bash
-./nano-init /var/run/sam.sock ./my-agent --flag1 value
+nano-init run /run/agent.sock python agent.py "summarise the open issues"
 ```
+
+Needs `NET_ADMIN` and `/dev/net/tun` to build the tun. In a container:
+
+```bash
+docker run --rm --network none \
+  --cap-add NET_ADMIN --device /dev/net/tun \
+  -v /run/sam/agent.sock:/run/agent.sock \
+  my-agent-image
+```
+
+`nano-init copy <dest>` writes the binary somewhere else, for building a sandbox
+image that has nothing else in it.
+
+## See also
+
+- [Running agents on SAM](https://sam-mesh.dev/docs/user/running-agents/) — the
+  full picture, including the microVM arrangement
+- [Agent architecture](https://sam-mesh.dev/docs/agent-architecture/) — why the
+  boundary speaks SOCKS5

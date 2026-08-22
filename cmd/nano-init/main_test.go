@@ -15,393 +15,297 @@
 package main
 
 import (
-	"context"
-	"io"
-	"net"
-	"net/http"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"golang.org/x/net/dns/dnsmessage"
 )
 
-func TestBootstrapCA(t *testing.T) {
-	tempDir := t.TempDir()
-	udsPath := filepath.Join(tempDir, "mock-sam-box.sock")
-
-	// Start a mock HTTP server on a Unix Domain Socket
-	listener, err := net.Listen("unix", udsPath)
+func TestTheSameNameAlwaysGetsTheSameAddress(t *testing.T) {
+	// Clients cache. An agent that resolves once, holds the answer, and
+	// connects later must arrive at the same place, or a long-lived agent
+	// starts failing for reasons nothing in its own behaviour explains.
+	r, err := newResolver("169.254.64.0/18")
 	if err != nil {
-		t.Fatalf("Failed to listen on UDS: %v", err)
-	}
-	defer func() { _ = listener.Close() }()
-
-	mockCACert := []byte("fake-ca-cert-data")
-
-	srv := &http.Server{
-		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.Method == "GET" && r.URL.Path == "/internal/bootstrap/ca.crt" {
-				w.WriteHeader(http.StatusOK)
-				_, _ = w.Write(mockCACert)
-			} else {
-				w.WriteHeader(http.StatusNotFound)
-			}
-		}),
-	}
-	go func() {
-		_ = srv.Serve(listener)
-	}()
-	defer func() { _ = srv.Close() }()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	// Clean target file if it already exists
-	_ = os.Remove("/tmp/ephemeral_ca.pem")
-	defer func() { _ = os.Remove("/tmp/ephemeral_ca.pem") }()
-
-	if err := bootstrapCA(ctx, udsPath); err != nil {
-		t.Fatalf("bootstrapCA failed: %v", err)
+		t.Fatalf("newResolver: %v", err)
 	}
 
-	data, err := os.ReadFile("/tmp/ephemeral_ca.pem")
+	first, err := r.assign("mesh.sam.alt")
 	if err != nil {
-		t.Fatalf("Failed to read bootstrap CA: %v", err)
+		t.Fatalf("assign: %v", err)
+	}
+	again, err := r.assign("mesh.sam.alt")
+	if err != nil {
+		t.Fatalf("assign: %v", err)
+	}
+	other, err := r.assign("calc.mcp.sam.alt")
+	if err != nil {
+		t.Fatalf("assign: %v", err)
 	}
 
-	if string(data) != string(mockCACert) {
-		t.Errorf("Expected cert data %q, got %q", string(mockCACert), string(data))
+	if first != again {
+		t.Errorf("same name got %v then %v", first, again)
+	}
+	if first == other {
+		t.Errorf("two names share the address %v", first)
 	}
 }
 
-func TestDNSSpoofer(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	dnsAddr := "127.0.0.1:10053"
-	if err := startDNSSpoofer(ctx, dnsAddr); err != nil {
-		t.Fatalf("Failed to start DNS spoofer: %v", err)
-	}
-
-	// Create UDP connection to make queries
-	conn, err := net.Dial("udp", dnsAddr)
+func TestTheAddressLeadsBackToTheName(t *testing.T) {
+	// This is the whole point of the resolver: the boundary must be told a
+	// name, because mesh.sam.alt has no address and the boundary is what
+	// chooses a provider for it.
+	r, err := newResolver("169.254.64.0/18")
 	if err != nil {
-		t.Fatalf("Failed to dial DNS spoofer: %v", err)
+		t.Fatalf("newResolver: %v", err)
 	}
-	defer func() { _ = conn.Close() }()
 
-	// Query A record
-	msgA := dnsmessage.Message{
-		Header: dnsmessage.Header{
-			ID:               1234,
-			OpCode:           0,
-			RecursionDesired: true,
-		},
-		Questions: []dnsmessage.Question{
-			{
-				Name:  dnsmessage.MustNewName("api.github.com."),
-				Type:  dnsmessage.TypeA,
-				Class: dnsmessage.ClassINET,
-			},
-		},
-	}
-	packedA, _ := msgA.Pack()
-	_, _ = conn.Write(packedA)
-
-	buf := make([]byte, 512)
-	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-	n, err := conn.Read(buf)
+	addr, err := r.assign("mesh.sam.alt")
 	if err != nil {
-		t.Fatalf("Failed to read DNS reply: %v", err)
+		t.Fatalf("assign: %v", err)
 	}
 
-	var respA dnsmessage.Message
-	if err := respA.Unpack(buf[:n]); err != nil {
-		t.Fatalf("Failed to unpack DNS response: %v", err)
+	name, ok := r.nameFor(addr)
+	if !ok || name != "mesh.sam.alt" {
+		t.Errorf("nameFor(%v) = %q, %v; want mesh.sam.alt", addr, name, ok)
 	}
 
-	if len(respA.Answers) == 0 {
-		t.Fatalf("No answers in DNS A response")
-	}
-
-	answerA := respA.Answers[0]
-	if answerA.Header.Type != dnsmessage.TypeA {
-		t.Fatalf("Expected A record answer, got %v", answerA.Header.Type)
-	}
-
-	bodyVarA := answerA.Body
-	aRes, ok := bodyVarA.(*dnsmessage.AResource)
-	if !ok {
-		t.Fatalf("Expected AResource body type")
-	}
-
-	expectedA := [4]byte{127, 0, 0, 1}
-	if aRes.A != expectedA {
-		t.Errorf("Expected A record %v, got %v", expectedA, aRes.A)
-	}
-
-	// Query AAAA record
-	msgAAAA := dnsmessage.Message{
-		Header: dnsmessage.Header{
-			ID:               5678,
-			OpCode:           0,
-			RecursionDesired: true,
-		},
-		Questions: []dnsmessage.Question{
-			{
-				Name:  dnsmessage.MustNewName("api.github.com."),
-				Type:  dnsmessage.TypeAAAA,
-				Class: dnsmessage.ClassINET,
-			},
-		},
-	}
-	packedAAAA, _ := msgAAAA.Pack()
-	_, _ = conn.Write(packedAAAA)
-
-	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-	n, err = conn.Read(buf)
-	if err != nil {
-		t.Fatalf("Failed to read DNS reply: %v", err)
-	}
-
-	var respAAAA dnsmessage.Message
-	if err := respAAAA.Unpack(buf[:n]); err != nil {
-		t.Fatalf("Failed to unpack DNS response: %v", err)
-	}
-
-	if len(respAAAA.Answers) == 0 {
-		t.Fatalf("No answers in DNS AAAA response")
-	}
-
-	answerAAAA := respAAAA.Answers[0]
-	if answerAAAA.Header.Type != dnsmessage.TypeAAAA {
-		t.Fatalf("Expected AAAA record answer, got %v", answerAAAA.Header.Type)
-	}
-
-	bodyVarAAAA := answerAAAA.Body
-	aaaaRes, ok := bodyVarAAAA.(*dnsmessage.AAAAResource)
-	if !ok {
-		t.Fatalf("Expected AAAAResource body type")
-	}
-
-	expectedAAAA := net.ParseIP("::1").To16()
-	var expectedAAAABytes [16]byte
-	copy(expectedAAAABytes[:], expectedAAAA)
-
-	if aaaaRes.AAAA != expectedAAAABytes {
-		t.Errorf("Expected AAAA record %v, got %v", expectedAAAABytes, aaaaRes.AAAA)
+	// An address nobody handed out is not an error: an agent may dial a
+	// literal address, and whether that is allowed is policy's business.
+	if _, ok := r.nameFor(netip.MustParseAddr("93.184.216.34")); ok {
+		t.Error("an address that was never assigned resolved to a name")
 	}
 }
 
-func TestTCPForwarder(t *testing.T) {
-	tempDir := t.TempDir()
-	udsPath := filepath.Join(tempDir, "mock-uds.sock")
-
-	// UDS Listener (representing gateway)
-	udsListener, err := net.Listen("unix", udsPath)
+func TestTheAddressPoolIsBounded(t *testing.T) {
+	// A /30 holds four addresses, and the network address is skipped. An
+	// agent resolving endlessly must be refused rather than handed something
+	// outside the pool that would then be routed somewhere real.
+	r, err := newResolver("169.254.64.0/30")
 	if err != nil {
-		t.Fatalf("Failed to listen on UDS: %v", err)
+		t.Fatalf("newResolver: %v", err)
 	}
-	defer func() { _ = udsListener.Close() }()
 
-	mockGatewayMsg := []byte("hello from gateway")
-
-	go func() {
-		conn, err := udsListener.Accept()
-		if err != nil {
-			return
+	var lastErr error
+	for i := range 10 {
+		if _, err := r.assign(strings.Repeat("a", i+1) + ".example"); err != nil {
+			lastErr = err
+			break
 		}
-		defer func() { _ = conn.Close() }()
-		_, _ = conn.Write(mockGatewayMsg)
-	}()
-
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("Failed to listen: %v", err)
 	}
-	defer func() { _ = listener.Close() }()
-
-	go func() {
-		for {
-			conn, err := listener.Accept()
-			if err != nil {
-				return
-			}
-			go handleConnection(conn, udsPath)
-		}
-	}()
-
-	// Dial forwarder
-	conn, err := net.Dial("tcp", listener.Addr().String())
-	if err != nil {
-		t.Fatalf("Failed to dial forwarder: %v", err)
-	}
-	defer func() { _ = conn.Close() }()
-
-	reply := make([]byte, len(mockGatewayMsg))
-	_, err = io.ReadFull(conn, reply)
-	if err != nil {
-		t.Fatalf("Failed to read from forwarder connection: %v", err)
-	}
-
-	if string(reply) != string(mockGatewayMsg) {
-		t.Errorf("Expected message %q, got %q", string(mockGatewayMsg), string(reply))
+	if lastErr == nil {
+		t.Error("the pool handed out more addresses than it contains")
 	}
 }
 
-func TestBuildAgentEnv(t *testing.T) {
-	caPath := "/tmp/test_ca.pem"
-	interceptorPath := "/tmp/test_interceptor.so"
-
-	env := buildAgentEnv(1234, caPath, interceptorPath)
-
-	expected := map[string]string{
-		"SSL_CERT_FILE":       caPath,
-		"REQUESTS_CA_BUNDLE":  caPath,
-		"NODE_EXTRA_CA_CERTS": caPath,
-		"HTTP_PROXY":          "http://127.0.0.1:1234",
-		"HTTPS_PROXY":         "http://127.0.0.1:1234",
-		"ALL_PROXY":           "http://127.0.0.1:1234",
-		"http_proxy":          "http://127.0.0.1:1234",
-		"https_proxy":         "http://127.0.0.1:1234",
-		"all_proxy":           "http://127.0.0.1:1234",
-		"SAM_PROXY_PORT":      "1234",
-		"LD_PRELOAD":          interceptorPath,
+func TestAQueriesAreAnsweredWithAPlaceholder(t *testing.T) {
+	r, err := newResolver("169.254.64.0/18")
+	if err != nil {
+		t.Fatalf("newResolver: %v", err)
 	}
 
-	envMap := make(map[string]string)
-	for _, kv := range env {
-		parts := strings.SplitN(kv, "=", 2)
-		if len(parts) == 2 {
-			envMap[parts[0]] = parts[1]
+	query, err := buildQuery("mesh.sam.alt.", dnsmessage.TypeA)
+	if err != nil {
+		t.Fatalf("buildQuery: %v", err)
+	}
+
+	reply, err := r.answer(query)
+	if err != nil {
+		t.Fatalf("answer: %v", err)
+	}
+
+	var parser dnsmessage.Parser
+	if _, err := parser.Start(reply); err != nil {
+		t.Fatalf("parse reply: %v", err)
+	}
+	if err := parser.SkipAllQuestions(); err != nil {
+		t.Fatalf("skip questions: %v", err)
+	}
+	answer, err := parser.AnswerHeader()
+	if err != nil {
+		t.Fatalf("answer header: %v", err)
+	}
+	if answer.Type != dnsmessage.TypeA {
+		t.Fatalf("answer type = %v, want A", answer.Type)
+	}
+
+	resource, err := parser.AResource()
+	if err != nil {
+		t.Fatalf("A resource: %v", err)
+	}
+	got := netip.AddrFrom4(resource.A)
+	if name, ok := r.nameFor(got); !ok || name != "mesh.sam.alt" {
+		t.Errorf("answered %v, which maps to %q, %v", got, name, ok)
+	}
+}
+
+func TestAAAAQueriesAreAnsweredEmpty(t *testing.T) {
+	// A sandbox that got an AAAA answer would try IPv6 first and wait for it
+	// to fail, which reads as a slow mesh rather than an absent address family.
+	r, err := newResolver("169.254.64.0/18")
+	if err != nil {
+		t.Fatalf("newResolver: %v", err)
+	}
+
+	query, err := buildQuery("mesh.sam.alt.", dnsmessage.TypeAAAA)
+	if err != nil {
+		t.Fatalf("buildQuery: %v", err)
+	}
+	reply, err := r.answer(query)
+	if err != nil {
+		t.Fatalf("answer: %v", err)
+	}
+
+	var parser dnsmessage.Parser
+	if _, err := parser.Start(reply); err != nil {
+		t.Fatalf("parse reply: %v", err)
+	}
+	if err := parser.SkipAllQuestions(); err != nil {
+		t.Fatalf("skip questions: %v", err)
+	}
+	if _, err := parser.AnswerHeader(); err == nil {
+		t.Error("AAAA query produced an answer record")
+	}
+}
+
+func TestConnectSendsTheNameNotTheAddress(t *testing.T) {
+	// If this regresses, the boundary receives an address it cannot resolve a
+	// provider for, and every mesh name stops working while every literal
+	// address keeps working, which is a confusing way to lose the design.
+	request, err := connectRequest("mesh.sam.alt", 80)
+	if err != nil {
+		t.Fatalf("connectRequest: %v", err)
+	}
+
+	if request[3] != atypDomain {
+		t.Fatalf("address type = %d, want %d (domain)", request[3], atypDomain)
+	}
+	length := int(request[4])
+	if got := string(request[5 : 5+length]); got != "mesh.sam.alt" {
+		t.Errorf("name = %q, want mesh.sam.alt", got)
+	}
+	port := int(request[5+length])<<8 | int(request[6+length])
+	if port != 80 {
+		t.Errorf("port = %d, want 80", port)
+	}
+}
+
+func TestConnectPassesLiteralAddressesThrough(t *testing.T) {
+	// An agent that dials an address rather than a name is not doing anything
+	// forbidden; the boundary still decides. Encoding it as a name would make
+	// the boundary try to resolve "93.184.216.34" as a mesh service.
+	request, err := connectRequest("93.184.216.34", 443)
+	if err != nil {
+		t.Fatalf("connectRequest: %v", err)
+	}
+	if request[3] != atypIPv4 {
+		t.Errorf("address type = %d, want %d (IPv4)", request[3], atypIPv4)
+	}
+}
+
+func TestConnectRefusesAnUnencodableName(t *testing.T) {
+	if _, err := connectRequest(strings.Repeat("a", 256), 80); err == nil {
+		t.Error("a name too long for the protocol was encoded anyway")
+	}
+}
+
+func TestPolicyDenialIsLegibleAsPolicy(t *testing.T) {
+	// An operator reading an agent's logs has to be able to tell "you may not"
+	// from "the mesh is broken", because the two have nothing in common.
+	if got := replyMessage(0x02); !strings.Contains(got, "not allowed") {
+		t.Errorf("reply 0x02 reads as %q, which does not say it was policy", got)
+	}
+	if got := replyMessage(0x05); !strings.Contains(got, "refused") {
+		t.Errorf("reply 0x05 reads as %q", got)
+	}
+}
+
+func TestTheAgentEnvironmentIsNotDoctored(t *testing.T) {
+	// The point of the rewrite: nano-init no longer reaches into the agent. If
+	// these come back, confinement has quietly become a request for the
+	// agent's cooperation again and every argument for the design stops
+	// holding.
+	source, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatalf("read main.go: %v", err)
+	}
+	for _, forbidden := range []string{
+		"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
+		"LD_PRELOAD", "SSL_CERT_FILE", "REQUESTS_CA_BUNDLE",
+	} {
+		if strings.Contains(string(source), `"`+forbidden+`"`) {
+			t.Errorf("%s is being set for the agent again", forbidden)
+		}
+	}
+}
+
+func TestTheBoundaryCanBeNamedEitherWay(t *testing.T) {
+	// A container dials a path and a microVM dials vsock. One binary serves
+	// both, and nothing else in the sandbox knows which kind it is, so this
+	// string is the entire difference between them.
+	if _, _, err := parseVsock("2:1080"); err != nil {
+		t.Errorf("parseVsock(2:1080): %v", err)
+	}
+	for _, bad := range []string{"2", "host:1080", "2:not-a-port", ""} {
+		if _, _, err := parseVsock(bad); err == nil {
+			t.Errorf("parseVsock(%q) was accepted", bad)
 		}
 	}
 
-	for k, expectedVal := range expected {
-		val, exists := envMap[k]
-		if !exists {
-			t.Errorf("Expected environment variable %s to be set", k)
-			continue
-		}
-		if val != expectedVal {
-			t.Errorf("Expected environment variable %s to be %q, got %q", k, expectedVal, val)
-		}
+	// A missing socket has to be reported at startup. A sandbox that starts
+	// without a way out looks like a mesh outage on the agent's first call.
+	if err := checkBoundary(filepath.Join(t.TempDir(), "absent.sock")); err == nil {
+		t.Error("a boundary socket that does not exist was accepted")
+	}
+	if err := checkBoundary("vsock://2:1080"); err != nil {
+		t.Errorf("a well-formed vsock boundary was rejected: %v", err)
 	}
 }
 
 func TestCopyFile(t *testing.T) {
-	tempDir := t.TempDir()
-	src := filepath.Join(tempDir, "source-file")
-	dest := filepath.Join(tempDir, "dest-file")
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src")
+	dest := filepath.Join(dir, "dest")
 
-	content := []byte("hello copy world")
-	if err := os.WriteFile(src, content, 0755); err != nil {
-		t.Fatalf("Failed to write source file: %v", err)
+	if err := os.WriteFile(src, []byte("binary"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
 	}
-
 	if err := copyFile(src, dest); err != nil {
-		t.Fatalf("copyFile failed: %v", err)
+		t.Fatalf("copyFile: %v", err)
 	}
 
-	data, err := os.ReadFile(dest)
+	got, err := os.ReadFile(dest)
 	if err != nil {
-		t.Fatalf("Failed to read dest file: %v", err)
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(got) != "binary" {
+		t.Errorf("contents = %q, want %q", got, "binary")
 	}
 
-	if string(data) != string(content) {
-		t.Errorf("Expected content %q, got %q", string(content), string(data))
-	}
-
-	fi, err := os.Stat(dest)
+	info, err := os.Stat(dest)
 	if err != nil {
-		t.Fatalf("Stat dest failed: %v", err)
+		t.Fatalf("Stat: %v", err)
 	}
-
-	expectedMode := os.FileMode(0755)
-	if fi.Mode().Perm() != expectedMode {
-		t.Errorf("Expected permissions %v, got %v", expectedMode, fi.Mode().Perm())
+	// The copy has to be runnable; the exact bits are the umask's business.
+	if info.Mode().Perm()&0o100 == 0 {
+		t.Errorf("mode = %v, want the owner execute bit set", info.Mode().Perm())
 	}
 }
 
-func TestBootstrapInterceptor(t *testing.T) {
-	tempDir := t.TempDir()
-	udsPath := filepath.Join(tempDir, "mock-sam-box-interceptor.sock")
-
-	listener, err := net.Listen("unix", udsPath)
-	if err != nil {
-		t.Fatalf("Failed to listen on UDS: %v", err)
+func buildQuery(name string, qtype dnsmessage.Type) ([]byte, error) {
+	builder := dnsmessage.NewBuilder(nil, dnsmessage.Header{ID: 1234})
+	if err := builder.StartQuestions(); err != nil {
+		return nil, err
 	}
-	defer func() { _ = listener.Close() }()
-
-	mockSO := []byte("fake-shared-library-so-data")
-	var receivedArch, receivedLibc string
-
-	srv := &http.Server{
-		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.Method == "GET" && r.URL.Path == "/internal/bootstrap/libinterceptor.so" {
-				receivedArch = r.URL.Query().Get("arch")
-				receivedLibc = r.URL.Query().Get("libc")
-				w.WriteHeader(http.StatusOK)
-				_, _ = w.Write(mockSO)
-			} else {
-				w.WriteHeader(http.StatusNotFound)
-			}
-		}),
+	if err := builder.Question(dnsmessage.Question{
+		Name:  dnsmessage.MustNewName(name),
+		Type:  qtype,
+		Class: dnsmessage.ClassINET,
+	}); err != nil {
+		return nil, err
 	}
-	go func() {
-		_ = srv.Serve(listener)
-	}()
-	defer func() { _ = srv.Close() }()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	_ = os.Remove("/tmp/libinterceptor.so")
-	defer func() { _ = os.Remove("/tmp/libinterceptor.so") }()
-
-	soPath, err := bootstrapInterceptor(ctx, udsPath)
-	if err != nil {
-		t.Fatalf("bootstrapInterceptor failed: %v", err)
-	}
-
-	if soPath != "/tmp/libinterceptor.so" {
-		t.Errorf("Expected path '/tmp/libinterceptor.so', got %q", soPath)
-	}
-
-	data, err := os.ReadFile("/tmp/libinterceptor.so")
-	if err != nil {
-		t.Fatalf("Failed to read bootstrap SO: %v", err)
-	}
-
-	if string(data) != string(mockSO) {
-		t.Errorf("Expected SO data %q, got %q", string(mockSO), string(data))
-	}
-
-	if receivedArch == "" {
-		t.Errorf("Expected arch query parameter to be passed, but was empty")
-	}
-	if receivedLibc == "" {
-		t.Errorf("Expected libc query parameter to be passed, but was empty")
-	}
-
-	// Test fallback / error case (server returns 404)
-	errSrvListener, err := net.Listen("unix", filepath.Join(tempDir, "mock-error-sam-box.sock"))
-	if err == nil {
-		defer func() { _ = errSrvListener.Close() }()
-		errSrv := &http.Server{
-			Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(http.StatusNotFound)
-			}),
-		}
-		go func() { _ = errSrv.Serve(errSrvListener) }()
-		defer func() { _ = errSrv.Close() }()
-
-		_, err = bootstrapInterceptor(ctx, errSrvListener.Addr().String())
-		if err == nil {
-			t.Errorf("Expected bootstrapInterceptor to return error when server returns 404")
-		}
-	}
+	return builder.Finish()
 }

@@ -55,3 +55,8 @@ __pycache__/
 keys.db
 mobile/logcat.txt
 
+# Guest images built by scripts/build-rootfs.sh; gigabytes, and reproducible
+# from the script, so they belong in a bucket rather than in history.
+/rootfs.ext4
+/rootfs.tar
+

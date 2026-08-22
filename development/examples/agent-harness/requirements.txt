@@ -1,0 +1,12 @@
+# The harness needs a model client and a tool client. It does not need a SAM
+# client, because there is no such thing: the mesh is reached with ordinary
+# HTTP to an ordinary name.
+#
+# There is no SOCKS support here on purpose. The sandbox routes the agent's
+# traffic to the boundary through tun0, so the agent neither configures a proxy
+# nor knows there is one.
+openai>=1.40,<3
+# Pinned to a major version: 1.x spells the transport streamablehttp_client and
+# 2.x spells it streamable_http_client, so an unpinned floor silently changes
+# the API underneath a sandbox image.
+mcp>=2.0,<3

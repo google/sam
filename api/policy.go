@@ -26,6 +26,7 @@ var (
 		FactGroup: {},
 		FactEmail: {},
 		FactNode:  {},
+		FactAgent: {},
 	}
 )
 

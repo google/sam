@@ -96,7 +96,7 @@ SAM_API_TOKEN="my-agent-super-token-123" sam-node run --bind-addr "127.0.0.1:808
 Your AI agent connects to the node's local MCP server. The local server translates standard MCP queries (like `listTools` or `callTool`) into secure P2P mesh commands.
 
 ### Exposing the API
-The local MCP endpoint is served via **HTTP Server-Sent Events (SSE)** at:
+The local MCP endpoint is served over **Streamable HTTP** at:
 `http://127.0.0.1:8080/mcp`
 
 The node serves the very same API on a Unix socket, `<data-dir>/sam.sock`

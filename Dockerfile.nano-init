@@ -2,15 +2,13 @@
 FROM golang:1.26.6 AS builder
 RUN apt-get update && apt-get install -y gcc libc-dev
 WORKDIR /app
-COPY go.mod go.sum ./
+COPY cmd/nano-init/go.mod cmd/nano-init/go.sum ./
 RUN go mod download
-COPY . .
-RUN gcc -shared -fPIC -ldl -o libinterceptor.so cmd/nano-init/interceptor/interceptor.c
-RUN CGO_ENABLED=0 GOOS=linux go build -buildvcs=false -o nano-init ./cmd/nano-init
+COPY cmd/nano-init/ ./
+RUN CGO_ENABLED=0 GOOS=linux go build -buildvcs=false -ldflags="-s -w" -o nano-init .
 
 # Stage 2: Final
 FROM gcr.io/distroless/base:nonroot
 COPY --from=builder --chown=nonroot:nonroot /app/nano-init /
-COPY --from=builder --chown=nonroot:nonroot /app/libinterceptor.so /opt/sam/libinterceptor.so
 USER nonroot:nonroot
 ENTRYPOINT ["/nano-init"]

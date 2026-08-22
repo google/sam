@@ -1,0 +1,10 @@
+{
+  "recorded": "2026-08-21T05:42:33+00:00",
+  "commit": "e5b296692f69091917e014b1e87dde4876da5c1f",
+  "dirty": true,
+  "kernel": "Linux 7.1.6-1rodete1-amd64",
+  "cpus": 48,
+  "memory_kb": 123632524,
+  "cpu_model": "Intel(R) Xeon(R) CPU @ 2.60GHz",
+  "go": "go1.26.5"
+}
