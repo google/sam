@@ -60,8 +60,8 @@ class StdoutChannel(Channel):
 
 
 def build_channels(env) -> List[Channel]:
+    # Stdout is always on so the log shows every alert, delivered or not.
     channels = [cls.from_env(env) for cls in Channel.registry
                 if cls.required_env and all(env.get(var) for var in cls.required_env)]
-    if not channels:
-        channels.append(StdoutChannel())
+    channels.append(StdoutChannel())
     return channels

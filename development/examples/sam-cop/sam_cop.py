@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import re
+import signal
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -330,14 +331,28 @@ async def connect_with_retry(retries: int = 12, delay: float = 5.0) -> SamClient
 
 
 CONSECUTIVE_FAILURE_LIMIT = 3
+ABANDONED_CLIENT_LIMIT = 50
+
+_shutdown = False
+
+# Dead clients are parked, never released: closing one raises from a foreign task,
+# and letting the GC finalize it cancels a scope owned by ours. Reconnects are rare.
+_abandoned: List[SamClient] = []
+
+
+def _request_shutdown() -> None:
+    global _shutdown
+    _shutdown = True
 
 
 async def reconnect(client, state: SamCopState) -> Tuple[SamClient, str, SamCopState]:
     """Recovers from a lost MCP session; the node's seq counter restarts too, so reset cursor."""
-    try:
-        await client.close()
-    except Exception as error:
-        print(f"[-] error closing stale client: {error}", flush=True)
+    _abandoned.append(client)
+    # Each parked client keeps a file descriptor; exit before they pile up -
+    # the supervisor restart clears the list.
+    if len(_abandoned) >= ABANDONED_CLIENT_LIMIT:
+        print(f"[-] {len(_abandoned)} stale clients parked, exiting for a clean restart", flush=True)
+        sys.exit(1)
     client = await connect_with_retry()
     mesh_info = parse_tool_json(await client.call_tool("get_mesh_info", {})) or {}
     node_peer_id = mesh_info.get("peer_id", "unknown")
@@ -352,6 +367,10 @@ async def run_sam_cop():
     print(f"[*] sam-cop starting: poll={config.poll_interval}s miss_threshold={config.miss_threshold} "
           f"min_peers={config.min_peers} channels=[{channel_names}]", flush=True)
 
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(sig, _request_shutdown)
+
     client = await connect_with_retry()
     try:
         mesh_info = parse_tool_json(await client.call_tool("get_mesh_info", {})) or {}
@@ -364,7 +383,11 @@ async def run_sam_cop():
             try:
                 state = await run_cycle(client, state, channels, config, node_peer_id)
                 consecutive_failures = 0
-            except Exception as error:
+            # A lost session surfaces as a bare CancelledError from anyio's cancel scope,
+            # indistinguishable by type from a real shutdown - hence the explicit flag.
+            except (Exception, asyncio.CancelledError) as error:
+                if _shutdown:
+                    raise
                 consecutive_failures += 1
                 print(f"[-] poll cycle failed ({consecutive_failures}/{CONSECUTIVE_FAILURE_LIMIT}): {error}", flush=True)
                 if consecutive_failures >= CONSECUTIVE_FAILURE_LIMIT:
@@ -372,9 +395,17 @@ async def run_sam_cop():
                     client, node_peer_id, state = await reconnect(client, state)
                     consecutive_failures = 0
                     print(f"[+] reconnected to local node {node_peer_id}", flush=True)
-            await asyncio.sleep(config.poll_interval)
+            try:
+                await asyncio.sleep(config.poll_interval)
+            except (Exception, asyncio.CancelledError):
+                # A discarded session can still cancel us here, outside the cycle.
+                if _shutdown:
+                    raise
     finally:
-        await client.close()
+        try:
+            await client.close()
+        except BaseException as error:
+            print(f"[-] error closing client on shutdown: {error}", flush=True)
 
 
 if __name__ == "__main__":
