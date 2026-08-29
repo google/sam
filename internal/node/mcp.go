@@ -153,6 +153,18 @@ func NewMCPServer(node *SamNode) *mcp.Server {
 		Description: "Returns the last few lines of the node's log output.",
 	}, node.handleGetRecentLogs)
 
+	// Add the poll_node_events tool.
+	mcp.AddTool(mcpServer, &mcp.Tool{
+		Name:        "poll_node_events",
+		Description: "Poll typed node events (mesh events, security events) with cursor semantics. Pass since_seq from the previous response; 0 returns everything buffered.",
+	}, node.handlePollNodeEvents)
+
+	// Add the get_control_plane_info tool.
+	mcp.AddTool(mcpServer, &mcp.Tool{
+		Name:        "get_control_plane_info",
+		Description: "Fetch the control plane's public /info and /keys endpoints; returns active router addresses and valid signing keys as JSON.",
+	}, node.handleGetControlPlaneInfo)
+
 	return mcpServer
 }
 

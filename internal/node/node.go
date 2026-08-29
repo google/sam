@@ -1137,6 +1137,7 @@ func (n *SamNode) listenForControlPlaneEvents(ctx context.Context) {
 
 		if !n.rateLimiter.Allow(msg.ReceivedFrom.String()) {
 			logger.Warnf("[Mesh Event] Rate limit exceeded for %s, dropping message", msg.ReceivedFrom)
+			RecordNodeEvent(EventCategorySecurity, EventTypeRateLimitDrop, msg.ReceivedFrom.String(), "rate limit exceeded, message dropped")
 			continue
 		}
 
@@ -1154,6 +1155,7 @@ func (n *SamNode) listenForControlPlaneEvents(ctx context.Context) {
 
 		if !n.verifyEvent(&event) {
 			logger.Warnf("[Mesh Event] Potential spoofing attempt: invalid signature on event from %s", msg.ReceivedFrom)
+			RecordNodeEvent(EventCategorySecurity, EventTypeSpoofingAttempt, msg.ReceivedFrom.String(), "invalid event signature")
 			continue
 		}
 
@@ -1161,15 +1163,19 @@ func (n *SamNode) listenForControlPlaneEvents(ctx context.Context) {
 		eventTime := time.UnixMilli(event.Timestamp)
 		if time.Since(eventTime) > FreshnessThreshold || time.Until(eventTime) > FreshnessThreshold {
 			logger.Warnf("[Mesh Event] Dropping stale or future event from %s (timestamp: %d)", msg.ReceivedFrom, event.Timestamp)
+			RecordNodeEvent(EventCategorySecurity, EventTypeStaleEvent, msg.ReceivedFrom.String(), "stale or future event dropped")
 			continue
 		}
 
 		switch event.Type {
 		case api.MeshEvent_BANNED:
+			RecordNodeEvent(EventCategoryMesh, EventTypeBanned, event.PeerId, "peer banned by hub")
 			n.handleBannedEvent(&event)
 		case api.MeshEvent_KEY_ROTATION:
+			RecordNodeEvent(EventCategoryMesh, EventTypeKeyRotation, event.PeerId, "hub key rotation")
 			n.handleKeyRotationEvent(&event)
 		case api.MeshEvent_POLICY_UPDATE:
+			RecordNodeEvent(EventCategoryMesh, EventTypePolicyUpdate, event.PeerId, "mesh policy update received")
 			logger.Infof("[Mesh Event] Received POLICY_UPDATE event from %s, triggering sync", msg.ReceivedFrom)
 			go func() {
 				maxJitter := n.config.PolicySyncJitter
