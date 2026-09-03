@@ -2,7 +2,6 @@
 import json
 import os
 import time
-import uuid
 
 from google.protobuf.json_format import MessageToDict
 
@@ -13,14 +12,13 @@ from a2a.server.events.event_queue import EventQueue
 from a2a.server.request_handlers import DefaultRequestHandler
 from a2a.server.routes import create_agent_card_routes, create_jsonrpc_routes
 from a2a.server.tasks.inmemory_task_store import InMemoryTaskStore
+from a2a.server.tasks.task_updater import TaskUpdater
 from a2a.types import (
     AgentCapabilities,
     AgentCard,
     AgentInterface,
     AgentSkill,
-    Message,
     Part,
-    Role,
 )
 from google import genai
 from google.genai import types
@@ -28,6 +26,10 @@ from starlette.applications import Starlette
 
 PORT = 7777
 MODEL = os.environ.get("GEMINI_MODEL", "models/gemini-3.5-flash-lite")
+
+# Sentinel Gemini emits so a clarifying question becomes the A2A
+# input-required task state instead of hiding inside a completed reply.
+NEED_INPUT = "[NEED_INPUT]"
 
 class ChatExecutor(AgentExecutor):
     """One Gemini chat session per A2A contextId; the session carries the history."""
@@ -43,7 +45,12 @@ class ChatExecutor(AgentExecutor):
             chat = self.gemini.aio.chats.create(
                 model=MODEL,
                 config=types.GenerateContentConfig(
-                    thinking_config=types.ThinkingConfig(thinking_level="minimal")
+                    thinking_config=types.ThinkingConfig(thinking_level="minimal"),
+                    system_instruction=(
+                        "If you cannot complete the request without the user "
+                        f"answering a clarifying question first, start your reply "
+                        f"with the exact token {NEED_INPUT} followed by the question."
+                    ),
                 ),
             )
             self.chats[context.context_id] = chat
@@ -73,15 +80,13 @@ class ChatExecutor(AgentExecutor):
             f"{time.monotonic() - started:.1f}s usage={reply.usage_metadata}",
             flush=True,
         )
-        await event_queue.enqueue_event(
-            Message(
-                role=Role.ROLE_AGENT,
-                message_id=str(uuid.uuid4()),
-                parts=[Part(text=reply.text or "")],
-                context_id=context.context_id,
-                task_id=context.task_id,
-            )
-        )
+        updater = TaskUpdater(event_queue, context.task_id, context.context_id)
+        text = reply.text or ""
+        if text.startswith(NEED_INPUT):
+            question = text.removeprefix(NEED_INPUT).strip()
+            await updater.requires_input(updater.new_agent_message([Part(text=question)]))
+        else:
+            await updater.complete(updater.new_agent_message([Part(text=text)]))
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
         pass
