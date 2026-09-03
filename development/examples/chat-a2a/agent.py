@@ -39,6 +39,22 @@ ASK_USER = types.FunctionDeclaration(
     ),
 )
 
+# Same typed channel for producing files: the content becomes an A2A artifact
+# (raw bytes + filename) instead of being pasted into the chat reply.
+RETURN_FILE = types.FunctionDeclaration(
+    name="return_file",
+    description="Deliver a generated text-based file (CSV, Markdown, JSON, plain text) to the user as a downloadable attachment instead of pasting it into the reply.",
+    parameters=types.Schema(
+        type=types.Type.OBJECT,
+        properties={
+            "filename": types.Schema(type=types.Type.STRING),
+            "content": types.Schema(type=types.Type.STRING),
+            "media_type": types.Schema(type=types.Type.STRING, description="MIME type, e.g. text/csv"),
+        },
+        required=["filename", "content"],
+    ),
+)
+
 class ChatExecutor(AgentExecutor):
     """One Gemini chat session per A2A contextId; the session carries the history."""
 
@@ -55,7 +71,7 @@ class ChatExecutor(AgentExecutor):
                 model=MODEL,
                 config=types.GenerateContentConfig(
                     thinking_config=types.ThinkingConfig(thinking_level="minimal"),
-                    tools=[types.Tool(function_declarations=[ASK_USER])],
+                    tools=[types.Tool(function_declarations=[ASK_USER, RETURN_FILE])],
                 ),
             )
             self.chats[context.context_id] = chat
@@ -98,8 +114,25 @@ class ChatExecutor(AgentExecutor):
             self.pending_question.add(context.context_id)
             question = str(calls[0].args.get("question", ""))
             await updater.requires_input(updater.new_agent_message([Part(text=question)]))
-        else:
-            await updater.complete(updater.new_agent_message([Part(text=reply.text or "")]))
+            return
+        if calls and calls[0].name == "return_file":
+            filename = str(calls[0].args.get("filename", "file.txt"))
+            content = str(calls[0].args.get("content", ""))
+            media = str(calls[0].args.get("media_type") or "text/plain")
+            await updater.add_artifact(
+                [Part(raw=content.encode("utf-8"), filename=filename, media_type=media)],
+                name=filename,
+            )
+            # Unlike ask_user, the tool result is known now: answer the call
+            # immediately so the chat history stays valid for the next turn.
+            reply = await chat.send_message(
+                types.Part.from_function_response(name="return_file", response={"delivered": True})
+            )
+            await updater.complete(
+                updater.new_agent_message([Part(text=reply.text or f"Sent {filename}.")])
+            )
+            return
+        await updater.complete(updater.new_agent_message([Part(text=reply.text or "")]))
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
         pass
@@ -111,7 +144,7 @@ agent_card = AgentCard(
     version="0.1.0",
     capabilities=AgentCapabilities(streaming=False),
     default_input_modes=["text/plain", "application/json", "application/pdf", "image/png", "image/jpeg"],
-    default_output_modes=["text/plain"],
+    default_output_modes=["text/plain", "text/csv", "text/markdown", "application/json"],
     skills=[
         AgentSkill(
             id="chat",
