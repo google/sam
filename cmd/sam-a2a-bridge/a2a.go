@@ -16,6 +16,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"mime"
@@ -273,4 +274,71 @@ func saveFilePart(dir, taskID, name string, data []byte) (string, error) {
 		return "", err
 	}
 	return path, nil
+}
+
+type getAgentCardParams struct {
+	Peer    string `json:"peer" jsonschema:"Peer ID of the node hosting the agent"`
+	Service string `json:"service" jsonschema:"Name of the a2a service registered on that peer"`
+}
+
+// agentCardSummary trims the agent card to what a model can use; full cards
+// carry security schemas and provider blurbs a model never needs.
+type agentCardSummary struct {
+	Name               string           `json:"name"`
+	Description        string           `json:"description,omitempty"`
+	Version            string           `json:"version,omitempty"`
+	DefaultInputModes  []string         `json:"default_input_modes,omitempty"`
+	DefaultOutputModes []string         `json:"default_output_modes,omitempty"`
+	Streaming          bool             `json:"streaming"`
+	Skills             []agentCardSkill `json:"skills,omitempty"`
+}
+
+type agentCardSkill struct {
+	ID          string   `json:"id"`
+	Name        string   `json:"name,omitempty"`
+	Description string   `json:"description,omitempty"`
+	Tags        []string `json:"tags,omitempty"`
+	Examples    []string `json:"examples,omitempty"`
+}
+
+func getAgentCard(ctx context.Context, cfg bridgeConfig, p getAgentCardParams) (agentCardSummary, error) {
+	httpClient := &http.Client{
+		Timeout:   30 * time.Second,
+		Transport: &samTransport{base: http.DefaultTransport, token: cfg.token},
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		cfg.meshURL(p.Peer, p.Service)+"/.well-known/agent-card.json", nil)
+	if err != nil {
+		return agentCardSummary{}, err
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return agentCardSummary{}, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	// Wire keys match a2a-go v2.5.0's a2a.AgentCard/AgentCapabilities/AgentSkill json tags exactly.
+	var wire struct {
+		Name               string   `json:"name"`
+		Description        string   `json:"description"`
+		Version            string   `json:"version"`
+		DefaultInputModes  []string `json:"defaultInputModes"`
+		DefaultOutputModes []string `json:"defaultOutputModes"`
+		Capabilities       struct {
+			Streaming bool `json:"streaming"`
+		} `json:"capabilities"`
+		Skills []agentCardSkill `json:"skills"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&wire); err != nil {
+		return agentCardSummary{}, fmt.Errorf("agent card is not valid JSON: %w", err)
+	}
+	return agentCardSummary{
+		Name:               wire.Name,
+		Description:        wire.Description,
+		Version:            wire.Version,
+		DefaultInputModes:  wire.DefaultInputModes,
+		DefaultOutputModes: wire.DefaultOutputModes,
+		Streaming:          wire.Capabilities.Streaming,
+		Skills:             wire.Skills,
+	}, nil
 }

@@ -107,3 +107,23 @@ func TestNewBridgeServerConstructs(t *testing.T) {
 		t.Fatal("newBridgeServer returned nil")
 	}
 }
+
+func TestHandleGetAgentCard(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"name":"echo-agent","capabilities":{"streaming":true},"skills":[]}`))
+	}))
+	defer srv.Close()
+
+	res, _, err := handleGetAgentCard(bridgeConfig{sidecarURL: srv.URL})(
+		context.Background(), nil, getAgentCardParams{Peer: "12D3KooWpeer", Service: "echo"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.IsError {
+		t.Fatalf("unexpected tool error: %s", textContent(t, res))
+	}
+	if !strings.Contains(textContent(t, res), `"echo-agent"`) {
+		t.Errorf("card summary missing: %s", textContent(t, res))
+	}
+}

@@ -313,3 +313,43 @@ func TestResultIncludesFileURIs(t *testing.T) {
 		t.Fatalf("URI file part must pass through as-is: %v", got.Files)
 	}
 }
+
+func TestGetAgentCardTrims(t *testing.T) {
+	card := `{"name":"echo-agent","description":"echoes","version":"1.2.0",` +
+		`"defaultInputModes":["text/plain","application/pdf"],"defaultOutputModes":["text/plain"],` +
+		`"capabilities":{"streaming":false,"pushNotifications":true},` +
+		`"securitySchemes":{"oauth":{"type":"oauth2"}},"provider":{"organization":"acme"},` +
+		`"skills":[{"id":"echo","name":"Echo","description":"repeats input",` +
+		`"tags":["test"],"examples":["say hi"]}]}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || !strings.HasSuffix(r.URL.Path, "/.well-known/agent-card.json") {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(card))
+	}))
+	defer srv.Close()
+
+	got, err := getAgentCard(context.Background(), bridgeConfig{sidecarURL: srv.URL},
+		getAgentCardParams{Peer: "12D3KooWpeer", Service: "echo"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Name != "echo-agent" || got.Version != "1.2.0" {
+		t.Errorf("identity fields: %+v", got)
+	}
+	if len(got.Skills) != 1 || got.Skills[0].ID != "echo" || got.Skills[0].Examples[0] != "say hi" {
+		t.Errorf("skills not carried: %+v", got.Skills)
+	}
+	if len(got.DefaultInputModes) != 2 {
+		t.Errorf("input modes not carried: %+v", got.DefaultInputModes)
+	}
+	if got.Streaming {
+		t.Error("streaming must reflect the card (false)")
+	}
+	raw, _ := json.Marshal(got)
+	if strings.Contains(string(raw), "oauth") || strings.Contains(string(raw), "acme") {
+		t.Fatalf("trim failed, security/provider material leaked: %s", raw)
+	}
+}
