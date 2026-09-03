@@ -56,8 +56,18 @@ class ChatExecutor(AgentExecutor):
         if data_parts:
             # Text-first agent: structured payloads reach Gemini as a labeled block.
             prompt += "\n[structured data]: " + json.dumps(data_parts)
+        gemini_parts = [prompt]
+        for part in context.message.parts:
+            if part.WhichOneof("content") != "raw":
+                continue
+            media = part.media_type or "application/octet-stream"
+            if media.startswith("text/"):
+                # Text attachments read best as prompt text, not opaque blobs.
+                gemini_parts[0] += f"\n[attached file {part.filename}]:\n" + part.raw.decode("utf-8", "replace")
+            else:
+                gemini_parts.append(types.Part.from_bytes(data=part.raw, mime_type=media))
         started = time.monotonic()
-        reply = await chat.send_message(prompt)
+        reply = await chat.send_message(gemini_parts)
         print(
             f"[chat] context={context.context_id} gemini took "
             f"{time.monotonic() - started:.1f}s usage={reply.usage_metadata}",
@@ -82,7 +92,7 @@ agent_card = AgentCard(
     description="Gemini-backed conversational agent; remembers the conversation per contextId",
     version="0.1.0",
     capabilities=AgentCapabilities(streaming=False),
-    default_input_modes=["text/plain", "application/json"],
+    default_input_modes=["text/plain", "application/json", "application/pdf", "image/png", "image/jpeg"],
     default_output_modes=["text/plain"],
     skills=[
         AgentSkill(
