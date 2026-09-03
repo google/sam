@@ -16,10 +16,13 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -163,5 +166,70 @@ func TestMeshURLEscapesPathSegments(t *testing.T) {
 	want := "http://localhost:8080/sam/12D3KooWpeer/a2a/..%2F..%2Fsam%2Fservice%2Fregister"
 	if got != want {
 		t.Fatalf("meshURL = %q, want %q", got, want)
+	}
+}
+
+func TestSendAgentTaskWithDataPart(t *testing.T) {
+	var rpc map[string]any
+	task := `{"kind":"task","id":"t10","contextId":"c10","status":{"state":"completed"}}`
+	srv := fakeSidecar(t, "/sam/12D3KooWpeer/a2a/echo", `{"task":`+task+`}`, &rpc)
+	defer srv.Close()
+
+	_, err := sendAgentTask(context.Background(), bridgeConfig{sidecarURL: srv.URL},
+		sendAgentTaskParams{Peer: "12D3KooWpeer", Service: "echo",
+			Data: map[string]any{"answer": 42, "unit": "cm"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(rpc)
+	if !strings.Contains(string(raw), `"answer":42`) || !strings.Contains(string(raw), `"unit":"cm"`) {
+		t.Fatalf("data payload not on the wire: %s", raw)
+	}
+}
+
+func TestSendAgentTaskWithFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "hello.txt")
+	if err := os.WriteFile(path, []byte("hello agent"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var rpc map[string]any
+	task := `{"kind":"task","id":"t11","contextId":"c11","status":{"state":"completed"}}`
+	srv := fakeSidecar(t, "/sam/12D3KooWpeer/a2a/echo", `{"task":`+task+`}`, &rpc)
+	defer srv.Close()
+
+	_, err := sendAgentTask(context.Background(), bridgeConfig{sidecarURL: srv.URL},
+		sendAgentTaskParams{Peer: "12D3KooWpeer", Service: "echo", FilePath: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(rpc)
+	wantB64 := base64.StdEncoding.EncodeToString([]byte("hello agent"))
+	if !strings.Contains(string(raw), wantB64) {
+		t.Fatalf("file bytes not on the wire as base64: %s", raw)
+	}
+	if !strings.Contains(string(raw), "hello.txt") {
+		t.Fatalf("file name not on the wire: %s", raw)
+	}
+}
+
+func TestSendAgentTaskFileTooLarge(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "big.bin")
+	if err := os.WriteFile(path, make([]byte, maxAttachmentBytes+1), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := sendAgentTask(context.Background(), bridgeConfig{sidecarURL: "http://127.0.0.1:1"},
+		sendAgentTaskParams{Peer: "12D3KooWpeer", Service: "echo", FilePath: path})
+	if err == nil || !strings.Contains(err.Error(), "attachment cap") {
+		t.Fatalf("oversized file must be rejected before any request, got: %v", err)
+	}
+}
+
+func TestSendAgentTaskRequiresContent(t *testing.T) {
+	_, err := sendAgentTask(context.Background(), bridgeConfig{sidecarURL: "http://127.0.0.1:1"},
+		sendAgentTaskParams{Peer: "12D3KooWpeer", Service: "echo"})
+	if err == nil || !strings.Contains(err.Error(), "nothing to send") {
+		t.Fatalf("empty send must be rejected, got: %v", err)
 	}
 }

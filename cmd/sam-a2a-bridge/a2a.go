@@ -16,8 +16,12 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"mime"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -36,12 +40,68 @@ func (c bridgeConfig) meshURL(peer, service string) string {
 }
 
 type sendAgentTaskParams struct {
-	Peer           string `json:"peer" jsonschema:"Peer ID of the node hosting the agent"`
-	Service        string `json:"service" jsonschema:"Name of the a2a service registered on that peer"`
-	Message        string `json:"message" jsonschema:"Plain-text message for the agent"`
-	RequiredLabels string `json:"required_labels,omitempty" jsonschema:"Comma-separated key=value labels the provider must have attested (e.g. region=eu-west-1); the local node refuses fail-closed before any data leaves it"`
-	ContextID      string `json:"context_id,omitempty" jsonschema:"Continue an existing conversation context"`
-	TaskID         string `json:"task_id,omitempty" jsonschema:"Reply into an existing task, e.g. one in state input-required"`
+	Peer           string         `json:"peer" jsonschema:"Peer ID of the node hosting the agent"`
+	Service        string         `json:"service" jsonschema:"Name of the a2a service registered on that peer"`
+	Message        string         `json:"message,omitempty" jsonschema:"Plain-text message for the agent; optional if data or file_path is set"`
+	Data           map[string]any `json:"data,omitempty" jsonschema:"Structured JSON payload sent to the agent as an A2A DataPart"`
+	FilePath       string         `json:"file_path,omitempty" jsonschema:"Local file to attach; sent to the agent as bytes, max 5 MB"`
+	FileName       string         `json:"file_name,omitempty" jsonschema:"Name shown to the agent for the attached file (default: the file's base name)"`
+	RequiredLabels string         `json:"required_labels,omitempty" jsonschema:"Comma-separated key=value labels the provider must have attested (e.g. region=eu-west-1); the local node refuses fail-closed before any data leaves it"`
+	ContextID      string         `json:"context_id,omitempty" jsonschema:"Continue an existing conversation context"`
+	TaskID         string         `json:"task_id,omitempty" jsonschema:"Reply into an existing task, e.g. one in state input-required"`
+}
+
+const maxAttachmentBytes = 5 << 20
+
+// buildParts builds the message parts in a fixed order (text, data, file) so
+// wire output is deterministic across calls with the same params.
+func buildParts(p sendAgentTaskParams) ([]*a2a.Part, error) {
+	var parts []*a2a.Part
+	if p.Message != "" {
+		parts = append(parts, a2a.NewTextPart(p.Message))
+	}
+	if p.Data != nil {
+		parts = append(parts, a2a.NewDataPart(p.Data))
+	}
+	if p.FilePath != "" {
+		filePart, err := fileToPart(p.FilePath, p.FileName)
+		if err != nil {
+			return nil, err
+		}
+		parts = append(parts, filePart)
+	}
+	if len(parts) == 0 {
+		return nil, fmt.Errorf("nothing to send: set message, data, or file_path")
+	}
+	return parts, nil
+}
+
+// fileToPart reads path into a raw Part; the SDK's Part has no dedicated file
+// constructor, so filename/mediaType are set directly on the returned Part.
+func fileToPart(path, nameOverride string) (*a2a.Part, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if info.Size() > maxAttachmentBytes {
+		return nil, fmt.Errorf("file %s is %d bytes; attachment cap is %d", path, info.Size(), maxAttachmentBytes)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	name := nameOverride
+	if name == "" {
+		name = filepath.Base(path)
+	}
+	mimeType := mime.TypeByExtension(filepath.Ext(name))
+	if mimeType == "" {
+		mimeType = http.DetectContentType(data)
+	}
+	part := a2a.NewRawPart(data)
+	part.Filename = name
+	part.MediaType = mimeType
+	return part, nil
 }
 
 type getAgentTaskParams struct {
@@ -79,13 +139,16 @@ func sendAgentTask(ctx context.Context, cfg bridgeConfig, p sendAgentTaskParams)
 	}
 	defer client.Destroy()
 
-	part := a2a.NewTextPart(p.Message)
+	parts, err := buildParts(p)
+	if err != nil {
+		return taskResult{}, err
+	}
 	var msg *a2a.Message
 	if p.TaskID != "" || p.ContextID != "" {
 		msg = a2a.NewMessageForTask(a2a.MessageRoleUser,
-			a2a.TaskInfo{TaskID: a2a.TaskID(p.TaskID), ContextID: p.ContextID}, part)
+			a2a.TaskInfo{TaskID: a2a.TaskID(p.TaskID), ContextID: p.ContextID}, parts...)
 	} else {
-		msg = a2a.NewMessage(a2a.MessageRoleUser, part)
+		msg = a2a.NewMessage(a2a.MessageRoleUser, parts...)
 	}
 	result, err := client.SendMessage(ctx, &a2a.SendMessageRequest{Message: msg})
 	if err != nil {
