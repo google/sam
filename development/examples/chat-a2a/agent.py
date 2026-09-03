@@ -13,12 +13,14 @@ from a2a.server.request_handlers import DefaultRequestHandler
 from a2a.server.routes import create_agent_card_routes, create_jsonrpc_routes
 from a2a.server.tasks.inmemory_task_store import InMemoryTaskStore
 from a2a.server.tasks.task_updater import TaskUpdater
+from a2a.helpers.proto_helpers import new_task
 from a2a.types import (
     AgentCapabilities,
     AgentCard,
     AgentInterface,
     AgentSkill,
     Part,
+    TaskState,
 )
 from google import genai
 from google.genai import types
@@ -109,6 +111,11 @@ class ChatExecutor(AgentExecutor):
             flush=True,
         )
         updater = TaskUpdater(event_queue, context.task_id, context.context_id)
+        # The runtime rejects a status update as a task's first event.
+        if context.current_task is None:
+            await event_queue.enqueue_event(
+                new_task(context.task_id, context.context_id, TaskState.TASK_STATE_SUBMITTED)
+            )
         calls = reply.function_calls or []
         if calls and calls[0].name == "ask_user":
             self.pending_question.add(context.context_id)
