@@ -75,14 +75,31 @@ const (
 	TokenRefreshCheckInterval = 10 * time.Minute
 )
 
+// EnrollChallenge is the payload a bootstrap enrollee signs to prove
+// possession of the private half of BootstrapEnrollRequest.public_key at
+// POST /enroll, carried in that message's timestamp/challenge_signature
+// fields. Binding the peer ID keeps a captured signature useless for any
+// other peer; the domain prefix keeps it useless at any other endpoint.
+func EnrollChallenge(peerID string, ts int64) []byte {
+	return []byte("sam:enroll:" + peerID + ":" + strconv.FormatInt(ts, 10))
+}
+
 // EnrollStatusChallenge is the payload a bootstrap enrollee signs to prove
 // possession of the key it submitted at /enroll when polling
-// GET /enroll/status: the signature travels in the `sig` query parameter
-// (unpadded base64url) alongside `ts` (unix milliseconds). The domain prefix
-// keeps the signature from doubling as a /refresh challenge, which signs the
-// bare timestamp.
-func EnrollStatusChallenge(ts int64) []byte {
-	return []byte("sam:enroll-status:" + strconv.FormatInt(ts, 10))
+// GET /enroll/status. ts is unix milliseconds; the signature travels in the
+// HeaderChallengeSignature header (unpadded base64url) alongside
+// HeaderChallengeTimestamp.
+func EnrollStatusChallenge(peerID string, ts int64) []byte {
+	return []byte("sam:enroll-status:" + peerID + ":" + strconv.FormatInt(ts, 10))
+}
+
+// RefreshChallenge is the payload an enrolled peer signs to prove possession
+// of its identity key at POST /refresh, carried in TokenRefreshRequest's
+// timestamp/challenge_signature fields alongside the expiring biscuit. Same
+// shape as the other enrollment challenges: peer- and endpoint-bound, so a
+// captured signature is useless anywhere else.
+func RefreshChallenge(peerID string, ts int64) []byte {
+	return []byte("sam:refresh:" + peerID + ":" + strconv.FormatInt(ts, 10))
 }
 
 // ============================================================================
@@ -97,6 +114,14 @@ const (
 	// This header is internal to the SAM mesh datapath and is stripped before requests
 	// are forwarded to backend services.
 	HeaderSamBiscuit = "X-Sam-Biscuit"
+
+	// HeaderChallengeTimestamp and HeaderChallengeSignature carry the signed
+	// freshness challenge on GET /enroll/status: unix milliseconds and an
+	// unpadded base64url signature over EnrollStatusChallenge. Headers rather
+	// than query parameters, so the signature never lands in access logs,
+	// where it would be replayable for its freshness window.
+	HeaderChallengeTimestamp = "X-Sam-Challenge-Ts"
+	HeaderChallengeSignature = "X-Sam-Challenge-Sig"
 
 	// HeaderPeerID carries the authenticated libp2p peer ID of the caller.
 	// The mesh ingress handler stamps it after authorization succeeds,

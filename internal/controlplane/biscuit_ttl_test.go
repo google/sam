@@ -119,7 +119,11 @@ func refreshNode(t *testing.T, cpURL string, priv crypto.PrivKey, currentBiscuit
 	t.Helper()
 
 	timestamp := time.Now().UnixMilli()
-	sig, err := priv.Sign([]byte(fmt.Sprintf("%d", timestamp)))
+	pid, err := peer.IDFromPrivateKey(priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sig, err := priv.Sign(api.RefreshChallenge(pid.String(), timestamp))
 	if err != nil {
 		t.Fatal(err)
 	}

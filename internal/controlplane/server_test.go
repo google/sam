@@ -21,7 +21,6 @@ import (
 	"crypto/rsa"
 	"encoding/base64"
 	"encoding/json"
-	"fmt"
 	"io"
 	"math/big"
 	"net/http"
@@ -796,11 +795,14 @@ func TestEnrollmentWorkflow(t *testing.T) {
 	pubBytes, _ := crypto.MarshalPublicKey(pubNode)
 
 	// 2. Submit Enrollment Request (Mode B -> PENDING)
+	enrollTS, enrollSig := enrollPoP(t, privNode, pID.String())
 	enrollReq := &api.BootstrapEnrollRequest{
-		BootstrapToken: tokenDetails.Token,
-		PeerId:         pID.String(),
-		PublicKey:      pubBytes,
-		RequestedRole:  api.RoleRouter,
+		BootstrapToken:     tokenDetails.Token,
+		PeerId:             pID.String(),
+		PublicKey:          pubBytes,
+		RequestedRole:      api.RoleRouter,
+		Timestamp:          enrollTS,
+		ChallengeSignature: enrollSig,
 	}
 	enrollReqData, _ := proto.Marshal(enrollReq)
 
@@ -824,7 +826,7 @@ func TestEnrollmentWorkflow(t *testing.T) {
 	}
 
 	// 3. Poll Enrollment Status -> PENDING (signed by the enrollee's key)
-	resp, err = client.Get(signedEnrollStatusURL(t, baseURL, privNode, pID.String(), time.Now().UnixMilli()))
+	resp, err = client.Do(signedEnrollStatusRequest(t, baseURL, privNode, pID.String(), time.Now().UnixMilli()))
 	if err != nil {
 		t.Fatalf("failed to get status: %v", err)
 	}
@@ -866,7 +868,7 @@ func TestEnrollmentWorkflow(t *testing.T) {
 	_ = resp.Body.Close()
 
 	// 5. Poll Status -> APPROVED & Validate Biscuit
-	resp, err = client.Get(signedEnrollStatusURL(t, baseURL, privNode, pID.String(), time.Now().UnixMilli()))
+	resp, err = client.Do(signedEnrollStatusRequest(t, baseURL, privNode, pID.String(), time.Now().UnixMilli()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -924,11 +926,14 @@ func TestEnrollmentWorkflow(t *testing.T) {
 	pID2, _ := peer.IDFromPrivateKey(privNode2)
 	pubBytes2, _ := crypto.MarshalPublicKey(pubNode2)
 
+	enrollTS2, enrollSig2 := enrollPoP(t, privNode2, pID2.String())
 	enrollReq2 := &api.BootstrapEnrollRequest{
-		BootstrapToken: tokenDetails.Token, // use remaining usage
-		PeerId:         pID2.String(),
-		PublicKey:      pubBytes2,
-		RequestedRole:  api.RoleRouter,
+		BootstrapToken:     tokenDetails.Token, // use remaining usage
+		PeerId:             pID2.String(),
+		PublicKey:          pubBytes2,
+		RequestedRole:      api.RoleRouter,
+		Timestamp:          enrollTS2,
+		ChallengeSignature: enrollSig2,
 	}
 	enrollReqData2, _ := proto.Marshal(enrollReq2)
 
@@ -949,24 +954,41 @@ func TestEnrollmentWorkflow(t *testing.T) {
 	}
 }
 
-// signedEnrollStatusURL builds a /enroll/status URL carrying the
-// proof-of-possession challenge signed by priv.
-func signedEnrollStatusURL(t *testing.T, baseURL string, priv crypto.PrivKey, peerID string, ts int64) string {
+// signedEnrollStatusRequest builds a GET /enroll/status request carrying the
+// proof-of-possession challenge headers signed by priv.
+func signedEnrollStatusRequest(t *testing.T, baseURL string, priv crypto.PrivKey, peerID string, ts int64) *http.Request {
 	t.Helper()
-	sig, err := priv.Sign(api.EnrollStatusChallenge(ts))
+	sig, err := priv.Sign(api.EnrollStatusChallenge(peerID, ts))
 	if err != nil {
 		t.Fatalf("failed to sign enroll status challenge: %v", err)
 	}
-	return baseURL + "/enroll/status?peer_id=" + peerID +
-		"&ts=" + strconv.FormatInt(ts, 10) +
-		"&sig=" + base64.RawURLEncoding.EncodeToString(sig)
+	req, err := http.NewRequest(http.MethodGet, baseURL+"/enroll/status?peer_id="+peerID, nil)
+	if err != nil {
+		t.Fatalf("failed to build enroll status request: %v", err)
+	}
+	req.Header.Set(api.HeaderChallengeTimestamp, strconv.FormatInt(ts, 10))
+	req.Header.Set(api.HeaderChallengeSignature, base64.RawURLEncoding.EncodeToString(sig))
+	return req
 }
 
-// TestEnrollStatusRequiresProofOfPossession pins the fix for
-// GHSA-hp3x-79wr-rx66: /enroll/status must never reveal an enrollment's
-// status or its biscuit to a caller that cannot sign with the key submitted
-// at /enroll.
-func TestEnrollStatusRequiresProofOfPossession(t *testing.T) {
+// enrollPoP returns the timestamp/challenge_signature pair proving possession
+// of priv for a POST /enroll as peerID.
+func enrollPoP(t *testing.T, priv crypto.PrivKey, peerID string) (int64, []byte) {
+	t.Helper()
+	ts := time.Now().UnixMilli()
+	sig, err := priv.Sign(api.EnrollChallenge(peerID, ts))
+	if err != nil {
+		t.Fatalf("failed to sign enroll challenge: %v", err)
+	}
+	return ts, sig
+}
+
+// TestBootstrapEnrollmentRequiresProofOfPossession pins the fix for
+// GHSA-hp3x-79wr-rx66 on both bootstrap endpoints: neither GET /enroll/status
+// nor a repeated POST /enroll may reveal an enrollment's status or biscuit to
+// a caller that cannot sign with the enrollee's key — holding a valid
+// bootstrap token is not enough.
+func TestBootstrapEnrollmentRequiresProofOfPossession(t *testing.T) {
 	issuer, _ := startCustomMockOIDC(t)
 	srv, store, baseURL := setupTestServer(t, issuer)
 	defer func() {
@@ -978,7 +1000,7 @@ func TestEnrollStatusRequiresProofOfPossession(t *testing.T) {
 
 	client := &http.Client{Timeout: 5 * time.Second}
 
-	adminReqBody := []byte(`{"role": "sam:role:router", "ttl_hours": 2, "max_usages": 1, "description": "PoP test"}`)
+	adminReqBody := []byte(`{"role": "sam:role:router", "ttl_hours": 2, "max_usages": 2, "description": "PoP test"}`)
 	req, _ := http.NewRequest("POST", baseURL+"/admin/bootstrap-tokens", bytes.NewBuffer(adminReqBody))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer super-secret-admin-token")
@@ -1002,11 +1024,14 @@ func TestEnrollStatusRequiresProofOfPossession(t *testing.T) {
 	pID, _ := peer.IDFromPrivateKey(priv)
 	pubBytes, _ := crypto.MarshalPublicKey(pub)
 
+	enrollTS, enrollSig := enrollPoP(t, priv, pID.String())
 	enrollData, _ := proto.Marshal(&api.BootstrapEnrollRequest{
-		BootstrapToken: tokenDetails.Token,
-		PeerId:         pID.String(),
-		PublicKey:      pubBytes,
-		RequestedRole:  api.RoleRouter,
+		BootstrapToken:     tokenDetails.Token,
+		PeerId:             pID.String(),
+		PublicKey:          pubBytes,
+		RequestedRole:      api.RoleRouter,
+		Timestamp:          enrollTS,
+		ChallengeSignature: enrollSig,
 	})
 	resp, err = client.Post(baseURL+"/enroll", "application/x-protobuf", bytes.NewReader(enrollData))
 	if err != nil {
@@ -1020,20 +1045,21 @@ func TestEnrollStatusRequiresProofOfPossession(t *testing.T) {
 		t.Fatalf("expected auto-approved enrollment with biscuit, got %v", enrollResp.Status)
 	}
 
-	otherKey, _, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
+	otherKey, otherPub, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
 	otherPID, _ := peer.IDFromPrivateKey(otherKey)
 
-	denied := map[string]string{
-		"anonymous poll":  baseURL + "/enroll/status?peer_id=" + pID.String(),
-		"wrong key":       signedEnrollStatusURL(t, baseURL, otherKey, pID.String(), time.Now().UnixMilli()),
-		"stale timestamp": signedEnrollStatusURL(t, baseURL, priv, pID.String(), time.Now().Add(-6*time.Minute).UnixMilli()),
-		"unknown peer":    signedEnrollStatusURL(t, baseURL, otherKey, otherPID.String(), time.Now().UnixMilli()),
+	anonReq, _ := http.NewRequest(http.MethodGet, baseURL+"/enroll/status?peer_id="+pID.String(), nil)
+	denied := map[string]*http.Request{
+		"anonymous poll":  anonReq,
+		"wrong key":       signedEnrollStatusRequest(t, baseURL, otherKey, pID.String(), time.Now().UnixMilli()),
+		"stale timestamp": signedEnrollStatusRequest(t, baseURL, priv, pID.String(), time.Now().Add(-6*time.Minute).UnixMilli()),
+		"unknown peer":    signedEnrollStatusRequest(t, baseURL, otherKey, otherPID.String(), time.Now().UnixMilli()),
 	}
-	for name, u := range denied {
-		resp, err := client.Get(u)
+	for name, dr := range denied {
+		resp, err := client.Do(dr)
 		if err != nil {
 			t.Fatalf("%s: request failed: %v", name, err)
 		}
@@ -1048,7 +1074,7 @@ func TestEnrollStatusRequiresProofOfPossession(t *testing.T) {
 	}
 
 	// Positive control: the enrollee itself still collects its biscuit.
-	resp, err = client.Get(signedEnrollStatusURL(t, baseURL, priv, pID.String(), time.Now().UnixMilli()))
+	resp, err = client.Do(signedEnrollStatusRequest(t, baseURL, priv, pID.String(), time.Now().UnixMilli()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1063,6 +1089,136 @@ func TestEnrollStatusRequiresProofOfPossession(t *testing.T) {
 	}
 	if statusResp.Status != api.EnrollmentStatus_ENROLLMENT_STATUS_APPROVED || !bytes.Equal(statusResp.BiscuitToken, enrollResp.BiscuitToken) {
 		t.Fatalf("signed poll did not return the approved biscuit: %v", statusResp.Status)
+	}
+
+	// POST /enroll is gated the same way: the existing-enrollment branch
+	// re-serves the stored biscuit, so a bootstrap token holder who is not
+	// the peer must never reach it.
+	postEnroll := func(name string, payload []byte) *api.BootstrapEnrollResponse {
+		t.Helper()
+		resp, err := client.Post(baseURL+"/enroll", "application/x-protobuf", bytes.NewReader(payload))
+		if err != nil {
+			t.Fatalf("%s: POST /enroll failed: %v", name, err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		var r api.BootstrapEnrollResponse
+		_ = proto.Unmarshal(body, &r)
+		return &r
+	}
+
+	otherPubBytes, _ := crypto.MarshalPublicKey(otherPub)
+	crossTS, crossSig := enrollPoP(t, otherKey, pID.String())
+	for name, payload := range map[string]*api.BootstrapEnrollRequest{
+		"cross-peer re-fetch with wrong key": {
+			BootstrapToken:     tokenDetails.Token,
+			PeerId:             pID.String(),
+			PublicKey:          pubBytes,
+			RequestedRole:      api.RoleRouter,
+			Timestamp:          crossTS,
+			ChallengeSignature: crossSig,
+		},
+		"peer_id not derived from public_key": {
+			BootstrapToken:     tokenDetails.Token,
+			PeerId:             pID.String(),
+			PublicKey:          otherPubBytes,
+			RequestedRole:      api.RoleRouter,
+			Timestamp:          crossTS,
+			ChallengeSignature: crossSig,
+		},
+		"missing challenge": {
+			BootstrapToken: tokenDetails.Token,
+			PeerId:         pID.String(),
+			PublicKey:      pubBytes,
+			RequestedRole:  api.RoleRouter,
+		},
+	} {
+		data, _ := proto.Marshal(payload)
+		r := postEnroll(name, data)
+		if r.Status != api.EnrollmentStatus_ENROLLMENT_STATUS_REJECTED {
+			t.Errorf("%s: expected REJECTED, got %v", name, r.Status)
+		}
+		if len(r.BiscuitToken) != 0 {
+			t.Errorf("%s: response leaked a biscuit", name)
+		}
+	}
+
+	// The enrollee itself retries POST /enroll idempotently.
+	retryTS, retrySig := enrollPoP(t, priv, pID.String())
+	retryData, _ := proto.Marshal(&api.BootstrapEnrollRequest{
+		BootstrapToken:     tokenDetails.Token,
+		PeerId:             pID.String(),
+		PublicKey:          pubBytes,
+		RequestedRole:      api.RoleRouter,
+		Timestamp:          retryTS,
+		ChallengeSignature: retrySig,
+	})
+	r := postEnroll("enrollee retry", retryData)
+	if r.Status != api.EnrollmentStatus_ENROLLMENT_STATUS_APPROVED || !bytes.Equal(r.BiscuitToken, enrollResp.BiscuitToken) {
+		t.Fatalf("enrollee retry did not return its own biscuit: %v", r.Status)
+	}
+
+	// Domain separation: a signature captured from one endpoint must verify
+	// nowhere else, even signed by the right key within the freshness window.
+	crossEndpointTS := time.Now().UnixMilli()
+	statusSig, err := priv.Sign(api.EnrollStatusChallenge(pID.String(), crossEndpointTS))
+	if err != nil {
+		t.Fatal(err)
+	}
+	replayData, _ := proto.Marshal(&api.BootstrapEnrollRequest{
+		BootstrapToken:     tokenDetails.Token,
+		PeerId:             pID.String(),
+		PublicKey:          pubBytes,
+		RequestedRole:      api.RoleRouter,
+		Timestamp:          crossEndpointTS,
+		ChallengeSignature: statusSig, // valid /enroll/status signature, wrong endpoint
+	})
+	if r := postEnroll("cross-endpoint replay", replayData); r.Status != api.EnrollmentStatus_ENROLLMENT_STATUS_REJECTED || len(r.BiscuitToken) != 0 {
+		t.Errorf("an /enroll/status signature was accepted at /enroll: %v", r.Status)
+	}
+
+	enrollSigForStatus, err := priv.Sign(api.EnrollChallenge(pID.String(), crossEndpointTS))
+	if err != nil {
+		t.Fatal(err)
+	}
+	statusReplay, _ := http.NewRequest(http.MethodGet, baseURL+"/enroll/status?peer_id="+pID.String(), nil)
+	statusReplay.Header.Set(api.HeaderChallengeTimestamp, strconv.FormatInt(crossEndpointTS, 10))
+	statusReplay.Header.Set(api.HeaderChallengeSignature, base64.RawURLEncoding.EncodeToString(enrollSigForStatus))
+	resp, err = client.Do(statusReplay)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("an /enroll signature was accepted at /enroll/status: %s", resp.Status)
+	}
+}
+
+// TestEnrollStatusRateLimited pins that /enroll/status shares the enrollment
+// rate limit: the advisory's PoC relied on polling it without bound.
+func TestEnrollStatusRateLimited(t *testing.T) {
+	issuer, _ := startCustomMockOIDC(t)
+	srv, store, baseURL := setupTestServer(t, issuer)
+	defer func() {
+		_ = srv.Close()
+		_ = store.Close()
+	}()
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	limited := false
+	for i := 0; i < EnrollBurst+10; i++ {
+		resp, err := client.Get(baseURL + "/enroll/status?peer_id=unknown")
+		if err != nil {
+			t.Fatalf("request %d failed: %v", i, err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode == http.StatusTooManyRequests {
+			limited = true
+			break
+		}
+	}
+	if !limited {
+		t.Fatalf("no 429 after %d rapid /enroll/status requests", EnrollBurst+10)
 	}
 }
 
@@ -1119,7 +1275,11 @@ func enrollRefreshTestNode(t *testing.T, ctx context.Context, store storage.Stor
 func signedRefreshRequest(t *testing.T, priv crypto.PrivKey, timestamp int64) []byte {
 	t.Helper()
 
-	sig, err := priv.Sign([]byte(fmt.Sprintf("%d", timestamp)))
+	pid, err := peer.IDFromPrivateKey(priv)
+	if err != nil {
+		t.Fatalf("IDFromPrivateKey: %v", err)
+	}
+	sig, err := priv.Sign(api.RefreshChallenge(pid.String(), timestamp))
 	if err != nil {
 		t.Fatalf("Sign: %v", err)
 	}
@@ -1179,8 +1339,10 @@ func TestHandleRefresh_TimestampFreshness(t *testing.T) {
 		{"stale", func() int64 { return time.Now().Add(-2 * time.Hour).UnixMilli() }, http.StatusUnauthorized},
 		{"far future", func() int64 { return time.Now().Add(2 * time.Hour).UnixMilli() }, http.StatusUnauthorized},
 		{"seconds instead of milliseconds", func() int64 { return time.Now().Unix() }, http.StatusUnauthorized},
-		{"zero", func() int64 { return 0 }, http.StatusBadRequest},
-		{"negative", func() int64 { return -1 }, http.StatusBadRequest},
+		// Absent and malformed timestamps are authentication failures like
+		// every other bad challenge: one uniform 401, no oracle.
+		{"zero", func() int64 { return 0 }, http.StatusUnauthorized},
+		{"negative", func() int64 { return -1 }, http.StatusUnauthorized},
 	}
 
 	for _, tc := range cases {
@@ -1301,8 +1463,8 @@ func TestTokenRefreshAndRevocation(t *testing.T) {
 
 	// 2. Perform refresh
 	timestamp := time.Now().UnixMilli()
-	challengeData := []byte(fmt.Sprintf("%d", timestamp))
-	challengeSig, err := privNode.Sign(challengeData)
+	refreshPID, _ := peer.IDFromPrivateKey(privNode)
+	challengeSig, err := privNode.Sign(api.RefreshChallenge(refreshPID.String(), timestamp))
 	if err != nil {
 		t.Fatalf("failed to generate challenge signature: %v", err)
 	}
@@ -1980,11 +2142,14 @@ func TestBootstrapTokenOwnerPropagatesToNode(t *testing.T) {
 	pID, _ := peer.IDFromPrivateKey(privNode)
 	pubBytes, _ := crypto.MarshalPublicKey(pubNode)
 
+	ownerTS, ownerSig := enrollPoP(t, privNode, pID.String())
 	enrollData, _ := proto.Marshal(&api.BootstrapEnrollRequest{
-		BootstrapToken: tokenDetails.Token,
-		PeerId:         pID.String(),
-		PublicKey:      pubBytes,
-		RequestedRole:  api.RoleNode,
+		BootstrapToken:     tokenDetails.Token,
+		PeerId:             pID.String(),
+		PublicKey:          pubBytes,
+		RequestedRole:      api.RoleNode,
+		Timestamp:          ownerTS,
+		ChallengeSignature: ownerSig,
 	})
 	resp, err = client.Post(baseURL+"/enroll", "application/x-protobuf", bytes.NewBuffer(enrollData))
 	if err != nil {

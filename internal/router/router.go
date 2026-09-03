@@ -342,11 +342,19 @@ func (r *Router) enrollBootstrap(peerID peer.ID) error {
 		return fmt.Errorf("failed to marshal router public key: %w", err)
 	}
 
+	enrollTS := time.Now().UnixMilli()
+	enrollSig, err := r.privKey.Sign(api.EnrollChallenge(peerID.String(), enrollTS))
+	if err != nil {
+		return fmt.Errorf("failed to sign enrollment challenge: %w", err)
+	}
+
 	req := &api.BootstrapEnrollRequest{
-		BootstrapToken: r.config.BootstrapToken,
-		PeerId:         peerID.String(),
-		PublicKey:      pubBytes,
-		RequestedRole:  r.config.RequiredRole,
+		BootstrapToken:     r.config.BootstrapToken,
+		PeerId:             peerID.String(),
+		PublicKey:          pubBytes,
+		RequestedRole:      r.config.RequiredRole,
+		Timestamp:          enrollTS,
+		ChallengeSignature: enrollSig,
 	}
 	data, err := proto.Marshal(req)
 	if err != nil {
@@ -389,6 +397,8 @@ func (r *Router) enrollBootstrap(peerID peer.ID) error {
 		u = u.JoinPath("enroll", "status")
 		q := u.Query()
 		q.Set("peer_id", peerID.String())
+		u.RawQuery = q.Encode()
+		statusURL := u.String()
 		ticker := time.NewTicker(2 * time.Second)
 		defer ticker.Stop()
 
@@ -401,17 +411,16 @@ func (r *Router) enrollBootstrap(peerID peer.ID) error {
 				// Prove possession of the enrollment key on every poll; the
 				// control plane returns the biscuit only to the enrollee.
 				ts := time.Now().UnixMilli()
-				sig, err := r.privKey.Sign(api.EnrollStatusChallenge(ts))
+				sig, err := r.privKey.Sign(api.EnrollStatusChallenge(peerID.String(), ts))
 				if err != nil {
 					return fmt.Errorf("failed to sign enrollment status challenge: %w", err)
 				}
-				q.Set("ts", strconv.FormatInt(ts, 10))
-				q.Set("sig", base64.RawURLEncoding.EncodeToString(sig))
-				u.RawQuery = q.Encode()
-				req, err := http.NewRequestWithContext(r.ctx, http.MethodGet, u.String(), nil)
+				req, err := http.NewRequestWithContext(r.ctx, http.MethodGet, statusURL, nil)
 				if err != nil {
 					return fmt.Errorf("failed to create status request: %w", err)
 				}
+				req.Header.Set(api.HeaderChallengeTimestamp, strconv.FormatInt(ts, 10))
+				req.Header.Set(api.HeaderChallengeSignature, base64.RawURLEncoding.EncodeToString(sig))
 				statusResp, err := client.Do(req)
 				if err != nil {
 					logger.Warnf("failed to poll enrollment status: %v", err)
@@ -1051,10 +1060,13 @@ func (r *Router) RefreshEnrollment(ctx context.Context) error {
 		return fmt.Errorf("router not enrolled (no biscuit)")
 	}
 
-	// 1. Generate challenge signature over current timestamp
+	// 1. Sign the peer-bound refresh challenge
 	timestamp := time.Now().UnixMilli()
-	challengeData := []byte(fmt.Sprintf("%d", timestamp))
-	sig, err := r.privKey.Sign(challengeData)
+	peerID, err := peer.IDFromPrivateKey(r.privKey)
+	if err != nil {
+		return fmt.Errorf("failed to derive peer ID from private key: %w", err)
+	}
+	sig, err := r.privKey.Sign(api.RefreshChallenge(peerID.String(), timestamp))
 	if err != nil {
 		return fmt.Errorf("failed to generate signature: %w", err)
 	}

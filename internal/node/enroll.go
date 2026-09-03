@@ -223,12 +223,20 @@ func (n *SamNode) EnrollBootstrap(ctx context.Context, controlPlaneURL string, b
 		return fmt.Errorf("failed to marshal public key: %w", err)
 	}
 
+	enrollTS := time.Now().UnixMilli()
+	enrollSig, err := n.config.PrivKey.Sign(api.EnrollChallenge(n.Host.ID().String(), enrollTS))
+	if err != nil {
+		return fmt.Errorf("failed to sign enrollment challenge: %w", err)
+	}
+
 	req := &api.BootstrapEnrollRequest{
-		BootstrapToken: bootstrapToken,
-		PeerId:         n.Host.ID().String(),
-		PublicKey:      pubBytes,
-		RequestedRole:  n.config.RequiredRole,
-		Labels:         n.config.Labels, // validated at startup
+		BootstrapToken:     bootstrapToken,
+		PeerId:             n.Host.ID().String(),
+		PublicKey:          pubBytes,
+		RequestedRole:      n.config.RequiredRole,
+		Labels:             n.config.Labels, // validated at startup
+		Timestamp:          enrollTS,
+		ChallengeSignature: enrollSig,
 	}
 	data, err := proto.Marshal(req)
 	if err != nil {
@@ -283,6 +291,8 @@ func (n *SamNode) EnrollBootstrap(ctx context.Context, controlPlaneURL string, b
 		u = u.JoinPath("enroll", "status")
 		q := u.Query()
 		q.Set("peer_id", n.Host.ID().String())
+		u.RawQuery = q.Encode()
+		statusURL := u.String()
 		ticker := time.NewTicker(2 * time.Second)
 		defer ticker.Stop()
 
@@ -295,17 +305,16 @@ func (n *SamNode) EnrollBootstrap(ctx context.Context, controlPlaneURL string, b
 				// Prove possession of the enrollment key on every poll; the
 				// control plane returns the biscuit only to the enrollee.
 				ts := time.Now().UnixMilli()
-				sig, err := n.config.PrivKey.Sign(api.EnrollStatusChallenge(ts))
+				sig, err := n.config.PrivKey.Sign(api.EnrollStatusChallenge(n.Host.ID().String(), ts))
 				if err != nil {
 					return fmt.Errorf("failed to sign enrollment status challenge: %w", err)
 				}
-				q.Set("ts", strconv.FormatInt(ts, 10))
-				q.Set("sig", base64.RawURLEncoding.EncodeToString(sig))
-				u.RawQuery = q.Encode()
-				hReq, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+				hReq, err := http.NewRequestWithContext(ctx, http.MethodGet, statusURL, nil)
 				if err != nil {
 					return fmt.Errorf("failed to create status request: %w", err)
 				}
+				hReq.Header.Set(api.HeaderChallengeTimestamp, strconv.FormatInt(ts, 10))
+				hReq.Header.Set(api.HeaderChallengeSignature, base64.RawURLEncoding.EncodeToString(sig))
 
 				hResp, err := client.Do(hReq)
 				if err != nil {
