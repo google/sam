@@ -353,3 +353,22 @@ func TestGetAgentCardTrims(t *testing.T) {
 		t.Fatalf("trim failed, security/provider material leaked: %s", raw)
 	}
 }
+
+func TestResultErrorIncludesTaskID(t *testing.T) {
+	fileB64 := base64.StdEncoding.EncodeToString([]byte("file content"))
+	task := `{"kind":"task","id":"t99","contextId":"c99","status":{"state":"completed",` +
+		`"message":{"kind":"message","messageId":"m1","role":"agent","parts":[` +
+		`{"raw":"` + fileB64 + `","filename":"test.txt","mediaType":"text/plain"}]}}}`
+	srv := fakeSidecar(t, "/sam/12D3KooWpeer/a2a/echo", `{"task":`+task+`}`, nil)
+	defer srv.Close()
+
+	_, err := sendAgentTask(context.Background(),
+		bridgeConfig{sidecarURL: srv.URL, downloadDir: "/nonexistent-dir-xyz"},
+		sendAgentTaskParams{Peer: "12D3KooWpeer", Service: "echo", Message: "go"})
+	if err == nil {
+		t.Fatal("error expected when download dir does not exist")
+	}
+	if !strings.Contains(err.Error(), "task t99") {
+		t.Errorf("error must include task ID; got: %v", err)
+	}
+}

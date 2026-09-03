@@ -32,10 +32,9 @@ Propose each shell command and let the user approve it before running anything.
    path before continuing.
 2. Build the bridge (own Go module, Go >= 1.25):
    `cd <sam-repo>/cmd/sam-a2a-bridge && go build -o ~/bin/sam-a2a-bridge .`
-3. Register it with the harness, passing the sidecar URL, its API token, and
-   the download directory for agent-returned files:
-   `claude mcp add sam-a2a-bridge -- ~/bin/sam-a2a-bridge -url http://localhost:8080 -token <sidecar-token> -download-dir ~/.sam/a2a-downloads`
-   (Files are saved under the download directory; the default is `~/.sam/a2a-downloads` and the user prunes manually.)
+3. Register it with the harness, passing the sidecar URL and its API token:
+   `claude mcp add sam-a2a-bridge -- ~/bin/sam-a2a-bridge -url http://localhost:8080 -token <sidecar-token>`
+   (Agent-returned files land in `~/.sam/a2a-downloads` by default, auto-created; pass `-download-dir` to change it — you must create that directory yourself. No auto-cleanup; prune manually.)
 4. Restart the harness session; the three tools appear.
 
 ## Check Agent Capabilities
@@ -64,8 +63,8 @@ input schema) and `file_path` attachments appropriately.
   - `message` is plain text.
   - `data` is a JSON object; it becomes a DataPart and routes to the agent's
     structured-input handler. Check `default_input_modes` first.
-  - `file_path` and `file_name` attach a local file (up to 5 MB). Both must be
-    provided together. The agent receives the file as an attachment.
+  - `file_path` attaches a local file (up to 5 MB); `file_name` optionally
+    renames what the agent sees (default: the file's base name).
 - The call returns immediately with `{"task_id", "context_id", "state", "text",
   "data"?, "files"?}` — it never blocks on the agent.
   - `data` (optional) contains structured JSON returned inline.

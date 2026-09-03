@@ -246,7 +246,7 @@ func (r *taskResult) collect(cfg bridgeConfig, taskID string, parts a2a.ContentP
 		if b := part.Raw(); b != nil {
 			path, err := saveFilePart(cfg.downloadDir, taskID, part.Filename, b)
 			if err != nil {
-				return err
+				return fmt.Errorf("task %s: saving returned file: %w", taskID, err)
 			}
 			r.Files = append(r.Files, path)
 		}
