@@ -43,11 +43,8 @@ func fakeSidecar(t *testing.T, wantPath string, result string, capture *map[stri
 	}))
 }
 
-// a2a-go v2.5.0's jsonrpcTransport.SendMessage unmarshals the result through
-// a2a.StreamResponse, which discriminates on a {"task":...}/{"message":...}
-// envelope key (a2a/core.go type event), not the raw kind-tagged object the
-// A2A wire spec uses. GetTask unmarshals the result directly into a2a.Task,
-// so its fixture stays unwrapped.
+// SendMessage results arrive enveloped as {"task":...}/{"message":...} per
+// a2a.StreamResponse; GetTask results don't (unmarshaled directly into a2a.Task).
 
 func TestSendAgentTaskMapsTaskResult(t *testing.T) {
 	var rpc map[string]any
