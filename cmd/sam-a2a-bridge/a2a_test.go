@@ -233,3 +233,83 @@ func TestSendAgentTaskRequiresContent(t *testing.T) {
 		t.Fatalf("empty send must be rejected, got: %v", err)
 	}
 }
+
+func TestResultCollectsDataAndFiles(t *testing.T) {
+	downloads := t.TempDir()
+	fileB64 := base64.StdEncoding.EncodeToString([]byte("report body"))
+	task := `{"kind":"task","id":"t20","contextId":"c20","status":{"state":"completed",` +
+		`"message":{"kind":"message","messageId":"m1","role":"agent","parts":[` +
+		`{"text":"done"},{"data":{"anomalies":2}}]}},` +
+		`"artifacts":[{"artifactId":"a1","name":"report","parts":[` +
+		`{"raw":"` + fileB64 + `","filename":"report.txt","mediaType":"text/plain"},` +
+		`{"data":{"rows":14002}}]}]}`
+	srv := fakeSidecar(t, "/sam/12D3KooWpeer/a2a/echo", `{"task":`+task+`}`, nil)
+	defer srv.Close()
+
+	got, err := sendAgentTask(context.Background(),
+		bridgeConfig{sidecarURL: srv.URL, downloadDir: downloads},
+		sendAgentTaskParams{Peer: "12D3KooWpeer", Service: "echo", Message: "go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Text != "done" {
+		t.Errorf("text = %q, want done (text logic unchanged)", got.Text)
+	}
+	if len(got.Data) != 2 {
+		t.Fatalf("data = %v, want 2 entries (status message + artifact)", got.Data)
+	}
+	if len(got.Files) != 1 {
+		t.Fatalf("files = %v, want 1", got.Files)
+	}
+	if !strings.HasPrefix(filepath.Base(got.Files[0]), "t20-") {
+		t.Errorf("file name %q not task-id-prefixed", got.Files[0])
+	}
+	content, err := os.ReadFile(got.Files[0])
+	if err != nil || string(content) != "report body" {
+		t.Fatalf("saved file wrong: %v %q", err, content)
+	}
+}
+
+func TestSaveFilePartSanitizesName(t *testing.T) {
+	dir := t.TempDir()
+	path, err := saveFilePart(dir, "t1", "../../evil.txt", []byte("x"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filepath.Dir(path) != dir {
+		t.Fatalf("escaped the download dir: %s", path)
+	}
+}
+
+func TestSaveFilePartCollision(t *testing.T) {
+	dir := t.TempDir()
+	first, err := saveFilePart(dir, "t1", "a.txt", []byte("1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := saveFilePart(dir, "t1", "a.txt", []byte("2"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first == second {
+		t.Fatalf("collision not uniquified: %s", second)
+	}
+}
+
+func TestResultIncludesFileURIs(t *testing.T) {
+	task := `{"kind":"task","id":"t21","contextId":"c21","status":{"state":"completed"},` +
+		`"artifacts":[{"artifactId":"a1","parts":[` +
+		`{"url":"https://example.com/big.bin","mediaType":"application/octet-stream"}]}]}`
+	srv := fakeSidecar(t, "/sam/12D3KooWpeer/a2a/echo", `{"task":`+task+`}`, nil)
+	defer srv.Close()
+
+	got, err := sendAgentTask(context.Background(),
+		bridgeConfig{sidecarURL: srv.URL, downloadDir: t.TempDir()},
+		sendAgentTaskParams{Peer: "12D3KooWpeer", Service: "echo", Message: "go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Files) != 1 || got.Files[0] != "https://example.com/big.bin" {
+		t.Fatalf("URI file part must pass through as-is: %v", got.Files)
+	}
+}

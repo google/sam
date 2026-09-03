@@ -16,6 +16,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"mime"
 	"net/http"
@@ -30,8 +31,9 @@ import (
 )
 
 type bridgeConfig struct {
-	sidecarURL string
-	token      string
+	sidecarURL  string
+	token       string
+	downloadDir string
 }
 
 // meshURL is the sidecar's raw egress path for one remote a2a service.
@@ -111,10 +113,12 @@ type getAgentTaskParams struct {
 }
 
 type taskResult struct {
-	TaskID    string `json:"task_id"`
-	ContextID string `json:"context_id"`
-	State     string `json:"state"`
-	Text      string `json:"text"`
+	TaskID    string   `json:"task_id"`
+	ContextID string   `json:"context_id"`
+	State     string   `json:"state"`
+	Text      string   `json:"text"`
+	Data      []any    `json:"data,omitempty"`
+	Files     []string `json:"files,omitempty"`
 }
 
 func newMeshClient(ctx context.Context, cfg bridgeConfig, peer, service, requiredLabels string) (*a2aclient.Client, error) {
@@ -154,7 +158,7 @@ func sendAgentTask(ctx context.Context, cfg bridgeConfig, p sendAgentTaskParams)
 	if err != nil {
 		return taskResult{}, err
 	}
-	return toTaskResult(result), nil
+	return toTaskResult(cfg, result)
 }
 
 func getAgentTask(ctx context.Context, cfg bridgeConfig, p getAgentTaskParams) (taskResult, error) {
@@ -168,24 +172,32 @@ func getAgentTask(ctx context.Context, cfg bridgeConfig, p getAgentTaskParams) (
 	if err != nil {
 		return taskResult{}, err
 	}
-	return toTaskResult(task), nil
+	return toTaskResult(cfg, task)
 }
 
-// toTaskResult flattens the SDK's Message|Task union into the 4 fields a
-// harness needs; a direct Message reply is final, hence state "completed".
-func toTaskResult(result any) taskResult {
+// toTaskResult flattens the SDK's Message|Task union into the fields a
+// harness needs, also collecting data/file parts from every location;
+// a direct Message reply is final, hence state "completed".
+func toTaskResult(cfg bridgeConfig, result any) (taskResult, error) {
 	switch v := result.(type) {
 	case *a2a.Message:
-		return taskResult{
+		out := taskResult{
 			TaskID:    string(v.TaskID),
 			ContextID: v.ContextID,
 			State:     "completed",
 			Text:      textOf(v.Parts),
 		}
+		if err := out.collect(cfg, out.TaskID, v.Parts); err != nil {
+			return taskResult{}, err
+		}
+		return out, nil
 	case *a2a.Task:
 		out := taskResult{TaskID: string(v.ID), ContextID: v.ContextID, State: string(v.Status.State)}
 		if v.Status.Message != nil {
 			out.Text = textOf(v.Status.Message.Parts)
+			if err := out.collect(cfg, out.TaskID, v.Status.Message.Parts); err != nil {
+				return taskResult{}, err
+			}
 		}
 		if out.Text == "" {
 			var texts []string
@@ -196,9 +208,14 @@ func toTaskResult(result any) taskResult {
 			}
 			out.Text = strings.Join(texts, "\n")
 		}
-		return out
+		for _, artifact := range v.Artifacts {
+			if err := out.collect(cfg, out.TaskID, artifact.Parts); err != nil {
+				return taskResult{}, err
+			}
+		}
+		return out, nil
 	}
-	return taskResult{}
+	return taskResult{}, nil
 }
 
 // textOf joins the text of every part; a2a.Part is a concrete struct (not an
@@ -211,4 +228,49 @@ func textOf(parts a2a.ContentParts) string {
 		}
 	}
 	return strings.Join(texts, "\n")
+}
+
+// collect appends data parts inline and saves file parts, returning paths.
+// Paths, not base64: inline bytes flood the model's context; a path the
+// model can act on is the useful representation.
+func (r *taskResult) collect(cfg bridgeConfig, taskID string, parts a2a.ContentParts) error {
+	for _, part := range parts {
+		if d := part.Data(); d != nil {
+			r.Data = append(r.Data, d)
+		}
+		if uri := part.URL(); uri != "" {
+			r.Files = append(r.Files, string(uri))
+			continue
+		}
+		if b := part.Raw(); b != nil {
+			path, err := saveFilePart(cfg.downloadDir, taskID, part.Filename, b)
+			if err != nil {
+				return err
+			}
+			r.Files = append(r.Files, path)
+		}
+	}
+	return nil
+}
+
+func saveFilePart(dir, taskID, name string, data []byte) (string, error) {
+	if taskID == "" {
+		taskID = "msg"
+	}
+	if name == "" {
+		name = "file"
+	}
+	name = filepath.Base(filepath.Clean("/" + name)) // remote input names a local path: keep only a leaf
+	base := taskID + "-" + name
+	path := filepath.Join(dir, base)
+	for n := 1; ; n++ {
+		if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+			break
+		}
+		path = filepath.Join(dir, fmt.Sprintf("%s.%d", base, n))
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return "", err
+	}
+	return path, nil
 }

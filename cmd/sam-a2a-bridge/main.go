@@ -20,6 +20,8 @@ import (
 	"errors"
 	"flag"
 	"log"
+	"os"
+	"path/filepath"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -27,9 +29,23 @@ import (
 func main() {
 	sidecarURL := flag.String("url", "http://localhost:8080", "Sidecar API base URL")
 	token := flag.String("token", "", "Authorization Bearer token for protected sidecar endpoints")
+	downloadDir := flag.String("download-dir", "", "Directory for files returned by agents (default: ~/.sam/a2a-downloads, created if missing)")
 	flag.Parse()
 
-	cfg := bridgeConfig{sidecarURL: *sidecarURL, token: *token}
+	// A user-supplied dir is used as-is (the caller creates it); only the
+	// built-in default is auto-created.
+	dir := *downloadDir
+	if dir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			log.Fatal(err)
+		}
+		dir = filepath.Join(home, ".sam", "a2a-downloads")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			log.Fatal(err)
+		}
+	}
+	cfg := bridgeConfig{sidecarURL: *sidecarURL, token: *token, downloadDir: dir}
 	if err := newBridgeServer(cfg).Run(context.Background(), &mcp.StdioTransport{}); err != nil {
 		log.Fatal(err)
 	}
@@ -73,7 +89,7 @@ func handleGetAgentTask(cfg bridgeConfig) func(context.Context, *mcp.CallToolReq
 
 // toolResult renders errors as tool errors (not protocol errors) so the
 // harness model sees refusal text like the labels-gate 403 verbatim.
-func toolResult(res taskResult, err error) (*mcp.CallToolResult, any, error) {
+func toolResult(res any, err error) (*mcp.CallToolResult, any, error) {
 	if err != nil {
 		text := err.Error()
 		var se *sidecarError
