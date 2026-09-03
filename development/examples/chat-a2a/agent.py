@@ -27,9 +27,17 @@ from starlette.applications import Starlette
 PORT = 7777
 MODEL = os.environ.get("GEMINI_MODEL", "models/gemini-3.5-flash-lite")
 
-# Sentinel Gemini emits so a clarifying question becomes the A2A
-# input-required task state instead of hiding inside a completed reply.
-NEED_INPUT = "[NEED_INPUT]"
+# Typed channel for "I need the user to answer first": a function call is
+# schema-enforced, unlike a magic reply prefix the model may forget or misquote.
+ASK_USER = types.FunctionDeclaration(
+    name="ask_user",
+    description="Ask the user a clarifying question you need answered before you can complete the request.",
+    parameters=types.Schema(
+        type=types.Type.OBJECT,
+        properties={"question": types.Schema(type=types.Type.STRING)},
+        required=["question"],
+    ),
+)
 
 class ChatExecutor(AgentExecutor):
     """One Gemini chat session per A2A contextId; the session carries the history."""
@@ -37,6 +45,7 @@ class ChatExecutor(AgentExecutor):
     def __init__(self):
         self.gemini = genai.Client()
         self.chats = {}
+        self.pending_question = set()
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         chat = self.chats.get(context.context_id)
@@ -46,11 +55,7 @@ class ChatExecutor(AgentExecutor):
                 model=MODEL,
                 config=types.GenerateContentConfig(
                     thinking_config=types.ThinkingConfig(thinking_level="minimal"),
-                    system_instruction=(
-                        "If you cannot complete the request without the user "
-                        f"answering a clarifying question first, start your reply "
-                        f"with the exact token {NEED_INPUT} followed by the question."
-                    ),
+                    tools=[types.Tool(function_declarations=[ASK_USER])],
                 ),
             )
             self.chats[context.context_id] = chat
@@ -73,6 +78,13 @@ class ChatExecutor(AgentExecutor):
                 gemini_parts[0] += f"\n[attached file {part.filename}]:\n" + part.raw.decode("utf-8", "replace")
             else:
                 gemini_parts.append(types.Part.from_bytes(data=part.raw, mime_type=media))
+        # A dangling ask_user call must be answered in-history; the user's
+        # reply IS the tool response.
+        if context.context_id in self.pending_question:
+            self.pending_question.discard(context.context_id)
+            gemini_parts[0] = types.Part.from_function_response(
+                name="ask_user", response={"answer": gemini_parts[0]}
+            )
         started = time.monotonic()
         reply = await chat.send_message(gemini_parts)
         print(
@@ -81,12 +93,13 @@ class ChatExecutor(AgentExecutor):
             flush=True,
         )
         updater = TaskUpdater(event_queue, context.task_id, context.context_id)
-        text = reply.text or ""
-        if text.startswith(NEED_INPUT):
-            question = text.removeprefix(NEED_INPUT).strip()
+        calls = reply.function_calls or []
+        if calls and calls[0].name == "ask_user":
+            self.pending_question.add(context.context_id)
+            question = str(calls[0].args.get("question", ""))
             await updater.requires_input(updater.new_agent_message([Part(text=question)]))
         else:
-            await updater.complete(updater.new_agent_message([Part(text=text)]))
+            await updater.complete(updater.new_agent_message([Part(text=reply.text or "")]))
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
         pass
