@@ -17,6 +17,7 @@ package main
 import (
 	"context"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -31,7 +32,7 @@ type bridgeConfig struct {
 
 // meshURL is the sidecar's raw egress path for one remote a2a service.
 func (c bridgeConfig) meshURL(peer, service string) string {
-	return strings.TrimRight(c.sidecarURL, "/") + "/sam/" + peer + "/a2a/" + service
+	return strings.TrimRight(c.sidecarURL, "/") + "/sam/" + url.PathEscape(peer) + "/a2a/" + url.PathEscape(service)
 }
 
 type sendAgentTaskParams struct {

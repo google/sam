@@ -156,3 +156,12 @@ func TestGetAgentTaskMapsResult(t *testing.T) {
 		t.Errorf("state = %q, want it to convey 'completed'", got.State)
 	}
 }
+
+func TestMeshURLEscapesPathSegments(t *testing.T) {
+	cfg := bridgeConfig{sidecarURL: "http://localhost:8080"}
+	got := cfg.meshURL("12D3KooWpeer", "../../sam/service/register")
+	want := "http://localhost:8080/sam/12D3KooWpeer/a2a/..%2F..%2Fsam%2Fservice%2Fregister"
+	if got != want {
+		t.Fatalf("meshURL = %q, want %q", got, want)
+	}
+}

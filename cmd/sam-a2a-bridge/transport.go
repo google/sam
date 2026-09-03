@@ -21,9 +21,8 @@ import (
 	"strings"
 )
 
-// Mirrors api.HeaderSamAuthentication / api.HeaderSamRequiredLabels
-// (api/network.go:114,133); literals because this module must not
-// depend on the root module.
+// Mirrors api.HeaderSamAuthentication / api.HeaderSamRequiredLabels in the root module's api/network.go;
+// literals because this module must not depend on it.
 const (
 	headerSamAuthentication = "X-Sam-Authentication"
 	headerSamRequiredLabels = "X-Sam-Required-Labels"

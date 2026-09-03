@@ -101,3 +101,9 @@ func TestHandleGetAgentTask(t *testing.T) {
 		t.Errorf("got %+v", got)
 	}
 }
+
+func TestNewBridgeServerConstructs(t *testing.T) {
+	if s := newBridgeServer(bridgeConfig{sidecarURL: "http://localhost:8080"}); s == nil {
+		t.Fatal("newBridgeServer returned nil")
+	}
+}
