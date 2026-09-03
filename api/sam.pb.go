@@ -622,6 +622,11 @@ func (x *BootstrapEnrollRequest) GetLabels() map[string]string {
 	return nil
 }
 
+// BootstrapEnrollResponse answers POST /enroll and GET /enroll/status.
+// Polling GET /enroll/status requires proof of possession of the key
+// submitted at /enroll: alongside `peer_id`, the caller sends the query
+// parameters `ts` (unix milliseconds) and `sig` (unpadded base64url
+// signature over the UTF-8 bytes of "sam:enroll-status:<ts>").
 type BootstrapEnrollResponse struct {
 	state                 protoimpl.MessageState `protogen:"open.v1"`
 	Status                EnrollmentStatus       `protobuf:"varint,1,opt,name=status,proto3,enum=sam.v1.EnrollmentStatus" json:"status,omitempty"`

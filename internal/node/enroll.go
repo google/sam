@@ -18,10 +18,12 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -281,8 +283,6 @@ func (n *SamNode) EnrollBootstrap(ctx context.Context, controlPlaneURL string, b
 		u = u.JoinPath("enroll", "status")
 		q := u.Query()
 		q.Set("peer_id", n.Host.ID().String())
-		u.RawQuery = q.Encode()
-		statusURL := u.String()
 		ticker := time.NewTicker(2 * time.Second)
 		defer ticker.Stop()
 
@@ -292,7 +292,17 @@ func (n *SamNode) EnrollBootstrap(ctx context.Context, controlPlaneURL string, b
 			case <-ctx.Done():
 				return ctx.Err()
 			case <-ticker.C:
-				hReq, err := http.NewRequestWithContext(ctx, http.MethodGet, statusURL, nil)
+				// Prove possession of the enrollment key on every poll; the
+				// control plane returns the biscuit only to the enrollee.
+				ts := time.Now().UnixMilli()
+				sig, err := n.config.PrivKey.Sign(api.EnrollStatusChallenge(ts))
+				if err != nil {
+					return fmt.Errorf("failed to sign enrollment status challenge: %w", err)
+				}
+				q.Set("ts", strconv.FormatInt(ts, 10))
+				q.Set("sig", base64.RawURLEncoding.EncodeToString(sig))
+				u.RawQuery = q.Encode()
+				hReq, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 				if err != nil {
 					return fmt.Errorf("failed to create status request: %w", err)
 				}

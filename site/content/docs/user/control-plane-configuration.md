@@ -171,6 +171,8 @@ Nodes and Routers run a background task that periodically checks the remaining B
 * **Threshold**: When the remaining token lifespan is less than 20% of its initial TTL (~4.8 hours remaining), the daemon proactively trades the expiring Biscuit for a fresh one.
 * **Challenge Handshake**: The client signs a current timestamp using its private key and sends it to the Control Plane `/refresh` endpoint along with its expiring Biscuit in the `Authorization: Bearer <token>` header. The Control Plane verifies the signature against the registered node's public key in the database before issuing a new Biscuit.
 
+The bootstrap polling endpoint is guarded by the same proof of possession: `GET /enroll/status` answers only when the caller signs a current timestamp with the key it submitted at `/enroll` (sent as the `ts` and `sig` query parameters). Anything else — no signature, a stale timestamp, another key, an unknown peer — receives a uniform `401`, so an approved enrollment's Biscuit is only ever released to the enrollee itself.
+
 ### Administrative Revocation
 
 Administrators can immediately revoke any active session to disable a node's ability to renew its token.

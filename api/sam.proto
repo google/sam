@@ -87,6 +87,11 @@ message BootstrapEnrollRequest {
   map<string, string> labels = 5;
 }
 
+// BootstrapEnrollResponse answers POST /enroll and GET /enroll/status.
+// Polling GET /enroll/status requires proof of possession of the key
+// submitted at /enroll: alongside `peer_id`, the caller sends the query
+// parameters `ts` (unix milliseconds) and `sig` (unpadded base64url
+// signature over the UTF-8 bytes of "sam:enroll-status:<ts>").
 message BootstrapEnrollResponse {
   EnrollmentStatus status = 1;
   bytes biscuit_token = 2;         // Populated only if APPROVED

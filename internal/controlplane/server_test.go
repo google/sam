@@ -29,6 +29,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -427,6 +428,29 @@ func TestNodeAndRouterRegistrationFlow(t *testing.T) {
 		t.Errorf("expected active routers address list %v, got %v", routerAddresses, info.RouterAddresses)
 	}
 
+	// 5b. Leases that would redirect joiners are refused: malformed
+	// multiaddrs and addresses terminating at another peer.
+	for name, badAddr := range map[string]string{
+		"not a multiaddr": "not-even-a-multiaddr",
+		"missing p2p":     "/ip4/203.0.113.66/tcp/4001",
+		"foreign peer":    "/ip4/203.0.113.66/tcp/4001/p2p/" + nodePeer.String(),
+	} {
+		badLease := &api.RouterLeaseRequest{
+			PeerId:    routerPeer.String(),
+			Addresses: []string{badAddr},
+			Biscuit:   enrollRouterResp.BiscuitToken,
+		}
+		reqData, _ = proto.Marshal(badLease)
+		resp, err = client.Post(baseURL+"/routers/lease", "application/x-protobuf", bytes.NewReader(reqData))
+		if err != nil {
+			t.Fatalf("POST bad lease (%s) failed: %v", name, err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("expected 400 for lease with %s, got: %s", name, resp.Status)
+		}
+	}
+
 	// 6. Rogue Node tries to lease as a router (lacks 'router' role)
 	rogueLeaseReq := &api.RouterLeaseRequest{
 		PeerId:    nodePeer.String(),
@@ -799,8 +823,8 @@ func TestEnrollmentWorkflow(t *testing.T) {
 		t.Errorf("expected PENDING status, got %v", enrollResp.Status)
 	}
 
-	// 3. Poll Enrollment Status -> PENDING
-	resp, err = client.Get(baseURL + "/enroll/status?peer_id=" + pID.String())
+	// 3. Poll Enrollment Status -> PENDING (signed by the enrollee's key)
+	resp, err = client.Get(signedEnrollStatusURL(t, baseURL, privNode, pID.String(), time.Now().UnixMilli()))
 	if err != nil {
 		t.Fatalf("failed to get status: %v", err)
 	}
@@ -842,7 +866,7 @@ func TestEnrollmentWorkflow(t *testing.T) {
 	_ = resp.Body.Close()
 
 	// 5. Poll Status -> APPROVED & Validate Biscuit
-	resp, err = client.Get(baseURL + "/enroll/status?peer_id=" + pID.String())
+	resp, err = client.Get(signedEnrollStatusURL(t, baseURL, privNode, pID.String(), time.Now().UnixMilli()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -922,6 +946,123 @@ func TestEnrollmentWorkflow(t *testing.T) {
 	}
 	if len(enrollResp2.BiscuitToken) == 0 {
 		t.Error("biscuit token empty in Auto-Approve response")
+	}
+}
+
+// signedEnrollStatusURL builds a /enroll/status URL carrying the
+// proof-of-possession challenge signed by priv.
+func signedEnrollStatusURL(t *testing.T, baseURL string, priv crypto.PrivKey, peerID string, ts int64) string {
+	t.Helper()
+	sig, err := priv.Sign(api.EnrollStatusChallenge(ts))
+	if err != nil {
+		t.Fatalf("failed to sign enroll status challenge: %v", err)
+	}
+	return baseURL + "/enroll/status?peer_id=" + peerID +
+		"&ts=" + strconv.FormatInt(ts, 10) +
+		"&sig=" + base64.RawURLEncoding.EncodeToString(sig)
+}
+
+// TestEnrollStatusRequiresProofOfPossession pins the fix for
+// GHSA-hp3x-79wr-rx66: /enroll/status must never reveal an enrollment's
+// status or its biscuit to a caller that cannot sign with the key submitted
+// at /enroll.
+func TestEnrollStatusRequiresProofOfPossession(t *testing.T) {
+	issuer, _ := startCustomMockOIDC(t)
+	srv, store, baseURL := setupTestServer(t, issuer)
+	defer func() {
+		_ = srv.Close()
+		_ = store.Close()
+	}()
+	srv.config.AdminToken = "super-secret-admin-token"
+	srv.config.AutoApproveEnrollment = true
+
+	client := &http.Client{Timeout: 5 * time.Second}
+
+	adminReqBody := []byte(`{"role": "sam:role:router", "ttl_hours": 2, "max_usages": 1, "description": "PoP test"}`)
+	req, _ := http.NewRequest("POST", baseURL+"/admin/bootstrap-tokens", bytes.NewBuffer(adminReqBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer super-secret-admin-token")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("failed to create bootstrap token: %v", err)
+	}
+	var tokenDetails struct {
+		Token string `json:"token"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&tokenDetails)
+	_ = resp.Body.Close()
+	if tokenDetails.Token == "" {
+		t.Fatal("empty bootstrap token")
+	}
+
+	priv, pub, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pID, _ := peer.IDFromPrivateKey(priv)
+	pubBytes, _ := crypto.MarshalPublicKey(pub)
+
+	enrollData, _ := proto.Marshal(&api.BootstrapEnrollRequest{
+		BootstrapToken: tokenDetails.Token,
+		PeerId:         pID.String(),
+		PublicKey:      pubBytes,
+		RequestedRole:  api.RoleRouter,
+	})
+	resp, err = client.Post(baseURL+"/enroll", "application/x-protobuf", bytes.NewReader(enrollData))
+	if err != nil {
+		t.Fatalf("failed to enroll: %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	var enrollResp api.BootstrapEnrollResponse
+	_ = proto.Unmarshal(body, &enrollResp)
+	if enrollResp.Status != api.EnrollmentStatus_ENROLLMENT_STATUS_APPROVED || len(enrollResp.BiscuitToken) == 0 {
+		t.Fatalf("expected auto-approved enrollment with biscuit, got %v", enrollResp.Status)
+	}
+
+	otherKey, _, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherPID, _ := peer.IDFromPrivateKey(otherKey)
+
+	denied := map[string]string{
+		"anonymous poll":  baseURL + "/enroll/status?peer_id=" + pID.String(),
+		"wrong key":       signedEnrollStatusURL(t, baseURL, otherKey, pID.String(), time.Now().UnixMilli()),
+		"stale timestamp": signedEnrollStatusURL(t, baseURL, priv, pID.String(), time.Now().Add(-6*time.Minute).UnixMilli()),
+		"unknown peer":    signedEnrollStatusURL(t, baseURL, otherKey, otherPID.String(), time.Now().UnixMilli()),
+	}
+	for name, u := range denied {
+		resp, err := client.Get(u)
+		if err != nil {
+			t.Fatalf("%s: request failed: %v", name, err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Errorf("%s: expected 401, got %s (body %q)", name, resp.Status, body)
+		}
+		if bytes.Contains(body, enrollResp.BiscuitToken) {
+			t.Errorf("%s: response leaked the enrollment biscuit", name)
+		}
+	}
+
+	// Positive control: the enrollee itself still collects its biscuit.
+	resp, err = client.Get(signedEnrollStatusURL(t, baseURL, priv, pID.String(), time.Now().UnixMilli()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ = io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("signed poll failed: %s (body %q)", resp.Status, body)
+	}
+	var statusResp api.BootstrapEnrollResponse
+	if err := proto.Unmarshal(body, &statusResp); err != nil {
+		t.Fatalf("failed to unmarshal status response: %v", err)
+	}
+	if statusResp.Status != api.EnrollmentStatus_ENROLLMENT_STATUS_APPROVED || !bytes.Equal(statusResp.BiscuitToken, enrollResp.BiscuitToken) {
+		t.Fatalf("signed poll did not return the approved biscuit: %v", statusResp.Status)
 	}
 }
 

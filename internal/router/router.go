@@ -28,6 +28,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -388,8 +389,6 @@ func (r *Router) enrollBootstrap(peerID peer.ID) error {
 		u = u.JoinPath("enroll", "status")
 		q := u.Query()
 		q.Set("peer_id", peerID.String())
-		u.RawQuery = q.Encode()
-		statusURL := u.String()
 		ticker := time.NewTicker(2 * time.Second)
 		defer ticker.Stop()
 
@@ -399,7 +398,17 @@ func (r *Router) enrollBootstrap(peerID peer.ID) error {
 			case <-r.ctx.Done():
 				return r.ctx.Err()
 			case <-ticker.C:
-				req, err := http.NewRequestWithContext(r.ctx, http.MethodGet, statusURL, nil)
+				// Prove possession of the enrollment key on every poll; the
+				// control plane returns the biscuit only to the enrollee.
+				ts := time.Now().UnixMilli()
+				sig, err := r.privKey.Sign(api.EnrollStatusChallenge(ts))
+				if err != nil {
+					return fmt.Errorf("failed to sign enrollment status challenge: %w", err)
+				}
+				q.Set("ts", strconv.FormatInt(ts, 10))
+				q.Set("sig", base64.RawURLEncoding.EncodeToString(sig))
+				u.RawQuery = q.Encode()
+				req, err := http.NewRequestWithContext(r.ctx, http.MethodGet, u.String(), nil)
 				if err != nil {
 					return fmt.Errorf("failed to create status request: %w", err)
 				}

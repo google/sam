@@ -19,6 +19,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -73,6 +74,16 @@ const (
 	// if their current Biscuit token is close to expiration and needs to be proactively refreshed.
 	TokenRefreshCheckInterval = 10 * time.Minute
 )
+
+// EnrollStatusChallenge is the payload a bootstrap enrollee signs to prove
+// possession of the key it submitted at /enroll when polling
+// GET /enroll/status: the signature travels in the `sig` query parameter
+// (unpadded base64url) alongside `ts` (unix milliseconds). The domain prefix
+// keeps the signature from doubling as a /refresh challenge, which signs the
+// bare timestamp.
+func EnrollStatusChallenge(ts int64) []byte {
+	return []byte("sam:enroll-status:" + strconv.FormatInt(ts, 10))
+}
 
 // ============================================================================
 // SAM Custom HTTP Headers

@@ -30,6 +30,7 @@ import (
 	"net"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -44,6 +45,7 @@ import (
 	golog "github.com/ipfs/go-log/v2"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/multiformats/go-multiaddr"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"golang.org/x/time/rate"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -913,6 +915,21 @@ func (s *Server) HandleRouterLease(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Advertised addresses are served verbatim to joining peers via /info and
+	// /enroll: accept only well-formed multiaddrs terminating at the
+	// authenticated router itself.
+	for _, addrStr := range req.Addresses {
+		ma, err := multiaddr.NewMultiaddr(addrStr)
+		if err != nil {
+			http.Error(w, "Invalid multiaddr in addresses: "+addrStr, http.StatusBadRequest)
+			return
+		}
+		if _, last := peer.SplitAddr(ma); last != pID {
+			http.Error(w, "Address does not terminate at the authenticated router: "+addrStr, http.StatusBadRequest)
+			return
+		}
+	}
+
 	// Expose lease renewal
 	expiresAt := time.Now().Add(s.config.LeaseDuration)
 	lease := &storage.RouterLease{
@@ -1307,10 +1324,26 @@ func (s *Server) HandleEnroll(w http.ResponseWriter, r *http.Request) {
 	s.writeEnrollResponse(w, resp)
 }
 
+// enrollStatusChallengeMaxAge bounds the freshness window of the signed
+// /enroll/status challenge, mirroring the /refresh handshake.
+const enrollStatusChallengeMaxAge = 5 * time.Minute
+
 // HandleEnrollStatus HTTP GET `/enroll/status`
+//
+// The approved response carries the enrollee's Biscuit, so polling requires
+// proof of possession of the key submitted at /enroll: `ts` (unix
+// milliseconds) and `sig` (unpadded base64url signature over
+// api.EnrollStatusChallenge(ts)) must accompany `peer_id`. Every failure
+// mode after the freshness check answers a uniform 401 so the endpoint is not
+// a peer-ID existence oracle for anonymous callers.
 func (s *Server) HandleEnrollStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if !s.limiter.Allow() {
+		http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
 		return
 	}
 
@@ -1320,14 +1353,44 @@ func (s *Server) HandleEnrollStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ts, err := strconv.ParseInt(r.URL.Query().Get("ts"), 10, 64)
+	if err != nil || ts <= 0 {
+		http.Error(w, "Missing or invalid ts parameter: signed challenge required", http.StatusUnauthorized)
+		return
+	}
+	sig, err := base64.RawURLEncoding.DecodeString(r.URL.Query().Get("sig"))
+	if err != nil || len(sig) == 0 {
+		http.Error(w, "Missing or invalid sig parameter: signed challenge required", http.StatusUnauthorized)
+		return
+	}
+	challengeTime := time.UnixMilli(ts)
+	now := time.Now()
+	if now.Sub(challengeTime) > enrollStatusChallengeMaxAge || challengeTime.Sub(now) > enrollStatusChallengeMaxAge {
+		http.Error(w, "stale or invalid challenge timestamp", http.StatusUnauthorized)
+		return
+	}
+
 	ctx := r.Context()
 	enrollReq, err := s.store.GetEnrollmentRequest(ctx, peerID)
 	if err == storage.ErrNotFound {
-		s.writeEnrollError(w, api.EnrollmentStatus_ENROLLMENT_STATUS_REJECTED, "Enrollment request not found")
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	} else if err != nil {
 		logger.Errorf("Failed to retrieve enrollment status: %v", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	pubKey, err := crypto.UnmarshalPublicKey(enrollReq.PublicKey)
+	if err != nil {
+		logger.Errorf("Corrupted public key stored for enrollment %s: %v", peerID, err)
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	ok, err := pubKey.Verify(api.EnrollStatusChallenge(ts), sig)
+	if err != nil || !ok {
+		logger.Warnw("Enroll status challenge verification failed", "peer_id", peerID)
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 
