@@ -1,7 +1,10 @@
 """Gemini-backed A2A chat agent hosted by a node in the local dev mesh."""
+import json
 import os
 import time
 import uuid
+
+from google.protobuf.json_format import MessageToDict
 
 import uvicorn
 from a2a.server.agent_execution.agent_executor import AgentExecutor
@@ -44,8 +47,17 @@ class ChatExecutor(AgentExecutor):
                 ),
             )
             self.chats[context.context_id] = chat
+        prompt = context.get_user_input()
+        data_parts = [
+            MessageToDict(part.data)
+            for part in context.message.parts
+            if part.WhichOneof("content") == "data"
+        ]
+        if data_parts:
+            # Text-first agent: structured payloads reach Gemini as a labeled block.
+            prompt += "\n[structured data]: " + json.dumps(data_parts)
         started = time.monotonic()
-        reply = await chat.send_message(context.get_user_input())
+        reply = await chat.send_message(prompt)
         print(
             f"[chat] context={context.context_id} gemini took "
             f"{time.monotonic() - started:.1f}s usage={reply.usage_metadata}",
@@ -70,8 +82,8 @@ agent_card = AgentCard(
     description="Gemini-backed conversational agent; remembers the conversation per contextId",
     version="0.1.0",
     capabilities=AgentCapabilities(streaming=False),
-    default_input_modes=["text"],
-    default_output_modes=["text"],
+    default_input_modes=["text/plain", "application/json"],
+    default_output_modes=["text/plain"],
     skills=[
         AgentSkill(
             id="chat",
