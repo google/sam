@@ -372,3 +372,20 @@ func TestResultErrorIncludesTaskID(t *testing.T) {
 		t.Errorf("error must include task ID; got: %v", err)
 	}
 }
+
+func TestSaveFilePartSanitizesTaskID(t *testing.T) {
+	dir := t.TempDir()
+	path, err := saveFilePart(dir, "../../evil", "a.txt", []byte("x"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filepath.Dir(path) != dir {
+		t.Fatalf("task id escaped the download dir: %s", path)
+	}
+}
+
+func TestFileToPartRejectsNonRegular(t *testing.T) {
+	if _, err := fileToPart(t.TempDir(), ""); err == nil || !strings.Contains(err.Error(), "not a regular file") {
+		t.Fatalf("directory must be rejected, got: %v", err)
+	}
+}

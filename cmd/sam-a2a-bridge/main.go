@@ -33,7 +33,8 @@ func main() {
 	flag.Parse()
 
 	// A user-supplied dir is used as-is (the caller creates it); only the
-	// built-in default is auto-created.
+	// built-in default is auto-created. Fail fast so a missing dir surfaces
+	// at startup, not on the first file-bearing result.
 	dir := *downloadDir
 	if dir == "" {
 		home, err := os.UserHomeDir()
@@ -44,6 +45,8 @@ func main() {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			log.Fatal(err)
 		}
+	} else if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+		log.Fatalf("-download-dir %s is not a usable directory (create it first): %v", dir, err)
 	}
 	cfg := bridgeConfig{sidecarURL: *sidecarURL, token: *token, downloadDir: dir}
 	if err := newBridgeServer(cfg).Run(context.Background(), &mcp.StdioTransport{}); err != nil {

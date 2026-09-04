@@ -92,8 +92,9 @@ class ChatExecutor(AgentExecutor):
                 continue
             media = part.media_type or "application/octet-stream"
             if media.startswith("text/"):
+                filename = part.filename or "unnamed"
                 # Text attachments read best as prompt text, not opaque blobs.
-                gemini_parts[0] += f"\n[attached file {part.filename}]:\n" + part.raw.decode("utf-8", "replace")
+                gemini_parts[0] += f"\n[attached file {filename}]:\n" + part.raw.decode("utf-8", "replace")
             else:
                 gemini_parts.append(types.Part.from_bytes(data=part.raw, mime_type=media))
         # A dangling ask_user call must be answered in-history; the user's

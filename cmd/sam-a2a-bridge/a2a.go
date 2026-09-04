@@ -222,6 +222,10 @@ func fileToPart(path, nameOverride string) (*a2a.Part, error) {
 	if err != nil {
 		return nil, err
 	}
+	// A FIFO or device would block or misbehave in ReadFile.
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("file %s is not a regular file", path)
+	}
 	if info.Size() > maxAttachmentBytes {
 		return nil, fmt.Errorf("file %s is %d bytes; attachment cap is %d", path, info.Size(), maxAttachmentBytes)
 	}
@@ -328,12 +332,18 @@ func saveFilePart(dir, taskID, name string, data []byte) (string, error) {
 	if name == "" {
 		name = "file"
 	}
-	name = filepath.Base(filepath.Clean("/" + name)) // remote input names a local path: keep only a leaf
+	// Both components are remote input naming a local path: keep only leaves.
+	taskID = filepath.Base(filepath.Clean("/" + taskID))
+	name = filepath.Base(filepath.Clean("/" + name))
 	base := taskID + "-" + name
 	path := filepath.Join(dir, base)
 	for n := 1; ; n++ {
-		if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		_, err := os.Stat(path)
+		if errors.Is(err, os.ErrNotExist) {
 			break
+		}
+		if err != nil {
+			return "", err
 		}
 		path = filepath.Join(dir, fmt.Sprintf("%s.%d", base, n))
 	}
