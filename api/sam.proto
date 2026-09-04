@@ -171,6 +171,13 @@ message ControlPlaneInfoResponse {
   string client_id = 2;
   string audience = 3;
   repeated string router_addresses = 4;
+  // The complete set of currently banned peer IDs. Consumers reconcile their
+  // local blocklist against this list rather than merging into it, so that a
+  // peer the control plane no longer bans is unbanned everywhere without
+  // needing an event of its own. MeshEvent_BANNED stays the fast path for
+  // sub-second eviction; this is how a node that restarted or was offline
+  // when the event was published catches up.
+  repeated string banned_peer_ids = 5;
 }
 
 message RouterLeaseRequest {

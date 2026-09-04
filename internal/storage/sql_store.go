@@ -693,6 +693,26 @@ func (s *SQLStore) IsNodeBanned(ctx context.Context, peerID string) (bool, error
 	return banned, nil
 }
 
+// ListBannedPeerIDs implements Store.
+func (s *SQLStore) ListBannedPeerIDs(ctx context.Context) ([]string, error) {
+	query := s.rebind(`SELECT peer_id FROM nodes WHERE banned = ?`)
+	rows, err := s.db.QueryContext(ctx, query, true)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var peerIDs []string
+	for rows.Next() {
+		var peerID string
+		if err := rows.Scan(&peerID); err != nil {
+			return nil, err
+		}
+		peerIDs = append(peerIDs, peerID)
+	}
+	return peerIDs, rows.Err()
+}
+
 // UpsertRouterLease implements Store.
 func (s *SQLStore) UpsertRouterLease(ctx context.Context, lease *RouterLease) error {
 	addrsBytes, err := json.Marshal(lease.Addresses)

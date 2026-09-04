@@ -632,7 +632,10 @@ func (r *Router) listenForControlPlaneEvents(ctx context.Context) {
 				if bannedPeer, err := peer.Decode(event.PeerId); err == nil {
 					logger.Infof("[Router Event] Received BANNED event for peer %s, evicting from authenticated peers and adding to blocklist", bannedPeer)
 					r.authenticatedPeers.Delete(bannedPeer)
-					r.bannedPeers.Store(bannedPeer, true)
+					// The timestamp is what stops an /info answer that was
+					// already in flight from undoing this (see
+					// reconcileBannedPeers).
+					r.bannedPeers.Store(bannedPeer, time.Now())
 					if r.Host != nil {
 						_ = r.Host.Network().ClosePeer(bannedPeer)
 					}
@@ -764,6 +767,62 @@ func (r *Router) renewLease() {
 	}
 }
 
+// reconcileBannedPeers replaces the local blocklist with the control plane's
+// ban set. It is a replacement rather than a merge: the control plane can
+// unban a peer, and there is no event for that, so a peer that has dropped off
+// the list has to drop out of the blocklist too.
+//
+// fetchedAt is when the request that produced peerIDs was issued, and it is
+// what makes the replacement safe. A ban is written to the control plane's
+// database before MeshEvent_BANNED is published, so a response *issued after*
+// the ban is guaranteed to carry it, and its absence really does mean
+// unbanned. A response issued before the ban cannot say anything about it, so
+// bans recorded since fetchedAt are left alone -- otherwise an /info still in
+// flight when an event arrived would immediately undo it, which is a race the
+// router hits on startup, where the first poll overlaps live gossip.
+func (r *Router) reconcileBannedPeers(peerIDs []string, fetchedAt time.Time) {
+	banned := make(map[peer.ID]struct{}, len(peerIDs))
+	for _, id := range peerIDs {
+		p, err := peer.Decode(id)
+		if err != nil {
+			logger.Warnf("[Federation] Ignoring undecodable banned peer ID %q: %v", id, err)
+			continue
+		}
+		banned[p] = struct{}{}
+	}
+
+	// Drop bans the control plane no longer holds, except any that landed
+	// after this answer was asked for.
+	r.bannedPeers.Range(func(key, value any) bool {
+		p, ok := key.(peer.ID)
+		if !ok {
+			return true
+		}
+		if _, still := banned[p]; still {
+			return true
+		}
+		if bannedAt, ok := value.(time.Time); ok && bannedAt.After(fetchedAt) {
+			return true
+		}
+		logger.Infof("[Federation] Peer %s is no longer banned, removing from blocklist", p)
+		r.bannedPeers.Delete(p)
+		return true
+	})
+
+	// Apply the ones it does, evicting anything already admitted.
+	for p := range banned {
+		if _, already := r.bannedPeers.Load(p); already {
+			continue
+		}
+		logger.Infof("[Federation] Peer %s is banned, adding to blocklist", p)
+		r.bannedPeers.Store(p, fetchedAt)
+		r.authenticatedPeers.Delete(p)
+		if r.Host != nil {
+			_ = r.Host.Network().ClosePeer(p)
+		}
+	}
+}
+
 func (r *Router) runFederationLoop() {
 	defer r.wg.Done()
 	ticker := time.NewTicker(30 * time.Second)
@@ -783,6 +842,10 @@ func (r *Router) runFederationLoop() {
 
 func (r *Router) connectBootstrapRouters() {
 	client := &http.Client{Timeout: 10 * time.Second}
+	// Taken before the request: anything banned after this point cannot be
+	// reflected in the answer, so reconciliation must not read its absence as
+	// an unban (see reconcileBannedPeers).
+	fetchedAt := time.Now()
 	resp, err := client.Get(r.config.ControlPlaneURL + "/info")
 	if err != nil {
 		logger.Errorf("[Federation] Failed to fetch router info: %v", err)
@@ -804,6 +867,10 @@ func (r *Router) connectBootstrapRouters() {
 	if err := proto.Unmarshal(body, &info); err != nil {
 		return
 	}
+
+	// /info carries the whole ban set, so this is also where a router that
+	// restarted or missed a MeshEvent_BANNED catches up.
+	r.reconcileBannedPeers(info.GetBannedPeerIds(), fetchedAt)
 
 	for _, addrStr := range info.RouterAddresses {
 		ma, err := multiaddr.NewMultiaddr(addrStr)

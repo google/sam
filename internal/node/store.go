@@ -22,7 +22,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/libp2p/go-libp2p/core/peer"
 	"go.etcd.io/bbolt"
 	bbolterrors "go.etcd.io/bbolt/errors"
 )
@@ -77,9 +76,6 @@ func NewStore(dir string) (*Store, error) {
 
 	err = db.Update(func(tx *bbolt.Tx) error {
 		if _, err := tx.CreateBucketIfNotExists([]byte(bucketIdentity)); err != nil {
-			return err
-		}
-		if _, err := tx.CreateBucketIfNotExists([]byte(bucketBannedPeers)); err != nil {
 			return err
 		}
 		return nil
@@ -308,22 +304,8 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
-const (
-	bucketBannedPeers = "banned_peers"
-)
-
-// IsBanned checks local store to see if this peer is banned.
-func (s *Store) IsBanned(p peer.ID) bool {
-	var banned bool
-	_ = s.db.View(func(tx *bbolt.Tx) error {
-		b := tx.Bucket([]byte(bucketBannedPeers))
-		if b == nil {
-			return nil
-		}
-		if b.Get([]byte(p.String())) != nil {
-			banned = true
-		}
-		return nil
-	})
-	return banned
-}
+// Peer bans are deliberately not kept here. A ban on disk cannot be undone by
+// the control plane -- there is no unban event -- and it says nothing about a
+// node that was offline when the ban was published. Both are handled instead by
+// reconciling against the ban set in /info on every start (see SyncMeshConfig),
+// with MeshEvent_BANNED as the sub-second path for nodes that are already up.

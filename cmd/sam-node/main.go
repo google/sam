@@ -389,7 +389,7 @@ func main() {
 			var controlPlanePubKey ed25519.PublicKey
 			var routerAddrs []multiaddr.Multiaddr
 
-			storedPubKey, syncedAddrs, err := node.SyncMeshConfig(context.Background(), store)
+			storedPubKey, syncedAddrs, bannedPeerIDs, err := node.SyncMeshConfig(context.Background(), store)
 			if err != nil {
 				logger.Warnf("Failed to sync mesh config: %v", err)
 			}
@@ -518,6 +518,7 @@ func main() {
 					ControlPlanePubKey:   controlPlanePubKey,
 					RouterAddrs:          routerAddrs,
 					Store:                store,
+					BannedPeerIDs:        bannedPeerIDs,
 					MeshID:               meshFlag,
 					DiscoveryInterval:    discoveryIntervalFlag,
 					ListenAddrs:          listenAddrs,
@@ -585,6 +586,7 @@ func main() {
 					PrivKey:              priv,
 					RouterAddrs:          initRouterAddrs,
 					Store:                store,
+					BannedPeerIDs:        bannedPeerIDs,
 					MeshID:               meshFlag,
 					DiscoveryInterval:    discoveryIntervalFlag,
 					ListenAddrs:          listenAddrs,
@@ -642,11 +644,12 @@ func main() {
 				}
 				enrollCancel()
 
-				storedPubKey, newRouterAddrs, err := node.SyncMeshConfig(context.Background(), store)
+				storedPubKey, newRouterAddrs, postEnrollBannedPeerIDs, err := node.SyncMeshConfig(context.Background(), store)
 				if err != nil {
 					logger.Warnf("Failed to sync mesh config post-enrollment: %v", err)
 				}
 				controlPlanePubKey = storedPubKey
+				bannedPeerIDs = postEnrollBannedPeerIDs
 
 				logger.Debugf("listenAddrs: %v, allowLoopback: %v", listenAddrs, allowLoopbackFlag)
 				meshNode, err = node.NewSamNode(node.Options{
@@ -654,6 +657,7 @@ func main() {
 					ControlPlanePubKey:   controlPlanePubKey,
 					RouterAddrs:          newRouterAddrs,
 					Store:                store,
+					BannedPeerIDs:        bannedPeerIDs,
 					MeshID:               meshFlag,
 					DiscoveryInterval:    discoveryIntervalFlag,
 					ListenAddrs:          listenAddrs,

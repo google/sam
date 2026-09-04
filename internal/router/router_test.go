@@ -872,3 +872,55 @@ func TestPerformMutualAuthAcceptsRotatedKey(t *testing.T) {
 		t.Fatal("peer not recorded as authenticated")
 	}
 }
+
+// reconcileBannedPeers replaces the blocklist with the control plane's ban
+// set rather than merging into it. The removal half is the point: the control
+// plane can unban a peer and there is no event for that, so a peer that drops
+// off /info has to drop out of the blocklist too.
+func TestReconcileBannedPeers(t *testing.T) {
+	newPeer := func(t *testing.T) peer.ID {
+		t.Helper()
+		priv, _, err := crypto.GenerateEd25519Key(rand.Reader)
+		if err != nil {
+			t.Fatal(err)
+		}
+		id, err := peer.IDFromPrivateKey(priv)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+
+	stillBanned := newPeer(t)
+	unbanned := newPeer(t)
+	newlyBanned := newPeer(t)
+
+	r := &Router{}
+	// Prior state, as a running router would hold it.
+	past := time.Now().Add(-time.Minute)
+	r.bannedPeers.Store(stillBanned, past)
+	r.bannedPeers.Store(unbanned, past)
+	r.authenticatedPeers.Store(newlyBanned, true)
+
+	fetchedAt := time.Now()
+	r.reconcileBannedPeers([]string{stillBanned.String(), newlyBanned.String()}, fetchedAt)
+
+	if _, banned := r.bannedPeers.Load(stillBanned); !banned {
+		t.Error("a peer still in the ban set must stay banned")
+	}
+	if _, banned := r.bannedPeers.Load(newlyBanned); !banned {
+		t.Error("a peer newly in the ban set must become banned")
+	}
+	if _, banned := r.bannedPeers.Load(unbanned); banned {
+		t.Error("a peer no longer in the ban set must be unbanned: /info is the only signal an unban has")
+	}
+	if _, admitted := r.authenticatedPeers.Load(newlyBanned); admitted {
+		t.Error("banning a peer must drop any prior admission")
+	}
+
+	// An undecodable entry must be skipped, not abort the reconciliation.
+	r.reconcileBannedPeers([]string{"not-a-peer-id", stillBanned.String()}, time.Now())
+	if _, banned := r.bannedPeers.Load(stillBanned); !banned {
+		t.Error("a malformed entry must not discard the valid ones")
+	}
+}

@@ -27,7 +27,6 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"go.etcd.io/bbolt"
 )
 
 func TestConnectionGater(t *testing.T) {
@@ -82,20 +81,49 @@ func TestConnectionGater(t *testing.T) {
 		t.Errorf("expected InterceptSecured to deny peer2 (in revoked cache)")
 	}
 
-	// Case 3: Peer is in persistent store (banned)
-	err = store.db.Update(func(tx *bbolt.Tx) error {
-		b := tx.Bucket([]byte(bucketBannedPeers))
-		return b.Put([]byte(peer3.String()), []byte("true"))
-	})
+	// Case 3: a peer the control plane does not ban stays reachable, even
+	// after another peer has been banned.
+	if !gater.InterceptPeerDial(peer3) {
+		t.Errorf("expected InterceptPeerDial to allow peer3")
+	}
+	if !gater.InterceptSecured(network.DirInbound, peer3, nil) {
+		t.Errorf("expected InterceptSecured to allow peer3")
+	}
+}
+
+// The revocation cache is seeded from the control plane's ban set at startup
+// (Options.BannedPeerIDs, filled by SyncMeshConfig). Without that a restarted
+// node would enforce no ban at all until the next MeshEvent_BANNED, which for
+// a ban published while it was down never arrives.
+func TestGaterEnforcesSeededBans(t *testing.T) {
+	priv, _, _ := crypto.GenerateEd25519Key(nil)
+	banned, err := peer.IDFromPrivateKey(priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherPriv, _, _ := crypto.GenerateEd25519Key(nil)
+	allowed, err := peer.IDFromPrivateKey(otherPriv)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if gater.InterceptPeerDial(peer3) {
-		t.Errorf("expected InterceptPeerDial to deny peer3 (in store)")
+	cache, err := lru.New[string, int64](100)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if gater.InterceptSecured(network.DirInbound, peer3, nil) {
-		t.Errorf("expected InterceptSecured to deny peer3 (in store)")
+	node := &SamNode{revokedPeers: cache}
+	// Mirrors what NewSamNode does with Options.BannedPeerIDs.
+	node.revokedPeers.Add(banned.String(), time.Now().Unix())
+
+	gater := &nodeConnGate{node: node}
+	if gater.InterceptPeerDial(banned) {
+		t.Error("a peer in the control plane's ban set must not be dialled")
+	}
+	if gater.InterceptSecured(network.DirInbound, banned, nil) {
+		t.Error("a peer in the control plane's ban set must not be accepted")
+	}
+	if !gater.InterceptPeerDial(allowed) {
+		t.Error("seeding a ban must not deny unrelated peers")
 	}
 }
 

@@ -390,11 +390,25 @@ func (s *Server) HandleInfo(w http.ResponseWriter, r *http.Request) {
 		routerAddrs = append(routerAddrs, r.Addresses...)
 	}
 
+	// The ban set is published here, rather than only as a MeshEvent, because
+	// the event is broadcast once and gossip has no replay: a node or router
+	// that restarted or was offline at the time would otherwise never learn
+	// the ban. A failure to read it must not be served as an empty list --
+	// that would read as "nothing is banned" and unban everyone -- so it is
+	// treated like any other failure to build this response.
+	bannedPeerIDs, err := s.store.ListBannedPeerIDs(r.Context())
+	if err != nil {
+		logger.Errorf("Failed to retrieve banned peers: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
 	resp := &api.ControlPlaneInfoResponse{
 		OidcIssuer:      issuer,
 		ClientId:        clientID,
 		Audience:        aud,
 		RouterAddresses: routerAddrs, // Reused this field for back-compatibility with bootstrap routers list
+		BannedPeerIds:   bannedPeerIDs,
 	}
 
 	respData, err := proto.Marshal(resp)

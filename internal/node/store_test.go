@@ -18,15 +18,11 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
-
-	"github.com/libp2p/go-libp2p/core/peer"
-	"go.etcd.io/bbolt"
 )
 
 func TestStore_NewStore_And_Close(t *testing.T) {
@@ -416,46 +412,6 @@ func TestStore_ResetMeshIdentity(t *testing.T) {
 		t.Errorf("expected private key to survive reset, got %v want %v", loadedKey, key)
 	}
 }
-
-func TestStore_IsBanned(t *testing.T) {
-	store, err := NewStore(t.TempDir())
-	if err != nil {
-		t.Fatalf("Failed to create store: %v", err)
-	}
-	defer func() {
-		if err := store.Close(); err != nil {
-			t.Errorf("failed to close store: %v", err)
-		}
-	}()
-
-	pID, err := peer.Decode("12D3KooWBysiyDVxxj7Lq8KvhFnZVhqKdZHtwRaJu7hvGwSZFMNg")
-	if err != nil {
-		t.Fatalf("Failed to decode peer ID: %v", err)
-	}
-
-	// Verify not banned initially
-	if store.IsBanned(pID) {
-		t.Errorf("Expected peer %s to not be banned", pID)
-	}
-
-	// Manually add peer to banned bucket to test IsBanned
-	err = store.db.Update(func(tx *bbolt.Tx) error {
-		b := tx.Bucket([]byte("banned_peers"))
-		if b == nil {
-			return fmt.Errorf("banned_peers bucket not found")
-		}
-		return b.Put([]byte(pID.String()), []byte("banned"))
-	})
-	if err != nil {
-		t.Fatalf("Failed to manually ban peer: %v", err)
-	}
-
-	// Verify banned now
-	if !store.IsBanned(pID) {
-		t.Errorf("Expected peer %s to be banned", pID)
-	}
-}
-
 func TestGetDefaultDataDir(t *testing.T) {
 	dir, err := GetDefaultDataDir()
 	if err != nil {

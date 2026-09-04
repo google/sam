@@ -265,9 +265,6 @@ func (n *SamNode) connectPeer(ctx context.Context, peerAddr string) error {
 	if n.revokedPeers != nil && n.revokedPeers.Contains(addrInfo.ID.String()) {
 		return fmt.Errorf("failed to dial: failed to dial %s: gater disallows connection to peer", addrInfo.ID)
 	}
-	if n.Store.IsBanned(addrInfo.ID) {
-		return fmt.Errorf("failed to dial: failed to dial %s: gater disallows connection to peer", addrInfo.ID)
-	}
 	conns := n.Host.Network().ConnsToPeer(addrInfo.ID)
 	connectedness := n.Host.Network().Connectedness(addrInfo.ID)
 	logger.Debugf("[connect-peer] Target peer %s, connectedness: %v, active conns: %d", addrInfo.ID, connectedness, len(conns))

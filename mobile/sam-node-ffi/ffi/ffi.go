@@ -128,7 +128,7 @@ func StartNode(configJSON string) error {
 	var routerAddrs []multiaddr.Multiaddr
 
 	// Sync config from stored/synced configuration
-	storedPubKey, syncedAddrs, err := node.SyncMeshConfig(context.Background(), store)
+	storedPubKey, syncedAddrs, bannedPeerIDs, err := node.SyncMeshConfig(context.Background(), store)
 	if err == nil && len(storedPubKey) > 0 {
 		controlPlanePubKey = storedPubKey
 		routerAddrs = syncedAddrs
@@ -160,6 +160,7 @@ func StartNode(configJSON string) error {
 		ControlPlanePubKey:   controlPlanePubKey,
 		RouterAddrs:          routerAddrs,
 		Store:                store,
+		BannedPeerIDs:        bannedPeerIDs,
 		MeshID:               meshID,
 		DiscoveryInterval:    discoveryInterval,
 		ListenAddrs:          listenAddrs,
@@ -321,7 +322,7 @@ func EnrollNode(dataDir string, controlPlaneURL string, jwt string, allowLoopbac
 		return fmt.Errorf("failed to save control plane URL: %w", err)
 	}
 
-	_, _, err = node.SyncMeshConfig(enrollCtx, store)
+	_, _, _, err = node.SyncMeshConfig(enrollCtx, store)
 	if err != nil {
 		return fmt.Errorf("failed to sync mesh config post-enrollment: %w", err)
 	}

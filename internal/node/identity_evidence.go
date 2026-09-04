@@ -295,11 +295,11 @@ func (n *SamNode) buildPeerEvidence(requested peer.ID, observation peerBiscuitOb
 	}, nil
 }
 
+// peerIsRevoked reports whether the peer is in the revocation cache, which is
+// seeded from the control plane's ban set at startup (see SyncMeshConfig) and
+// updated by MeshEvent_BANNED.
 func (n *SamNode) peerIsRevoked(peerID peer.ID) bool {
-	if n.revokedPeers != nil && n.revokedPeers.Contains(peerID.String()) {
-		return true
-	}
-	return n.Store != nil && n.Store.IsBanned(peerID)
+	return n.revokedPeers != nil && n.revokedPeers.Contains(peerID.String())
 }
 
 type biscuitClaims struct {

@@ -1127,8 +1127,15 @@ type ControlPlaneInfoResponse struct {
 	ClientId        string                 `protobuf:"bytes,2,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
 	Audience        string                 `protobuf:"bytes,3,opt,name=audience,proto3" json:"audience,omitempty"`
 	RouterAddresses []string               `protobuf:"bytes,4,rep,name=router_addresses,json=routerAddresses,proto3" json:"router_addresses,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// The complete set of currently banned peer IDs. Consumers reconcile their
+	// local blocklist against this list rather than merging into it, so that a
+	// peer the control plane no longer bans is unbanned everywhere without
+	// needing an event of its own. MeshEvent_BANNED stays the fast path for
+	// sub-second eviction; this is how a node that restarted or was offline
+	// when the event was published catches up.
+	BannedPeerIds []string `protobuf:"bytes,5,rep,name=banned_peer_ids,json=bannedPeerIds,proto3" json:"banned_peer_ids,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ControlPlaneInfoResponse) Reset() {
@@ -1185,6 +1192,13 @@ func (x *ControlPlaneInfoResponse) GetAudience() string {
 func (x *ControlPlaneInfoResponse) GetRouterAddresses() []string {
 	if x != nil {
 		return x.RouterAddresses
+	}
+	return nil
+}
+
+func (x *ControlPlaneInfoResponse) GetBannedPeerIds() []string {
+	if x != nil {
+		return x.BannedPeerIds
 	}
 	return nil
 }
@@ -2977,13 +2991,14 @@ const file_api_sam_proto_rawDesc = "" +
 	"\ttimestamp\x18\b \x01(\x03R\ttimestamp\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x9f\x01\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xc7\x01\n" +
 	"\x18ControlPlaneInfoResponse\x12\x1f\n" +
 	"\voidc_issuer\x18\x01 \x01(\tR\n" +
 	"oidcIssuer\x12\x1b\n" +
 	"\tclient_id\x18\x02 \x01(\tR\bclientId\x12\x1a\n" +
 	"\baudience\x18\x03 \x01(\tR\baudience\x12)\n" +
-	"\x10router_addresses\x18\x04 \x03(\tR\x0frouterAddresses\"\xa9\x01\n" +
+	"\x10router_addresses\x18\x04 \x03(\tR\x0frouterAddresses\x12&\n" +
+	"\x0fbanned_peer_ids\x18\x05 \x03(\tR\rbannedPeerIds\"\xa9\x01\n" +
 	"\x12RouterLeaseRequest\x12\x17\n" +
 	"\apeer_id\x18\x01 \x01(\tR\x06peerId\x12\x1c\n" +
 	"\taddresses\x18\x02 \x03(\tR\taddresses\x12\x18\n" +

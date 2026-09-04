@@ -162,9 +162,12 @@ func TestSyncMeshConfig(t *testing.T) {
 	defer store.Close() //nolint:errcheck
 
 	// Initial store is empty, so SyncMeshConfig should just return empty
-	pubKey, addrs, err := SyncMeshConfig(context.Background(), store)
+	pubKey, addrs, bannedPeerIDs, err := SyncMeshConfig(context.Background(), store)
 	if err != nil {
 		t.Fatalf("SyncMeshConfig failed: %v", err)
+	}
+	if len(bannedPeerIDs) != 0 {
+		t.Errorf("Expected no banned peers for empty store, got %v", bannedPeerIDs)
 	}
 	if len(pubKey) != 0 || len(addrs) != 0 {
 		t.Errorf("Expected empty result for empty store, got pubKey=%v, addrs=%v", pubKey, addrs)
@@ -180,7 +183,7 @@ func TestSyncMeshConfig(t *testing.T) {
 	}
 
 	// Call SyncMeshConfig, it should fetch new addrs from server
-	pubKey, addrs, err = SyncMeshConfig(context.Background(), store)
+	pubKey, addrs, _, err = SyncMeshConfig(context.Background(), store)
 	if err != nil {
 		t.Fatalf("SyncMeshConfig failed: %v", err)
 	}

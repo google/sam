@@ -40,6 +40,12 @@ type Options struct {
 	ControlPlanePubKey ed25519.PublicKey
 	RouterAddrs        []multiaddr.Multiaddr
 	Store              *Store
+
+	// BannedPeerIDs seeds the revocation cache from the control plane's ban
+	// set (see SyncMeshConfig). Without it a restarted node would enforce no
+	// ban until the next MeshEvent_BANNED, which for an existing ban never
+	// comes.
+	BannedPeerIDs []string
 	MeshID             string
 	DiscoveryInterval  string
 	ListenAddrs        []string

@@ -2267,3 +2267,66 @@ func TestBootstrapTokenOwnerPropagatesToNode(t *testing.T) {
 		t.Errorf("enrolled node owner = %q, want %q", enrolled.OwnerID, ownerSub)
 	}
 }
+
+// /info carries the whole ban set so a node or router that restarted, or was
+// offline when MeshEvent_BANNED was published, can reconcile against it. A
+// peer that is not banned must not appear, or consumers would blocklist it.
+func TestHandleInfoPublishesBanSet(t *testing.T) {
+	issuer, _ := startCustomMockOIDC(t)
+	srv, st, _ := setupTestServer(t, issuer)
+	defer func() {
+		_ = srv.Close()
+		_ = st.Close()
+	}()
+	ctx := context.Background()
+
+	const (
+		bannedPeer  = "12D3KooWBanned000000000000000000000000000000000001"
+		allowedPeer = "12D3KooWAllowed00000000000000000000000000000000002"
+	)
+	for _, peerID := range []string{bannedPeer, allowedPeer} {
+		if err := st.EnrollNode(ctx, &storage.EnrolledNode{
+			PeerID:    peerID,
+			PublicKey: []byte("test-public-key"),
+			Biscuit:   []byte("test-biscuit"),
+			Role:      "agent",
+			ExpiresAt: time.Now().Add(time.Hour),
+		}); err != nil {
+			t.Fatalf("EnrollNode(%s): %v", peerID, err)
+		}
+	}
+	// The path /admin/revoke takes: enrollment always starts unbanned.
+	if err := st.SetNodeBanned(ctx, bannedPeer, true); err != nil {
+		t.Fatalf("SetNodeBanned: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	srv.HandleInfo(rec, httptest.NewRequest(http.MethodGet, "/info", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("unexpected /info status: %d", rec.Code)
+	}
+	var info api.ControlPlaneInfoResponse
+	if err := proto.Unmarshal(rec.Body.Bytes(), &info); err != nil {
+		t.Fatalf("unmarshal ControlPlaneInfoResponse: %v", err)
+	}
+
+	got := info.GetBannedPeerIds()
+	if len(got) != 1 || got[0] != bannedPeer {
+		t.Errorf("banned_peer_ids = %v, want exactly [%s]", got, bannedPeer)
+	}
+
+	// An unban must show up as absence, since that is the only signal
+	// consumers get: there is no unban event.
+	if err := st.SetNodeBanned(ctx, bannedPeer, false); err != nil {
+		t.Fatalf("SetNodeBanned(false): %v", err)
+	}
+	rec = httptest.NewRecorder()
+	srv.HandleInfo(rec, httptest.NewRequest(http.MethodGet, "/info", nil))
+	var after api.ControlPlaneInfoResponse
+	if err := proto.Unmarshal(rec.Body.Bytes(), &after); err != nil {
+		t.Fatalf("unmarshal ControlPlaneInfoResponse: %v", err)
+	}
+	if len(after.GetBannedPeerIds()) != 0 {
+		t.Errorf("after unban banned_peer_ids = %v, want empty", after.GetBannedPeerIds())
+	}
+}

@@ -44,11 +44,6 @@ func (g *nodeConnGate) InterceptPeerDial(p peer.ID) (allow bool) {
 		logger.Warnf("[Gater] InterceptPeerDial denying %s: in revoked cache", p)
 		return false
 	}
-	banned := g.node.Store.IsBanned(p)
-	if banned {
-		logger.Warnf("[Gater] InterceptPeerDial denying %s: banned in store", p)
-		return false
-	}
 	logger.Debugf("[Gater] InterceptPeerDial allowing %s", p)
 	return true
 }
@@ -68,10 +63,6 @@ func (g *nodeConnGate) InterceptSecured(dir network.Direction, p peer.ID, n netw
 	logger.Debugf("[Gater] InterceptSecured for %s (dir: %v)", p, dir)
 	if g.node.revokedPeers != nil && g.node.revokedPeers.Contains(p.String()) {
 		logger.Warnf("[Gater] InterceptSecured denying %s: in revoked cache", p)
-		return false
-	}
-	if g.node.Store.IsBanned(p) {
-		logger.Warnf("[Gater] InterceptSecured denying %s: banned in store", p)
 		return false
 	}
 	logger.Debugf("[Gater] InterceptSecured allowing %s", p)
