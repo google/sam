@@ -1,7 +1,9 @@
 """Gemini-backed A2A chat agent hosted by a node in the local dev mesh."""
+import json
 import os
 import time
-import uuid
+
+from google.protobuf.json_format import MessageToDict
 
 import uvicorn
 from a2a.server.agent_execution.agent_executor import AgentExecutor
@@ -10,14 +12,15 @@ from a2a.server.events.event_queue import EventQueue
 from a2a.server.request_handlers import DefaultRequestHandler
 from a2a.server.routes import create_agent_card_routes, create_jsonrpc_routes
 from a2a.server.tasks.inmemory_task_store import InMemoryTaskStore
+from a2a.server.tasks.task_updater import TaskUpdater
+from a2a.helpers.proto_helpers import new_task
 from a2a.types import (
     AgentCapabilities,
     AgentCard,
     AgentInterface,
     AgentSkill,
-    Message,
     Part,
-    Role,
+    TaskState,
 )
 from google import genai
 from google.genai import types
@@ -26,12 +29,41 @@ from starlette.applications import Starlette
 PORT = 7777
 MODEL = os.environ.get("GEMINI_MODEL", "models/gemini-3.5-flash-lite")
 
+# Typed channel for "I need the user to answer first": a function call is
+# schema-enforced, unlike a magic reply prefix the model may forget or misquote.
+ASK_USER = types.FunctionDeclaration(
+    name="ask_user",
+    description="Ask the user a clarifying question you need answered before you can complete the request.",
+    parameters=types.Schema(
+        type=types.Type.OBJECT,
+        properties={"question": types.Schema(type=types.Type.STRING)},
+        required=["question"],
+    ),
+)
+
+# Same typed channel for producing files: the content becomes an A2A artifact
+# (raw bytes + filename) instead of being pasted into the chat reply.
+RETURN_FILE = types.FunctionDeclaration(
+    name="return_file",
+    description="Deliver a generated text-based file (CSV, Markdown, JSON, plain text) to the user as a downloadable attachment instead of pasting it into the reply.",
+    parameters=types.Schema(
+        type=types.Type.OBJECT,
+        properties={
+            "filename": types.Schema(type=types.Type.STRING),
+            "content": types.Schema(type=types.Type.STRING),
+            "media_type": types.Schema(type=types.Type.STRING, description="MIME type, e.g. text/csv"),
+        },
+        required=["filename", "content"],
+    ),
+)
+
 class ChatExecutor(AgentExecutor):
     """One Gemini chat session per A2A contextId; the session carries the history."""
 
     def __init__(self):
         self.gemini = genai.Client()
         self.chats = {}
+        self.pending_question = set()
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         chat = self.chats.get(context.context_id)
@@ -40,26 +72,75 @@ class ChatExecutor(AgentExecutor):
             chat = self.gemini.aio.chats.create(
                 model=MODEL,
                 config=types.GenerateContentConfig(
-                    thinking_config=types.ThinkingConfig(thinking_level="minimal")
+                    thinking_config=types.ThinkingConfig(thinking_level="minimal"),
+                    tools=[types.Tool(function_declarations=[ASK_USER, RETURN_FILE])],
                 ),
             )
             self.chats[context.context_id] = chat
+        prompt = context.get_user_input()
+        data_parts = [
+            MessageToDict(part.data)
+            for part in context.message.parts
+            if part.WhichOneof("content") == "data"
+        ]
+        if data_parts:
+            # Text-first agent: structured payloads reach Gemini as a labeled block.
+            prompt += "\n[structured data]: " + json.dumps(data_parts)
+        gemini_parts = [prompt]
+        for part in context.message.parts:
+            if part.WhichOneof("content") != "raw":
+                continue
+            media = part.media_type or "application/octet-stream"
+            if media.startswith("text/"):
+                filename = part.filename or "unnamed"
+                # Text attachments read best as prompt text, not opaque blobs.
+                gemini_parts[0] += f"\n[attached file {filename}]:\n" + part.raw.decode("utf-8", "replace")
+            else:
+                gemini_parts.append(types.Part.from_bytes(data=part.raw, mime_type=media))
+        # A dangling ask_user call must be answered in-history; the user's
+        # reply IS the tool response.
+        if context.context_id in self.pending_question:
+            self.pending_question.discard(context.context_id)
+            gemini_parts[0] = types.Part.from_function_response(
+                name="ask_user", response={"answer": gemini_parts[0]}
+            )
         started = time.monotonic()
-        reply = await chat.send_message(context.get_user_input())
+        reply = await chat.send_message(gemini_parts)
         print(
             f"[chat] context={context.context_id} gemini took "
             f"{time.monotonic() - started:.1f}s usage={reply.usage_metadata}",
             flush=True,
         )
-        await event_queue.enqueue_event(
-            Message(
-                role=Role.ROLE_AGENT,
-                message_id=str(uuid.uuid4()),
-                parts=[Part(text=reply.text or "")],
-                context_id=context.context_id,
-                task_id=context.task_id,
+        updater = TaskUpdater(event_queue, context.task_id, context.context_id)
+        # The runtime rejects a status update as a task's first event.
+        if context.current_task is None:
+            await event_queue.enqueue_event(
+                new_task(context.task_id, context.context_id, TaskState.TASK_STATE_SUBMITTED)
             )
-        )
+        calls = reply.function_calls or []
+        if calls and calls[0].name == "ask_user":
+            self.pending_question.add(context.context_id)
+            question = str(calls[0].args.get("question", ""))
+            await updater.requires_input(updater.new_agent_message([Part(text=question)]))
+            return
+        if calls and calls[0].name == "return_file":
+            filename = str(calls[0].args.get("filename", "file.txt"))
+            content = str(calls[0].args.get("content", ""))
+            media = str(calls[0].args.get("media_type") or "text/plain")
+            await updater.add_artifact(
+                [Part(raw=content.encode("utf-8"), filename=filename, media_type=media)],
+                name=filename,
+            )
+            # Unlike ask_user, the tool result is known now: answer the call
+            # immediately so the chat history stays valid for the next turn.
+            reply = await chat.send_message(
+                types.Part.from_function_response(name="return_file", response={"delivered": True})
+            )
+            await updater.complete(
+                updater.new_agent_message([Part(text=reply.text or f"Sent {filename}.")])
+            )
+            return
+        await updater.complete(updater.new_agent_message([Part(text=reply.text or "")]))
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
         pass
@@ -70,8 +151,8 @@ agent_card = AgentCard(
     description="Gemini-backed conversational agent; remembers the conversation per contextId",
     version="0.1.0",
     capabilities=AgentCapabilities(streaming=False),
-    default_input_modes=["text"],
-    default_output_modes=["text"],
+    default_input_modes=["text/plain", "application/json", "application/pdf", "image/png", "image/jpeg"],
+    default_output_modes=["text/plain", "text/csv", "text/markdown", "application/json"],
     skills=[
         AgentSkill(
             id="chat",
