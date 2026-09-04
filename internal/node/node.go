@@ -1045,10 +1045,13 @@ func (n *SamNode) RefreshEnrollment(ctx context.Context) error {
 		return fmt.Errorf("corrupted private key: %w", err)
 	}
 
-	// 3. Generate challenge signature over current timestamp
+	// 3. Sign the peer-bound refresh challenge
 	timestamp := time.Now().UnixMilli()
-	challengeData := []byte(fmt.Sprintf("%d", timestamp))
-	sig, err := privKey.Sign(challengeData)
+	peerID, err := peer.IDFromPrivateKey(privKey)
+	if err != nil {
+		return fmt.Errorf("failed to derive peer ID from private key: %w", err)
+	}
+	sig, err := privKey.Sign(api.RefreshChallenge(peerID.String(), timestamp))
 	if err != nil {
 		return fmt.Errorf("failed to generate signature: %w", err)
 	}

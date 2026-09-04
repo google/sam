@@ -552,9 +552,17 @@ type BootstrapEnrollRequest struct {
 	RequestedRole  string                 `protobuf:"bytes,4,opt,name=requested_role,json=requestedRole,proto3" json:"requested_role,omitempty"`
 	// Operator-declared labels; the admin approving the enrollment attests
 	// them (see EnrollRequest.labels).
-	Labels        map[string]string `protobuf:"bytes,5,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Labels map[string]string `protobuf:"bytes,5,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	// Proof of possession of public_key's private half: timestamp is unix
+	// milliseconds and challenge_signature signs the UTF-8 bytes of
+	// "sam:enroll:<peer_id>:<timestamp>". Required, and peer_id must be
+	// derived from public_key: this is what entitles a repeated POST /enroll
+	// to re-fetch an existing enrollment's biscuit, so a bootstrap token
+	// alone must never satisfy it.
+	Timestamp          int64  `protobuf:"varint,6,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	ChallengeSignature []byte `protobuf:"bytes,7,opt,name=challenge_signature,json=challengeSignature,proto3" json:"challenge_signature,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *BootstrapEnrollRequest) Reset() {
@@ -622,6 +630,26 @@ func (x *BootstrapEnrollRequest) GetLabels() map[string]string {
 	return nil
 }
 
+func (x *BootstrapEnrollRequest) GetTimestamp() int64 {
+	if x != nil {
+		return x.Timestamp
+	}
+	return 0
+}
+
+func (x *BootstrapEnrollRequest) GetChallengeSignature() []byte {
+	if x != nil {
+		return x.ChallengeSignature
+	}
+	return nil
+}
+
+// BootstrapEnrollResponse answers POST /enroll and GET /enroll/status.
+// Polling GET /enroll/status requires proof of possession of the key
+// submitted at /enroll: alongside the `peer_id` query parameter, the caller
+// sends the X-Sam-Challenge-Ts header (unix milliseconds) and the
+// X-Sam-Challenge-Sig header (unpadded base64url signature over the UTF-8
+// bytes of "sam:enroll-status:<peer_id>:<ts>").
 type BootstrapEnrollResponse struct {
 	state                 protoimpl.MessageState `protogen:"open.v1"`
 	Status                EnrollmentStatus       `protobuf:"varint,1,opt,name=status,proto3,enum=sam.v1.EnrollmentStatus" json:"status,omitempty"`
@@ -1678,7 +1706,10 @@ func (x *KeysResponse) GetPublicKeys() [][]byte {
 
 type TokenRefreshRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Signature over the decimal string form of timestamp, made with the node key.
+	// Signature with the node key over the UTF-8 bytes of
+	// "sam:refresh:<peer_id>:<timestamp>", where peer_id is the one bound in
+	// the presented biscuit. Peer- and endpoint-bound so a captured signature
+	// verifies nowhere else.
 	ChallengeSignature []byte `protobuf:"bytes,1,opt,name=challenge_signature,json=challengeSignature,proto3" json:"challenge_signature,omitempty"`
 	// Unix milliseconds. Must be within the control plane's freshness window.
 	Timestamp     int64 `protobuf:"varint,2,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
@@ -2891,14 +2922,16 @@ const file_api_sam_proto_rawDesc = "" +
 	"\x10router_addresses\x18\x04 \x03(\tR\x0frouterAddresses\x12\x1e\n" +
 	"\n" +
 	"expiration\x18\x05 \x01(\x03R\n" +
-	"expiration\"\x9f\x02\n" +
+	"expiration\"\xee\x02\n" +
 	"\x16BootstrapEnrollRequest\x12'\n" +
 	"\x0fbootstrap_token\x18\x01 \x01(\tR\x0ebootstrapToken\x12\x17\n" +
 	"\apeer_id\x18\x02 \x01(\tR\x06peerId\x12\x1d\n" +
 	"\n" +
 	"public_key\x18\x03 \x01(\fR\tpublicKey\x12%\n" +
 	"\x0erequested_role\x18\x04 \x01(\tR\rrequestedRole\x12B\n" +
-	"\x06labels\x18\x05 \x03(\v2*.sam.v1.BootstrapEnrollRequest.LabelsEntryR\x06labels\x1a9\n" +
+	"\x06labels\x18\x05 \x03(\v2*.sam.v1.BootstrapEnrollRequest.LabelsEntryR\x06labels\x12\x1c\n" +
+	"\ttimestamp\x18\x06 \x01(\x03R\ttimestamp\x12/\n" +
+	"\x13challenge_signature\x18\a \x01(\fR\x12challengeSignature\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xcd\x02\n" +

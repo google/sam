@@ -30,6 +30,7 @@ import (
 	"net"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -44,6 +45,7 @@ import (
 	golog "github.com/ipfs/go-log/v2"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/multiformats/go-multiaddr"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"golang.org/x/time/rate"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -676,24 +678,9 @@ func (s *Server) HandleRefresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	const refreshChallengeMaxAge = 5 * time.Minute
-	if req.Timestamp <= 0 {
-		http.Error(w, "missing or invalid timestamp", http.StatusBadRequest)
-		return
-	}
-	challengeTime := time.UnixMilli(req.Timestamp)
-	now := time.Now()
-	if now.Sub(challengeTime) > refreshChallengeMaxAge || challengeTime.Sub(now) > refreshChallengeMaxAge {
-		logger.Warnw("Stale or invalid challenge timestamp", "peer_id", nodeRecord.PeerID, "timestamp", req.Timestamp)
-		http.Error(w, "stale or invalid challenge timestamp", http.StatusUnauthorized)
-		return
-	}
-
-	challengeData := []byte(fmt.Sprintf("%d", req.Timestamp))
-	ok, err := pubKey.Verify(challengeData, req.ChallengeSignature)
-	if err != nil || !ok {
-		logger.Warnw("Challenge signature verification failed", "peer_id", nodeRecord.PeerID, "error", err)
-		http.Error(w, "Challenge signature verification failed", http.StatusUnauthorized)
+	if err := verifyFreshChallenge(pubKey, api.RefreshChallenge(nodeRecord.PeerID, req.Timestamp), req.Timestamp, req.ChallengeSignature); err != nil {
+		logger.Warnw("Refresh challenge verification failed", "peer_id", nodeRecord.PeerID, "error", err)
+		http.Error(w, "Challenge verification failed: "+err.Error(), http.StatusUnauthorized)
 		return
 	}
 
@@ -911,6 +898,44 @@ func (s *Server) HandleRouterLease(w http.ResponseWriter, r *http.Request) {
 		logger.Warnf("Router %s lacks router role in its biscuit: %v\nWorld state:\n%s", req.PeerId, err, authorizer.PrintWorld())
 		http.Error(w, "Unauthorized: entity is not a router", http.StatusForbidden)
 		return
+	}
+
+	// A lease is what /info serves to every joining node, and biscuits stay
+	// valid offline until their TTL: revocation has to cut off renewals here,
+	// as /refresh and /policies already do.
+	routerRecord, err := s.store.GetNode(r.Context(), pID.String())
+	if err == storage.ErrNotFound {
+		http.Error(w, "Router not enrolled", http.StatusUnauthorized)
+		return
+	} else if err != nil {
+		logger.Errorf("Failed to retrieve router record: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+	if err := routerRecord.CheckAdmission(time.Now()); err != nil {
+		if errors.Is(err, storage.ErrNodeBanned) {
+			logger.Warnw("Revoked router attempted lease renewal", "peer_id", pID.String())
+			http.Error(w, "Router is banned", http.StatusForbidden)
+			return
+		}
+		logger.Warnw("Router with expired session attempted lease renewal", "peer_id", pID.String())
+		http.Error(w, "Session expired, please re-enroll", http.StatusUnauthorized)
+		return
+	}
+
+	// Advertised addresses are served verbatim to joining peers via /info and
+	// /enroll: accept only well-formed multiaddrs terminating at the
+	// authenticated router itself.
+	for _, addrStr := range req.Addresses {
+		ma, err := multiaddr.NewMultiaddr(addrStr)
+		if err != nil {
+			http.Error(w, "Invalid multiaddr in addresses: "+addrStr, http.StatusBadRequest)
+			return
+		}
+		if _, last := peer.SplitAddr(ma); last != pID {
+			http.Error(w, "Address does not terminate at the authenticated router: "+addrStr, http.StatusBadRequest)
+			return
+		}
 	}
 
 	// Expose lease renewal
@@ -1180,6 +1205,26 @@ func (s *Server) HandleEnroll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Proof of possession: peer_id must be the submitted key's own, and the
+	// caller must hold its private half. This gates the existing-request
+	// branch below — a bootstrap token alone must not re-fetch another
+	// peer's biscuit.
+	enrolleeKey, err := crypto.UnmarshalPublicKey(req.PublicKey)
+	if err != nil {
+		s.writeEnrollError(w, api.EnrollmentStatus_ENROLLMENT_STATUS_REJECTED, "Invalid public key")
+		return
+	}
+	if !pID.MatchesPublicKey(enrolleeKey) {
+		logger.Warnw("Enrollment peer_id does not match public_key", "peer_id", req.PeerId)
+		s.writeEnrollError(w, api.EnrollmentStatus_ENROLLMENT_STATUS_REJECTED, "peer_id is not derived from public_key")
+		return
+	}
+	if err := verifyFreshChallenge(enrolleeKey, api.EnrollChallenge(req.PeerId, req.Timestamp), req.Timestamp, req.ChallengeSignature); err != nil {
+		logger.Warnw("Enroll challenge verification failed", "peer_id", req.PeerId, "error", err)
+		s.writeEnrollError(w, api.EnrollmentStatus_ENROLLMENT_STATUS_REJECTED, "Invalid enrollment challenge: "+err.Error())
+		return
+	}
+
 	// 2. Check for existing enrollment request
 	existingReq, err := s.store.GetEnrollmentRequest(ctx, req.PeerId)
 	if err == nil {
@@ -1307,10 +1352,48 @@ func (s *Server) HandleEnroll(w http.ResponseWriter, r *http.Request) {
 	s.writeEnrollResponse(w, resp)
 }
 
+// challengeMaxAge bounds the freshness window of every signed timestamp
+// challenge on the enrollment surface (/enroll, /enroll/status, /refresh).
+const challengeMaxAge = 5 * time.Minute
+
+// verifyFreshChallenge checks a signed timestamp challenge: ts must be within
+// challengeMaxAge of now and sig must verify over payload with pub. The
+// payload (built by api.EnrollChallenge, api.EnrollStatusChallenge or
+// api.RefreshChallenge) binds the peer and the endpoint, so a signature
+// captured from one request verifies nowhere else.
+func verifyFreshChallenge(pub crypto.PubKey, payload []byte, ts int64, sig []byte) error {
+	if ts <= 0 {
+		return errors.New("missing or invalid challenge timestamp")
+	}
+	challengeTime := time.UnixMilli(ts)
+	now := time.Now()
+	if now.Sub(challengeTime) > challengeMaxAge || challengeTime.Sub(now) > challengeMaxAge {
+		return errors.New("stale or invalid challenge timestamp")
+	}
+	ok, err := pub.Verify(payload, sig)
+	if err != nil || !ok {
+		return errors.New("challenge signature verification failed")
+	}
+	return nil
+}
+
 // HandleEnrollStatus HTTP GET `/enroll/status`
+//
+// The approved response carries the enrollee's Biscuit, so polling requires
+// proof of possession of the key submitted at /enroll: the
+// api.HeaderChallengeTimestamp header (unix milliseconds) and the
+// api.HeaderChallengeSignature header (unpadded base64url signature over
+// api.EnrollStatusChallenge) must accompany `peer_id`. Every failure mode
+// after the header parse answers a uniform 401 so the endpoint is not a
+// peer-ID existence oracle for anonymous callers.
 func (s *Server) HandleEnrollStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if !s.limiter.Allow() {
+		http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
 		return
 	}
 
@@ -1320,14 +1403,33 @@ func (s *Server) HandleEnrollStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ts, tsErr := strconv.ParseInt(r.Header.Get(api.HeaderChallengeTimestamp), 10, 64)
+	sig, sigErr := base64.RawURLEncoding.DecodeString(r.Header.Get(api.HeaderChallengeSignature))
+	if tsErr != nil || sigErr != nil || len(sig) == 0 {
+		http.Error(w, "Missing or invalid challenge headers: signed challenge required", http.StatusUnauthorized)
+		return
+	}
+
 	ctx := r.Context()
 	enrollReq, err := s.store.GetEnrollmentRequest(ctx, peerID)
 	if err == storage.ErrNotFound {
-		s.writeEnrollError(w, api.EnrollmentStatus_ENROLLMENT_STATUS_REJECTED, "Enrollment request not found")
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	} else if err != nil {
 		logger.Errorf("Failed to retrieve enrollment status: %v", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	pubKey, err := crypto.UnmarshalPublicKey(enrollReq.PublicKey)
+	if err != nil {
+		logger.Errorf("Corrupted public key stored for enrollment %s: %v", peerID, err)
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if err := verifyFreshChallenge(pubKey, api.EnrollStatusChallenge(peerID, ts), ts, sig); err != nil {
+		logger.Warnw("Enroll status challenge verification failed", "peer_id", peerID, "error", err)
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 

@@ -96,12 +96,19 @@ func TestApprovalRefusesLabelsTheRoleDoesNotGrant(t *testing.T) {
 			t.Fatal(err)
 		}
 
+		enrollTS := time.Now().UnixMilli()
+		enrollSig, err := priv.Sign(api.EnrollChallenge(pID.String(), enrollTS))
+		if err != nil {
+			t.Fatal(err)
+		}
 		enrollData, err := proto.Marshal(&api.BootstrapEnrollRequest{
-			BootstrapToken: tokenDetails.Token,
-			PeerId:         pID.String(),
-			PublicKey:      pubBytes,
-			RequestedRole:  api.RoleNode,
-			Labels:         labels,
+			BootstrapToken:     tokenDetails.Token,
+			PeerId:             pID.String(),
+			PublicKey:          pubBytes,
+			RequestedRole:      api.RoleNode,
+			Labels:             labels,
+			Timestamp:          enrollTS,
+			ChallengeSignature: enrollSig,
 		})
 		if err != nil {
 			t.Fatal(err)
