@@ -44,7 +44,7 @@ func TestHandleSendAgentTaskSuccess(t *testing.T) {
 	srv := fakeSidecar(t, "/sam/12D3KooWpeer/a2a/echo", task, nil)
 	defer srv.Close()
 
-	res, _, err := handleSendAgentTask(bridgeConfig{sidecarURL: srv.URL})(
+	res, _, err := mcpTool(bridgeConfig{sidecarURL: srv.URL}, handleSendAgentTask)(
 		context.Background(), nil, sendAgentTaskParams{Peer: "12D3KooWpeer", Service: "echo", Message: "hi"})
 	if err != nil {
 		t.Fatal(err)
@@ -67,7 +67,7 @@ func TestHandleSendAgentTaskRefusalIsToolError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	res, _, err := handleSendAgentTask(bridgeConfig{sidecarURL: srv.URL})(
+	res, _, err := mcpTool(bridgeConfig{sidecarURL: srv.URL}, handleSendAgentTask)(
 		context.Background(), nil, sendAgentTaskParams{Peer: "12D3KooWpeer", Service: "echo",
 			Message: "hi", RequiredLabels: "region=us-east-1"})
 	if err != nil {
@@ -88,7 +88,7 @@ func TestHandleGetAgentTask(t *testing.T) {
 	srv := fakeSidecar(t, "/sam/12D3KooWpeer/a2a/echo", task, nil)
 	defer srv.Close()
 
-	res, _, err := handleGetAgentTask(bridgeConfig{sidecarURL: srv.URL})(
+	res, _, err := mcpTool(bridgeConfig{sidecarURL: srv.URL}, handleGetAgentTask)(
 		context.Background(), nil, getAgentTaskParams{Peer: "12D3KooWpeer", Service: "echo", TaskID: "t9"})
 	if err != nil {
 		t.Fatal(err)
@@ -115,7 +115,7 @@ func TestHandleGetAgentCard(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	res, _, err := handleGetAgentCard(bridgeConfig{sidecarURL: srv.URL})(
+	res, _, err := mcpTool(bridgeConfig{sidecarURL: srv.URL}, handleGetAgentCard)(
 		context.Background(), nil, getAgentCardParams{Peer: "12D3KooWpeer", Service: "echo"})
 	if err != nil {
 		t.Fatal(err)

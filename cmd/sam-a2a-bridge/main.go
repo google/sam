@@ -58,6 +58,12 @@ func newBridgeServer(cfg bridgeConfig) *mcp.Server {
 	}, nil)
 
 	mcp.AddTool(server, &mcp.Tool{
+		Name: "get_agent_card",
+		Description: "Fetch a mesh agent's card, trimmed to essentials: skills with examples, accepted " +
+			"input/output MIME types, and streaming support. Use before composing data/file sends.",
+	}, mcpTool(cfg, handleGetAgentCard))
+
+	mcp.AddTool(server, &mcp.Tool{
 		Name: "send_agent_task",
 		Description: "Send a message to an A2A agent on the SAM mesh: plain text (message), structured JSON " +
 			"(data), and/or a local file attachment (file_path, max 5 MB) — at least one required. Returns " +
@@ -65,40 +71,22 @@ func newBridgeServer(cfg bridgeConfig) *mcp.Server {
 			"disk and returned as paths. Poll non-terminal states with get_agent_task. Pass context_id to " +
 			"continue a conversation, task_id to reply into a task waiting for input. required_labels makes " +
 			"the local node refuse fail-closed unless the provider attested them.",
-	}, handleSendAgentTask(cfg))
+	}, mcpTool(cfg, handleSendAgentTask))
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "get_agent_task",
 		Description: "Fetch the current state and output of a task previously created with send_agent_task; " +
 			"same result shape, including data and files.",
-	}, handleGetAgentTask(cfg))
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name: "get_agent_card",
-		Description: "Fetch a mesh agent's card, trimmed to essentials: skills with examples, accepted " +
-			"input/output MIME types, and streaming support. Use before composing data/file sends.",
-	}, handleGetAgentCard(cfg))
+	}, mcpTool(cfg, handleGetAgentTask))
 
 	return server
 }
 
-func handleSendAgentTask(cfg bridgeConfig) func(context.Context, *mcp.CallToolRequest, sendAgentTaskParams) (*mcp.CallToolResult, any, error) {
-	return func(ctx context.Context, _ *mcp.CallToolRequest, p sendAgentTaskParams) (*mcp.CallToolResult, any, error) {
-		res, err := sendAgentTask(ctx, cfg, p)
-		return toolResult(res, err)
-	}
-}
-
-func handleGetAgentTask(cfg bridgeConfig) func(context.Context, *mcp.CallToolRequest, getAgentTaskParams) (*mcp.CallToolResult, any, error) {
-	return func(ctx context.Context, _ *mcp.CallToolRequest, p getAgentTaskParams) (*mcp.CallToolResult, any, error) {
-		res, err := getAgentTask(ctx, cfg, p)
-		return toolResult(res, err)
-	}
-}
-
-func handleGetAgentCard(cfg bridgeConfig) func(context.Context, *mcp.CallToolRequest, getAgentCardParams) (*mcp.CallToolResult, any, error) {
-	return func(ctx context.Context, _ *mcp.CallToolRequest, p getAgentCardParams) (*mcp.CallToolResult, any, error) {
-		res, err := getAgentCard(ctx, cfg, p)
+// mcpTool adapts a handler to the go-sdk tool signature, routing errors
+// through toolResult so refusals surface as tool errors.
+func mcpTool[Params, Result any](cfg bridgeConfig, handler func(context.Context, bridgeConfig, Params) (Result, error)) func(context.Context, *mcp.CallToolRequest, Params) (*mcp.CallToolResult, any, error) {
+	return func(ctx context.Context, _ *mcp.CallToolRequest, p Params) (*mcp.CallToolResult, any, error) {
+		res, err := handler(ctx, cfg, p)
 		return toolResult(res, err)
 	}
 }

@@ -58,7 +58,7 @@ func TestSendAgentTaskMapsTaskResult(t *testing.T) {
 	defer srv.Close()
 
 	cfg := bridgeConfig{sidecarURL: srv.URL, token: "tok"}
-	got, err := sendAgentTask(context.Background(), cfg, sendAgentTaskParams{
+	got, err := handleSendAgentTask(context.Background(), cfg, sendAgentTaskParams{
 		Peer: "12D3KooWpeer", Service: "echo", Message: "hi",
 	})
 	if err != nil {
@@ -86,7 +86,7 @@ func TestSendAgentTaskMapsMessageResult(t *testing.T) {
 	srv := fakeSidecar(t, "/sam/12D3KooWpeer/a2a/echo", msg, nil)
 	defer srv.Close()
 
-	got, err := sendAgentTask(context.Background(), bridgeConfig{sidecarURL: srv.URL},
+	got, err := handleSendAgentTask(context.Background(), bridgeConfig{sidecarURL: srv.URL},
 		sendAgentTaskParams{Peer: "12D3KooWpeer", Service: "echo", Message: "2+2?"})
 	if err != nil {
 		t.Fatal(err)
@@ -105,7 +105,7 @@ func TestSendAgentTaskThreadsContinuationIDs(t *testing.T) {
 	srv := fakeSidecar(t, "/sam/12D3KooWpeer/a2a/echo", task, &rpc)
 	defer srv.Close()
 
-	_, err := sendAgentTask(context.Background(), bridgeConfig{sidecarURL: srv.URL},
+	_, err := handleSendAgentTask(context.Background(), bridgeConfig{sidecarURL: srv.URL},
 		sendAgentTaskParams{Peer: "12D3KooWpeer", Service: "echo", Message: "more",
 			ContextID: "c3", TaskID: "t3"})
 	if err != nil {
@@ -124,7 +124,7 @@ func TestSendAgentTaskSurfacesSidecarRefusal(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, err := sendAgentTask(context.Background(), bridgeConfig{sidecarURL: srv.URL},
+	_, err := handleSendAgentTask(context.Background(), bridgeConfig{sidecarURL: srv.URL},
 		sendAgentTaskParams{Peer: "12D3KooWpeer", Service: "echo", Message: "hi",
 			RequiredLabels: "region=us-east-1"})
 	if err == nil {
@@ -142,7 +142,7 @@ func TestGetAgentTaskMapsResult(t *testing.T) {
 	srv := fakeSidecar(t, "/sam/12D3KooWpeer/a2a/echo", task, &rpc)
 	defer srv.Close()
 
-	got, err := getAgentTask(context.Background(), bridgeConfig{sidecarURL: srv.URL},
+	got, err := handleGetAgentTask(context.Background(), bridgeConfig{sidecarURL: srv.URL},
 		getAgentTaskParams{Peer: "12D3KooWpeer", Service: "echo", TaskID: "t4"})
 	if err != nil {
 		t.Fatal(err)
@@ -175,7 +175,7 @@ func TestSendAgentTaskWithDataPart(t *testing.T) {
 	srv := fakeSidecar(t, "/sam/12D3KooWpeer/a2a/echo", `{"task":`+task+`}`, &rpc)
 	defer srv.Close()
 
-	_, err := sendAgentTask(context.Background(), bridgeConfig{sidecarURL: srv.URL},
+	_, err := handleSendAgentTask(context.Background(), bridgeConfig{sidecarURL: srv.URL},
 		sendAgentTaskParams{Peer: "12D3KooWpeer", Service: "echo",
 			Data: map[string]any{"answer": 42, "unit": "cm"}})
 	if err != nil {
@@ -198,7 +198,7 @@ func TestSendAgentTaskWithFile(t *testing.T) {
 	srv := fakeSidecar(t, "/sam/12D3KooWpeer/a2a/echo", `{"task":`+task+`}`, &rpc)
 	defer srv.Close()
 
-	_, err := sendAgentTask(context.Background(), bridgeConfig{sidecarURL: srv.URL},
+	_, err := handleSendAgentTask(context.Background(), bridgeConfig{sidecarURL: srv.URL},
 		sendAgentTaskParams{Peer: "12D3KooWpeer", Service: "echo", FilePath: path})
 	if err != nil {
 		t.Fatal(err)
@@ -219,7 +219,7 @@ func TestSendAgentTaskFileTooLarge(t *testing.T) {
 	if err := os.WriteFile(path, make([]byte, maxAttachmentBytes+1), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, err := sendAgentTask(context.Background(), bridgeConfig{sidecarURL: "http://127.0.0.1:1"},
+	_, err := handleSendAgentTask(context.Background(), bridgeConfig{sidecarURL: "http://127.0.0.1:1"},
 		sendAgentTaskParams{Peer: "12D3KooWpeer", Service: "echo", FilePath: path})
 	if err == nil || !strings.Contains(err.Error(), "attachment cap") {
 		t.Fatalf("oversized file must be rejected before any request, got: %v", err)
@@ -227,7 +227,7 @@ func TestSendAgentTaskFileTooLarge(t *testing.T) {
 }
 
 func TestSendAgentTaskRequiresContent(t *testing.T) {
-	_, err := sendAgentTask(context.Background(), bridgeConfig{sidecarURL: "http://127.0.0.1:1"},
+	_, err := handleSendAgentTask(context.Background(), bridgeConfig{sidecarURL: "http://127.0.0.1:1"},
 		sendAgentTaskParams{Peer: "12D3KooWpeer", Service: "echo"})
 	if err == nil || !strings.Contains(err.Error(), "nothing to send") {
 		t.Fatalf("empty send must be rejected, got: %v", err)
@@ -246,7 +246,7 @@ func TestResultCollectsDataAndFiles(t *testing.T) {
 	srv := fakeSidecar(t, "/sam/12D3KooWpeer/a2a/echo", `{"task":`+task+`}`, nil)
 	defer srv.Close()
 
-	got, err := sendAgentTask(context.Background(),
+	got, err := handleSendAgentTask(context.Background(),
 		bridgeConfig{sidecarURL: srv.URL, downloadDir: downloads},
 		sendAgentTaskParams{Peer: "12D3KooWpeer", Service: "echo", Message: "go"})
 	if err != nil {
@@ -303,7 +303,7 @@ func TestResultIncludesFileURIs(t *testing.T) {
 	srv := fakeSidecar(t, "/sam/12D3KooWpeer/a2a/echo", `{"task":`+task+`}`, nil)
 	defer srv.Close()
 
-	got, err := sendAgentTask(context.Background(),
+	got, err := handleSendAgentTask(context.Background(),
 		bridgeConfig{sidecarURL: srv.URL, downloadDir: t.TempDir()},
 		sendAgentTaskParams{Peer: "12D3KooWpeer", Service: "echo", Message: "go"})
 	if err != nil {
@@ -331,7 +331,7 @@ func TestGetAgentCardTrims(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	got, err := getAgentCard(context.Background(), bridgeConfig{sidecarURL: srv.URL},
+	got, err := handleGetAgentCard(context.Background(), bridgeConfig{sidecarURL: srv.URL},
 		getAgentCardParams{Peer: "12D3KooWpeer", Service: "echo"})
 	if err != nil {
 		t.Fatal(err)
@@ -362,7 +362,7 @@ func TestResultErrorIncludesTaskID(t *testing.T) {
 	srv := fakeSidecar(t, "/sam/12D3KooWpeer/a2a/echo", `{"task":`+task+`}`, nil)
 	defer srv.Close()
 
-	_, err := sendAgentTask(context.Background(),
+	_, err := handleSendAgentTask(context.Background(),
 		bridgeConfig{sidecarURL: srv.URL, downloadDir: "/nonexistent-dir-xyz"},
 		sendAgentTaskParams{Peer: "12D3KooWpeer", Service: "echo", Message: "go"})
 	if err == nil {

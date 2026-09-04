@@ -31,6 +31,8 @@ import (
 	"github.com/a2aproject/a2a-go/v2/a2aclient"
 )
 
+const maxAttachmentBytes = 5 << 20
+
 type bridgeConfig struct {
 	sidecarURL  string
 	token       string
@@ -40,6 +42,73 @@ type bridgeConfig struct {
 // meshURL is the sidecar's raw egress path for one remote a2a service.
 func (c bridgeConfig) meshURL(peer, service string) string {
 	return strings.TrimRight(c.sidecarURL, "/") + "/sam/" + url.PathEscape(peer) + "/a2a/" + url.PathEscape(service)
+}
+
+type getAgentCardParams struct {
+	Peer    string `json:"peer" jsonschema:"Peer ID of the node hosting the agent"`
+	Service string `json:"service" jsonschema:"Name of the a2a service registered on that peer"`
+}
+
+// agentCardSummary trims the agent card to what a model can use; full cards
+// carry security schemas and provider blurbs a model never needs.
+type agentCardSummary struct {
+	Name               string           `json:"name"`
+	Description        string           `json:"description,omitempty"`
+	Version            string           `json:"version,omitempty"`
+	DefaultInputModes  []string         `json:"default_input_modes,omitempty"`
+	DefaultOutputModes []string         `json:"default_output_modes,omitempty"`
+	Streaming          bool             `json:"streaming"`
+	Skills             []agentCardSkill `json:"skills,omitempty"`
+}
+
+type agentCardSkill struct {
+	ID          string   `json:"id"`
+	Name        string   `json:"name,omitempty"`
+	Description string   `json:"description,omitempty"`
+	Tags        []string `json:"tags,omitempty"`
+	Examples    []string `json:"examples,omitempty"`
+}
+
+func handleGetAgentCard(ctx context.Context, cfg bridgeConfig, p getAgentCardParams) (agentCardSummary, error) {
+	httpClient := &http.Client{
+		Timeout:   30 * time.Second,
+		Transport: &samTransport{base: http.DefaultTransport, token: cfg.token},
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		cfg.meshURL(p.Peer, p.Service)+"/.well-known/agent-card.json", nil)
+	if err != nil {
+		return agentCardSummary{}, err
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return agentCardSummary{}, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	// Wire keys match a2a-go v2.5.0's a2a.AgentCard/AgentCapabilities/AgentSkill json tags exactly.
+	var wire struct {
+		Name               string   `json:"name"`
+		Description        string   `json:"description"`
+		Version            string   `json:"version"`
+		DefaultInputModes  []string `json:"defaultInputModes"`
+		DefaultOutputModes []string `json:"defaultOutputModes"`
+		Capabilities       struct {
+			Streaming bool `json:"streaming"`
+		} `json:"capabilities"`
+		Skills []agentCardSkill `json:"skills"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&wire); err != nil {
+		return agentCardSummary{}, fmt.Errorf("agent card is not valid JSON: %w", err)
+	}
+	return agentCardSummary{
+		Name:               wire.Name,
+		Description:        wire.Description,
+		Version:            wire.Version,
+		DefaultInputModes:  wire.DefaultInputModes,
+		DefaultOutputModes: wire.DefaultOutputModes,
+		Streaming:          wire.Capabilities.Streaming,
+		Skills:             wire.Skills,
+	}, nil
 }
 
 type sendAgentTaskParams struct {
@@ -54,7 +123,74 @@ type sendAgentTaskParams struct {
 	TaskID         string         `json:"task_id,omitempty" jsonschema:"Reply into an existing task, e.g. one in state input-required"`
 }
 
-const maxAttachmentBytes = 5 << 20
+type taskResult struct {
+	TaskID    string   `json:"task_id"`
+	ContextID string   `json:"context_id"`
+	State     string   `json:"state"`
+	Text      string   `json:"text"`
+	Data      []any    `json:"data,omitempty"`
+	Files     []string `json:"files,omitempty"`
+}
+
+func handleSendAgentTask(ctx context.Context, cfg bridgeConfig, p sendAgentTaskParams) (taskResult, error) {
+	client, err := newMeshClient(ctx, cfg, p.Peer, p.Service, p.RequiredLabels)
+	if err != nil {
+		return taskResult{}, err
+	}
+	defer client.Destroy()
+
+	parts, err := buildParts(p)
+	if err != nil {
+		return taskResult{}, err
+	}
+	var msg *a2a.Message
+	if p.TaskID != "" || p.ContextID != "" {
+		msg = a2a.NewMessageForTask(a2a.MessageRoleUser,
+			a2a.TaskInfo{TaskID: a2a.TaskID(p.TaskID), ContextID: p.ContextID}, parts...)
+	} else {
+		msg = a2a.NewMessage(a2a.MessageRoleUser, parts...)
+	}
+	result, err := client.SendMessage(ctx, &a2a.SendMessageRequest{Message: msg})
+	if err != nil {
+		return taskResult{}, err
+	}
+	return toTaskResult(cfg, result)
+}
+
+type getAgentTaskParams struct {
+	Peer    string `json:"peer" jsonschema:"Peer ID of the node hosting the agent"`
+	Service string `json:"service" jsonschema:"Name of the a2a service registered on that peer"`
+	TaskID  string `json:"task_id" jsonschema:"ID of the task to fetch"`
+}
+
+func handleGetAgentTask(ctx context.Context, cfg bridgeConfig, p getAgentTaskParams) (taskResult, error) {
+	client, err := newMeshClient(ctx, cfg, p.Peer, p.Service, "")
+	if err != nil {
+		return taskResult{}, err
+	}
+	defer client.Destroy()
+
+	task, err := client.GetTask(ctx, &a2a.GetTaskRequest{ID: a2a.TaskID(p.TaskID)})
+	if err != nil {
+		return taskResult{}, err
+	}
+	return toTaskResult(cfg, task)
+}
+
+func newMeshClient(ctx context.Context, cfg bridgeConfig, peer, service, requiredLabels string) (*a2aclient.Client, error) {
+	httpClient := &http.Client{
+		Timeout: 60 * time.Second,
+		Transport: &samTransport{
+			base:           http.DefaultTransport,
+			token:          cfg.token,
+			requiredLabels: requiredLabels,
+		},
+	}
+	return a2aclient.NewFromEndpoints(ctx,
+		[]*a2a.AgentInterface{a2a.NewAgentInterface(cfg.meshURL(peer, service), a2a.TransportProtocolJSONRPC)},
+		a2aclient.WithJSONRPCTransport(httpClient),
+	)
+}
 
 // buildParts builds the message parts in a fixed order (text, data, file) so
 // wire output is deterministic across calls with the same params.
@@ -105,75 +241,6 @@ func fileToPart(path, nameOverride string) (*a2a.Part, error) {
 	part.Filename = name
 	part.MediaType = mimeType
 	return part, nil
-}
-
-type getAgentTaskParams struct {
-	Peer    string `json:"peer" jsonschema:"Peer ID of the node hosting the agent"`
-	Service string `json:"service" jsonschema:"Name of the a2a service registered on that peer"`
-	TaskID  string `json:"task_id" jsonschema:"ID of the task to fetch"`
-}
-
-type taskResult struct {
-	TaskID    string   `json:"task_id"`
-	ContextID string   `json:"context_id"`
-	State     string   `json:"state"`
-	Text      string   `json:"text"`
-	Data      []any    `json:"data,omitempty"`
-	Files     []string `json:"files,omitempty"`
-}
-
-func newMeshClient(ctx context.Context, cfg bridgeConfig, peer, service, requiredLabels string) (*a2aclient.Client, error) {
-	httpClient := &http.Client{
-		Timeout: 60 * time.Second,
-		Transport: &samTransport{
-			base:           http.DefaultTransport,
-			token:          cfg.token,
-			requiredLabels: requiredLabels,
-		},
-	}
-	return a2aclient.NewFromEndpoints(ctx,
-		[]*a2a.AgentInterface{a2a.NewAgentInterface(cfg.meshURL(peer, service), a2a.TransportProtocolJSONRPC)},
-		a2aclient.WithJSONRPCTransport(httpClient),
-	)
-}
-
-func sendAgentTask(ctx context.Context, cfg bridgeConfig, p sendAgentTaskParams) (taskResult, error) {
-	client, err := newMeshClient(ctx, cfg, p.Peer, p.Service, p.RequiredLabels)
-	if err != nil {
-		return taskResult{}, err
-	}
-	defer client.Destroy()
-
-	parts, err := buildParts(p)
-	if err != nil {
-		return taskResult{}, err
-	}
-	var msg *a2a.Message
-	if p.TaskID != "" || p.ContextID != "" {
-		msg = a2a.NewMessageForTask(a2a.MessageRoleUser,
-			a2a.TaskInfo{TaskID: a2a.TaskID(p.TaskID), ContextID: p.ContextID}, parts...)
-	} else {
-		msg = a2a.NewMessage(a2a.MessageRoleUser, parts...)
-	}
-	result, err := client.SendMessage(ctx, &a2a.SendMessageRequest{Message: msg})
-	if err != nil {
-		return taskResult{}, err
-	}
-	return toTaskResult(cfg, result)
-}
-
-func getAgentTask(ctx context.Context, cfg bridgeConfig, p getAgentTaskParams) (taskResult, error) {
-	client, err := newMeshClient(ctx, cfg, p.Peer, p.Service, "")
-	if err != nil {
-		return taskResult{}, err
-	}
-	defer client.Destroy()
-
-	task, err := client.GetTask(ctx, &a2a.GetTaskRequest{ID: a2a.TaskID(p.TaskID)})
-	if err != nil {
-		return taskResult{}, err
-	}
-	return toTaskResult(cfg, task)
 }
 
 // toTaskResult flattens the SDK's Message|Task union into the fields a
@@ -274,71 +341,4 @@ func saveFilePart(dir, taskID, name string, data []byte) (string, error) {
 		return "", err
 	}
 	return path, nil
-}
-
-type getAgentCardParams struct {
-	Peer    string `json:"peer" jsonschema:"Peer ID of the node hosting the agent"`
-	Service string `json:"service" jsonschema:"Name of the a2a service registered on that peer"`
-}
-
-// agentCardSummary trims the agent card to what a model can use; full cards
-// carry security schemas and provider blurbs a model never needs.
-type agentCardSummary struct {
-	Name               string           `json:"name"`
-	Description        string           `json:"description,omitempty"`
-	Version            string           `json:"version,omitempty"`
-	DefaultInputModes  []string         `json:"default_input_modes,omitempty"`
-	DefaultOutputModes []string         `json:"default_output_modes,omitempty"`
-	Streaming          bool             `json:"streaming"`
-	Skills             []agentCardSkill `json:"skills,omitempty"`
-}
-
-type agentCardSkill struct {
-	ID          string   `json:"id"`
-	Name        string   `json:"name,omitempty"`
-	Description string   `json:"description,omitempty"`
-	Tags        []string `json:"tags,omitempty"`
-	Examples    []string `json:"examples,omitempty"`
-}
-
-func getAgentCard(ctx context.Context, cfg bridgeConfig, p getAgentCardParams) (agentCardSummary, error) {
-	httpClient := &http.Client{
-		Timeout:   30 * time.Second,
-		Transport: &samTransport{base: http.DefaultTransport, token: cfg.token},
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-		cfg.meshURL(p.Peer, p.Service)+"/.well-known/agent-card.json", nil)
-	if err != nil {
-		return agentCardSummary{}, err
-	}
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return agentCardSummary{}, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	// Wire keys match a2a-go v2.5.0's a2a.AgentCard/AgentCapabilities/AgentSkill json tags exactly.
-	var wire struct {
-		Name               string   `json:"name"`
-		Description        string   `json:"description"`
-		Version            string   `json:"version"`
-		DefaultInputModes  []string `json:"defaultInputModes"`
-		DefaultOutputModes []string `json:"defaultOutputModes"`
-		Capabilities       struct {
-			Streaming bool `json:"streaming"`
-		} `json:"capabilities"`
-		Skills []agentCardSkill `json:"skills"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&wire); err != nil {
-		return agentCardSummary{}, fmt.Errorf("agent card is not valid JSON: %w", err)
-	}
-	return agentCardSummary{
-		Name:               wire.Name,
-		Description:        wire.Description,
-		Version:            wire.Version,
-		DefaultInputModes:  wire.DefaultInputModes,
-		DefaultOutputModes: wire.DefaultOutputModes,
-		Streaming:          wire.Capabilities.Streaming,
-		Skills:             wire.Skills,
-	}, nil
 }
