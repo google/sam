@@ -1222,6 +1222,103 @@ func TestEnrollStatusRateLimited(t *testing.T) {
 	}
 }
 
+// TestRouterLeaseRevocation pins that revocation cuts off lease renewal: a
+// biscuit stays cryptographically valid until its TTL, so /routers/lease has
+// to check admission on every renewal, exactly as /refresh and /policies do.
+func TestRouterLeaseRevocation(t *testing.T) {
+	issuer, _ := startCustomMockOIDC(t)
+	srv, store, baseURL := setupTestServer(t, issuer)
+	defer func() {
+		_ = srv.Close()
+		_ = store.Close()
+	}()
+	srv.config.AdminToken = "super-secret-admin-token"
+
+	ctx := context.Background()
+	cpPriv, _, err := store.GetCurrentKey(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{Timeout: 5 * time.Second}
+
+	// enrollLeaseRouter mints a router biscuit and, unless orphan, the
+	// EnrolledNode record backing it.
+	enrollLeaseRouter := func(expiresAt time.Time, orphan bool) (peer.ID, []byte) {
+		t.Helper()
+		priv, pub, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		routerPeer, _ := peer.IDFromPrivateKey(priv)
+		pubBytes, _ := crypto.MarshalPublicKey(pub)
+		routerBiscuit, err := identity.MintBootstrapBiscuitToken(cpPriv, routerPeer, api.RoleRouter, time.Now().Add(time.Hour), nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !orphan {
+			if err := store.EnrollNode(ctx, &storage.EnrolledNode{
+				PeerID:         routerPeer.String(),
+				PublicKey:      pubBytes,
+				Biscuit:        routerBiscuit,
+				Role:           api.RoleRouter,
+				EnrollmentType: "BOOTSTRAP",
+				EnrolledAt:     time.Now(),
+				ExpiresAt:      expiresAt,
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return routerPeer, routerBiscuit
+	}
+
+	postLease := func(routerPeer peer.ID, routerBiscuit []byte) int {
+		t.Helper()
+		leaseData, _ := proto.Marshal(&api.RouterLeaseRequest{
+			PeerId:    routerPeer.String(),
+			Addresses: []string{"/ip4/127.0.0.1/tcp/4001/p2p/" + routerPeer.String()},
+			Biscuit:   routerBiscuit,
+		})
+		resp, err := client.Post(baseURL+"/routers/lease", "application/x-protobuf", bytes.NewReader(leaseData))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		return resp.StatusCode
+	}
+
+	// Admitted router renews; the same router refuses after /admin/revoke.
+	routerPeer, routerBiscuit := enrollLeaseRouter(time.Time{}, false)
+	if got := postLease(routerPeer, routerBiscuit); got != http.StatusOK {
+		t.Fatalf("lease before revocation: got %d, want 200", got)
+	}
+	revokeData, _ := proto.Marshal(&api.TokenRevokeRequest{PeerId: routerPeer.String()})
+	revokeReq, _ := http.NewRequest(http.MethodPost, baseURL+"/admin/revoke", bytes.NewReader(revokeData))
+	revokeReq.Header.Set("Authorization", "Bearer super-secret-admin-token")
+	resp, err := client.Do(revokeReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("revoke: got %s, want 200", resp.Status)
+	}
+	if got := postLease(routerPeer, routerBiscuit); got != http.StatusForbidden {
+		t.Fatalf("lease after revocation: got %d, want 403", got)
+	}
+
+	// A lapsed OIDC session is the other admission arm.
+	expiredPeer, expiredBiscuit := enrollLeaseRouter(time.Now().Add(-time.Hour), false)
+	if got := postLease(expiredPeer, expiredBiscuit); got != http.StatusUnauthorized {
+		t.Fatalf("lease with lapsed session: got %d, want 401", got)
+	}
+
+	// A valid biscuit with no enrollment record behind it renews nothing.
+	orphanPeer, orphanBiscuit := enrollLeaseRouter(time.Time{}, true)
+	if got := postLease(orphanPeer, orphanBiscuit); got != http.StatusUnauthorized {
+		t.Fatalf("lease without enrollment record: got %d, want 401", got)
+	}
+}
+
 // enrollRefreshTestNode enrolls a bootstrap node directly in the store and
 // returns its key and currently issued biscuit, ready to drive /refresh.
 func enrollRefreshTestNode(t *testing.T, ctx context.Context, store storage.Store) (crypto.PrivKey, []byte) {

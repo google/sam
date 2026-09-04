@@ -900,6 +900,29 @@ func (s *Server) HandleRouterLease(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A lease is what /info serves to every joining node, and biscuits stay
+	// valid offline until their TTL: revocation has to cut off renewals here,
+	// as /refresh and /policies already do.
+	routerRecord, err := s.store.GetNode(r.Context(), pID.String())
+	if err == storage.ErrNotFound {
+		http.Error(w, "Router not enrolled", http.StatusUnauthorized)
+		return
+	} else if err != nil {
+		logger.Errorf("Failed to retrieve router record: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+	if err := routerRecord.CheckAdmission(time.Now()); err != nil {
+		if errors.Is(err, storage.ErrNodeBanned) {
+			logger.Warnw("Revoked router attempted lease renewal", "peer_id", pID.String())
+			http.Error(w, "Router is banned", http.StatusForbidden)
+			return
+		}
+		logger.Warnw("Router with expired session attempted lease renewal", "peer_id", pID.String())
+		http.Error(w, "Session expired, please re-enroll", http.StatusUnauthorized)
+		return
+	}
+
 	// Advertised addresses are served verbatim to joining peers via /info and
 	// /enroll: accept only well-formed multiaddrs terminating at the
 	// authenticated router itself.
