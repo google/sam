@@ -34,7 +34,7 @@ Propose each shell command and let the user approve it before running anything.
    module needs, so a stale system Go still works):
    `make -C <sam-repo>/cmd/sam-a2a-bridge build`
 3. Register it with the harness, passing the sidecar URL and its API token:
-   `claude mcp add sam-a2a-bridge -- <sam-repo>/cmd/sam-a2a-bridge/sam-a2a-bridge -url http://localhost:8080 -token <sidecar-token>`
+   `claude mcp add sam-a2a-bridge -- <sam-repo>/bin/sam-a2a-bridge -url http://localhost:8080 -token <sidecar-token>`
    (Agent-returned files land in `~/.sam/a2a-downloads` by default, auto-created; pass `-download-dir` to change it — you must create that directory yourself. No auto-cleanup; prune manually.)
 4. Restart the harness session; the three tools appear.
 

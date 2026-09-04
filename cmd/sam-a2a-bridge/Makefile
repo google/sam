@@ -4,11 +4,13 @@ GOTOOLCHAIN ?= go1.25.7
 export GOTOOLCHAIN
 
 BINARY := sam-a2a-bridge
+# Binaries land in the repo-root bin/ like every other sam binary.
+OUT_DIR := $(abspath ../../bin)
 
 .PHONY: build test vet fmt install clean
 
 build:
-	go build -o $(BINARY) .
+	go build -o "$(OUT_DIR)/$(BINARY)" .
 
 test:
 	go test ./...
@@ -23,4 +25,4 @@ install:
 	go install .
 
 clean:
-	rm -f $(BINARY)
+	rm -f "$(OUT_DIR)/$(BINARY)"
