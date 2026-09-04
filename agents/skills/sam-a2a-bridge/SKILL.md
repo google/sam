@@ -30,10 +30,11 @@ Propose each shell command and let the user approve it before running anything.
 1. A running, enrolled `sam-node` is required first. If its sidecar does not
    answer on `http://localhost:8080`, use the `sam-mesh` skill's bootstrap
    path before continuing.
-2. Build the bridge (own Go module, Go >= 1.25):
-   `cd <sam-repo>/cmd/sam-a2a-bridge && go build -o ~/bin/sam-a2a-bridge .`
+2. Build the bridge (own Go module; the Makefile pins the Go toolchain the
+   module needs, so a stale system Go still works):
+   `make -C <sam-repo>/cmd/sam-a2a-bridge build`
 3. Register it with the harness, passing the sidecar URL and its API token:
-   `claude mcp add sam-a2a-bridge -- ~/bin/sam-a2a-bridge -url http://localhost:8080 -token <sidecar-token>`
+   `claude mcp add sam-a2a-bridge -- <sam-repo>/cmd/sam-a2a-bridge/sam-a2a-bridge -url http://localhost:8080 -token <sidecar-token>`
    (Agent-returned files land in `~/.sam/a2a-downloads` by default, auto-created; pass `-download-dir` to change it — you must create that directory yourself. No auto-cleanup; prune manually.)
 4. Restart the harness session; the three tools appear.
 
