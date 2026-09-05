@@ -82,6 +82,7 @@ func (d *AgentDialer) dialMeshService(ctx context.Context, route Route) (net.Con
 // connection.
 func serveOnPipe(h http.Handler) net.Conn {
 	agentSide, boundarySide := net.Pipe()
+	ln := newSingleConnListener(boundarySide)
 	server := &http.Server{
 		Handler: h,
 		// Mirrors the sidecar: bound header reads, but let bodies and responses
@@ -90,7 +91,7 @@ func serveOnPipe(h http.Handler) net.Conn {
 		IdleTimeout:       120 * time.Second,
 	}
 	go func() {
-		_ = server.Serve(newSingleConnListener(boundarySide))
+		_ = server.Serve(ln)
 	}()
 	return agentSide
 }
@@ -153,8 +154,8 @@ func sidecarTransport(socket string) http.RoundTripper {
 }
 
 // singleConnListener hands one already-established connection to an
-// http.Server and then blocks, so the server lives exactly as long as the
-// agent's connection does.
+// http.Server and then blocks until Close, so the server lives exactly as long
+// as the agent's connection does.
 type singleConnListener struct {
 	conn net.Conn
 
@@ -163,8 +164,26 @@ type singleConnListener struct {
 	closed  chan struct{}
 }
 
+// closeNotifyConn closes the listener when the underlying connection is closed,
+// so http.Server.Serve unblocks from Accept instead of leaking a goroutine.
+type closeNotifyConn struct {
+	net.Conn
+	fn func()
+}
+
+func (c *closeNotifyConn) Close() error {
+	err := c.Conn.Close()
+	c.fn()
+	return err
+}
+
 func newSingleConnListener(conn net.Conn) *singleConnListener {
-	return &singleConnListener{conn: conn, closed: make(chan struct{})}
+	l := &singleConnListener{closed: make(chan struct{})}
+	l.conn = &closeNotifyConn{
+		Conn: conn,
+		fn:   func() { _ = l.Close() },
+	}
+	return l
 }
 
 func (l *singleConnListener) Accept() (net.Conn, error) {

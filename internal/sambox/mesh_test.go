@@ -25,6 +25,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/google/sam/api"
 )
@@ -187,5 +188,39 @@ func TestUnreachableSidecarIsReportedAsUnreachable(t *testing.T) {
 	})
 	if !errors.Is(err, ErrHostUnreachable) {
 		t.Fatalf("DialDestination = %v, want ErrHostUnreachable", err)
+	}
+}
+
+// TestSingleConnListenerServeExitsOnConnClose verifies that after the one
+// connection is finished and closed, http.Server.Serve returns instead of
+// blocking forever on a second Accept (goroutine leak in serveOnPipe).
+func TestSingleConnListenerServeExitsOnConnClose(t *testing.T) {
+	agentSide, boundarySide := net.Pipe()
+	ln := newSingleConnListener(boundarySide)
+	srv := &http.Server{
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = io.WriteString(w, "ok")
+		}),
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+
+	exited := make(chan struct{})
+	go func() {
+		_ = srv.Serve(ln)
+		close(exited)
+	}()
+
+	resp, err := clientOver(agentSide).Get("http://mesh.example/")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	_ = resp.Body.Close()
+	_ = agentSide.Close()
+
+	select {
+	case <-exited:
+	case <-time.After(2 * time.Second):
+		t.Fatal("http.Server.Serve did not return after pipe close (Accept leak)")
 	}
 }
