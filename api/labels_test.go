@@ -107,3 +107,22 @@ func TestValidateLabels_AllKeysValidStaysSorted(t *testing.T) {
 		t.Errorf("ValidateLabels(sorted happy path): unexpected error: %v", err)
 	}
 }
+
+func TestParseLabels(t *testing.T) {
+	labels, err := ParseLabels("region=eu-west-1, team = platform")
+	if err != nil {
+		t.Fatalf("ParseLabels failed: %v", err)
+	}
+	if labels["region"] != "eu-west-1" || labels["team"] != "platform" {
+		t.Fatalf("unexpected labels: %v", labels)
+	}
+	if labels, err := ParseLabels(""); err != nil || labels != nil {
+		t.Fatalf("empty string should yield no labels, got %v, %v", labels, err)
+	}
+	if _, err := ParseLabels("no-equals"); err == nil {
+		t.Fatal("expected error for label without =")
+	}
+	if _, err := ParseLabels("k=a,k=b"); err == nil {
+		t.Fatal("expected error for duplicate key")
+	}
+}

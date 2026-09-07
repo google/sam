@@ -72,11 +72,13 @@ func TestMobileFFILifecycle(t *testing.T) {
 		println("--- MOCK ROUTER: wrote AuthResponse success with valid biscuit")
 	})
 
+	var enrolledLabels map[string]string
 	mux := http.NewServeMux()
 	mux.HandleFunc("/register", func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		var req api.EnrollRequest
 		_ = proto.Unmarshal(body, &req)
+		enrolledLabels = req.Labels
 
 		biscuitBytes := mintMockBiscuit(t, req.PeerId, cpPrivKey, api.RoleNode)
 		resp := &api.EnrollResponse{
@@ -104,9 +106,12 @@ func TestMobileFFILifecycle(t *testing.T) {
 
 	// 2. Mobile Enrollment
 	tmpDir := t.TempDir()
-	err = EnrollNode(tmpDir, httpServer.URL, "dummy-jwt", true)
+	err = EnrollNode(tmpDir, httpServer.URL, "dummy-jwt", true, "region=eu-west-1")
 	if err != nil {
 		t.Fatalf("EnrollNode failed: %v", err)
+	}
+	if enrolledLabels["region"] != "eu-west-1" {
+		t.Fatalf("Expected label region=eu-west-1 in enroll request, got %v", enrolledLabels)
 	}
 
 	// 3. Mobile Node Start
@@ -117,6 +122,7 @@ func TestMobileFFILifecycle(t *testing.T) {
 		BindAddr:        "127.0.0.1:0", // random free port
 		ApiToken:        "test-token",
 		AllowLoopback:   true,
+		Labels:          "region=eu-west-1",
 	}
 	cfgBytes, _ := json.Marshal(cfg)
 
@@ -133,6 +139,13 @@ func TestMobileFFILifecycle(t *testing.T) {
 	err = StopNode()
 	if err != nil {
 		t.Fatalf("StopNode failed: %v", err)
+	}
+}
+
+func TestStartNodeRejectsInvalidLabels(t *testing.T) {
+	if err := StartNode(`{"labels": "no-equals"}`); err == nil {
+		_ = StopNode()
+		t.Fatal("expected StartNode to reject invalid labels")
 	}
 }
 

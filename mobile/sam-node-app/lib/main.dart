@@ -25,9 +25,9 @@ String? _isolatedFetchControlPlaneInfo(String url) {
   }
 }
 
-String? _isolatedEnroll(String dataDir, String controlPlaneText, String jwtText, bool allowLoopback) {
+String? _isolatedEnroll(String dataDir, String controlPlaneText, String jwtText, bool allowLoopback, String labelsText) {
   try {
-    return SamNodeLib().enroll(dataDir, controlPlaneText, jwtText, allowLoopback);
+    return SamNodeLib().enroll(dataDir, controlPlaneText, jwtText, allowLoopback, labelsText);
   } catch (e) {
     return e.toString();
   }
@@ -71,7 +71,9 @@ class _NodeControlPageState extends State<NodeControlPage> {
       TextEditingController(text: 'https://bananas.sam-mesh.dev');
   final _jwtController = TextEditingController();
   final _tokenController = TextEditingController(text: 'secret-token');
-  
+  // Labels are attested at enrollment; changing them requires re-enrolling.
+  final _labelsController = TextEditingController();
+
   static const _exposeChannel = MethodChannel('com.example.sam_agent/mesh_expose');
 
   late SamNodeLib _samLib;
@@ -116,6 +118,7 @@ class _NodeControlPageState extends State<NodeControlPage> {
     _controlPlaneController.dispose();
     _jwtController.dispose();
     _tokenController.dispose();
+    _labelsController.dispose();
     _externalMcpUrlController.dispose();
     _externalMcpNameController.dispose();
     _externalMcpDescController.dispose();
@@ -574,8 +577,9 @@ class _NodeControlPageState extends State<NodeControlPage> {
     final dataDir = '${appDir.path}/sam_data';
     final controlPlaneText = _controlPlaneController.text;
     final jwtText = _jwtController.text;
+    final labelsText = _labelsController.text.trim();
     final err = await Isolate.run(() {
-      return _isolatedEnroll(dataDir, controlPlaneText, jwtText, true);
+      return _isolatedEnroll(dataDir, controlPlaneText, jwtText, true, labelsText);
     });
 
     setState(() {
@@ -656,6 +660,7 @@ class _NodeControlPageState extends State<NodeControlPage> {
       'apiToken': _tokenController.text,
       'allowLoopback': true,
       'enableRelay': false,
+      'labels': _labelsController.text.trim(),
       'services': services,
     });
 
@@ -688,7 +693,7 @@ class _NodeControlPageState extends State<NodeControlPage> {
     _pollingTimer?.cancel();
     _embeddedMcpServer.stop();
     final err = _samLib.stop();
-    
+
     // Stop Android Foreground Service
     try {
       _exposeChannel.invokeMethod('stopBackgroundService');
@@ -926,6 +931,15 @@ class _NodeControlPageState extends State<NodeControlPage> {
               labelText: 'Control plane URL',
               border: OutlineInputBorder(),
               hintText: 'https://bananas.sam-mesh.dev',
+            ),
+          ),
+          const SizedBox(height: 20),
+          TextField(
+            controller: _labelsController,
+            decoration: const InputDecoration(
+              labelText: 'Labels (key=value, comma-separated)',
+              border: OutlineInputBorder(),
+              hintText: 'region=eu-west-1',
             ),
           ),
           const SizedBox(height: 20),

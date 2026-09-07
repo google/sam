@@ -87,6 +87,32 @@ func ValidateLabels(labels map[string]string) error {
 	return nil
 }
 
+// ParseLabels parses a comma-separated "key=value" list (the wire/CLI form of
+// a label set) into a label map; an empty string means no claims. Parsing is
+// syntax only — run the result through ValidateLabels.
+func ParseLabels(s string) (map[string]string, error) {
+	if s == "" {
+		return nil, nil
+	}
+	labels := make(map[string]string)
+	for _, part := range strings.Split(s, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		k, v, ok := strings.Cut(part, "=")
+		if !ok {
+			return nil, fmt.Errorf("invalid label %q: expected key=value", part)
+		}
+		key := strings.TrimSpace(k)
+		if _, exists := labels[key]; exists {
+			return nil, fmt.Errorf("duplicate label key %q", key)
+		}
+		labels[key] = strings.TrimSpace(v)
+	}
+	return labels, nil
+}
+
 // A node declares its own labels when it enrols, so on its own a label is a
 // claim rather than an attestation. A role's allowed_labels is what makes it
 // one: the control plane only signs a label the operator said that role may

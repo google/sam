@@ -56,8 +56,11 @@ type MobileConfig struct {
 	LogLevel          string `json:"logLevel"`
 	DiscoveryInterval string `json:"discoveryInterval"`
 	ListenAddrs       string `json:"listenAddrs"` // comma-separated
-	AllowLoopback     bool   `json:"allowLoopback"`
-	EnableRelay       bool   `json:"enableRelay"`
+	// Labels are comma-separated key=value claims (same syntax as the CLI
+	// --labels flag); they are attested only at enrollment.
+	Labels        string `json:"labels"`
+	AllowLoopback bool   `json:"allowLoopback"`
+	EnableRelay   bool   `json:"enableRelay"`
 	// Services this node exposes, declared at start like the node config
 	// file's services block; there is no runtime registration.
 	Services []MobileService `json:"services,omitempty"`
@@ -83,6 +86,11 @@ func StartNode(configJSON string) error {
 	var config MobileConfig
 	if err := json.Unmarshal([]byte(configJSON), &config); err != nil {
 		return fmt.Errorf("failed to parse config JSON: %w", err)
+	}
+
+	labels, err := api.ParseLabels(config.Labels)
+	if err != nil {
+		return fmt.Errorf("invalid labels: %w", err)
 	}
 
 	lvl := golog.LevelInfo
@@ -193,6 +201,7 @@ func StartNode(configJSON string) error {
 		Store:                store,
 		BannedPeerIDs:        bannedPeerIDs,
 		MeshID:               meshID,
+		Labels:               labels,
 		DiscoveryInterval:    discoveryInterval,
 		ListenAddrs:          listenAddrs,
 		EnableRelay:          config.EnableRelay,
@@ -311,8 +320,14 @@ func GetNodeID() string {
 	return ""
 }
 
-// EnrollNode enrolls a node.
-func EnrollNode(dataDir string, controlPlaneURL string, jwt string, allowLoopback bool) error {
+// EnrollNode enrolls a node. Labels use the CLI --labels syntax and are
+// minted into the node's Biscuit here — changing them requires re-enrolling.
+func EnrollNode(dataDir string, controlPlaneURL string, jwt string, allowLoopback bool, labels string) error {
+	parsedLabels, err := api.ParseLabels(labels)
+	if err != nil {
+		return fmt.Errorf("invalid labels: %w", err)
+	}
+
 	_ = os.MkdirAll(dataDir, 0700)
 	logFilePath := filepath.Join(dataDir, "node.log")
 	golog.SetupLogging(golog.Config{
@@ -354,6 +369,7 @@ func EnrollNode(dataDir string, controlPlaneURL string, jwt string, allowLoopbac
 		Store:         store,
 		AllowLoopback: allowLoopback,
 		ListenAddrs:   listenAddrs,
+		Labels:        parsedLabels,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create node for enrollment: %w", err)

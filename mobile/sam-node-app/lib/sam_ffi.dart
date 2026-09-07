@@ -17,12 +17,14 @@ typedef EnrollNodeC = ffi.Pointer<Utf8> Function(
     ffi.Pointer<Utf8> dataDir,
     ffi.Pointer<Utf8> controlPlaneURL,
     ffi.Pointer<Utf8> jwt,
-    ffi.Int8 allowLoopback);
+    ffi.Int8 allowLoopback,
+    ffi.Pointer<Utf8> labels);
 typedef EnrollNodeDart = ffi.Pointer<Utf8> Function(
     ffi.Pointer<Utf8> dataDir,
     ffi.Pointer<Utf8> controlPlaneURL,
     ffi.Pointer<Utf8> jwt,
-    int allowLoopback);
+    int allowLoopback,
+    ffi.Pointer<Utf8> labels);
 
 typedef FetchControlPlaneInfoJSONC = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> controlPlaneURL);
 typedef FetchControlPlaneInfoJSONDart = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> controlPlaneURL);
@@ -94,17 +96,19 @@ class SamNodeLib {
     return goID;
   }
 
-  String? enroll(String dataDir, String controlPlaneURL, String jwt, bool allowLoopback) {
+  String? enroll(String dataDir, String controlPlaneURL, String jwt, bool allowLoopback, String labels) {
     final cDataDir = dataDir.toNativeUtf8();
     final cControlPlaneURL = controlPlaneURL.toNativeUtf8();
     final cJWT = jwt.toNativeUtf8();
     final cAllowLoopback = allowLoopback ? 1 : 0;
+    final cLabels = labels.toNativeUtf8();
 
-    final cErr = _enrollNode(cDataDir, cControlPlaneURL, cJWT, cAllowLoopback);
+    final cErr = _enrollNode(cDataDir, cControlPlaneURL, cJWT, cAllowLoopback, cLabels);
 
     calloc.free(cDataDir);
     calloc.free(cControlPlaneURL);
     calloc.free(cJWT);
+    calloc.free(cLabels);
 
     if (cErr.address == 0) return null;
     final goErr = cErr.toDartString();

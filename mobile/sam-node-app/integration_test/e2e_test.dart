@@ -44,7 +44,7 @@ void main() {
 
     // 3. Enroll Node against the host control plane
     const controlPlaneURL = 'http://127.0.0.1:37001';
-    final enrollErr = samLib.enroll(dataDir, controlPlaneURL, jwt, true);
+    final enrollErr = samLib.enroll(dataDir, controlPlaneURL, jwt, true, '');
     expect(enrollErr, isNull);
 
     // Start local Mock MCP Server inside the Android emulator. It must be
