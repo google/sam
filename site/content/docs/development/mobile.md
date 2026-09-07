@@ -65,7 +65,7 @@ make mobile-ffi-android
 ```
 
 ### 3. Build Android Emulator FFI Library
-Compiles `bin/android/libsam.so` targeting Android x86_64 emulator environments:
+Compiles `bin/android-x86_64/libsam.so` for x86_64 emulator images (Intel and Linux hosts). Emulators on Apple Silicon run arm64-v8a images; use target 2 for those:
 ```bash
 make mobile-ffi-android-x86_64
 ```
@@ -89,6 +89,8 @@ make mobile-app-apk
 To make changes to `sam-node` and run them on a mobile device:
 
 ### Android Setup
+The `mobile-ffi-*` targets only build into `bin/`; copy the library into `jniLibs/` yourself (or use `make mobile-app-apk`, which does both and builds the APK). For an x86_64 emulator, swap in `mobile-ffi-android-x86_64`, `bin/android-x86_64/libsam.so` and `jniLibs/x86_64`.
+
 1. Compile the Android ARM64 FFI shared library:
    ```bash
    make mobile-ffi-android
