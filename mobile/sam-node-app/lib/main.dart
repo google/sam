@@ -17,21 +17,24 @@ import 'package:url_launcher/url_launcher.dart';
 import 'sam_ffi.dart';
 import 'mcp_server.dart';
 
-String? _isolatedFetchControlPlaneInfo(String url) {
+// Isolate.run lives in these top-level functions, not in State methods: a closure
+// there shares its context with sibling setState closures, so `this` and its
+// DynamicLibrary would be sent to the isolate and rejected as unsendable.
+Future<String?> _isolatedFetchControlPlaneInfo(String url) => Isolate.run(() {
   try {
     return SamNodeLib().fetchControlPlaneInfoJSON(url);
   } catch (e) {
     return jsonEncode({'error': 'FFI_ERROR: ${e.toString()}'});
   }
-}
+});
 
-String? _isolatedEnroll(String dataDir, String controlPlaneText, String jwtText, bool allowLoopback, String labelsText) {
+Future<String?> _isolatedEnroll(String dataDir, String controlPlaneText, String jwtText, bool allowLoopback, String labelsText) => Isolate.run(() {
   try {
     return SamNodeLib().enroll(dataDir, controlPlaneText, jwtText, allowLoopback, labelsText);
   } catch (e) {
     return e.toString();
   }
-}
+});
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -163,7 +166,7 @@ class _NodeControlPageState extends State<NodeControlPage> {
     try {
       final controlPlaneUrl = _controlPlaneController.text.trim();
       debugPrint('DEBUG: Fetching control plane info from $controlPlaneUrl');
-      final infoJson = await Isolate.run(() => _isolatedFetchControlPlaneInfo(controlPlaneUrl));
+      final infoJson = await _isolatedFetchControlPlaneInfo(controlPlaneUrl);
       debugPrint('DEBUG: Control plane info JSON: $infoJson');
       if (infoJson == null) {
         throw Exception('Failed to fetch control plane info');
@@ -366,7 +369,7 @@ class _NodeControlPageState extends State<NodeControlPage> {
     try {
       final controlPlaneUrl = _controlPlaneController.text.trim();
       debugPrint('DEBUG: Device Login: Fetching control plane info from $controlPlaneUrl');
-      final infoJson = await Isolate.run(() => _isolatedFetchControlPlaneInfo(controlPlaneUrl));
+      final infoJson = await _isolatedFetchControlPlaneInfo(controlPlaneUrl);
       if (infoJson == null) throw Exception('Failed to fetch control plane info');
 
       final info = jsonDecode(infoJson);
@@ -578,9 +581,7 @@ class _NodeControlPageState extends State<NodeControlPage> {
     final controlPlaneText = _controlPlaneController.text;
     final jwtText = _jwtController.text;
     final labelsText = _labelsController.text.trim();
-    final err = await Isolate.run(() {
-      return _isolatedEnroll(dataDir, controlPlaneText, jwtText, true, labelsText);
-    });
+    final err = await _isolatedEnroll(dataDir, controlPlaneText, jwtText, true, labelsText);
 
     setState(() {
       if (err != null) {
