@@ -131,10 +131,19 @@ tmuxs() { tmux -L samsocket -f /dev/null "$@"; }
 show_cluster_logs() {
   tmuxs kill-session -t "${SESSION}" 2>/dev/null || true
 
+  # Resolved here rather than inherited so `-l` on a running cluster gets the header too.
+  local main_ip dex_ip
+  main_ip="$(gateway_ip sam-mesh-gateway)"
+  dex_ip="$(gateway_ip sam-mesh-dex-gateway)"
+
   tmuxs new-session -d -s "${SESSION}" -n mesh "$(logs control-plane 'deploy/sam-mesh-control-plane')" \; set -t "${SESSION}" destroy-unattached off
   tmuxs split-window -t "${SESSION}:0" "$(logs router 'statefulset/sam-mesh-router')"
   tmuxs set-option -t "${SESSION}" -g pane-border-status top
   tmuxs set-option -t "${SESSION}" -g pane-border-format ' #{pane_title} '
+  tmuxs set-option -t "${SESSION}" status-position top
+  tmuxs set-option -t "${SESSION}" status-left-length 250
+  tmuxs set-option -t "${SESSION}" status-right ''
+  tmuxs set-option -t "${SESSION}" status-left " console http://${main_ip}${CONSOLE_BASE_PATH}/  control plane http://${main_ip}  dex http://${dex_ip}/dex "
 
   # Title the tmux panes in creation order: control-plane, router.
   titles=(control-plane router)
