@@ -104,6 +104,7 @@ deploy_chart() {
     --set controlPlane.allowedAudiences="${ALLOWED_AUDIENCES//,/\\,}" \
     --set controlPlane.insecureSkipTlsVerify=true \
     --set 'bootstrap.nodeServices={*}' \
+    --set 'bootstrap.nodeLabels={*}' \
     --set 'bootstrap.nodeMembers={sam:system:authenticated}' \
     --set gateway.enabled=true \
     --set gateway.className=cloud-provider-kind \
