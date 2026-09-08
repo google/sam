@@ -18,6 +18,13 @@ data:
     - id: sam-console
       redirectURIs:
       - ${CONSOLE_REDIRECT_URI}
+      # The sam-node CLI and the mobile app log in through Dex's device flow or a
+      # loopback browser callback; Dex rejects both unless listed here.
+      - /device/callback
+      # Fixed ports from internal/node/oidc.go and mobile/sam-node-app/lib/main.dart.
+      - http://127.0.0.1:13000/callback
+      - http://127.0.0.1:13001/callback
+      - http://127.0.0.1:13002/callback
       name: 'SAM Console'
       public: true
     enablePasswordDB: true

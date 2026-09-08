@@ -4,4 +4,7 @@
          to allow setting breakpoints, to provide hot reload, etc.
     -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Debug builds talk plain http to a local control plane and Dex; Flutter blocks
+         non-loopback http unless the platform policy allows it. -->
+    <application android:networkSecurityConfig="@xml/network_security_config"/>
 </manifest>
