@@ -102,6 +102,7 @@ class _NodeControlPageState extends State<NodeControlPage> {
   final _externalMcpDescController = TextEditingController();
 
   late SamDartMcpServer _embeddedMcpServer;
+  bool _starting = false;
   int _selectedTab = 0; // 0 = Dashboard, 1 = Services
 
   @override
@@ -627,13 +628,37 @@ class _NodeControlPageState extends State<NodeControlPage> {
   }
 
   Future<void> _start() async {
+    // Backstop for the disabled button while a start is in flight.
+    if (_starting) return;
+    setState(() {
+      _starting = true;
+    });
+    try {
+      await _startNode();
+    } finally {
+      if (mounted) {
+        setState(() {
+          _starting = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _startNode() async {
     final appDir = await getApplicationDocumentsDirectory();
     final dataDir = '${appDir.path}/sam_data';
 
     // The embedded MCP backend must be listening before the node starts:
     // services are declared in the start configuration and probed at startup,
     // there is no runtime registration.
-    await _embeddedMcpServer.start(port: 9090);
+    try {
+      await _embeddedMcpServer.start(port: 9090);
+    } catch (e) {
+      setState(() {
+        _status = 'Start failed: embedded MCP server: $e';
+      });
+      return;
+    }
 
     final services = <Map<String, String>>[
       {
@@ -1114,9 +1139,9 @@ class _NodeControlPageState extends State<NodeControlPage> {
             children: [
               Expanded(
                 child: ElevatedButton.icon(
-                  onPressed: isRunning ? null : _start,
+                  onPressed: (isRunning || _starting) ? null : _start,
                   icon: const Icon(Icons.play_arrow),
-                  label: const Text('Start'),
+                  label: Text(_starting ? 'Starting…' : 'Start'),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.green,
                     foregroundColor: Colors.white,

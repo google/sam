@@ -21,30 +21,30 @@ class SamDartMcpServer {
   /// backs is declared in the node's start configuration; there is no
   /// runtime registration, so this server must be listening before the node
   /// starts and probes it.
+  ///
+  /// Throws if the port cannot be bound.
   Future<void> start({int port = 9090}) async {
-    try {
-      _server = await HttpServer.bind(InternetAddress.loopbackIPv4, port);
-      debugPrint('SAM Dart MCP Server listening on port $port');
+    if (_server != null) throw StateError('already started');
+    _server = await HttpServer.bind(InternetAddress.loopbackIPv4, port);
+    debugPrint('SAM Dart MCP Server listening on port $port');
 
-      _server!.listen((HttpRequest request) async {
-        // Handle CORS if needed, but since it's loopback and called by Go, maybe not strict
-        if (request.method == 'GET') {
-          _handleSse(request);
-        } else if (request.method == 'POST') {
-          _handlePost(request);
-        } else {
-          request.response.statusCode = HttpStatus.methodNotAllowed;
-          await request.response.close();
-        }
-      });
-    } catch (e) {
-      debugPrint('Failed to start Dart MCP Server: $e');
-    }
+    _server!.listen((HttpRequest request) async {
+      // Handle CORS if needed, but since it's loopback and called by Go, maybe not strict
+      if (request.method == 'GET') {
+        _handleSse(request);
+      } else if (request.method == 'POST') {
+        _handlePost(request);
+      } else {
+        request.response.statusCode = HttpStatus.methodNotAllowed;
+        await request.response.close();
+      }
+    });
   }
 
   /// Stops the server
   Future<void> stop() async {
     await _server?.close(force: true);
+    _server = null;
     _sseClients.clear();
     debugPrint('SAM Dart MCP Server stopped');
   }
