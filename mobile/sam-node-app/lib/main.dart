@@ -97,9 +97,9 @@ class _NodeControlPageState extends State<NodeControlPage> {
 
   // External MCP Bridging State: read when the node starts, since services
   // are declared in the start configuration.
-  final _externalMcpUrlController = TextEditingController(text: 'http://127.0.0.1:8080');
-  final _externalMcpNameController = TextEditingController(text: 'android-remote');
-  final _externalMcpDescController = TextEditingController(text: 'External Android Remote Control MCP');
+  final _externalMcpUrlController = TextEditingController();
+  final _externalMcpNameController = TextEditingController();
+  final _externalMcpDescController = TextEditingController();
 
   late SamDartMcpServer _embeddedMcpServer;
   int _selectedTab = 0; // 0 = Dashboard, 1 = Services
@@ -901,6 +901,7 @@ class _NodeControlPageState extends State<NodeControlPage> {
                       enabled: !isRunning,
                       decoration: const InputDecoration(
                         labelText: 'Description',
+                        hintText: 'External Android Remote Control MCP',
                         border: OutlineInputBorder(),
                       ),
                     ),
