@@ -62,25 +62,6 @@ func TestResolveSocketPath(t *testing.T) {
 	})
 }
 
-func TestParseLabelsFlag(t *testing.T) {
-	if got, err := parseLabelsFlag(""); got != nil || err != nil {
-		t.Errorf("empty flag: got %v, %v; want nil, nil", got, err)
-	}
-
-	got, err := parseLabelsFlag(" region=eu , team=platform ,,")
-	if err != nil || len(got) != 2 || got["region"] != "eu" || got["team"] != "platform" {
-		t.Errorf("parse should split key=value pairs: got %v, %v", got, err)
-	}
-
-	if _, err := parseLabelsFlag("noequals"); err == nil {
-		t.Error("entry without '=' must be rejected")
-	}
-
-	if _, err := parseLabelsFlag("region=us-east-1,region=us-west-1"); err == nil {
-		t.Error("duplicate label key must be rejected")
-	}
-}
-
 func TestNormalizeControlPlaneURL(t *testing.T) {
 	cases := map[string]string{
 		"bananas.sam-mesh.dev":          "https://bananas.sam-mesh.dev",

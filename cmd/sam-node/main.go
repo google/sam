@@ -259,11 +259,6 @@ func interactiveJoin(ctx context.Context, store *node.Store, targetControlPlane 
 	return jwtStr, info, nil
 }
 
-// parseLabelsFlag parses the --labels flag value; see api.ParseLabels.
-func parseLabelsFlag(s string) (map[string]string, error) {
-	return api.ParseLabels(s)
-}
-
 func main() {
 	rootCmd := &cobra.Command{
 		Use:   "sam-node",
@@ -307,7 +302,7 @@ func main() {
 			if jwtFlag != "" {
 				logger.Warn("--jwt passes a secret on the command line; prefer --jwt-path")
 			}
-			labels, err := parseLabelsFlag(labelsFlag)
+			labels, err := api.ParseLabels(labelsFlag)
 			if err != nil {
 				logger.Fatalf("Invalid --labels: %v", err)
 			}
@@ -726,7 +721,7 @@ func main() {
 				}
 			}
 
-			labels, err := parseLabelsFlag(labelsFlag)
+			labels, err := api.ParseLabels(labelsFlag)
 			if err != nil {
 				logger.Fatalf("Invalid --labels: %v", err)
 			}
