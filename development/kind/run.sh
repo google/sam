@@ -132,10 +132,11 @@ tmuxs() { tmux -L samsocket -f /dev/null "$@"; }
 show_cluster_logs() {
   tmuxs kill-session -t "${SESSION}" 2>/dev/null || true
 
-  # Resolved here rather than inherited so `-l` on a running cluster gets the header too.
+  # Looked up here, not inherited, so `-l` gets the header too; one direct query rather
+  # than gateway_ip's polling, so the logs still open when a gateway has no address.
   local main_ip dex_ip
-  main_ip="$(gateway_ip sam-mesh-gateway)"
-  dex_ip="$(gateway_ip sam-mesh-dex-gateway)"
+  main_ip="$(kubectl --context "${KCTX}" -n "${NAMESPACE}" get gateway sam-mesh-gateway -o jsonpath='{.status.addresses[0].value}' 2>/dev/null || true)"
+  dex_ip="$(kubectl --context "${KCTX}" -n "${NAMESPACE}" get gateway sam-mesh-dex-gateway -o jsonpath='{.status.addresses[0].value}' 2>/dev/null || true)"
 
   tmuxs new-session -d -s "${SESSION}" -n mesh "$(logs control-plane 'deploy/sam-mesh-control-plane')" \; set -t "${SESSION}" destroy-unattached off
   tmuxs split-window -t "${SESSION}:0" "$(logs router 'statefulset/sam-mesh-router')"
@@ -144,7 +145,7 @@ show_cluster_logs() {
   tmuxs set-option -t "${SESSION}" status-position top
   tmuxs set-option -t "${SESSION}" status-left-length 250
   tmuxs set-option -t "${SESSION}" status-right ''
-  tmuxs set-option -t "${SESSION}" status-left " console http://${main_ip}${CONSOLE_BASE_PATH}/  control plane http://${main_ip}  dex http://${dex_ip}/dex "
+  tmuxs set-option -t "${SESSION}" status-left " console http://${main_ip:-?}${CONSOLE_BASE_PATH}/  control plane http://${main_ip:-?}  dex http://${dex_ip:-?}/dex "
 
   # Title the tmux panes in creation order: control-plane, router.
   titles=(control-plane router)
