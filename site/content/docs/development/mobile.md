@@ -41,7 +41,7 @@ To run `sam-node` on mobile with near-zero codebase maintenance, we avoid rewrit
 1. **Go FFI Binding Package (`mobile/sam-node-ffi/`)**: Contains CGO-exported functions (`StartNode`, `StopNode`, `EnrollNode`, `GetNodeID`, `FreeString`) which compile into a C-shared library (`.so`) or static archive (`.a`).
 2. **Flutter App (`mobile/sam-node-app/`)**: A cross-platform app containing:
    - `lib/sam_ffi.dart`: The Dart FFI wrapper loading the Go library and exposing Dart methods.
-   - `lib/main.dart`: Simple control UI to enroll and start/stop the background node. The enrollment screen accepts optional labels (comma-separated `key=value`, same syntax as the CLI `--labels` flag); like on desktop, labels are attested only at enrollment, so changing them requires re-enrolling.
+   - `lib/main.dart`: Simple control UI to enroll and start/stop the background node. The enrollment screen accepts optional labels (comma-separated `key=value`, same syntax as the CLI `--labels` flag). The control plane mints them into the node's Biscuit at enrollment; the app keeps a copy in its data directory and sends it again on every start and Biscuit renewal, so changing labels means re-enrolling. Unlike the CLI, where `sam-node run --labels` has to be passed on every run, the app remembers them.
 3. **Local Loopback Communication**:
    - The Flutter Dart environment controls the node lifecycle (construction, starting, stopping) via FFI.
    - Any actual tool registration, discovery, or mesh API queries are performed using standard HTTP JSON-RPC calls over local loopback (`127.0.0.1`) to the `sam-node` sidecar API.
