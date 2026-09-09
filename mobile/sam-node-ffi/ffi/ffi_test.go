@@ -113,6 +113,9 @@ func TestMobileFFILifecycle(t *testing.T) {
 	if enrolledLabels["region"] != "eu-west-1" {
 		t.Fatalf("Expected label region=eu-west-1 in enroll request, got %v", enrolledLabels)
 	}
+	if got, err := loadEnrolledLabels(tmpDir); err != nil || got["region"] != "eu-west-1" {
+		t.Fatalf("Expected enrolled labels persisted for StartNode, got %v, %v", got, err)
+	}
 
 	// 3. Mobile Node Start
 	cfg := MobileConfig{
@@ -122,7 +125,7 @@ func TestMobileFFILifecycle(t *testing.T) {
 		BindAddr:        "127.0.0.1:0", // random free port
 		ApiToken:        "test-token",
 		AllowLoopback:   true,
-		Labels:          "region=eu-west-1",
+		// No labels: StartNode must fall back to the enrolled ones.
 	}
 	cfgBytes, _ := json.Marshal(cfg)
 

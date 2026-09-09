@@ -92,6 +92,13 @@ func StartNode(configJSON string) error {
 	if err != nil {
 		return fmt.Errorf("invalid labels: %w", err)
 	}
+	// The app only shows the labels field on its enrollment screen, so an
+	// empty start config reuses the labels the node enrolled with.
+	if len(labels) == 0 {
+		if labels, err = loadEnrolledLabels(config.DataDir); err != nil {
+			return err
+		}
+	}
 
 	lvl := golog.LevelInfo
 	if config.LogLevel != "" {
@@ -320,6 +327,21 @@ func GetNodeID() string {
 	return ""
 }
 
+// labelsFile keeps the enrolled labels in the app's data directory. The CLI
+// has no equivalent: --labels is passed on every run.
+const labelsFile = "labels"
+
+func loadEnrolledLabels(dataDir string) (map[string]string, error) {
+	raw, err := os.ReadFile(filepath.Join(dataDir, labelsFile))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to read labels: %w", err)
+	}
+	return api.ParseLabels(string(raw))
+}
+
 // EnrollNode enrolls a node. Labels use the CLI --labels syntax and are
 // minted into the node's Biscuit here — changing them requires re-enrolling.
 func EnrollNode(dataDir string, controlPlaneURL string, jwt string, allowLoopback bool, labels string) error {
@@ -329,6 +351,9 @@ func EnrollNode(dataDir string, controlPlaneURL string, jwt string, allowLoopbac
 	}
 
 	_ = os.MkdirAll(dataDir, 0700)
+	if err := os.WriteFile(filepath.Join(dataDir, labelsFile), []byte(labels), 0600); err != nil {
+		return fmt.Errorf("failed to save labels: %w", err)
+	}
 	logFilePath := filepath.Join(dataDir, "node.log")
 	golog.SetupLogging(golog.Config{
 		File:   logFilePath,
