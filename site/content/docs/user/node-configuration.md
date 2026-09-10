@@ -141,6 +141,28 @@ The `call_remote_tool` MCP tool accepts the same requirement via its `required_l
 
 Enforcement is fail-closed and cryptographic: gossiped labels only rank candidate providers, and before any request data leaves your node the sidecar verifies the provider's control-plane-signed Biscuit and checks its attested `label()` facts. Providers that return no identity or lack a matching fact are rejected.
 
+### Requiring labels of every provider (operator floor)
+
+The header above is the caller's requirement, and a caller that sends no header is unconstrained. To hold a boundary the caller cannot waive, set a floor in the node config:
+
+```yaml
+egress:
+  require_labels:      # every pair must hold, and callers cannot widen it
+    jurisdiction: eu
+    compliance: gdpr
+```
+
+Every remote provider must then attest all of these before the node sends it anything, whether or not the caller asked for labels. A caller may still narrow the choice further with `X-Sam-Required-Labels`; the two are checked independently, so a caller naming an unrelated label cannot stand in for the floor.
+
+Note the difference in meaning between the two, which follows from what each is for:
+
+| | Semantics |
+|---|---|
+| `X-Sam-Required-Labels` (caller) | **any** pair is enough — the caller is choosing among acceptable providers |
+| `egress.require_labels` (operator) | **every** pair must hold — the operator is drawing a boundary |
+
+A floor naming a label no provider attests reaches nothing, which makes it a usable egress kill switch. Omit the block entirely to keep the previous behaviour, where the requirement is whatever the caller supplied.
+
 ### Restricting callers by label (provider)
 
 Because every enrolled node's token carries its attested label facts, a provider can require callers to hold a label with a single local check in its `attenuation` block:
