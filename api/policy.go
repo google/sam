@@ -41,10 +41,14 @@ type ServiceConfig struct {
 
 // NodeConfig defines the optional attenuation rules and static services for a specific SAM Node.
 type NodeConfig struct {
-	Version     string            `yaml:"version"`
-	Attenuation Attenuation       `yaml:"attenuation"`
-	Services    []ServiceConfig   `yaml:"services"`
-	Labels      map[string]string `yaml:"labels,omitempty"`
+	Version     string          `yaml:"version"`
+	Attenuation Attenuation     `yaml:"attenuation"`
+	Services    []ServiceConfig `yaml:"services"`
+	// Labels is what this node is, attested at enrollment; Egress is what it
+	// demands of the peers it talks to. Adjacent because they are read
+	// together and mean opposite directions.
+	Labels map[string]string `yaml:"labels,omitempty"`
+	Egress Egress            `yaml:"egress"`
 }
 
 // NodeConfigVersionV1Alpha1 is the only node config schema this build understands.
@@ -65,4 +69,26 @@ type Attenuation struct {
 	Policies []string `yaml:"policies"`
 	Checks   []string `yaml:"checks"`
 	Rules    []string `yaml:"rules"`
+}
+
+// Egress is the operator's outbound policy: what this node demands of the peers
+// it talks to. Attenuation is the mirror of it — what this node demands of the
+// peers that talk to *it* — and the two are deliberately separate blocks
+// because they answer opposite questions.
+type Egress struct {
+	// RequireLabels is a floor every remote provider must attest before this
+	// node will send it anything, whatever the caller asked for. Absent means
+	// no floor, which is the historical behaviour: the requirement is then
+	// whatever the caller supplied, and a caller that supplies nothing is
+	// unconstrained.
+	//
+	// Every pair must hold (AND), unlike a caller's requirement, where any one
+	// pair is enough (see LabelCheck vs LabelFloorCheck). A map gives one value
+	// per key, so a floor cannot express alternatives — that is the point: a
+	// floor with alternatives would let the weakest of them stand in for the
+	// rest.
+	//
+	// A floor naming a label no peer attests reaches nothing, which is a
+	// usable egress kill switch.
+	RequireLabels map[string]string `yaml:"require_labels,omitempty"`
 }
