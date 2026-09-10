@@ -18,6 +18,8 @@ import (
 	"net/http"
 	"sort"
 	"time"
+
+	"github.com/google/sam/api"
 )
 
 // providerBackoff is how long a provider is skipped after a retryable failure.
@@ -25,13 +27,26 @@ const providerBackoff = 15 * time.Second
 
 // Rejection reasons for facade provider filtering (metric label values).
 const (
-	reasonPeerRevoked      = "peer_revoked"
-	reasonProviderBackoff  = "provider_backoff"
-	reasonLabelMismatch    = "label_mismatch"
-	reasonLabelUnattested  = "label_unattested"
-	reasonNoEligible       = "no_eligible_provider"
-	reasonAttemptsExceeded = "attempts_exceeded"
+	reasonPeerRevoked     = "peer_revoked"
+	reasonProviderBackoff = "provider_backoff"
+	reasonLabelMismatch   = "label_mismatch"
+	// reasonEgressFloorMismatch is kept distinct from reasonLabelMismatch so
+	// an operator can tell their own floor apart from a caller's requirement
+	// when a request finds no provider.
+	reasonEgressFloorMismatch = "egress_floor_mismatch"
+	reasonLabelUnattested     = "label_unattested"
+	reasonNoEligible          = "no_eligible_provider"
+	reasonAttemptsExceeded    = "attempts_exceeded"
 )
+
+// floor returns the operator's egress floor, or nil when the seam is unset
+// (tests) or no floor is configured.
+func (f *openAIFacade) floor() map[string]string {
+	if f.egressFloor == nil {
+		return nil
+	}
+	return f.egressFloor()
+}
 
 // labelsAllowed reports whether a provider's claimed labels satisfy any
 // required key=value pair (exact match).
@@ -68,6 +83,30 @@ func (f *openAIFacade) rankProviders(providers []modelProvider, requiredLabels m
 			knownMismatch := len(labels) > 0 && !labelsAllowed(requiredLabels, labels)
 			if knownMismatch || (p.peerID == "" && !labelsAllowed(requiredLabels, labels)) {
 				recordFacadeRejection(reasonLabelMismatch)
+				continue
+			}
+		}
+		// The operator's egress floor, which the caller cannot waive. Every
+		// pair must hold, so this is not labelsAllowed. A remote is dropped
+		// here only on a claim that already contradicts the floor; the gate
+		// still decides on attested facts. A local is decided here for good,
+		// because it has no biscuit to attest anything.
+		if floor := f.floor(); len(floor) > 0 {
+			// A local is settled here: its labels are its own configuration,
+			// it has no Biscuit, and it never reaches the gate, so the floor
+			// must hold in full.
+			//
+			// A remote is only skipped on a claim that conflicts. Gossip may
+			// carry part of what a peer attests, so silence on a pair of the
+			// floor is not failure — the gate resolves it on attested facts.
+			var outside bool
+			if p.peerID == "" {
+				outside = !api.LabelsSatisfyFloor(floor, labels)
+			} else {
+				outside = api.LabelsContradictFloor(floor, labels)
+			}
+			if outside {
+				recordFacadeRejection(reasonEgressFloorMismatch)
 				continue
 			}
 		}

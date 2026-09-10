@@ -81,6 +81,11 @@ type openAIFacade struct {
 	// peerLabels resolves a peer's gossip-observed labels for providers
 	// discovered via the registry probe, which carries no labels.
 	peerLabels func(peerID string) map[string]string
+	// egressFloor (may be nil) is the operator's egress floor. Remotes are
+	// held to it by the label gate, on attested facts; a local service has no
+	// biscuit and no gate, so ranking is the only place its floor can be
+	// applied at all.
+	egressFloor func() map[string]string
 	// Label gate seam (may be nil = enforcement unavailable, fail closed
 	// when a requirement exists): verifies the provider's
 	// control-plane-attested labels before any request data is sent
@@ -141,6 +146,7 @@ func newOpenAIFacade(node *SamNode, egress http.Handler) *openAIFacade {
 			return node.revokedPeers != nil && node.revokedPeers.Contains(peerID)
 		},
 		localLabels: node.labels,
+		egressFloor: node.egressFloor,
 		peerLabels: func(peerID string) map[string]string {
 			if node.Discovery == nil {
 				return nil

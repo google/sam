@@ -823,3 +823,76 @@ func TestAttemptWriter(t *testing.T) {
 		}
 	})
 }
+
+// A local service has no biscuit, so the label gate can never speak for it and
+// ranking is the only place an egress floor can apply. A remote is filtered
+// here only on claims that already contradict the floor; an unlabelled one is
+// left for the gate, which decides on attested facts.
+func TestRankProvidersEnforcesEgressFloor(t *testing.T) {
+	floor := map[string]string{"jurisdiction": "eu", "compliance": "gdpr"}
+
+	newFacadeWithFloor := func(local map[string]string, peer map[string]string) *openAIFacade {
+		f := newTestFacade()
+		f.egressFloor = func() map[string]string { return floor }
+		f.localLabels = func() map[string]string { return local }
+		f.peerLabels = func(string) map[string]string { return peer }
+		return f
+	}
+
+	t.Run("a local outside the floor is dropped", func(t *testing.T) {
+		f := newFacadeWithFloor(map[string]string{"jurisdiction": "us"}, nil)
+		got := f.rankProviders([]modelProvider{{service: "local"}}, nil)
+		if len(got) != 0 {
+			t.Errorf("a local that does not satisfy the floor must not be used: got %+v", got)
+		}
+	})
+
+	t.Run("a local one pair short is dropped", func(t *testing.T) {
+		f := newFacadeWithFloor(map[string]string{"jurisdiction": "eu"}, nil)
+		if got := f.rankProviders([]modelProvider{{service: "local"}}, nil); len(got) != 0 {
+			t.Errorf("the floor is a conjunction: got %+v", got)
+		}
+	})
+
+	t.Run("a local satisfying every pair survives", func(t *testing.T) {
+		f := newFacadeWithFloor(map[string]string{"jurisdiction": "eu", "compliance": "gdpr"}, nil)
+		if got := f.rankProviders([]modelProvider{{service: "local"}}, nil); len(got) != 1 {
+			t.Errorf("a local inside the floor must be usable: got %+v", got)
+		}
+	})
+
+	t.Run("a remote whose claims contradict the floor is dropped early", func(t *testing.T) {
+		f := newFacadeWithFloor(nil, nil)
+		p := modelProvider{peerID: "peerUS", service: "srv", labels: map[string]string{"jurisdiction": "us"}}
+		if got := f.rankProviders([]modelProvider{p}, nil); len(got) != 0 {
+			t.Errorf("a remote claiming outside the floor need not be dialled: got %+v", got)
+		}
+	})
+
+	// Gossip carries only part of what a peer attests, so a remote silent on
+	// one pair of the floor may still satisfy all of it in its Biscuit.
+	// Dropping it here would exclude a provider that is inside the boundary.
+	t.Run("a remote gossiping only part of the floor is left to the gate", func(t *testing.T) {
+		f := newFacadeWithFloor(nil, nil)
+		p := modelProvider{peerID: "peerEU", service: "srv", labels: map[string]string{"jurisdiction": "eu"}}
+		if got := f.rankProviders([]modelProvider{p}, nil); len(got) != 1 {
+			t.Errorf("silence on a pair is not a contradiction; the gate decides: got %+v", got)
+		}
+	})
+
+	t.Run("an unlabelled remote is left to the gate", func(t *testing.T) {
+		f := newFacadeWithFloor(nil, nil)
+		p := modelProvider{peerID: "peerUnknown", service: "srv"}
+		if got := f.rankProviders([]modelProvider{p}, nil); len(got) != 1 {
+			t.Errorf("ranking must not reject on absent claims; the gate decides: got %+v", got)
+		}
+	})
+
+	t.Run("no floor configured leaves ranking unchanged", func(t *testing.T) {
+		f := newTestFacade()
+		f.localLabels = func() map[string]string { return map[string]string{"jurisdiction": "us"} }
+		if got := f.rankProviders([]modelProvider{{service: "local"}}, nil); len(got) != 1 {
+			t.Errorf("without a floor a local is unconstrained: got %+v", got)
+		}
+	})
+}
