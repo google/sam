@@ -483,6 +483,7 @@ func (c *bufferedConn) Read(b []byte) (int, error) {
 type channelListener struct {
 	conns  chan net.Conn
 	closed chan struct{}
+	once   sync.Once
 }
 
 func (l *channelListener) Accept() (net.Conn, error) {
@@ -495,11 +496,17 @@ func (l *channelListener) Accept() (net.Conn, error) {
 }
 
 func (l *channelListener) Close() error {
-	select {
-	case <-l.closed:
-	default:
+	l.once.Do(func() {
 		close(l.closed)
-	}
+		for {
+			select {
+			case conn := <-l.conns:
+				_ = conn.Close()
+			default:
+				return
+			}
+		}
+	})
 	return nil
 }
 
