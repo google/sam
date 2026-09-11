@@ -546,8 +546,9 @@ func saveRefreshSession(ctx context.Context, store *node.Store, controlPlaneURL,
 // no token was saved or it expired; the app then falls back to the browser.
 func ReEnrollNode(dataDir string, labels string) error {
 	mu.Lock()
-	defer mu.Unlock()
-	if activeNode != nil || unauthSrv != nil {
+	isRunning := activeNode != nil || unauthSrv != nil
+	mu.Unlock()
+	if isRunning {
 		return errors.New("stop the node before re-enrolling")
 	}
 	parsedLabels, err := decodeLabels(labels)
