@@ -545,7 +545,10 @@ func saveRefreshSession(ctx context.Context, store *node.Store, controlPlaneURL,
 // at enrollment buys a JWT and the stored key keeps the PeerID. Fails when
 // no token was saved or it expired; the app then falls back to the browser.
 func ReEnrollNode(dataDir string, labels string) error {
-	if activeNode != nil || unauthSrv != nil {
+	mu.Lock()
+	isRunning := activeNode != nil || unauthSrv != nil
+	mu.Unlock()
+	if isRunning {
 		return errors.New("stop the node before re-enrolling")
 	}
 	parsedLabels, err := decodeLabels(labels)
