@@ -27,6 +27,10 @@ import (
 	"github.com/google/sam/api"
 )
 
+// StdioBridge backs the local SSE/POST HTTP ingress route for a
+// command-backed service (registered via baseService.Init). It is not used
+// for mesh sessions - see MCPService.backendTransport, which gives those
+// their own subprocess instead of sharing this one.
 type StdioBridge struct {
 	cmd     *exec.Cmd
 	stdin   io.WriteCloser
@@ -198,37 +202,6 @@ func (b *StdioBridge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
-}
-
-// Subscribe registers a new subscriber channel for stdout lines and returns
-// it along with an idempotent unsubscribe function. Buffered (cap 10); drops
-// on slow consumers match the SSE behaviour in ServeHTTP.
-func (b *StdioBridge) Subscribe() (<-chan string, func()) {
-	ch := make(chan string, 10)
-	b.mu.Lock()
-	b.clients[ch] = true
-	b.mu.Unlock()
-
-	var once sync.Once
-	unsub := func() {
-		once.Do(func() {
-			b.mu.Lock()
-			if b.clients[ch] {
-				delete(b.clients, ch)
-				close(ch)
-			}
-			b.mu.Unlock()
-		})
-	}
-	return ch, unsub
-}
-
-// Send writes data to the child's stdin, appending a newline.
-func (b *StdioBridge) Send(data []byte) error {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	_, err := b.stdin.Write(append(data, '\n'))
-	return err
 }
 
 func createStdioBridgeHandler(cmdBackend *api.CommandBackend) (http.Handler, *exec.Cmd, error) {

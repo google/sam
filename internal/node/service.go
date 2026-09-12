@@ -45,7 +45,7 @@ type baseService struct {
 	info    *api.ServiceInfo
 	backend any
 	handler http.Handler
-	cmd     *exec.Cmd // nil for URL-backed
+	cmd     *exec.Cmd // command backend's ServeHTTP-backing process; nil otherwise
 }
 
 // newReverseProxyHandler builds a single-host reverse-proxy handler for a
@@ -86,8 +86,10 @@ func newReverseProxyHandler(targetURL string) (http.Handler, error) {
 func (b *baseService) Info() *api.ServiceInfo { return b.info }
 func (b *baseService) Handler() http.Handler  { return b.handler }
 
-// Init builds the ingress handler for the backend. URL -> reverse-proxy,
-// Command -> StdioBridge. MCPService extends this; it does not replace it.
+// Init builds the ingress handler for the backend: URL -> reverse-proxy,
+// Command -> StdioBridge (the local SSE/POST HTTP route only - mesh
+// sessions get their own subprocess via MCPService.backendTransport
+// instead of this one). MCPService extends this; it does not replace it.
 func (b *baseService) Init(ctx context.Context) error {
 	switch x := b.backend.(type) {
 	case *api.RegisterServiceRequest_TargetUrl:
@@ -109,8 +111,7 @@ func (b *baseService) Init(ctx context.Context) error {
 	return nil
 }
 
-// Teardown kills the child process if any. Safe to call when cmd is nil
-// or already dead.
+// Teardown kills the command backend's process, if any.
 func (b *baseService) Teardown() error {
 	if b.cmd == nil || b.cmd.Process == nil {
 		return nil
