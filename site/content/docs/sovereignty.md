@@ -135,5 +135,5 @@ When deploying SAM for mission-critical, sovereign agent operations:
 2. **Maintain Root Cryptographic Key Custody:** Generate, manage, and hold your own Ed25519 root signing keys (via KMS/Cloud EKM or HSMs).
 3. **Use Your Own OIDC Identity Provider:** Point `--issuer` to your internal Keycloak, Dex, or corporate IdP.
 4. **Declare & Attest Sovereignty Labels:** Declare `labels: {jurisdiction: eu, region: <your-region>}` in each node's `sam-node.yaml` and configure control plane roles with `allowed_labels`.
-5. **Enforce Jurisdictional Egress:** Direct agents to specify `X-Sam-Required-Labels: jurisdiction=eu` on all inference and MCP requests to guarantee zero data leakage beyond authorized perimeters.
+5. **Enforce Jurisdictional Egress:** Set `egress.require_labels` in `sam-node.yaml` (e.g. `jurisdiction: eu`) so every provider must attest the boundary before the node sends it anything. Agents may narrow further per request with `X-Sam-Required-Labels`, but cannot widen past the floor or waive it by omitting the header — the two are checked independently and every pair of the floor must hold.
 6. **Set Local Attenuation Vetoes:** Configure local node `attenuation.policies` to retain final destination-side access control.

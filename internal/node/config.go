@@ -31,6 +31,11 @@ type NodeConfigComplete struct {
 	Rules    []biscuit.Rule
 	Services []api.ServiceConfig
 	Labels   map[string]string
+
+	// EgressRequireLabels is the operator's egress floor (api.Egress). Nil
+	// means no floor, so a caller's requirement — or the absence of one —
+	// stands on its own, as it always has.
+	EgressRequireLabels map[string]string
 }
 
 // LoadNodeConfig loads the node configuration from the specified path.
@@ -73,6 +78,19 @@ func CompleteNodeConfig(config api.NodeConfig) (*NodeConfigComplete, error) {
 	complete := &NodeConfigComplete{
 		Services: config.Services,
 		Labels:   config.Labels,
+	}
+
+	// Rejected at load, not at first use: a floor that cannot compile would
+	// otherwise fail open on the request that needed it, and an operator who
+	// wrote one is entitled to find out at startup instead.
+	if len(config.Egress.RequireLabels) > 0 {
+		if err := api.ValidateLabels(config.Egress.RequireLabels); err != nil {
+			return nil, fmt.Errorf("invalid egress.require_labels: %w", err)
+		}
+		if _, err := api.LabelFloorCheck(config.Egress.RequireLabels); err != nil {
+			return nil, fmt.Errorf("invalid egress.require_labels: %w", err)
+		}
+		complete.EgressRequireLabels = config.Egress.RequireLabels
 	}
 
 	for i, svc := range config.Services {

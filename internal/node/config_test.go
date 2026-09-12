@@ -336,3 +336,64 @@ func TestCompleteNodeConfig(t *testing.T) {
 		t.Fatal("CompleteNodeConfig() with invalid Datalog: want error, got nil")
 	}
 }
+
+func TestLoadNodeConfigEgressFloor(t *testing.T) {
+	write := func(t *testing.T, body string) string {
+		t.Helper()
+		path := filepath.Join(t.TempDir(), "sam-node.yaml")
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+
+	t.Run("floor is loaded", func(t *testing.T) {
+		cfg, err := LoadNodeConfig(write(t, `
+version: v1alpha1
+egress:
+  require_labels:
+    jurisdiction: eu
+    compliance: gdpr
+`))
+		if err != nil {
+			t.Fatalf("LoadNodeConfig: %v", err)
+		}
+		if len(cfg.EgressRequireLabels) != 2 ||
+			cfg.EgressRequireLabels["jurisdiction"] != "eu" ||
+			cfg.EgressRequireLabels["compliance"] != "gdpr" {
+			t.Errorf("EgressRequireLabels = %v", cfg.EgressRequireLabels)
+		}
+	})
+
+	t.Run("absent block means no floor", func(t *testing.T) {
+		cfg, err := LoadNodeConfig(write(t, "version: v1alpha1\n"))
+		if err != nil {
+			t.Fatalf("LoadNodeConfig: %v", err)
+		}
+		if cfg.EgressRequireLabels != nil {
+			t.Errorf("no egress block must leave the floor nil, got %v", cfg.EgressRequireLabels)
+		}
+	})
+
+	// Rejected at load: a floor that cannot compile would otherwise fail open
+	// on the first request that needed it.
+	t.Run("a malformed floor fails startup", func(t *testing.T) {
+		for _, body := range []string{
+			"version: v1alpha1\negress:\n  require_labels:\n    \"bad key!\": eu\n",
+			"version: v1alpha1\negress:\n  require_labels:\n    jurisdiction: \"has,comma\"\n",
+			"version: v1alpha1\negress:\n  require_labels:\n    jurisdiction: \"\"\n",
+		} {
+			if _, err := LoadNodeConfig(write(t, body)); err == nil {
+				t.Errorf("expected a load error for %q", body)
+			}
+		}
+	})
+
+	// The schema is strict, so a typo in the block name is refused rather than
+	// silently leaving the node with no floor.
+	t.Run("a misspelled key is refused, not ignored", func(t *testing.T) {
+		if _, err := LoadNodeConfig(write(t, "version: v1alpha1\negress:\n  required_labels:\n    jurisdiction: eu\n")); err == nil {
+			t.Error("require_labels misspelled as required_labels must fail the strict schema")
+		}
+	})
+}
