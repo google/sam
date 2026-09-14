@@ -27,6 +27,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
+	"github.com/multiformats/go-multibase"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -292,4 +293,80 @@ func TestValidateServiceAnnounceCaps(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A peer ID has several valid encodings that all decode to the same peer, so a
+// peer may announce itself in a spelling other than the canonical base58 and
+// still pass the signer check. The view has to record the canonical form,
+// because everything reading it compares against peer.ID.String(): the node's
+// revocation cache is keyed that way, and PeerLabels matches on equality. A
+// peer stored under an alternative spelling is a peer those lookups cannot
+// find -- and can also hold two entries at once, one per spelling.
+func TestObserveCanonicalisesAnnouncedPeerID(t *testing.T) {
+	signer := testPeerID(t)
+	canonical := signer.String()
+
+	// The CIDv1 spellings of the same peer. Each decodes back to signer.
+	alternatives := map[string]string{}
+	c := peer.ToCid(signer)
+	for name, base := range map[string]multibase.Encoding{
+		"base32":    multibase.Base32,
+		"base36":    multibase.Base36,
+		"base58btc": multibase.Base58BTC,
+	} {
+		s, err := c.StringOfBase(base)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if s == canonical {
+			t.Fatalf("test premise wrong: %s spelling equals the canonical form", name)
+		}
+		if decoded, err := peer.Decode(s); err != nil || decoded != signer {
+			t.Fatalf("test premise wrong: %s does not decode back to the signer (%v)", name, err)
+		}
+		alternatives[name] = s
+	}
+
+	for name, announced := range alternatives {
+		t.Run(name, func(t *testing.T) {
+			d := New(nil, testPeerID(t))
+			d.observe(rawMessage(t, signer, &api.ServiceAnnounce{
+				PeerId:      announced,
+				Type:        api.ServiceType_SERVICE_TYPE_INFERENCE,
+				ServiceName: "llm",
+				Keys:        []string{"m1"},
+				Labels:      map[string]string{"region": "eu"},
+				Timestamp:   time.Now().Unix(),
+			}))
+
+			got := d.Providers(api.ServiceType_SERVICE_TYPE_INFERENCE, "m1")
+			if len(got) != 1 {
+				t.Fatalf("announce should be accepted, got %d providers", len(got))
+			}
+			if got[0].PeerID != canonical {
+				t.Errorf("stored PeerID = %q, want the canonical %q", got[0].PeerID, canonical)
+			}
+			// The lookup every consumer actually performs.
+			if labels := d.PeerLabels(canonical); len(labels) == 0 {
+				t.Error("PeerLabels(canonical) found nothing: a consumer would see this peer as unlabelled")
+			}
+		})
+	}
+
+	// One peer, two spellings, one entry -- not two competing for the bound.
+	t.Run("spellings do not accumulate entries", func(t *testing.T) {
+		d := New(nil, testPeerID(t))
+		for _, announced := range []string{canonical, alternatives["base32"]} {
+			d.observe(rawMessage(t, signer, &api.ServiceAnnounce{
+				PeerId:      announced,
+				Type:        api.ServiceType_SERVICE_TYPE_INFERENCE,
+				ServiceName: "llm",
+				Keys:        []string{"m1"},
+				Timestamp:   time.Now().Unix(),
+			}))
+		}
+		if got := d.Providers(api.ServiceType_SERVICE_TYPE_INFERENCE, "m1"); len(got) != 1 {
+			t.Errorf("one peer announcing two spellings of its own ID holds %d entries, want 1", len(got))
+		}
+	})
 }

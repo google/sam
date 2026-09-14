@@ -126,8 +126,18 @@ func (d *Discovery) observe(msg *pubsub.Message) {
 		return
 	}
 
+	// claimed, not ann.GetPeerId(): a peer ID has several valid encodings that
+	// all decode to the same peer -- base58, and CIDv1 in base32/base36/base58btc
+	// -- so the announced string passes the signer check above whichever one it
+	// used. Everything downstream compares this value against a canonical
+	// peer.ID.String(): the revocation cache is keyed that way, and PeerLabels
+	// matches on equality. Storing the announced spelling would leave those
+	// lookups missing a peer that is present, and would let one peer hold two
+	// entries under two spellings.
+	canonicalID := claimed.String()
+
 	typeStr, _ := api.ServiceTypeToString(ann.GetType())
-	entryKey := ann.GetPeerId() + "|" + typeStr + "|" + ann.GetServiceName()
+	entryKey := canonicalID + "|" + typeStr + "|" + ann.GetServiceName()
 
 	d.viewMu.Lock()
 	defer d.viewMu.Unlock()
@@ -135,7 +145,7 @@ func (d *Discovery) observe(msg *pubsub.Message) {
 		d.evictOldestLocked()
 	}
 	d.providers[entryKey] = Provider{
-		PeerID:  ann.GetPeerId(),
+		PeerID:  canonicalID,
 		Type:    ann.GetType(),
 		Service: ann.GetServiceName(),
 		Keys:    ann.GetKeys(),
