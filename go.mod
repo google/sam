@@ -18,7 +18,7 @@ require (
 	github.com/libp2p/go-libp2p-pubsub v0.17.0
 	github.com/libp2p/go-msgio v0.3.0
 	github.com/mattn/go-isatty v0.0.24
-	github.com/modelcontextprotocol/go-sdk v1.7.0
+	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/multiformats/go-multiaddr v0.16.1
 	github.com/multiformats/go-multiaddr-dns v0.6.0
 	github.com/multiformats/go-multihash v0.2.3
