@@ -1,6 +1,6 @@
 module github.com/google/sam
 
-go 1.25.7
+go 1.26.0
 
 require (
 	github.com/a2aproject/a2a-go/v2 v2.5.0
@@ -30,7 +30,7 @@ require (
 	go.uber.org/zap v1.28.0
 	golang.org/x/net v0.58.0
 	golang.org/x/oauth2 v0.36.0
-	golang.org/x/time v0.15.0
+	golang.org/x/time v0.16.0
 	google.golang.org/protobuf v1.36.12
 	gopkg.in/yaml.v2 v2.4.0
 	modernc.org/sqlite v1.58.0
