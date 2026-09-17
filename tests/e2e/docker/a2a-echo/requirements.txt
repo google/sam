@@ -1,5 +1,5 @@
-a2a-sdk>=1.0
-httpx>=0.27
-sse-starlette>=2.0
-starlette>=0.40
-uvicorn>=0.30
+a2a-sdk>=1.1.2
+httpx>=0.28.1
+sse-starlette>=3.4.11
+starlette>=1.6.0
+uvicorn>=0.52.4
