@@ -17,6 +17,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -95,18 +96,24 @@ func handleIngress(ctx context.Context, conn net.Conn) error {
 
 	_ = conn.SetReadDeadline(time.Now().Add(ingressConnectTimeout))
 	reader := bufio.NewReaderSize(conn, ingressMaxHandshake)
-	line, err := reader.ReadString('\n')
+	// ReadSlice rather than ReadString: ReadString grows a buffer of its own
+	// until it finds a newline, so the size above would bound nothing, and a
+	// client that never sends one could make this process -- PID 1 in the
+	// sandbox -- accumulate for as long as the deadline allows. ReadSlice
+	// stops at the buffer and says so. The far side of this handshake bounds
+	// its read the same way; see dialSandbox in internal/sambox/ingress.go.
+	line, err := reader.ReadSlice('\n')
 	if err != nil {
+		if errors.Is(err, bufio.ErrBufferFull) {
+			return refuseIngress(conn, fmt.Errorf("the handshake is longer than %d bytes", ingressMaxHandshake))
+		}
 		return fmt.Errorf("read the ingress handshake: %w", err)
 	}
 	_ = conn.SetReadDeadline(time.Time{})
 
-	port, err := parseIngressConnect(line)
+	port, err := parseIngressConnect(string(line))
 	if err != nil {
-		// Answered rather than dropped: a gateway that gets nothing back
-		// cannot tell a refusal from a sandbox that never started.
-		_, _ = io.WriteString(conn, "ERR "+err.Error()+"\n")
-		return err
+		return refuseIngress(conn, err)
 	}
 
 	// The agent is in this namespace, which is the whole reason this hop
@@ -136,6 +143,15 @@ func handleIngress(ctx context.Context, conn net.Conn) error {
 
 	relay(conn, agent)
 	return nil
+}
+
+// refuseIngress tells the gateway why its handshake was not honoured.
+//
+// Answered rather than dropped: a gateway that gets nothing back cannot tell
+// a refusal from a sandbox that never started.
+func refuseIngress(conn net.Conn, err error) error {
+	_, _ = io.WriteString(conn, "ERR "+err.Error()+"\n")
+	return err
 }
 
 // parseIngressConnect reads the one line the gateway sends first.
