@@ -139,8 +139,8 @@ type tokenInfoResponse struct {
 }
 
 type networkInfoResponse struct {
-	ListenAddresses   []string `json:"listen_addresses"`
-	ObservedAddresses []string `json:"observed_addresses"`
+	ListenAddresses    []string `json:"listen_addresses"`
+	AnnouncedAddresses []string `json:"announced_addresses"`
 }
 
 type logsResponse struct {
@@ -238,14 +238,14 @@ func (n *SamNode) networkInfo() networkInfoResponse {
 		listenAddrs = append(listenAddrs, a.String())
 	}
 
-	observedAddrs := []string{}
+	announcedAddrs := []string{}
 	for _, a := range n.Host.Addrs() {
-		observedAddrs = append(observedAddrs, a.String())
+		announcedAddrs = append(announcedAddrs, a.String())
 	}
 
 	return networkInfoResponse{
-		ListenAddresses:   listenAddrs,
-		ObservedAddresses: observedAddrs,
+		ListenAddresses:    listenAddrs,
+		AnnouncedAddresses: announcedAddrs,
 	}
 }
 

@@ -41,7 +41,7 @@ func newDebugCmd() *cobra.Command {
 
 	debugCmd.AddCommand(
 		newDebugGetCmd("mesh-info", "Show connected peers, DHT size, and the router peer ID", "/debug/mesh-info"),
-		newDebugGetCmd("network-info", "Show local network interfaces and listener addresses", "/debug/network-info"),
+		newDebugGetCmd("network-info", "Show listener and announced addresses", "/debug/network-info"),
 		newDebugGetCmd("token-info", "Show the local auth token's expiration and status", "/debug/token-info"),
 		newDebugGetCmd("logs", "Show the last few lines of the node's log output", "/debug/logs"),
 	)

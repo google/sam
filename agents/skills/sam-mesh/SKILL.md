@@ -119,7 +119,7 @@ endpoint over the node's Unix socket — no token involved:
 ```bash
 sam-node debug mesh-info                 # connected peers, DHT size, router peer ID
 sam-node debug connectivity [peer-id]    # ping the SAM router, or a specific peer
-sam-node debug network-info              # listen and observed addresses
+sam-node debug network-info              # listen and announced addresses
 sam-node debug token-info                # local auth token expiration and status
 sam-node debug logs                      # recent log lines
 sam-node debug connect-peer <multiaddr>  # manually dial a peer

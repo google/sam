@@ -145,6 +145,9 @@ func TestNetworkInfo(t *testing.T) {
 	if len(info.ListenAddresses) == 0 {
 		t.Fatalf("expected listen addresses, got %+v", info)
 	}
+	if len(info.AnnouncedAddresses) == 0 {
+		t.Fatalf("expected announced addresses, got %+v", info)
+	}
 }
 
 // TestDebugHandlerHTTP exercises the /debug mux itself: routing, method
@@ -171,6 +174,21 @@ func TestDebugHandlerHTTP(t *testing.T) {
 		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 			t.Errorf("GET %s: invalid JSON: %v", path, err)
 		}
+	}
+
+	networkInfo := get("/debug/network-info")
+	if !strings.Contains(networkInfo.Body.String(), `"announced_addresses"`) {
+		t.Fatalf("network info response does not contain announced_addresses: %s", networkInfo.Body.String())
+	}
+	if strings.Contains(networkInfo.Body.String(), `"observed_addresses"`) {
+		t.Fatalf("network info response still contains observed_addresses: %s", networkInfo.Body.String())
+	}
+	var info networkInfoResponse
+	if err := json.Unmarshal(networkInfo.Body.Bytes(), &info); err != nil {
+		t.Fatalf("decode network info response: %v", err)
+	}
+	if len(info.AnnouncedAddresses) == 0 {
+		t.Fatalf("network info response has no announced_addresses: %s", networkInfo.Body.String())
 	}
 
 	rec := get("/debug/connect-peer")
